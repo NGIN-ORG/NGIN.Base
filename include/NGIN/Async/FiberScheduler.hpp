@@ -21,11 +21,15 @@ namespace NGIN::Async
 {
     class FiberScheduler : public IScheduler
     {
+    private:
+        constexpr static UIntSize DEFAULT_NUM_FIBERS  = 128;
+        constexpr static UIntSize DEFAULT_NUM_THREADS = 4;
+
     public:
         using clock      = std::chrono::steady_clock;
         using time_point = clock::time_point;
 
-        FiberScheduler(size_t numThreads = 4, size_t numFibers = 128)
+        FiberScheduler(size_t numThreads = DEFAULT_NUM_THREADS, size_t numFibers = DEFAULT_NUM_FIBERS)
             : m_stop(false)
         {
             // Preallocate fibers
