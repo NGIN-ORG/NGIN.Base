@@ -1,0 +1,94 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 20
+  },
+  "configurePresets": [
+    {
+      "name": "coverage",
+      "description": "Debug + tests + coverage flags",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/coverage",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CODE_COVERAGE": "ON"
+      }
+    },
+    {
+      "name": "development",
+      "description": "Development mode (dummy source, no examples/tests)",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/development",
+      "cacheVariables": {
+        "NGIN_BASE_DEVELOPMENT_MODE": "ON",
+        "NGIN_BASE_BUILD_EXAMPLES": "OFF",
+        "NGIN_BASE_BUILD_TESTS": "OFF"
+      }
+    },
+    {
+      "name": "install",
+      "hidden": false,
+      "description": "Configure for packaging & install",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/install",
+      "cacheVariables": {
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install"
+      }
+    },
+    {
+      "name": "tests",
+      "description": "Build tests",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/tests",
+      "cacheVariables": {
+        "NGIN_BASE_BUILD_TESTS": "ON",
+        "NGIN_BASE_BUILD_EXAMPLES": "OFF",
+        "NGIN_BASE_BUILD_BENCHMARKS": "OFF"
+      }
+    },
+    {
+      "name": "benchmarks",
+      "description": "Build benchmarks",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/benchmarks",
+      "cacheVariables": {
+        "NGIN_BASE_BUILD_BENCHMARKS": "ON",
+        "NGIN_BASE_BUILD_TESTS": "OFF",
+        "NGIN_BASE_BUILD_EXAMPLES": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "benchmarks-debug",
+      "configurePreset": "benchmarks",
+      "description": "Build benchmarks (Debug)",
+      "configuration": "Debug",
+      "jobs": 4,
+      "targets": [
+        "all"
+      ]
+    },
+    {
+      "name": "tests-release",
+      "configurePreset": "tests",
+      "description": "Build tests (Release)",
+      "configuration": "Release",
+      "jobs": 4,
+      "targets": [
+        "all"
+      ]
+    },
+    {
+      "name": "tests-debug",
+      "configurePreset": "tests",
+      "description": "Build tests (Debug)",
+      "configuration": "Debug",
+      "jobs": 4,
+      "targets": [
+        "all"
+      ]
+    }
+  ]
+}

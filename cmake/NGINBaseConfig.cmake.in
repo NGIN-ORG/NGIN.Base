@@ -1,0 +1,18 @@
+# cmake/NGINBaseConfig.cmake.in
+@PACKAGE_INIT@
+
+# Allow downstream to find any dependencies you add in the future
+include(CMakeFindDependencyMacro)
+
+# Bring in the exported targets (NGIN::Base)
+include("${CMAKE_CURRENT_LIST_DIR}/NGINBaseTargets.cmake")
+
+# Sanity check: ensure the alias exists
+if(NOT TARGET NGIN::Base)
+  message(FATAL_ERROR "NGIN::Base target not found. "
+                      "Something went wrong with NGIN.Base installation.")
+endif()
+
+# Mark the package as found
+set(NGINBase_FOUND TRUE)
+set(NGINBase_VERSION "@PACKAGE_VERSION@")
