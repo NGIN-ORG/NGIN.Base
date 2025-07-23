@@ -319,7 +319,7 @@ suite<"NGIN::Utilities::Callable"> callableTests = [] {
 
         expect(a(1) == 2);
         expect(b(1) == 3);
-        a.swap(b);
+        a.Swap(b);
         expect(a(1) == 3);
         expect(b(1) == 2);
     };
@@ -334,7 +334,7 @@ suite<"NGIN::Utilities::Callable"> callableTests = [] {
         expect(a(1) == 6);
         expect(b(1) == 10);
 
-        a.swap(b);
+        a.Swap(b);
         expect(a(1) == 10);
         expect(b(1) == 6);
     };
@@ -348,7 +348,7 @@ suite<"NGIN::Utilities::Callable"> callableTests = [] {
         expect(a(3) == 6);
         expect(b(3) == 8);// since data[0]=5 => 3+5=8
 
-        a.swap(b);
+        a.Swap(b);
 
         expect(a(3) == 8);
         expect(b(3) == 6);

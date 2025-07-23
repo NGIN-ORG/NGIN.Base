@@ -46,7 +46,7 @@ namespace NGIN::Utilities
                         !std::is_same_v<std::decay_t<F>, Callable>>>
         Callable(F&& f)
         {
-            init(std::forward<F>(f));
+            Init(std::forward<F>(f));
         }
 
         /// \brief Copy-constructs a Callable from another.
@@ -56,7 +56,7 @@ namespace NGIN::Utilities
         /// @param other Callable to copy from
         Callable(const Callable& other)
         {
-            copy_from(other);
+            CopyFrom(other);
         }
 
         /// \brief Move-constructs a Callable from another.
@@ -65,7 +65,7 @@ namespace NGIN::Utilities
         /// @param other Callable to move from
         Callable(Callable&& other) noexcept
         {
-            move_from(std::move(other));
+            MoveFrom(std::move(other));
         }
 
         /// \brief Copy-assigns from another Callable.
@@ -77,8 +77,8 @@ namespace NGIN::Utilities
         {
             if (this != &other)
             {
-                reset();
-                copy_from(other);
+                Reset();
+                CopyFrom(other);
             }
             return *this;
         }
@@ -91,8 +91,8 @@ namespace NGIN::Utilities
         {
             if (this != &other)
             {
-                reset();
-                move_from(std::move(other));
+                Reset();
+                MoveFrom(std::move(other));
             }
             return *this;
         }
@@ -100,7 +100,7 @@ namespace NGIN::Utilities
         /// \brief Assigns nullptr, making this Callable empty.
         Callable& operator=(std::nullptr_t) noexcept
         {
-            reset();
+            Reset();
             return *this;
         }
 
@@ -117,15 +117,15 @@ namespace NGIN::Utilities
                         !std::is_same_v<std::decay_t<F>, Callable>>>
         Callable& operator=(F&& f)
         {
-            reset();
-            init(std::forward<F>(f));
+            Reset();
+            Init(std::forward<F>(f));
             return *this;
         }
 
         /// \brief Destructor. Destroys any stored callable.
         ~Callable()
         {
-            reset();
+            Reset();
         }
 
         /// \brief Invokes the stored callable.
@@ -133,13 +133,13 @@ namespace NGIN::Utilities
         /// Throws std::bad_function_call if empty.
         /// @param args Arguments to pass to the callable
         /// @return Result of invoking the callable
-        R operator()(Args... args) const
+        auto operator()(Args... args) const -> R
         {
             if (!m_invoke)
             {
                 throw std::bad_function_call();
             }
-            return m_invoke(const_cast<void*>(get_ptr()), std::forward<Args>(args)...);
+            return m_invoke(const_cast<void*>(GetPtr()), std::forward<Args>(args)...);
         }
 
         /// \brief Checks if the Callable is non-empty.
@@ -150,11 +150,11 @@ namespace NGIN::Utilities
         }
 
         /// \brief Destroys any stored callable and makes this empty.
-        void reset() noexcept
+        void Reset() noexcept
         {
             if (m_destroy)
             {
-                m_destroy(get_ptr());
+                m_destroy(GetPtr());
             }
             m_invoke    = nullptr;
             m_copy      = nullptr;
@@ -168,7 +168,7 @@ namespace NGIN::Utilities
         ///
         /// Both inline and heap-stored cases are handled.
         /// @param other Callable to swap with
-        void swap(Callable& other) noexcept
+        void Swap(Callable& other) noexcept
         {
             using std::swap;
             if (!m_invoke && !other.m_invoke)
@@ -212,13 +212,10 @@ namespace NGIN::Utilities
         using DestroyFn = void (*)(void* storagePtr);
 
         /// \brief Storage for the callable: either inline buffer or heap pointer.
-        union alignas(ALIGNMENT) Storage
+        alignas(ALIGNMENT) union Storage
         {
             std::byte buffer[BUFFER_SIZE];///< Inline buffer for SBO
             void* heapPtr;                ///< Heap pointer for large objects
-
-            Storage() noexcept {}
-            ~Storage() noexcept {}
         } m_storage {};
 
         /// \brief Size in bytes of the stored object (0 if empty).
@@ -235,14 +232,14 @@ namespace NGIN::Utilities
 
         /// \brief Returns a pointer to the stored object (inline or heap).
         /// @return Pointer to the stored callable object
-        void* get_ptr() noexcept
+        void* GetPtr() noexcept
         {
             return m_usingHeap ? m_storage.heapPtr : static_cast<void*>(m_storage.buffer);
         }
 
         /// \brief Returns a const pointer to the stored object (inline or heap).
         /// @return Const pointer to the stored callable object
-        const void* get_ptr() const noexcept
+        [[nodiscard]] const void* GetPtr() const noexcept
         {
             return m_usingHeap ? m_storage.heapPtr : static_cast<const void*>(m_storage.buffer);
         }
@@ -253,11 +250,11 @@ namespace NGIN::Utilities
         /// @tparam F Callable type
         /// @param f Callable object to store
         template<typename F>
-        void init(F&& f)
+        void Init(F&& f)
         {
             using DecayedF = std::decay_t<F>;
 
-            constexpr bool fits_inline =
+            constexpr bool fitsInline =
                     (sizeof(DecayedF) <= BUFFER_SIZE) &&
                     (alignof(DecayedF) <= ALIGNMENT) &&
                     std::is_nothrow_move_constructible_v<DecayedF>;
@@ -265,7 +262,7 @@ namespace NGIN::Utilities
             // Record the exact size of the object we’re storing:
             m_size = sizeof(DecayedF);
 
-            if constexpr (fits_inline)
+            if constexpr (fitsInline)
             {
                 /// Inline (SBO) storage path
                 // Fast path for function pointers
@@ -275,7 +272,7 @@ namespace NGIN::Utilities
                     m_usingHeap = false;
                     m_size      = sizeof(DecayedF);
                     m_invoke    = [](void* ptr, Args&&... args) -> R {
-                        auto fn = *reinterpret_cast<DecayedF*>(ptr);
+                        auto fn = *static_cast<DecayedF*>(ptr);
                         return fn(std::forward<Args>(args)...);
                     };
                     m_copy = [](void* dest, const void* src) {
@@ -295,7 +292,7 @@ namespace NGIN::Utilities
                     m_usingHeap = false;
                     m_size      = sizeof(DecayedF);
                     m_invoke    = [](void* ptr, Args&&... args) -> R {
-                        auto& obj = *reinterpret_cast<DecayedF*>(ptr);
+                        auto& obj = *static_cast<DecayedF*>(ptr);
                         return obj(std::forward<Args>(args)...);
                     };
                     m_copy = [](void* dest, const void* src) {
@@ -312,11 +309,7 @@ namespace NGIN::Utilities
                 m_usingHeap = false;
 
                 // Destroy only calls the destructor; no delete
-                if constexpr (std::is_trivially_destructible_v<DecayedF>)
-                {
-                    m_destroy = nullptr;
-                }
-                else if constexpr (std::is_destructible_v<DecayedF>)
+                if constexpr (std::is_destructible_v<DecayedF>)
                 {
                     m_destroy = [](void* ptr) {
                         auto* obj = static_cast<DecayedF*>(ptr);
@@ -359,8 +352,8 @@ namespace NGIN::Utilities
             else
             {
                 /// Heap storage path (for large or non-SBO types)
-                void* raw         = ::operator new(sizeof(DecayedF), std::align_val_t {alignof(DecayedF)});
-                DecayedF* heapObj = static_cast<DecayedF*>(raw);
+                void* raw     = ::operator new(sizeof(DecayedF), std::align_val_t {alignof(DecayedF)});
+                auto* heapObj = static_cast<DecayedF*>(raw);
                 try
                 {
                     new (heapObj) DecayedF(std::forward<F>(f));
@@ -427,7 +420,7 @@ namespace NGIN::Utilities
         /// If the source is empty, does nothing. Otherwise, copies the stored object
         /// and all type-erased operations. Throws std::runtime_error if copying is not supported.
         /// @param other Callable to copy from
-        void copy_from(const Callable& other)
+        void CopyFrom(const Callable& other)
         {
             if (!other.m_invoke)
             {
@@ -447,13 +440,13 @@ namespace NGIN::Utilities
             {
                 // Allocate exactly other.m_size bytes with max alignment ALIGNMENT.
                 void* raw = ::operator new(other.m_size, std::align_val_t {ALIGNMENT});
-                other.m_copy(raw, other.get_ptr());
+                other.m_copy(raw, other.GetPtr());
                 m_storage.heapPtr = raw;
             }
             else
             {
                 // Inline copy
-                other.m_copy(static_cast<void*>(m_storage.buffer), other.get_ptr());
+                other.m_copy(static_cast<void*>(m_storage.buffer), other.GetPtr());
             }
 
             // Copy all function-pointers:
@@ -468,7 +461,7 @@ namespace NGIN::Utilities
         /// If the source is empty, does nothing. Otherwise, moves the stored object
         /// and all type-erased operations, leaving the source empty.
         /// @param other Callable to move from
-        void move_from(Callable&& other) noexcept
+        void MoveFrom(Callable&& other) noexcept
         {
             if (!other.m_invoke)
             {
@@ -490,11 +483,11 @@ namespace NGIN::Utilities
                 // Inline-buffer move:
                 if (other.m_move)
                 {
-                    other.m_move(static_cast<void*>(m_storage.buffer), other.get_ptr());
+                    other.m_move(static_cast<void*>(m_storage.buffer), other.GetPtr());
                     // Destroy the “source” inline so it isn’t double-destroyed:
                     if (other.m_destroy)
                     {
-                        other.m_destroy(other.get_ptr());
+                        other.m_destroy(other.GetPtr());
                         std::memset(other.m_storage.buffer, 0, BUFFER_SIZE);
                     }
                 }
