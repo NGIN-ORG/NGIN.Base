@@ -62,8 +62,8 @@ namespace NGIN
     class Unit
     {
     public:
-        using ValueType     = ValueT;
-        using quantity_type = Quantity;
+        using ValueType    = ValueT;
+        using QuantityType = Quantity;
 
         constexpr Unit()
             : value({}) {};
@@ -139,7 +139,7 @@ namespace NGIN
     template<typename ToUnit, typename FromUnit>
     constexpr ToUnit UnitCast(const FromUnit& from)
     {
-        static_assert(IsSameQuantity<typename ToUnit::quantity_type, typename FromUnit::quantity_type>::value,
+        static_assert(IsSameQuantity<typename ToUnit::QuantityType, typename FromUnit::QuantityType>::value,
                       "Units must have the same quantity for conversion");
 
         auto baseValue = FromUnit::ConvertToBase(from.GetValue());
@@ -369,8 +369,8 @@ namespace NGIN
 
     template<typename UnitType, typename QuantityType>
     concept IsUnitOf = requires {
-        typename UnitType::quantity_type;                                                  // Check that UnitType has a quantity_type
-        std::is_base_of<Unit<UnitType, typename UnitType::quantity_type>, UnitType>::value;// Must derive from Unit
-        std::is_same<typename UnitType::quantity_type, QuantityType>::value;               // Check the quantity matches
+        typename UnitType::QuantityType;                                                  // Check that UnitType has a QuantityType
+        std::is_base_of<Unit<UnitType, typename UnitType::QuantityType>, UnitType>::value;// Must derive from Unit
+        std::is_same<typename UnitType::QuantityType, QuantityType>::value;               // Check the quantity matches
     };
 }// namespace NGIN
