@@ -13,8 +13,11 @@ namespace NGIN::Async
     {
     public:
         using Job                                  = NGIN::Utilities::Callable<void()>;
-        constexpr static size_t DEFAULT_STACK_SIZE = 128 * 1024;
-
+        constexpr static size_t DEFAULT_STACK_SIZE = 128us * 1024us;
+        Fiber(const Fiber&)                        = delete;
+        Fiber& operator=(const Fiber&)             = delete;
+        Fiber(Fiber&&)                             = delete;
+        Fiber& operator=(Fiber&&)                  = delete;
 
         // Ensure the main fiber is initialized for the calling thread.
         static void EnsureMainFiber()
@@ -113,10 +116,5 @@ namespace NGIN::Async
                 Yield();
             }
         }
-
-        Fiber(const Fiber&)            = delete;
-        Fiber& operator=(const Fiber&) = delete;
-        Fiber(Fiber&&)                 = delete;
-        Fiber& operator=(Fiber&&)      = delete;
     };
 }// namespace NGIN::Async
