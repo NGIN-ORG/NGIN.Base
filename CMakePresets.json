@@ -57,6 +57,17 @@
         "NGIN_BASE_BUILD_TESTS": "OFF",
         "NGIN_BASE_BUILD_EXAMPLES": "OFF"
       }
+    },
+    {
+      "name": "examples",
+      "description": "Build examples",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/examples",
+      "cacheVariables": {
+        "NGIN_BASE_BUILD_BENCHMARKS": "OFF",
+        "NGIN_BASE_BUILD_TESTS": "OFF",
+        "NGIN_BASE_BUILD_EXAMPLES": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -85,6 +96,26 @@
       "configurePreset": "tests",
       "description": "Build tests (Debug)",
       "configuration": "Debug",
+      "jobs": 4,
+      "targets": [
+        "all"
+      ]
+    },
+    {
+      "name": "examples-debug",
+      "configurePreset": "examples",
+      "description": "Build examples (Debug)",
+      "configuration": "Debug",
+      "jobs": 4,
+      "targets": [
+        "all"
+      ]
+    },
+    {
+      "name": "examples-release",
+      "configurePreset": "examples",
+      "description": "Build examples (Release)",
+      "configuration": "Release",
       "jobs": 4,
       "targets": [
         "all"
