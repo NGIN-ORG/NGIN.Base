@@ -41,9 +41,13 @@
 
 # Build results
 Build/
+build/
 
 Build
+build
 
 Build/**
-
+build/**
+ */
 Build/**/*
+buiild/**/*

@@ -1,12 +1,19 @@
 Checks: >
   -*,
   readability-identifier-naming,
+  cppcoreguidelines-*,
+  clang-analyzer-*,
   performance-*,
   modernize-*,
+  -modernize-use-trailing-return-type,
   bugprone-*,
+  -bugprone-easily-swappable-parameters,
   misc-*
 
 CheckOptions:
+  - key: bugprone-easily-swappable-parameters.ModelImplicitConversions
+    value: 'false'
+# Naming options
   - key: readability-identifier-naming.NamespaceCase
     value: CamelCase
   - key: readability-identifier-naming.ParameterCase
@@ -27,6 +34,14 @@ CheckOptions:
     value: CamelCase
   - key: readability-identifier-naming.MemberCase
     value: camelBack
+  - key: readability-identifier-naming.MemberPrefix
+    value: m_
+  - key: readability-identifier-naming.ClassMemberPrefix
+    value: s_
+  - key: readability-identifier-naming.ClassMemberCase
+    value: camelBack
+  - key: readability-identifier-naming.UnionCase
+    value: CamelCase
   - key: readability-identifier-naming.EnumCase
     value: CamelCase
   - key: readability-identifier-naming.EnumConstantCase
