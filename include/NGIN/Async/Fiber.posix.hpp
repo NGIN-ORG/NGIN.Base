@@ -12,14 +12,33 @@ namespace NGIN::Async
 {
     class Fiber
     {
-    private:
-        constexpr static UIntSize DEFAULT_STACK_SIZE = 128 * 1024; // 128 KB
     public:
-        using Entry = NGIN::Utilities::Callable<void()>;
+        using Job                                    = NGIN::Utilities::Callable<void()>;
+        constexpr static UIntSize DEFAULT_STACK_SIZE = 128 * 1024;
+        Fiber(const Fiber&)                          = delete;
+        Fiber& operator=(const Fiber&)               = delete;
+        Fiber(Fiber&&)                               = delete;
+        Fiber& operator=(Fiber&&)                    = delete;
 
-        Fiber(Entry entry, UIntSize stackSize = DEFAULT_STACK_SIZE)
-            : m_entry(std::move(entry)), m_active(false), m_stackSize(stackSize)
+        // Ensure the main context is initialized for the calling thread.
+        static void EnsureMainFiber()
         {
+            if (!s_mainCtxInitialized)
+            {
+                if (getcontext(&s_mainCtx) == -1)
+                    throw std::runtime_error("getcontext failed");
+                s_mainCtxInitialized = true;
+            }
+        }
+
+        static bool IsMainFiberInitialized() noexcept
+        {
+            return s_mainCtxInitialized;
+        }
+
+        Fiber(UIntSize stackSize = DEFAULT_STACK_SIZE)
+        {
+            EnsureMainFiber();
             m_stack = std::make_unique<Byte[]>(stackSize);
             if (getcontext(&m_ctx) == -1)
                 throw std::runtime_error("getcontext failed");
@@ -29,35 +48,67 @@ namespace NGIN::Async
             makecontext(&m_ctx, (void (*)()) &Fiber::Trampoline, 1, this);
         }
 
-        ~Fiber() = default;
+        Fiber(Job job, UIntSize stackSize = DEFAULT_STACK_SIZE)
+        {
+            EnsureMainFiber();
+            m_stack = std::make_unique<Byte[]>(stackSize);
+            if (getcontext(&m_ctx) == -1)
+                throw std::runtime_error("getcontext failed");
+            m_ctx.uc_stack.ss_sp   = m_stack.get();
+            m_ctx.uc_stack.ss_size = stackSize;
+            m_ctx.uc_link          = nullptr;
+            makecontext(&m_ctx, (void (*)()) &Fiber::Trampoline, 1, this);
+            assign(std::move(job));
+        }
+
+        ~Fiber()
+        {
+            // No direct equivalent to SwitchToFiber, but cleanup can be handled here if needed
+            // Context and stack memory are managed by unique_ptr
+        }
+
+        void assign(Job job) noexcept
+        {
+            m_job = std::move(job);
+        }
 
         void Resume()
         {
-            m_active = true;
+            s_fiber = this;
             swapcontext(&s_mainCtx, &m_ctx);
         }
 
         static void Yield()
         {
-            swapcontext(&s_fiber->m_ctx, &s_mainCtx);
+            if (s_fiber)
+                swapcontext(&s_fiber->m_ctx, &s_mainCtx);
         }
 
     private:
         ucontext_t m_ctx;
-        Entry m_entry;
-        bool m_active;
-        UIntSize m_stackSize;
+        Job m_job;
         std::unique_ptr<Byte[]> m_stack;
         static thread_local Fiber* s_fiber;
         static thread_local ucontext_t s_mainCtx;
+        static thread_local bool s_mainCtxInitialized;
 
         static void Trampoline(Fiber* self)
         {
             s_fiber = self;
-            self->m_entry();
-            Fiber::Yield();
+            while (true)
+            {
+                if (!self->m_job)
+                {
+                    Yield();
+                    continue;
+                }
+                self->m_job();
+                self->m_job = {};
+                Yield();
+            }
         }
     };
     thread_local Fiber* Fiber::s_fiber = nullptr;
     thread_local ucontext_t Fiber::s_mainCtx;
+    thread_local bool Fiber::s_mainCtxInitialized = false;
 }// namespace NGIN::Async
