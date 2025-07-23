@@ -1,7 +1,9 @@
 Checks: >
   -*,
   readability-identifier-naming,
+  -readability-magic-numbers,
   cppcoreguidelines-*,
+  -cppcoreguidelines-avoid-magic-numbers,
   clang-analyzer-*,
   performance-*,
   modernize-*,
