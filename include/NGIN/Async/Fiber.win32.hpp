@@ -13,7 +13,7 @@ namespace NGIN::Async
     {
     public:
         using Job                                  = NGIN::Utilities::Callable<void()>;
-        constexpr static size_t DEFAULT_STACK_SIZE = 128us * 1024us;
+        constexpr static size_t DEFAULT_STACK_SIZE = 128uz * 1024uz;
         Fiber(const Fiber&)                        = delete;
         Fiber& operator=(const Fiber&)             = delete;
         Fiber(Fiber&&)                             = delete;
