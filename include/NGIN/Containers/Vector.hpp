@@ -7,6 +7,7 @@
 /// reference to an allocator yourself.
 #pragma once
 
+#include <NGIN/Primitives.hpp>
 #include <NGIN/Memory/Mallocator.hpp>
 #include <cstddef>
 #include <initializer_list>
@@ -25,7 +26,7 @@ namespace NGIN::Containers
     public:
         /// @brief Default constructor: uses Allocator::Instance().
         /// @note Fails to compile if `Allocator::Instance()` doesn't exist.
-        Vector(std::size_t initialCapacity = 0)
+        Vector(UIntSize initialCapacity = 0)
             requires requires { Allocator::Instance(); }
             : m_allocator(Allocator::Instance()), m_data(nullptr), m_size(0), m_capacity(0)
         {
@@ -34,7 +35,7 @@ namespace NGIN::Containers
 
 
         /// @brief Default constructor: uses Mallocator::Instance() if Allocator is IAllocator.
-        Vector(std::size_t initialCapacity = 0)
+        Vector(UIntSize initialCapacity = 0)
             requires(std::is_same_v<Allocator, NGIN::Memory::IAllocator>)
             : m_allocator(NGIN::Memory::Mallocator::Instance()), m_data(nullptr), m_size(0), m_capacity(0)
         {
@@ -42,7 +43,7 @@ namespace NGIN::Containers
         }
 
         /// @brief Construct with an explicit external allocator.
-        Vector(Allocator& allocator, std::size_t initialCapacity = 0)
+        Vector(Allocator& allocator, UIntSize initialCapacity = 0)
             : m_allocator(allocator), m_data(nullptr), m_size(0), m_capacity(0)
         {
             Reserve(initialCapacity);
@@ -65,7 +66,7 @@ namespace NGIN::Containers
             : m_allocator(other.m_allocator), m_data(nullptr), m_size(0), m_capacity(0)
         {
             Reserve(other.m_capacity);
-            for (std::size_t i = 0; i < other.m_size; ++i)
+            for (UIntSize i = 0; i < other.m_size; ++i)
             {
                 new (m_data + i) T(other.m_data[i]);
                 ++m_size;
@@ -102,7 +103,7 @@ namespace NGIN::Containers
                 m_capacity = 0;
                 Reserve(other.m_capacity);
 
-                for (std::size_t i = 0; i < other.m_size; ++i)
+                for (UIntSize i = 0; i < other.m_size; ++i)
                     new (m_data + i) T(other.m_data[i]);
                 m_size = other.m_size;
             }
@@ -157,12 +158,12 @@ namespace NGIN::Containers
         }
 
         /// @brief Insert by copy at index (shifts elements right).
-        void PushAt(std::size_t index, const T& value)
+        void PushAt(UIntSize index, const T& value)
         {
             if (index > m_size)
                 throw std::out_of_range("Vector::PushAt: index out of range");
             EnsureCapacityForOne();
-            for (std::size_t i = m_size; i > index; --i)
+            for (UIntSize i = m_size; i > index; --i)
             {
                 new (m_data + i) T(std::move(m_data[i - 1]));
                 m_data[i - 1].~T();
@@ -172,12 +173,12 @@ namespace NGIN::Containers
         }
 
         /// @brief Insert by move at index (shifts elements right).
-        void PushAt(std::size_t index, T&& value)
+        void PushAt(UIntSize index, T&& value)
         {
             if (index > m_size)
                 throw std::out_of_range("Vector::PushAt: index out of range");
             EnsureCapacityForOne();
-            for (std::size_t i = m_size; i > index; --i)
+            for (UIntSize i = m_size; i > index; --i)
             {
                 new (m_data + i) T(std::move(m_data[i - 1]));
                 m_data[i - 1].~T();
@@ -188,12 +189,12 @@ namespace NGIN::Containers
 
         /// @brief In-place insert at index (shifts elements right).
         template<typename... Args>
-        void EmplaceAt(std::size_t index, Args&&... args)
+        void EmplaceAt(UIntSize index, Args&&... args)
         {
             if (index > m_size)
                 throw std::out_of_range("Vector::EmplaceAt: index out of range");
             EnsureCapacityForOne();
-            for (std::size_t i = m_size; i > index; --i)
+            for (UIntSize i = m_size; i > index; --i)
             {
                 new (m_data + i) T(std::move(m_data[i - 1]));
                 m_data[i - 1].~T();
@@ -212,12 +213,12 @@ namespace NGIN::Containers
         }
 
         /// @brief Erase at index (shifts down).
-        void Erase(std::size_t index)
+        void Erase(UIntSize index)
         {
             if (index >= m_size)
                 throw std::out_of_range("Vector::Erase: index out of range");
             m_data[index].~T();
-            for (std::size_t i = index; i + 1 < m_size; ++i)
+            for (UIntSize i = index; i + 1 < m_size; ++i)
             {
                 new (m_data + i) T(std::move(m_data[i + 1]));
                 m_data[i + 1].~T();
@@ -235,7 +236,7 @@ namespace NGIN::Containers
         //=== Capacity management ===//
 
         /// @brief Ensure at least `newCapacity` slots.
-        void Reserve(std::size_t newCapacity)
+        void Reserve(UIntSize newCapacity)
         {
             if (newCapacity <= m_capacity)
                 return;
@@ -246,14 +247,14 @@ namespace NGIN::Containers
                 throw std::bad_alloc();
 
             // Move-construct old elements into new buffer
-            std::size_t i = 0;
+            UIntSize i = 0;
             try
             {
                 for (; i < m_size; ++i)
                     new (newData + i) T(std::move(m_data[i]));
             } catch (...)
             {
-                for (std::size_t j = 0; j < i; ++j)
+                for (UIntSize j = 0; j < i; ++j)
                     newData[j].~T();
                 m_allocator.Deallocate(newData);
                 throw;
@@ -286,7 +287,7 @@ namespace NGIN::Containers
 
             auto block = m_allocator.Allocate(m_size * sizeof(T), alignof(T));
             T* newData = reinterpret_cast<T*>(block.ptr);
-            for (std::size_t i = 0; i < m_size; ++i)
+            for (UIntSize i = 0; i < m_size; ++i)
             {
                 new (newData + i) T(std::move(m_data[i]));
                 m_data[i].~T();
@@ -299,33 +300,33 @@ namespace NGIN::Containers
 
         //=== Observers ===//
 
-        [[nodiscard]] std::size_t Size() const noexcept
+        [[nodiscard]] UIntSize Size() const noexcept
         {
             return m_size;
         }
-        [[nodiscard]] std::size_t Capacity() const noexcept
+        [[nodiscard]] UIntSize Capacity() const noexcept
         {
             return m_capacity;
         }
 
-        T& At(std::size_t idx)
+        T& At(UIntSize idx)
         {
             if (idx >= m_size)
                 throw std::out_of_range("Vector::At: index out of range");
             return m_data[idx];
         }
-        const T& At(std::size_t idx) const
+        const T& At(UIntSize idx) const
         {
             if (idx >= m_size)
                 throw std::out_of_range("Vector::At: index out of range");
             return m_data[idx];
         }
 
-        T& operator[](std::size_t idx)
+        T& operator[](UIntSize idx)
         {
             return m_data[idx];
         }
-        const T& operator[](std::size_t idx) const
+        const T& operator[](UIntSize idx) const
         {
             return m_data[idx];
         }
@@ -360,7 +361,7 @@ namespace NGIN::Containers
     private:
         inline void DestroyElements() noexcept
         {
-            for (std::size_t i = 0; i < m_size; ++i)
+            for (UIntSize i = 0; i < m_size; ++i)
                 m_data[i].~T();
         }
 
@@ -380,8 +381,8 @@ namespace NGIN::Containers
 
         Allocator& m_allocator;
         T* m_data;
-        std::size_t m_size;
-        std::size_t m_capacity;
+        UIntSize m_size;
+        UIntSize m_capacity;
     };
 
 }// namespace NGIN::Containers
