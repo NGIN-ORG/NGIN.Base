@@ -56,8 +56,18 @@ target_compile_definitions(NGIN.Base
     $<$<STREQUAL:$<PLATFORM_ID>,Linux>:NGIN_PLATFORM=\"Linux\">
 )
 
+# Add -latomic for GCC/Clang if needed
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  set(NEED_ATOMIC TRUE)
+endif()
+
+
 # Alias
-add_library(NGIN::Base ALIAS NGIN.Base)
+add_library(NGIN::Base ALIAS NGIN.Base) 
+
+if(NEED_ATOMIC)
+  target_link_libraries(NGIN.Base INTERFACE atomic)
+endif()
 
 #-------------------------------------------------------------------------------
 # Installation

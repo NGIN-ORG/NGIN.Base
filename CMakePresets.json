@@ -82,6 +82,16 @@
       ]
     },
     {
+      "name": "benchmarks-release",
+      "configurePreset": "benchmarks",
+      "description": "Build benchmarks (Release)",
+      "configuration": "Release",
+      "jobs": 4,
+      "targets": [
+        "all"
+      ]
+    },
+    {
       "name": "tests-release",
       "configurePreset": "tests",
       "description": "Build tests (Release)",
