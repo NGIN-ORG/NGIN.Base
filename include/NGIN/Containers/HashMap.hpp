@@ -17,7 +17,6 @@
 
 namespace NGIN::Containers
 {
-
     /// @brief Flat hashmap implementation with dynamic growth.
     template<typename Key, typename Value>
         requires requires { Value(); }///TODO: Replace with a proper concept
@@ -97,6 +96,38 @@ namespace NGIN::Containers
     };
 
     //---------------------------- IMPLEMENTATION ----------------------------//
+    template<typename Key, typename Value>
+        requires requires { Value(); }
+    inline bool FlatHashMap<Key, Value>::Contains(const Key& key) const
+    {
+        UIntSize index = Hash(key) & (Capacity() - 1);
+        UIntSize i     = 1;
+        while (m_table[index].isOccupied)
+        {
+            const UIntSize i2 = i * i;
+            if (m_table[index].key == key)
+            {
+                return true;
+            }
+            if (i2 > Capacity())
+            {
+                break;
+            }
+            index = (index + i2) & (Capacity() - 1);
+            ++i;
+        }
+        return false;
+    }
+    template<typename Key, typename Value>
+        requires requires { Value(); }
+    inline void FlatHashMap<Key, Value>::Clear()
+    {
+        for (UIntSize i = 0; i < m_table.Size(); ++i)
+        {
+            m_table[i].isOccupied = false;
+        }
+        m_size = 0;
+    }
 
     template<typename Key, typename Value>
         requires requires { Value(); }///TODO: Replace with a proper concept
