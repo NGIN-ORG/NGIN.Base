@@ -266,15 +266,75 @@ namespace NGIN::Async
             return p.m_finished;
         }
 
+        bool IsRunning() const noexcept
+        {
+            auto& p = m_handle.promise();
+            std::lock_guard lk(p.m_mutex);
+            return !p.m_finished && m_handle && !m_handle.done();
+        }
+
+        bool IsFaulted() const noexcept
+        {
+            auto& p = m_handle.promise();
+            std::lock_guard lk(p.m_mutex);
+            return p.m_error != nullptr;
+        }
+
+        bool IsCanceled() const noexcept
+        {
+            // No cancellation support yet, always false
+            return false;
+        }
+
         handle_type Handle() const noexcept
         {
             return m_handle;
+        }
+
+        // --- Continuation support ---
+        template<typename F>
+        auto Then(F&& func)
+        {
+            using RetTask = decltype(func(std::declval<T>()));
+            struct Awaiter {
+                Task& parent;
+                F func;
+                bool await_ready() const noexcept { return parent.IsCompleted(); }
+                auto await_suspend(std::coroutine_handle<> h) {
+                    struct Cont {
+                        std::coroutine_handle<> h;
+                        Task* parent;
+                        F func;
+                        void operator()() {
+                            try {
+                                auto result = parent->Get();
+                                auto nextTask = func(std::move(result));
+                                nextTask.Start(*parent->m_scheduler_ctx);
+                                nextTask.Wait();
+                            } catch (...) {}
+                            h.resume();
+                        }
+                    };
+                    std::thread(Cont{h, &parent, std::move(func)}).detach();
+                }
+                auto await_resume() {}
+            };
+            struct ContTask {
+                Task& parent;
+                F func;
+                auto operator co_await() { return Awaiter{parent, std::move(func)}; }
+            };
+            return ContTask{*this, std::forward<F>(func)};
         }
 
     private:
         handle_type m_handle;
         IScheduler* m_scheduler;
         std::atomic_bool m_started;
+
+        // For continuation support
+        friend class TaskContext;
+        TaskContext* m_scheduler_ctx {nullptr};
     };
 
     //------------------------------------------------------------------------
@@ -426,15 +486,75 @@ namespace NGIN::Async
             return p.m_finished;
         }
 
+        bool IsRunning() const noexcept
+        {
+            auto& p = m_handle.promise();
+            std::lock_guard lk(p.m_mutex);
+            return !p.m_finished && m_handle && !m_handle.done();
+        }
+
+        bool IsFaulted() const noexcept
+        {
+            auto& p = m_handle.promise();
+            std::lock_guard lk(p.m_mutex);
+            return p.m_error != nullptr;
+        }
+
+        bool IsCanceled() const noexcept
+        {
+            // No cancellation support yet, always false
+            return false;
+        }
+
         handle_type Handle() const noexcept
         {
             return m_handle;
+        }
+
+        // --- Continuation support ---
+        template<typename F>
+        auto Then(F&& func)
+        {
+            using RetTask = decltype(func());
+            struct Awaiter {
+                Task& parent;
+                F func;
+                bool await_ready() const noexcept { return parent.IsCompleted(); }
+                auto await_suspend(std::coroutine_handle<> h) {
+                    struct Cont {
+                        std::coroutine_handle<> h;
+                        Task* parent;
+                        F func;
+                        void operator()() {
+                            try {
+                                parent->Get();
+                                auto nextTask = func();
+                                nextTask.Start(*parent->m_scheduler_ctx);
+                                nextTask.Wait();
+                            } catch (...) {}
+                            h.resume();
+                        }
+                    };
+                    std::thread(Cont{h, &parent, std::move(func)}).detach();
+                }
+                auto await_resume() {}
+            };
+            struct ContTask {
+                Task& parent;
+                F func;
+                auto operator co_await() { return Awaiter{parent, std::move(func)}; }
+            };
+            return ContTask{*this, std::forward<F>(func)};
         }
 
     private:
         handle_type m_handle;
         IScheduler* m_scheduler;
         std::atomic_bool m_started;
+
+        // For continuation support
+        friend class TaskContext;
+        TaskContext* m_scheduler_ctx {nullptr};
 
     public:
         /// Static delay: returns a Task<void> that completes after duration.
