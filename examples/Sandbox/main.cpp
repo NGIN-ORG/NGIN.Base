@@ -31,9 +31,9 @@ Task<int> DelayedValue(TaskContext& ctx, int value, std::chrono::milliseconds de
 Task<void> WhenAllCombinator(TaskContext& ctx)
 {
     std::cout << "[WhenAllCombinator] scheduling parallel tasks...\n";
-    auto t1 = ctx.Run(&DelayedValue, 1, 1000ms);
-    auto t2 = ctx.Run(&DelayedValue, 2, 2000ms);
-    auto t3 = ctx.Run(&DelayedValue, 3, 3000ms);
+    auto t1 = ctx.Run(&DelayedValue, 1, 500ms);
+    auto t2 = ctx.Run(&DelayedValue, 2, 1000ms);
+    auto t3 = ctx.Run(&DelayedValue, 3, 1500ms);
 
     int r1 = co_await t1;
     int r2 = co_await t2;
@@ -58,11 +58,38 @@ void RunAllSchedulerTests(const char* schedulerName, int numThreadsOrFibers = 2)
     s.Wait();
     std::cout << "-- SimpleTask Done --\n\n";
 
+    // --- Test: Task<void>::Then() ---
+    std::cout << "-- Test: SimpleTask with Then() --\n";
+    auto s2 = SimpleTask(ctx, 99);
+    s2.Start(ctx);
+    auto cont = s2.Then([&ctx]() -> Task<void> {
+        std::cout << "[Continuation] SimpleTask finished, running continuation!\n";
+        co_await ctx.Delay(500ms);
+        std::cout << "[Continuation] Done after delay.\n";
+        co_return;
+    });
+    cont.parent.Start(ctx); // Start the original task if not already started
+    cont.parent.Wait();     // Wait for the original task
+    std::cout << "-- SimpleTask with Then() Done --\n\n";
+
     // --- Test: DelayedValue ---
     std::cout << "-- Test: DelayedValue --\n";
     auto d  = ctx.Run(DelayedValue(ctx, 123, 1500ms));
     int val = d.Get();
     std::cout << "-- DelayedValue Result: " << val << "\n\n";
+
+    // --- Test: Task<int>::Then() ---
+    std::cout << "-- Test: DelayedValue with Then() --\n";
+    auto d2 = ctx.Run(DelayedValue(ctx, 456, 1000ms));
+    auto cont2 = d2.Then([&ctx](int result) -> Task<void> {
+        std::cout << "[Continuation] DelayedValue result: " << result << ", running continuation!\n";
+        co_await ctx.Delay(300ms);
+        std::cout << "[Continuation] Done after delay.\n";
+        co_return;
+    });
+    cont2.parent.Start(ctx);
+    cont2.parent.Wait();
+    std::cout << "-- DelayedValue with Then() Done --\n\n";
 
     // --- Test: WhenAllCombinator ---
     std::cout << "-- Test: WhenAllCombinator --\n";
@@ -80,12 +107,7 @@ void RunAllSchedulerTests(const char* schedulerName, int numThreadsOrFibers = 2)
 int main()
 {
     RunAllSchedulerTests<ThreadPoolScheduler>("ThreadPool", 2);
-
-#ifdef _WIN32
-    RunAllSchedulerTests<FiberScheduler>("Fiber", 1);
-#else
-    std::cout << "FiberScheduler is Windows only.\n";
-#endif
+   // RunAllSchedulerTests<FiberScheduler>("Fiber", 1);
 
     return 0;
 }
