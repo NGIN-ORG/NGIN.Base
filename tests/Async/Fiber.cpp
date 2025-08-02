@@ -18,12 +18,15 @@ suite<"NGIN::Async::Fiber"> fiberTests = [] {
     "SingleResumeYield"_test = [] {
         std::atomic<bool> entered {false}, yielded {false};
         Fiber fib([&] {
+            std::cout << "Fiber started\n";
             entered = true;
+            std::cout << "Fiber yielding\n";
             Fiber::Yield();
             yielded = true;
         },
                   64 * 1024);
         fib.Resume();
+        std::cout << "Main resumed after fiber yield\n";
         expect(entered.load());
         expect(!yielded.load());
         fib.Resume();
@@ -63,9 +66,10 @@ suite<"NGIN::Async::Fiber"> fiberTests = [] {
     };
 
     "ExceptionHandling"_test = [] {
-        Fiber fib([] { throw std::runtime_error("fiber error"); }, 64 * 1024);
-        fib.Resume();// Exception should not propagate to caller
-        expect(true);
+        expect(throws([] {
+            Fiber fib([] { throw std::runtime_error("fiber error"); }, 64 * 1024);
+            fib.Resume();
+        }));
     };
 
     "ResourceCleanup"_test = [] {
