@@ -141,18 +141,8 @@ namespace NGIN
         Benchmark& operator=(const Benchmark&)     = delete;
         Benchmark& operator=(Benchmark&&) noexcept = delete;
 
-        ~Benchmark()
-        {
-            // Automatic deregistration from the global registry
-            std::lock_guard<std::mutex> lock(GetRegistryMutex());
-            auto& reg = GetRegistry();
-            reg.erase(
-                    std::remove_if(
-                            reg.begin(),
-                            reg.end(),
-                            [this](auto const& uptr) { return uptr.get() == this; }),
-                    reg.end());
-        }
+        ~Benchmark() = default;
+
 
         /// \brief  Estimate per‐Start/Stop overhead (nanoseconds).
         static F64 EstimateTimerOverhead(Int32 iterations = 1'000'000)
