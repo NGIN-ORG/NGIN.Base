@@ -58,7 +58,7 @@ namespace NGIN::Async
             m_ctx.uc_stack.ss_size = stackSize;
             m_ctx.uc_link          = nullptr;
             makecontext(&m_ctx, (void (*)()) &Fiber::Trampoline, 1, this);
-            assign(std::move(job));
+            Assign(std::move(job));
         }
 
         ~Fiber()
@@ -67,7 +67,7 @@ namespace NGIN::Async
             // Context and stack memory are managed by unique_ptr
         }
 
-        void assign(Job job) noexcept
+        void Assign(Job job) noexcept
         {
             m_job = std::move(job);
         }

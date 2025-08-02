@@ -4,7 +4,7 @@
 
 // Only include the platform-specific fiber implementation
 #if defined(_WIN32)
-#include "Fiber.win32.hpp"
+#include "Fiber.new.hpp"
 #elif defined(__unix__) || defined(__linux__)
 #include "Fiber.posix.hpp"
 #else

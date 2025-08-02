@@ -60,7 +60,7 @@ namespace NGIN::Async
             if (!m_fiber)
                 throw std::runtime_error("CreateFiberEx failed");
 
-            assign(std::move(job));
+            Assign(std::move(job));
         }
 
         ~Fiber()
@@ -72,7 +72,7 @@ namespace NGIN::Async
         }
 
         /// Assign *any* job to this fiber
-        void assign(Job job) noexcept
+        void Assign(Job job) noexcept
         {
             m_job = std::move(job);
         }
