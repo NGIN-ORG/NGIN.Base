@@ -53,23 +53,28 @@ namespace NGIN::Async
 
         ~FiberScheduler() override
         {
-            m_stop = true;
-            m_readyCv.notify_all();
+            m_stop.store(true);
+            CancelAll();
+            m_readyCv.notify_all();// Wake up all threads exactly once
 
-            if (m_driverThread.joinable())
-                m_driverThread.join();
 
+            // Join worker threads
             for (auto& t: m_threads)
                 if (t.joinable())
                     t.join();
 
-            // Clear sleeping tasks (timers)
+            // Join the driver thread
+            if (m_driverThread.joinable())
+                m_driverThread.join();
+
+            // Clean up sleeping tasks
             {
                 std::lock_guard lock(m_timersMutex);
                 while (!m_sleepingTasks.empty())
                     m_sleepingTasks.pop();
             }
         }
+
 
         void Schedule(std::coroutine_handle<> coro) noexcept override
         {
@@ -176,12 +181,14 @@ namespace NGIN::Async
         {
             while (!m_stop)
             {
-                std::chrono::milliseconds nextSleep = std::chrono::milliseconds(100);
+                std::chrono::milliseconds nextSleep = std::chrono::milliseconds(5);
+                bool hasSleeping                    = false;
 
                 {
                     std::lock_guard lock(m_timersMutex);
                     if (!m_sleepingTasks.empty())
                     {
+                        hasSleeping   = true;
                         auto now      = clock::now();
                         auto resumeAt = m_sleepingTasks.top().first;
                         if (resumeAt > now)
@@ -195,8 +202,11 @@ namespace NGIN::Async
                 CheckSleepingTasks();
                 m_readyCv.notify_all();
 
-                // Sleep for next deadline or default 100ms
-                std::this_thread::sleep_for(nextSleep);
+                // Yield if no sleeping tasks, or if nextSleep is zero; otherwise sleep
+                if (!hasSleeping || nextSleep.count() == 0)
+                    std::this_thread::yield();
+                else
+                    std::this_thread::sleep_for(nextSleep);
             }
         }
 
@@ -206,15 +216,17 @@ namespace NGIN::Async
             // Convert this thread to a fiber (for cooperative scheduling)
             Fiber::EnsureMainFiber();
 
-            while (!m_stop)
+            while (!m_stop.load())
             {
                 std::coroutine_handle<> coro = nullptr;
                 {
                     std::unique_lock lock(m_readyMutex);
+                    if (m_stop.load())
+                        break;
                     m_readyCv.wait(lock, [this] {
-                        return m_stop || !m_readyQueue.empty();
+                        return m_stop.load() || !m_readyQueue.empty();
                     });
-                    if (m_stop)
+                    if (m_stop.load())
                         break;
                     if (!m_readyQueue.empty())
                     {
