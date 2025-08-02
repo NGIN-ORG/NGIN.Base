@@ -68,8 +68,8 @@ void RunAllSchedulerTests(const char* schedulerName, int numThreadsOrFibers = 2)
         std::cout << "[Continuation] Done after delay.\n";
         co_return;
     });
-    cont.parent.Start(ctx); // Start the original task if not already started
-    cont.parent.Wait();     // Wait for the original task
+    cont.parent.Start(ctx);// Start the original task if not already started
+    cont.parent.Wait();    // Wait for the original task
     std::cout << "-- SimpleTask with Then() Done --\n\n";
 
     // --- Test: DelayedValue ---
@@ -80,7 +80,7 @@ void RunAllSchedulerTests(const char* schedulerName, int numThreadsOrFibers = 2)
 
     // --- Test: Task<int>::Then() ---
     std::cout << "-- Test: DelayedValue with Then() --\n";
-    auto d2 = ctx.Run(DelayedValue(ctx, 456, 1000ms));
+    auto d2    = ctx.Run(DelayedValue(ctx, 456, 1000ms));
     auto cont2 = d2.Then([&ctx](int result) -> Task<void> {
         std::cout << "[Continuation] DelayedValue result: " << result << ", running continuation!\n";
         co_await ctx.Delay(300ms);
@@ -107,7 +107,7 @@ void RunAllSchedulerTests(const char* schedulerName, int numThreadsOrFibers = 2)
 int main()
 {
     RunAllSchedulerTests<ThreadPoolScheduler>("ThreadPool", 2);
-   // RunAllSchedulerTests<FiberScheduler>("Fiber", 1);
+    RunAllSchedulerTests<FiberScheduler>("Fiber", 1);
 
     return 0;
 }
