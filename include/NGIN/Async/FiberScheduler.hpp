@@ -14,6 +14,7 @@
 #include <chrono>
 #include <cassert>
 #include <functional>
+#include <iostream>// For logging, can remove if not desired
 #include <NGIN/Primitives.hpp>
 #include "IScheduler.hpp"
 #include "Fiber.hpp"
@@ -33,20 +34,20 @@ namespace NGIN::Async
         FiberScheduler(size_t numThreads = DEFAULT_NUM_THREADS, size_t numFibers = DEFAULT_NUM_FIBERS)
             : m_stop(false)
         {
-            // Preallocate fibers
+            // Preallocate fibers (named for easier debugging)
             m_allFibers.reserve(numFibers);
             for (size_t i = 0; i < numFibers; ++i)
             {
-                auto fiber = std::make_unique<Fiber>();
+                auto fiber = std::make_unique<Fiber>("Fiber_" + std::to_string(i));
                 m_fiberPool.push(fiber.get());
                 m_allFibers.push_back(std::move(fiber));
             }
 
             // Launch worker threads
             for (size_t i = 0; i < numThreads; ++i)
-                m_threads.emplace_back([this] { WorkerLoop(); });
+                m_threads.emplace_back([this, i] { WorkerLoop(i); });
 
-            // Launch driver thread
+            // Launch driver thread (for time-based scheduling)
             m_driverThread = std::thread([this] { DriverLoop(); });
         }
 
@@ -62,7 +63,7 @@ namespace NGIN::Async
                 if (t.joinable())
                     t.join();
 
-            // Optionally: clear sleeping tasks
+            // Clear sleeping tasks (timers)
             {
                 std::lock_guard lock(m_timersMutex);
                 while (!m_sleepingTasks.empty())
@@ -85,7 +86,6 @@ namespace NGIN::Async
                 std::lock_guard lock(m_timersMutex);
                 m_sleepingTasks.emplace(resumeAt, coro);
             }
-            // Wake up the driver thread to possibly update sleep deadline
         }
 
         bool RunOne() override
@@ -158,7 +158,7 @@ namespace NGIN::Async
         std::priority_queue<SleepEntry, std::vector<SleepEntry>, SleepEntryCompare> m_sleepingTasks;
         std::mutex m_timersMutex;
 
-        // Called from driver thread: check for timers that need to be resumed
+        // Timer management
         void CheckSleepingTasks()
         {
             auto now = clock::now();
@@ -201,11 +201,10 @@ namespace NGIN::Async
         }
 
         // Worker threads: each pulls a ready coroutine, runs it on a fiber, returns fiber to pool
-        void WorkerLoop()
+        void WorkerLoop(size_t threadIdx)
         {
-            // Convert this thread to a fiber (once)
-            if (!Fiber::IsMainFiberInitialized())
-                Fiber::EnsureMainFiber();
+            // Convert this thread to a fiber (for cooperative scheduling)
+            Fiber::EnsureMainFiber();
 
             while (!m_stop)
             {
@@ -242,9 +241,37 @@ namespace NGIN::Async
                     m_fiberPool.pop();
                 }
 
-                fiber->Assign(NGIN::Utilities::Callable<void()>([coro]() { coro.resume(); }));
-                fiber->Resume();
+                // Defensive: must be assignable (not running)
+                try
+                {
+                    fiber->Assign([coro]() { coro.resume(); });
+                } catch (const std::exception& ex)
+                {
+                    // Should never happen unless fiber is misused, but handle gracefully
+                    std::cerr << "[FiberScheduler] Fiber assign failed: " << ex.what() << std::endl;
+                    {
+                        std::lock_guard lock2(m_fiberMutex);
+                        m_fiberPool.push(fiber);
+                    }
+                    continue;
+                }
 
+                try
+                {
+                    fiber->Resume();
+                } catch (const std::exception& ex)
+                {
+                    std::cerr << "[FiberScheduler] Exception in fiber: " << ex.what() << std::endl;
+                    // Optionally, can log fiber name/state here
+                }
+
+                // Ensure fiber is not left in a bad state before returning to pool
+                auto st = fiber->GetState();
+                if (st == Fiber::State::Error || st == Fiber::State::Completed)
+                {
+                    // Optionally reset fiber or recreate here for persistent pools
+                    // For now, just reassign job later as needed
+                }
                 {
                     std::lock_guard lock(m_fiberMutex);
                     m_fiberPool.push(fiber);
