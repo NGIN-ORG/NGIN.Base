@@ -14,6 +14,7 @@
 #include <chrono>
 #include <cassert>
 #include <functional>
+#include <NGIN/Primitives.hpp>
 #include "IScheduler.hpp"
 #include "Fiber.hpp"
 
@@ -241,7 +242,7 @@ namespace NGIN::Async
                     m_fiberPool.pop();
                 }
 
-                fiber->assign(NGIN::Utilities::Callable<void()>([coro]() { coro.resume(); }));
+                fiber->Assign(NGIN::Utilities::Callable<void()>([coro]() { coro.resume(); }));
                 fiber->Resume();
 
                 {
