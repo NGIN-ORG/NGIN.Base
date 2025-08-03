@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <array>
 #include <NGIN/Math/Ratio.hpp>
+#include <ostream>
 
 namespace NGIN::Units
 {
@@ -153,13 +154,37 @@ namespace NGIN::Units
         return ToUnit(toValue);
     }
 
+
     // Example: SI time units
     using Seconds      = Unit<TIME, Ratio<1, 1>, double>;
     using Milliseconds = Unit<TIME, Ratio<1, 1000>, double>;
     using Microseconds = Unit<TIME, Ratio<1, 1000000>, double>;
+    using Nanoseconds  = Unit<TIME, Ratio<1, 1000000000>, double>;
     using Minutes      = Unit<TIME, Ratio<60, 1>, double>;
     using Hours        = Unit<TIME, Ratio<3600, 1>, double>;
     using Days         = Unit<TIME, Ratio<86400, 1>, double>;
+    using Weeks        = Unit<TIME, Ratio<604800, 1>, double>;
+    using Fortnights   = Unit<TIME, Ratio<1209600, 1>, double>;
+
+    // Example: SI length units
+    using Meters      = Unit<LENGTH, Ratio<1, 1>, double>;
+    using Kilometers  = Unit<LENGTH, Ratio<1000, 1>, double>;
+    using Centimeters = Unit<LENGTH, Ratio<1, 100>, double>;
+    using Millimeters = Unit<LENGTH, Ratio<1, 1000>, double>;
+
+    // Example: SI mass units
+    using Kilograms  = Unit<MASS, Ratio<1, 1>, double>;
+    using Grams      = Unit<MASS, Ratio<1, 1000>, double>;
+    using Milligrams = Unit<MASS, Ratio<1, 1000000>, double>;
+
+    // Example: SI current units
+    using Amperes      = Unit<CURRENT, Ratio<1, 1>, double>;
+    using Milliamperes = Unit<CURRENT, Ratio<1, 1000>, double>;
+
+    // Example: SI temperature units
+    using Kelvin  = Unit<TEMPERATURE, Ratio<1, 1>, double>;
+    using Celsius = Unit<TEMPERATURE, Ratio<1, 1>, double>;// For now, treat as same as Kelvin for structure
+    // Specializations for SI current units
 
     // Example: Derived unit
     using Velocity = Unit<AddExponents(LENGTH, QuantityExponents {0, 0, -1, 0, 0, 0, 0}), Ratio<1, 1>, double>;
@@ -167,5 +192,155 @@ namespace NGIN::Units
     // User extension example
     // struct MyUnit : Unit<QuantityExponents{...}, Ratio<...>, float> { ... };
     // constexpr MyUnit operator"" _my(long double v) { return MyUnit(static_cast<float>(v)); }
+
+    // --- UnitTraits for metadata (symbol, name, etc.) ---
+    template<typename UnitT>
+    struct UnitTraits;
+
+
+    // Specializations for SI time units
+    // Specializations for SI length units
+    template<>
+    struct UnitTraits<Meters>
+    {
+        static constexpr const char* symbol = "m";
+        static constexpr const char* name   = "meters";
+    };
+    template<>
+    struct UnitTraits<Kilometers>
+    {
+        static constexpr const char* symbol = "km";
+        static constexpr const char* name   = "kilometers";
+    };
+    template<>
+    struct UnitTraits<Centimeters>
+    {
+        static constexpr const char* symbol = "cm";
+        static constexpr const char* name   = "centimeters";
+    };
+    template<>
+    struct UnitTraits<Millimeters>
+    {
+        static constexpr const char* symbol = "mm";
+        static constexpr const char* name   = "millimeters";
+    };
+
+    // Specializations for SI mass units
+    template<>
+    struct UnitTraits<Kilograms>
+    {
+        static constexpr const char* symbol = "kg";
+        static constexpr const char* name   = "kilograms";
+    };
+    template<>
+    struct UnitTraits<Grams>
+    {
+        static constexpr const char* symbol = "g";
+        static constexpr const char* name   = "grams";
+    };
+    template<>
+    struct UnitTraits<Milligrams>
+    {
+        static constexpr const char* symbol = "mg";
+        static constexpr const char* name   = "milligrams";
+    };
+
+    template<>
+    struct UnitTraits<Seconds>
+    {
+        static constexpr const char* symbol = "s";
+        static constexpr const char* name   = "seconds";
+    };
+    template<>
+    struct UnitTraits<Milliseconds>
+    {
+        static constexpr const char* symbol = "ms";
+        static constexpr const char* name   = "milliseconds";
+    };
+    template<>
+    struct UnitTraits<Microseconds>
+    {
+        static constexpr const char* symbol = "us";
+        static constexpr const char* name   = "microseconds";
+    };
+    template<>
+    struct UnitTraits<Nanoseconds>
+    {
+        static constexpr const char* symbol = "ns";
+        static constexpr const char* name   = "nanoseconds";
+    };
+    template<>
+    struct UnitTraits<Minutes>
+    {
+        static constexpr const char* symbol = "min";
+        static constexpr const char* name   = "minutes";
+    };
+    template<>
+    struct UnitTraits<Hours>
+    {
+        static constexpr const char* symbol = "h";
+        static constexpr const char* name   = "hours";
+    };
+    template<>
+    struct UnitTraits<Days>
+    {
+        static constexpr const char* symbol = "d";
+        static constexpr const char* name   = "days";
+    };
+    template<>
+    struct UnitTraits<Weeks>
+    {
+        static constexpr const char* symbol = "wk";
+        static constexpr const char* name   = "weeks";
+    };
+    template<>
+    struct UnitTraits<Fortnights>
+    {
+        static constexpr const char* symbol = "fn";
+        static constexpr const char* name   = "fortnights";
+    };
+
+    template<>
+    struct UnitTraits<Amperes>
+    {
+        static constexpr const char* symbol = "A";
+        static constexpr const char* name   = "amperes";
+    };
+    template<>
+    struct UnitTraits<Milliamperes>
+    {
+        static constexpr const char* symbol = "mA";
+        static constexpr const char* name   = "milliamperes";
+    };
+
+    // Specializations for SI temperature units
+    template<>
+    struct UnitTraits<Kelvin>
+    {
+        static constexpr const char* symbol = "K";
+        static constexpr const char* name   = "kelvin";
+    };
+    template<>
+    struct UnitTraits<Celsius>
+    {
+        static constexpr const char* symbol = "°C";
+        static constexpr const char* name   = "celsius";
+    };
+
+
+    // Output streaming for units with or without UnitTraits (C++20 requires)
+    template<QuantityExponents Q, typename RatioT, typename ValueT>
+    std::ostream& operator<<(std::ostream& os, const Unit<Q, RatioT, ValueT>& u)
+        requires requires { UnitTraits<Unit<Q, RatioT, ValueT>>::symbol; }
+    {
+        return os << u.GetValue() << ' ' << UnitTraits<Unit<Q, RatioT, ValueT>>::symbol;
+    }
+
+    template<QuantityExponents Q, typename RatioT, typename ValueT>
+    std::ostream& operator<<(std::ostream& os, const Unit<Q, RatioT, ValueT>& u)
+        requires(!requires { UnitTraits<Unit<Q, RatioT, ValueT>>::symbol; })
+    {
+        return os << u.GetValue();
+    }
 
 }// namespace NGIN::Units
