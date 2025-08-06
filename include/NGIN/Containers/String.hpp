@@ -316,11 +316,7 @@ namespace NGIN::Containers
         }
 
         // measure length
-        UIntSize len = 0;
-        while (str[len] != CharT('\0'))
-        {
-            ++len;
-        }
+        UIntSize len = std::char_traits<CharT>::length(str);
 
         if (len <= (SBOSize - 1))
         {
@@ -653,6 +649,10 @@ namespace NGIN::Containers
     //------------------------------------------------------------------------------
 
     /// @brief A convenient alias for `BasicString<char, 48>`.
-    using String = BasicString<char, 48>;
+    using String      = BasicString<char, 48>;
+    using WString     = BasicString<wchar_t, 48>;
+    using AnsiString  = BasicString<char, 16>;// ANSI string with smaller buffer
+    using AsciiString = BasicString<char, 16>;// ASCII string with smaller buffer
+
 
 }// namespace NGIN::Containers
