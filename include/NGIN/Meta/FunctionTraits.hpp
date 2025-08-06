@@ -5,10 +5,6 @@
 #include <type_traits>
 namespace NGIN
 {
-    class Delegate;
-}
-namespace NGIN
-{
     namespace Meta
     {
         // Helper trait to check if a type has an operator()
@@ -53,11 +49,6 @@ namespace NGIN
         // Base template
         template<typename T, bool IsCallableV = IsCallable<T>::value>
         struct FunctionTraits;
-
-        template<>
-        struct FunctionTraits<NGIN::Delegate, false>
-        {
-        };
 
         // Specialization for function pointers
         template<typename R, typename... Args>
@@ -123,7 +114,7 @@ namespace NGIN
 
         // Lvalue ref-qualified member function
         template<typename C, typename R, typename... Args>
-        struct FunctionTraits<R (C::*)(Args...)&, false> : FunctionTraitsBaseMember<C, R, Args...>
+        struct FunctionTraits<R (C::*)(Args...) &, false> : FunctionTraitsBaseMember<C, R, Args...>
         {
             static constexpr bool is_lvalue_ref = true;
         };
@@ -138,7 +129,7 @@ namespace NGIN
 
         // Rvalue ref-qualified member function
         template<typename C, typename R, typename... Args>
-        struct FunctionTraits<R (C::*)(Args...)&&, false> : FunctionTraitsBaseMember<C, R, Args...>
+        struct FunctionTraits<R (C::*)(Args...) &&, false> : FunctionTraitsBaseMember<C, R, Args...>
         {
             static constexpr bool is_rvalue_ref = true;
         };
@@ -167,14 +158,14 @@ namespace NGIN
 
         // Lvalue ref-qualified noexcept member function
         template<typename C, typename R, typename... Args>
-        struct FunctionTraits<R (C::*)(Args...) & noexcept, false> : FunctionTraits<R (C::*)(Args...)&, false>
+        struct FunctionTraits<R (C::*)(Args...) & noexcept, false> : FunctionTraits<R (C::*)(Args...) &, false>
         {
             static constexpr bool is_noexcept = true;
         };
 
         // Rvalue ref-qualified noexcept member function
         template<typename C, typename R, typename... Args>
-        struct FunctionTraits<R (C::*)(Args...) && noexcept, false> : FunctionTraits<R (C::*)(Args...)&&, false>
+        struct FunctionTraits<R (C::*)(Args...) && noexcept, false> : FunctionTraits<R (C::*)(Args...) &&, false>
         {
             static constexpr bool is_noexcept = true;
         };
