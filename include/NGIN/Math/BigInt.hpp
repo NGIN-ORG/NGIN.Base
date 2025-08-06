@@ -444,54 +444,90 @@ namespace NGIN::Math
         }
 
 
-        static void DivMod(const BigInt& dividend,
-                           const BigInt& divisor,
-                           BigInt& quotient,
-                           BigInt& remainder)
+        static void DivMod(const BigInt& a, const BigInt& b, BigInt& q, BigInt& r)
         {
-            using UInt = UInt32;
-            if (divisor.IsZero())
+            size_t n = a.m_digits.size();
+            size_t m = b.m_digits.size();
+            if (b.IsZero())
                 throw std::runtime_error("Division by zero");
-
-            // Handle zero dividend
-            if (dividend.IsZero())
+            if (a.IsZero())
             {
-                quotient  = BigInt(0);
-                remainder = BigInt(0);
+                q = BigInt(0);
+                r = BigInt(0);
                 return;
             }
-
-            // Work with absolute values
-            BigInt a = dividend.Abs();
-            BigInt b = divisor.Abs();
-
-            // If |a| < |b|, result is trivial
-            if (AbsLess(a, b))
+            if (AbsLess(a.Abs(), b.Abs()))
             {
-                quotient  = BigInt(0);
-                remainder = dividend;// rem carries dividend’s sign
+                q = BigInt(0);
+                r = a;
                 return;
             }
+            if (m == 1)
+            {
+                DivModBySingleLimb(a, b.m_digits[0], q, r);
+            }
+            else if (n <= 4 && m <= 4)
+            {
+                NaiveDivMod(a, b, q, r);
+            }
+            else if (n < 256 && m < 256)
+            {
+                KnuthDivMod(a, b, q, r);
+            }
+            else
+            {
+                // Burnikel–Ziegler or Newton–Raphson for huge numbers
 
-            // Prepare for digit‑by‑digit division
-            std::size_t n = a.m_digits.size();
-            quotient.m_digits.assign(n, 0);
+                FastDivMod(a, b, q, r);
+            }
+            // Set quotient sign
+            q.m_negative = (a.m_negative != b.m_negative) && !q.IsZero();
+            // Set remainder sign to match dividend
+            // if (a.m_negative && !r.IsZero())
+            //     r = -r;
+        }
 
+        // --- Division helpers ---
+        static void DivModBySingleLimb(const BigInt& a, UInt32 b, BigInt& q, BigInt& r)
+        {
+            // Fast path: divide a by a single-limb b
+            q          = DivByUInt32(a.Abs(), b, nullptr);
+            UInt32 rem = 0;
+            DivByUInt32(a.Abs(), b, &rem);
+            r = BigInt(rem);
+        }
+
+        static void NaiveDivMod(const BigInt& a, const BigInt& b, BigInt& q, BigInt& r)
+        {
+            // Schoolbook division for tiny numbers
+            BigInt dividend = a.Abs();
+            BigInt divisor  = b.Abs();
+            q               = BigInt(0);
+            r               = dividend;
+            while (!AbsLess(r, divisor))
+            {
+                r = r - divisor;
+                q = q + BigInt(1);
+            }
+        }
+
+        static void KnuthDivMod(const BigInt& a, const BigInt& b, BigInt& q, BigInt& r)
+        {
+            using UInt      = UInt32;
+            BigInt dividend = a.Abs();
+            BigInt divisor  = b.Abs();
+            std::size_t n   = dividend.m_digits.size();
+            q.m_digits.assign(n, 0);
             BigInt rem(0);
-
-            // Process from most‑significant block down to least
             for (int i = int(n) - 1; i >= 0; --i)
             {
-                // rem = rem * BASE + next block
-                rem.m_digits.insert(rem.m_digits.begin(), a.m_digits[i]);
+                rem.m_digits.insert(rem.m_digits.begin(), dividend.m_digits[i]);
                 rem.Trim();
-
-                // Find the largest qd in [0, BASE-1] with b*qd <= rem
                 UInt low = 0, high = BASE - 1, qd = 0;
                 while (low <= high)
                 {
                     UInt mid    = low + ((high - low) >> 1);
-                    BigInt prod = b * BigInt(mid);
+                    BigInt prod = divisor * BigInt(mid);
                     if (prod <= rem)
                     {
                         qd  = mid;
@@ -502,22 +538,98 @@ namespace NGIN::Math
                         high = mid - 1;
                     }
                 }
-
-                // Subtract off that many b’s
-                quotient.m_digits[i] = qd;
+                q.m_digits[i] = qd;
                 if (qd)
                 {
-                    BigInt prod = b * BigInt(qd);
+                    BigInt prod = divisor * BigInt(qd);
                     rem         = rem - prod;
                 }
             }
+            q.Trim();
+            r = rem;
+        }
 
-            // Trim leading zeros off quotient
-            quotient.Trim();
+        static void FastDivMod(const BigInt& a, const BigInt& b, BigInt& q, BigInt& r)
+        {
+            // Burnikel–Ziegler division for huge numbers (blockwise recursive)
+            // This is a simplified version for demonstration, not fully optimized
+            // Reference: https://hal.inria.fr/inria-00072854/document
+            const size_t n = a.m_digits.size();
+            const size_t m = b.m_digits.size();
+            if (m == 0 || b.IsZero())
+                throw std::runtime_error("Division by zero");
+            if (n < m || a.IsZero())
+            {
+                q = BigInt(0);
+                r = a;
+                return;
+            }
+            // For small cases, fallback to Knuth
+            if (n < 512 || m < 32)
+            {
+                KnuthDivMod(a, b, q, r);
+                return;
+            }
 
-            // Write out remainder and restore proper signs
-            remainder           = rem;
-            quotient.m_negative = (dividend.m_negative != divisor.m_negative) && !quotient.IsZero();
+            // Choose block size k (must be >= m/2)
+            size_t k = (m + 1) / 2;
+            size_t s = (n + k - 1) / k;// number of blocks in a
+            // Split a and b into blocks of k limbs
+            auto split_blocks = [](const BigInt& x, size_t blocksize) -> std::vector<BigInt> {
+                std::vector<BigInt> blocks;
+                size_t total = x.m_digits.size();
+                for (size_t i = 0; i < total; i += blocksize)
+                {
+                    std::vector<UInt32> part;
+                    for (size_t j = i; j < std::min(i + blocksize, total); ++j)
+                        part.push_back(x.m_digits[j]);
+                    BigInt bpart;
+                    bpart.m_digits   = part;
+                    bpart.m_negative = false;
+                    bpart.Trim();
+                    blocks.push_back(bpart);
+                }
+                return blocks;
+            };
+
+            // Helper: shift left by k limbs (multiply by BASE^k)
+            auto shift_left_limbs = [](const BigInt& x, size_t limbs) -> BigInt {
+                if (x.IsZero())
+                    return x;
+                BigInt res = x;
+                res.m_digits.insert(res.m_digits.begin(), limbs, 0);
+                return res;
+            };
+
+            // Split a and b
+            std::vector<BigInt> a_blocks = split_blocks(a.Abs(), k);
+            std::vector<BigInt> b_blocks = split_blocks(b.Abs(), k);
+
+            // Compose b_hat = b shifted to align with a's highest block
+            size_t t     = a_blocks.size() - b_blocks.size();
+            BigInt b_hat = shift_left_limbs(b.Abs(), t * k);
+
+            BigInt rem = a.Abs();
+            q          = BigInt(0);
+            for (size_t i = t + 1; i-- > 0;)
+            {
+                // Estimate quotient digit for this block
+                BigInt qhat, rhat;
+                KnuthDivMod(rem, b_hat, qhat, rhat);
+                // q = q * BASE^{k} + qhat
+                q = shift_left_limbs(q, k);
+                q = q + qhat;
+                // rem = rhat
+                rem = rhat;
+                // Shift b_hat right by k limbs for next block
+                if (b_hat.m_digits.size() > k)
+                    b_hat.m_digits.erase(b_hat.m_digits.begin(), b_hat.m_digits.begin() + k);
+                else
+                    b_hat = BigInt(0);
+                b_hat.Trim();
+            }
+            q.Trim();
+            r = rem;
         }
 
 
