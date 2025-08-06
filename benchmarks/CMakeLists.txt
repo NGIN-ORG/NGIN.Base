@@ -11,3 +11,6 @@ target_link_libraries(ExampleBenchmark PRIVATE NGIN.Base)
 # Optionally, add more benchmarks here
 add_executable(SchedulerBenchmarks SchedulerBenchmarks.cpp)
 target_link_libraries(SchedulerBenchmarks PRIVATE NGIN.Base)
+
+add_executable(StringBenchmarks StringBenchmarks.cpp)
+target_link_libraries(StringBenchmarks PRIVATE NGIN.Base)
