@@ -40,7 +40,7 @@ namespace NGIN
         F64 stop()
         {
             m_timer.Stop();
-            return m_timer.GetElapsed<Nanoseconds>().GetValue();
+            return m_timer.GetElapsed<Units::Nanoseconds>().GetValue();
         }
 
         /// \brief  Prevents compiler from optimizing away `value`.
@@ -85,7 +85,7 @@ namespace NGIN
     };
 
     template<typename DesiredUnit>
-        requires IsUnitOf<DesiredUnit, Time>
+        requires Units::QuantityOf<TIME, DesiredUnit>
     struct BenchmarkResult
     {
         std::string name              = "Unknown Benchmark";
@@ -163,7 +163,7 @@ namespace NGIN
         ///         collecting min, max, avg, stddev, and percentiles.
         /// \throws std::runtime_error if the user’s callable throws.
         template<typename DesiredUnit>
-            requires IsUnitOf<DesiredUnit, Time>
+            requires Units::QuantityOf<TIME, DesiredUnit>
         [[nodiscard]] BenchmarkResult<DesiredUnit> Run()
         {
             assert(("Run() called but m_callable is empty", m_callable));
@@ -327,7 +327,7 @@ namespace NGIN
 
         /// \brief  Runs all registered benchmarks and returns their results.
         template<typename DesiredUnit>
-            requires IsUnitOf<DesiredUnit, Time>
+            requires Units::QuantityOf<TIME, DesiredUnit>
         static std::vector<BenchmarkResult<DesiredUnit>> RunAll()
         {
             std::vector<BenchmarkResult<DesiredUnit>> results;
@@ -344,7 +344,7 @@ namespace NGIN
             return results;
         }
         template<typename DesiredUnit>
-            requires IsUnitOf<DesiredUnit, Time>
+            requires Units::QuantityOf<TIME, DesiredUnit>
         static void PrintSummaryTable(std::ostream& os,
                                       const std::vector<BenchmarkResult<DesiredUnit>>& results)
         {
@@ -463,7 +463,7 @@ namespace NGIN
 
     /// \brief  Prints key statistics of a BenchmarkResult.
     template<typename DesiredUnit>
-        requires IsUnitOf<DesiredUnit, Time>
+        requires Units::QuantityOf<TIME, DesiredUnit>
     std::ostream& operator<<(std::ostream& os, BenchmarkResult<DesiredUnit> const& r)
     {
         os << "[" << r.name << "]  "
