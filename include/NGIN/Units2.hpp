@@ -2,13 +2,12 @@
 #include <cstdint>
 #include <cstddef>
 #include <array>
-#include <NGIN/Math/Ratio.hpp>
+#include <concepts>
+#include <format>
 #include <ostream>
 
 namespace NGIN::Units
 {
-    template<int64_t Numerator, int64_t Denominator>
-    using Ratio = NGIN::Math::Ratio<Numerator, Denominator>;
     /// @brief Represents the exponents for SI base quantities.
     struct QuantityExponents
     {
@@ -53,24 +52,79 @@ namespace NGIN::Units
     constexpr QuantityExponents AMOUNT {0, 0, 0, 0, 0, 1, 0};
     constexpr QuantityExponents LUMINOUS {0, 0, 0, 0, 0, 0, 1};
 
-    /// @brief Core Unit type
-    /// @tparam Q Quantity exponents
-    /// @tparam RatioT Compile-time scaling ratio to base unit (NGIN::Ratio)
-    /// @tparam ValueT Value type
-    ///
-    /// Example: Unit<LENGTH, Ratio<1,1>, double> for meters
-    ///          Unit<TIME, Ratio<1,1000>, double> for milliseconds
-    ///          Unit<AddExponents(LENGTH, TIME), Ratio<1,1>, double> for meter-seconds
-    ///
-    /// All arithmetic and conversions are constexpr/noexcept
 
-    template<QuantityExponents Q, typename RatioT = Ratio<1, 1>, typename ValueT = double>
+    //=== C++20 Concepts ===
+    /// @brief Concept: any Unit type
+    template<typename U>
+    concept UnitType = requires {
+        typename U::ValueType;
+        { U::Exponents } -> std::convertible_to<QuantityExponents>;
+    };
+
+    /// @brief Concept: Unit of specific quantity exponents
+    template<QuantityExponents E, typename U>
+    concept QuantityOf = UnitType<U> && (U::Exponents == E);
+
+
+    // --- Conversion Policies ---
+    template<int64_t Num, int64_t Den = 1>
+    struct RatioPolicy
+    {
+        template<typename ValueT>
+        static constexpr ValueT ToBase(ValueT value) noexcept
+        {
+            return value * static_cast<ValueT>(Num) / static_cast<ValueT>(Den);
+        }
+        template<typename ValueT>
+        static constexpr ValueT FromBase(ValueT base) noexcept
+        {
+            return base * static_cast<ValueT>(Den) / static_cast<ValueT>(Num);
+        }
+    };
+
+    template<double Offset>
+    struct OffsetPolicy
+    {
+        template<typename ValueT>
+        static constexpr ValueT ToBase(ValueT value) noexcept
+        {
+            return value + static_cast<ValueT>(Offset);
+        }
+        template<typename ValueT>
+        static constexpr ValueT FromBase(ValueT base) noexcept
+        {
+            return base - static_cast<ValueT>(Offset);
+        }
+    };
+
+    struct FahrenheitToKelvinPolicy
+    {
+        template<typename ValueT>
+        static constexpr ValueT ToBase(ValueT value) noexcept
+        {
+            // F -> K
+            return (value - 32.0) * 5.0 / 9.0 + 273.15;
+        }
+        template<typename ValueT>
+        static constexpr ValueT FromBase(ValueT base) noexcept
+        {
+            // K -> F
+            return (base - 273.15) * 9.0 / 5.0 + 32.0;
+        }
+    };
+
+    // --- Unit class with ConversionPolicy ---
+
+    template<
+            QuantityExponents Q,
+            typename ValueT = double,
+            typename Policy = RatioPolicy<1, 1>>
     class Unit
     {
     public:
         using ValueType                              = ValueT;
         static constexpr QuantityExponents Exponents = Q;
-        using RatioToBase                            = RatioT;
+        using ConversionPolicy                       = Policy;
 
         constexpr explicit Unit(ValueT value) noexcept : m_value(value) {}
         constexpr ValueT GetValue() const noexcept
@@ -105,89 +159,113 @@ namespace NGIN::Units
         }
 
         // Unit algebra: multiplication/division yields new Unit type
-        template<QuantityExponents Q2, typename R2>
-        constexpr auto operator*(const Unit<Q2, R2, ValueT>& rhs) const noexcept
+        template<QuantityExponents Q2, typename P2>
+        constexpr auto operator*(const Unit<Q2, ValueT, P2>& rhs) const noexcept
         {
-            return Unit<AddExponents(Q, Q2), Ratio<1, 1>, ValueT>(m_value * rhs.GetValue());
+            return Unit<AddExponents(Q, Q2), ValueT, RatioPolicy<1, 1>>(m_value * rhs.GetValue());
         }
-        template<QuantityExponents Q2, typename R2>
-        constexpr auto operator/(const Unit<Q2, R2, ValueT>& rhs) const noexcept
+        template<QuantityExponents Q2, typename P2>
+        constexpr auto operator/(const Unit<Q2, ValueT, P2>& rhs) const noexcept
         {
-            return Unit<SubExponents(Q, Q2), Ratio<1, 1>, ValueT>(m_value / rhs.GetValue());
+            return Unit<SubExponents(Q, Q2), ValueT, RatioPolicy<1, 1>>(m_value / rhs.GetValue());
         }
 
         // Conversion to base unit
         constexpr ValueT ToBase() const noexcept
         {
-            return m_value * RatioT::Value();
+            return Policy::ToBase(m_value);
         }
         static constexpr ValueT FromBase(ValueT baseValue) noexcept
         {
-            return baseValue / RatioT::Value();
+            return Policy::FromBase(baseValue);
         }
 
     private:
         ValueT m_value;
     };
 
+
     /// @brief UnitCast: convert between units of same exponents
     /// Compile-time error if exponents differ
-    ///
-    template<QuantityExponents Q, typename RTo, typename RFrom, typename ValueT>
-    constexpr Unit<Q, RTo, ValueT> UnitCast(const Unit<Q, RFrom, ValueT>& from) noexcept
+
+    // UnitCast: convert between units of the same dimensions, even if they use different ValueT or Policies
+    template<
+            QuantityExponents Q,
+            typename ToValueT, typename ToPolicy,
+            typename FromValueT, typename FromPolicy>
+    constexpr Unit<Q, ToValueT, ToPolicy>
+    UnitCast(const Unit<Q, FromValueT, FromPolicy>& from) noexcept
     {
-        static_assert(Q == Q, "UnitCast: Exponents must match");
-        // Convert to base, then to target
-        ValueT base = from.ToBase();
-        return Unit<Q, RTo, ValueT>(Unit<Q, RTo, ValueT>::FromBase(base));
+        // 1) Convert the source value to the common base unit (always as FromValueT)
+        FromValueT base = FromPolicy::ToBase(from.GetValue());
+
+        // 2) Convert that base value into the target policy’s units (still as FromValueT)
+        FromValueT toValIntermediate = ToPolicy::FromBase(base);
+
+        // 3) Finally, cast into the desired ValueT for the target Unit
+        return Unit<Q, ToValueT, ToPolicy>(
+                static_cast<ToValueT>(toValIntermediate));
     }
 
-    /// @brief User-friendly UnitCast: UnitCast<ToUnit>(from)
+    // Helper overload accepting a concrete destination Unit type
     template<typename ToUnit, typename FromUnit>
     constexpr ToUnit UnitCast(const FromUnit& from) noexcept
     {
         static_assert(
                 ToUnit::Exponents == FromUnit::Exponents,
                 "UnitCast: Units must have the same quantity exponents");
-        auto baseValue = FromUnit::RatioToBase::Value() * from.GetValue();
-        auto toValue   = ToUnit::FromBase(baseValue);
-        return ToUnit(toValue);
+
+        // Reuse the above template using ToUnit's ValueType and ConversionPolicy
+        return UnitCast<
+                ToUnit::Exponents,
+                typename ToUnit::ValueType, typename ToUnit::ConversionPolicy,
+                typename FromUnit::ValueType, typename FromUnit::ConversionPolicy>(from);
     }
 
+    /// @brief ValueCast: convert between units of the same kind with different ValueType (policy/exponents preserved)
+    template<typename ToValueT, typename FromUnit>
+    constexpr auto ValueCast(const FromUnit& from) noexcept
+    {
+        using UnitT = Unit<
+                FromUnit::Exponents,
+                ToValueT,
+                typename FromUnit::ConversionPolicy>;
+        return UnitCast<UnitT>(from);
+    }
 
     // Example: SI time units
-    using Seconds      = Unit<TIME, Ratio<1, 1>, double>;
-    using Milliseconds = Unit<TIME, Ratio<1, 1000>, double>;
-    using Microseconds = Unit<TIME, Ratio<1, 1000000>, double>;
-    using Nanoseconds  = Unit<TIME, Ratio<1, 1000000000>, double>;
-    using Minutes      = Unit<TIME, Ratio<60, 1>, double>;
-    using Hours        = Unit<TIME, Ratio<3600, 1>, double>;
-    using Days         = Unit<TIME, Ratio<86400, 1>, double>;
-    using Weeks        = Unit<TIME, Ratio<604800, 1>, double>;
-    using Fortnights   = Unit<TIME, Ratio<1209600, 1>, double>;
+    using Seconds      = Unit<TIME, double, RatioPolicy<1, 1>>;
+    using Milliseconds = Unit<TIME, double, RatioPolicy<1, 1000>>;
+    using Microseconds = Unit<TIME, double, RatioPolicy<1, 1000000>>;
+    using Nanoseconds  = Unit<TIME, double, RatioPolicy<1, 1000000000>>;
+    using Minutes      = Unit<TIME, double, RatioPolicy<60, 1>>;
+    using Hours        = Unit<TIME, double, RatioPolicy<3600, 1>>;
+    using Days         = Unit<TIME, double, RatioPolicy<86400, 1>>;
+    using Weeks        = Unit<TIME, double, RatioPolicy<604800, 1>>;
+    using Fortnights   = Unit<TIME, double, RatioPolicy<1209600, 1>>;
 
     // Example: SI length units
-    using Meters      = Unit<LENGTH, Ratio<1, 1>, double>;
-    using Kilometers  = Unit<LENGTH, Ratio<1000, 1>, double>;
-    using Centimeters = Unit<LENGTH, Ratio<1, 100>, double>;
-    using Millimeters = Unit<LENGTH, Ratio<1, 1000>, double>;
+    using Meters      = Unit<LENGTH, double, RatioPolicy<1, 1>>;
+    using Kilometers  = Unit<LENGTH, double, RatioPolicy<1000, 1>>;
+    using Centimeters = Unit<LENGTH, double, RatioPolicy<1, 100>>;
+    using Millimeters = Unit<LENGTH, double, RatioPolicy<1, 1000>>;
 
     // Example: SI mass units
-    using Kilograms  = Unit<MASS, Ratio<1, 1>, double>;
-    using Grams      = Unit<MASS, Ratio<1, 1000>, double>;
-    using Milligrams = Unit<MASS, Ratio<1, 1000000>, double>;
+    using Kilograms  = Unit<MASS, double, RatioPolicy<1, 1>>;
+    using Grams      = Unit<MASS, double, RatioPolicy<1, 1000>>;
+    using Milligrams = Unit<MASS, double, RatioPolicy<1, 1000000>>;
 
     // Example: SI current units
-    using Amperes      = Unit<CURRENT, Ratio<1, 1>, double>;
-    using Milliamperes = Unit<CURRENT, Ratio<1, 1000>, double>;
+    using Amperes      = Unit<CURRENT, double, RatioPolicy<1, 1>>;
+    using Milliamperes = Unit<CURRENT, double, RatioPolicy<1, 1000>>;
 
     // Example: SI temperature units
-    using Kelvin  = Unit<TEMPERATURE, Ratio<1, 1>, double>;
-    using Celsius = Unit<TEMPERATURE, Ratio<1, 1>, double>;// For now, treat as same as Kelvin for structure
-    // Specializations for SI current units
+    using Kelvin     = Unit<TEMPERATURE, double, RatioPolicy<1, 1>>;
+    using Celsius    = Unit<TEMPERATURE, double, OffsetPolicy<273.15>>;
+    using Fahrenheit = Unit<TEMPERATURE, double, FahrenheitToKelvinPolicy>;
 
     // Example: Derived unit
-    using Velocity = Unit<AddExponents(LENGTH, QuantityExponents {0, 0, -1, 0, 0, 0, 0}), Ratio<1, 1>, double>;
+    using Velocity = Unit<AddExponents(LENGTH, QuantityExponents {0, 0, -1, 0, 0, 0, 0}), double, RatioPolicy<1, 1>>;
 
     // User extension example
     // struct MyUnit : Unit<QuantityExponents{...}, Ratio<...>, float> { ... };
@@ -329,18 +407,61 @@ namespace NGIN::Units
 
 
     // Output streaming for units with or without UnitTraits (C++20 requires)
-    template<QuantityExponents Q, typename RatioT, typename ValueT>
-    std::ostream& operator<<(std::ostream& os, const Unit<Q, RatioT, ValueT>& u)
-        requires requires { UnitTraits<Unit<Q, RatioT, ValueT>>::symbol; }
+    template<QuantityExponents Q, typename ValueT, typename Policy>
+    std::ostream& operator<<(std::ostream& os, const Unit<Q, ValueT, Policy>& u)
+        requires requires { UnitTraits<Unit<Q, ValueT, Policy>>::symbol; }
     {
-        return os << u.GetValue() << ' ' << UnitTraits<Unit<Q, RatioT, ValueT>>::symbol;
+        return os << u.GetValue() << ' ' << UnitTraits<Unit<Q, ValueT, Policy>>::symbol;
     }
 
-    template<QuantityExponents Q, typename RatioT, typename ValueT>
-    std::ostream& operator<<(std::ostream& os, const Unit<Q, RatioT, ValueT>& u)
-        requires(!requires { UnitTraits<Unit<Q, RatioT, ValueT>>::symbol; })
+    template<QuantityExponents Q, typename ValueT, typename Policy>
+    std::ostream& operator<<(std::ostream& os, const Unit<Q, ValueT, Policy>& u)
+        requires(!requires { UnitTraits<Unit<Q, ValueT, Policy>>::symbol; })
     {
         return os << u.GetValue();
     }
 
 }// namespace NGIN::Units
+
+#if defined(__cpp_lib_format)
+
+//=== std::formatter integration ===
+namespace std
+{
+    template<
+            NGIN::Units::QuantityExponents Q,
+            typename ValueT,
+            typename Policy,
+            typename CharT>
+    struct formatter<NGIN::Units::Unit<Q, ValueT, Policy>, CharT> : public std::formatter<ValueT, CharT>
+    {
+        // delegate all the number‐parsing work to std::formatter<ValueT,CharT>
+        using Base = std::formatter<ValueT, CharT>;
+
+        // must match exactly what MSVC expects
+        constexpr auto parse(std::format_parse_context& ctx)
+        {
+            return Base::parse(ctx);
+        }
+
+        template<typename FormatContext>
+        auto format(const NGIN::Units::Unit<Q, ValueT, Policy>& u, FormatContext& ctx) const
+        {
+            // format the raw value first
+            auto out_it = Base::format(u.GetValue(), ctx);
+            // if there's a symbol, append it
+            if constexpr (requires {
+                              NGIN::Units::UnitTraits<NGIN::Units::Unit<Q, ValueT, Policy>>::symbol;
+                          })
+            {
+                return std::format_to(ctx.out(), " {}",
+                                      NGIN::Units::UnitTraits<NGIN::Units::Unit<Q, ValueT, Policy>>::symbol);
+            }
+            else
+            {
+                return out_it;
+            }
+        }
+    };
+}// namespace std
+#endif// __cpp_lib_format

@@ -1,376 +1,469 @@
 #pragma once
-#include <NGIN/Primitives.hpp>
-#include <iostream>
-#include <string>
-#include <string_view>
+#include <cstdint>
+#include <cstddef>
+#include <array>
+#include <concepts>
+#include <format>
+#include <ostream>
 #include <type_traits>
 
-namespace NGIN
+namespace NGIN::Units
 {
-#pragma region Quantity Types
-
-    /// @brief Represents a quantity with the following exponents:
-    /// @tparam LengthExp
-    /// @tparam MassExp
-    /// @tparam TimeExp
-    /// @tparam CurrentExp
-    /// @tparam TemperatureExp
-    /// @tparam AmountOfSubstanceExp
-    /// @tparam LuminousIntensityExp
-    template<
-            int LengthExp,
-            int MassExp,
-            int TimeExp,
-            int CurrentExp,
-            int TemperatureExp,
-            int AmountOfSubstanceExp,
-            int LuminousIntensityExp>
-    struct Quantity
+    /// @brief Represents the exponents for SI base quantities.
+    struct QuantityExponents
     {
-        static constexpr int LENGTH              = LengthExp;
-        static constexpr int MASS                = MassExp;
-        static constexpr int TIME                = TimeExp;
-        static constexpr int CURRENT             = CurrentExp;
-        static constexpr int TEMPERATURE         = TemperatureExp;
-        static constexpr int AMOUNT_OF_SUBSTANCE = AmountOfSubstanceExp;
-        static constexpr int LUMINOUS_INTENSITY  = LuminousIntensityExp;
-    };
-
-    // Helper to check if two Quantities are the same
-    template<typename Q1, typename Q2>
-    struct IsSameQuantity
-    {
-        static constexpr bool value =
-                Q1::LENGTH == Q2::LENGTH &&
-                Q1::MASS == Q2::MASS &&
-                Q1::TIME == Q2::TIME &&
-                Q1::CURRENT == Q2::CURRENT &&
-                Q1::TEMPERATURE == Q2::TEMPERATURE &&
-                Q1::AMOUNT_OF_SUBSTANCE == Q2::AMOUNT_OF_SUBSTANCE &&
-                Q1::LUMINOUS_INTENSITY == Q2::LUMINOUS_INTENSITY;
-    };
-
-    using Length            = Quantity<1, 0, 0, 0, 0, 0, 0>;
-    using Mass              = Quantity<0, 1, 0, 0, 0, 0, 0>;
-    using Time              = Quantity<0, 0, 1, 0, 0, 0, 0>;
-    using Current           = Quantity<0, 0, 0, 1, 0, 0, 0>;
-    using Temperature       = Quantity<0, 0, 0, 0, 1, 0, 0>;
-    using AmountOfSubstance = Quantity<0, 0, 0, 0, 0, 1, 0>;
-    using LuminousIntensity = Quantity<0, 0, 0, 0, 0, 0, 1>;
-
-    template<typename Derived, typename Quantity, typename ValueT = F64>
-    class Unit
-    {
-    public:
-        using ValueType    = ValueT;
-        using QuantityType = Quantity;
-
-        constexpr Unit()
-            : value({}) {};
-        constexpr Unit(ValueType value)
-            : value(value) {}
-
-        // Arithmetic operators with the same unit type
-        constexpr Derived operator+(const Derived& other)
+        static constexpr std::size_t NUM_EXPONENTS = 7;
+        std::array<int8_t, NUM_EXPONENTS> exponents {};// L, M, T, I, Θ, N, J
+        constexpr bool operator==(const QuantityExponents& other) const noexcept
         {
-            return Derived(value + other.value);
+            for (std::size_t k = 0; k < NUM_EXPONENTS; ++k)
+                if (exponents[k] != other.exponents[k])
+                    return false;
+            return true;
         }
-
-        constexpr Derived operator-(const Derived& other)
-        {
-            return Derived(value - other.value);
-        }
-
-        // Scalar multiplication and division
-        constexpr Derived operator*(ValueType scalar)
-        {
-            return Derived(value * scalar);
-        }
-
-        constexpr Derived operator/(ValueType scalar)
-        {
-            return Derived(value / scalar);
-        }
-
-        // Comparison operators
-        constexpr bool operator==(const Derived& other)
-        {
-            return value == other.value;
-        }
-
-        constexpr bool operator!=(const Derived& other)
+        constexpr bool operator!=(const QuantityExponents& other) const noexcept
         {
             return !(*this == other);
         }
-
-        // Access the value
-        constexpr ValueType GetValue() const
-        {
-            return value;
-        }
-
-        // Output representation
-        friend std::ostream& operator<<(std::ostream& os, const Derived& unit)
-        {
-            return os << unit.value << Derived::Symbol();
-        }
-
-    protected:
-        ValueType value;
-
-    private:
-        // Private conversion methods
-        static constexpr ValueType ConvertToBase(ValueType value)
-        {
-            return Derived::ToBase(value);
-        }
-
-        static constexpr ValueType ConvertFromBase(ValueType baseValue)
-        {
-            return Derived::FromBase(baseValue);
-        }
-
-        // Grant access to UnitCast
-        template<typename ToUnit, typename FromUnit>
-        friend constexpr ToUnit UnitCast(const FromUnit& from);
     };
 
-    // UnitCast function
-    template<typename ToUnit, typename FromUnit>
-    constexpr ToUnit UnitCast(const FromUnit& from)
+    /// @brief Compile-time addition of exponents
+    constexpr QuantityExponents AddExponents(const QuantityExponents& a, const QuantityExponents& b) noexcept
     {
-        static_assert(IsSameQuantity<typename ToUnit::QuantityType, typename FromUnit::QuantityType>::value,
-                      "Units must have the same quantity for conversion");
-
-        auto baseValue = FromUnit::ConvertToBase(from.GetValue());
-        auto toValue   = ToUnit::ConvertFromBase(baseValue);
-        return ToUnit(toValue);
+        QuantityExponents r {};
+        for (std::size_t k = 0; k < QuantityExponents::NUM_EXPONENTS; ++k)
+            r.exponents[k] = static_cast<int8_t>(a.exponents[k] + b.exponents[k]);
+        return r;
+    }
+    /// @brief Compile-time subtraction of exponents
+    constexpr QuantityExponents SubExponents(const QuantityExponents& a, const QuantityExponents& b) noexcept
+    {
+        QuantityExponents r {};
+        for (std::size_t k = 0; k < QuantityExponents::NUM_EXPONENTS; ++k)
+            r.exponents[k] = static_cast<int8_t>(a.exponents[k] - b.exponents[k]);
+        return r;
     }
 
-#pragma endregion
-#pragma region Time Units
-    // Base unit: Seconds
-    struct Seconds : Unit<Seconds, Time>
-    {
-        using Unit::Unit;
+    // SI base quantities
+    constexpr QuantityExponents LENGTH {1, 0, 0, 0, 0, 0, 0};
+    constexpr QuantityExponents MASS {0, 1, 0, 0, 0, 0, 0};
+    constexpr QuantityExponents TIME {0, 0, 1, 0, 0, 0, 0};
+    constexpr QuantityExponents CURRENT {0, 0, 0, 1, 0, 0, 0};
+    constexpr QuantityExponents TEMPERATURE {0, 0, 0, 0, 1, 0, 0};
+    constexpr QuantityExponents AMOUNT {0, 0, 0, 0, 0, 1, 0};
+    constexpr QuantityExponents LUMINOUS {0, 0, 0, 0, 0, 0, 1};
 
-        static constexpr std::string_view Symbol()
+
+    //=== C++20 Concepts ===
+
+    /// @brief Concept: any Unit type (relaxed to allow const/ref types)
+    template<typename U>
+    concept UnitType = requires {
+        typename std::remove_cvref_t<U>::ValueType;
+        { std::remove_cvref_t<U>::Exponents } -> std::convertible_to<QuantityExponents>;
+    };
+
+    /// @brief Concept: Unit of specific quantity exponents (relaxed)
+    template<QuantityExponents E, typename U>
+    concept QuantityOf = UnitType<U> && (std::remove_cvref_t<U>::Exponents == E);
+
+
+    // --- Conversion Policies ---
+    template<int64_t Num, int64_t Den = 1>
+    struct RatioPolicy
+    {
+        template<typename ValueT>
+        static constexpr ValueT ToBase(ValueT value) noexcept
         {
-            return "s";
+            return value * static_cast<ValueT>(Num) / static_cast<ValueT>(Den);
+        }
+        template<typename ValueT>
+        static constexpr ValueT FromBase(ValueT base) noexcept
+        {
+            return base * static_cast<ValueT>(Den) / static_cast<ValueT>(Num);
+        }
+    };
+
+    template<double Offset>
+    struct OffsetPolicy
+    {
+        template<typename ValueT>
+        static constexpr ValueT ToBase(ValueT value) noexcept
+        {
+            return value + static_cast<ValueT>(Offset);
+        }
+        template<typename ValueT>
+        static constexpr ValueT FromBase(ValueT base) noexcept
+        {
+            return base - static_cast<ValueT>(Offset);
+        }
+    };
+
+    struct FahrenheitToKelvinPolicy
+    {
+        template<typename ValueT>
+        static constexpr ValueT ToBase(ValueT value) noexcept
+        {
+            // F -> K
+            return (value - 32.0) * 5.0 / 9.0 + 273.15;
+        }
+        template<typename ValueT>
+        static constexpr ValueT FromBase(ValueT base) noexcept
+        {
+            // K -> F
+            return (base - 273.15) * 9.0 / 5.0 + 32.0;
+        }
+    };
+
+    // --- Unit class with ConversionPolicy ---
+
+    template<
+            QuantityExponents Q,
+            typename ValueT = double,
+            typename Policy = RatioPolicy<1, 1>>
+    class Unit
+    {
+    public:
+        using ValueType                              = ValueT;
+        static constexpr QuantityExponents Exponents = Q;
+        using ConversionPolicy                       = Policy;
+
+        constexpr explicit Unit(ValueT value) noexcept : m_value(value) {}
+        constexpr ValueT GetValue() const noexcept
+        {
+            return m_value;
+        }
+
+        // Arithmetic (same exponents)
+        constexpr Unit operator+(const Unit& other) const noexcept
+        {
+            return Unit(m_value + other.m_value);
+        }
+        constexpr Unit operator-(const Unit& other) const noexcept
+        {
+            return Unit(m_value - other.m_value);
+        }
+        constexpr Unit operator*(ValueT scalar) const noexcept
+        {
+            return Unit(m_value * scalar);
+        }
+        constexpr Unit operator/(ValueT scalar) const noexcept
+        {
+            return Unit(m_value / scalar);
+        }
+        constexpr bool operator==(const Unit& other) const noexcept
+        {
+            return m_value == other.m_value;
+        }
+        constexpr bool operator!=(const Unit& other) const noexcept
+        {
+            return m_value != other.m_value;
+        }
+
+        // Unit algebra: multiplication/division yields new Unit type
+        template<QuantityExponents Q2, typename P2>
+        constexpr auto operator*(const Unit<Q2, ValueT, P2>& rhs) const noexcept
+        {
+            return Unit<AddExponents(Q, Q2), ValueT, RatioPolicy<1, 1>>(m_value * rhs.GetValue());
+        }
+        template<QuantityExponents Q2, typename P2>
+        constexpr auto operator/(const Unit<Q2, ValueT, P2>& rhs) const noexcept
+        {
+            return Unit<SubExponents(Q, Q2), ValueT, RatioPolicy<1, 1>>(m_value / rhs.GetValue());
+        }
+
+        // Conversion to base unit
+        constexpr ValueT ToBase() const noexcept
+        {
+            return Policy::ToBase(m_value);
+        }
+        static constexpr ValueT FromBase(ValueT baseValue) noexcept
+        {
+            return Policy::FromBase(baseValue);
         }
 
     private:
-        friend class Unit<Seconds, Time>;
-
-        static constexpr ValueType ToBase(ValueType value)
-        {
-            return value;// Base unit
-        }
-
-        static constexpr ValueType FromBase(ValueType value)
-        {
-            return value;// Base unit
-        }
+        ValueT m_value;
     };
 
-    // Milliseconds
-    struct Milliseconds : Unit<Milliseconds, Time>
+
+    /// @brief UnitCast: convert between units of same exponents
+    /// Compile-time error if exponents differ
+
+    // UnitCast: convert between units of the same dimensions, even if they use different ValueT or Policies
+    template<
+            QuantityExponents Q,
+            typename ToValueT, typename ToPolicy,
+            typename FromValueT, typename FromPolicy>
+    constexpr Unit<Q, ToValueT, ToPolicy>
+    UnitCast(const Unit<Q, FromValueT, FromPolicy>& from) noexcept
     {
-        using Unit::Unit;
+        // 1) Convert the source value to the common base unit (always as FromValueT)
+        FromValueT base = FromPolicy::ToBase(from.GetValue());
 
-        static constexpr std::string_view Symbol()
-        {
-            return "ms";
-        }
+        // 2) Convert that base value into the target policy’s units (still as FromValueT)
+        FromValueT toValIntermediate = ToPolicy::FromBase(base);
 
-    private:
-        friend class Unit<Milliseconds, Time>;
+        // 3) Finally, cast into the desired ValueT for the target Unit
+        return Unit<Q, ToValueT, ToPolicy>(
+                static_cast<ToValueT>(toValIntermediate));
+    }
 
-        static constexpr ValueType ToBase(ValueType value)
-        {
-            return value / 1E+03;
-        }
-
-        static constexpr ValueType FromBase(ValueType value)
-        {
-            return value * 1E+03;
-        }
-    };
-
-    // Microseconds
-    struct Microseconds : Unit<Microseconds, Time>
+    // Helper overload accepting a concrete destination Unit type
+    template<typename ToUnit, typename FromUnit>
+    constexpr ToUnit UnitCast(const FromUnit& from) noexcept
     {
-        using Unit::Unit;
+        static_assert(
+                ToUnit::Exponents == FromUnit::Exponents,
+                "UnitCast: Units must have the same quantity exponents");
 
-        static constexpr std::string_view Symbol()
-        {
-            return "us";
-        }
+        // Reuse the above template using ToUnit's ValueType and ConversionPolicy
+        return UnitCast<
+                ToUnit::Exponents,
+                typename ToUnit::ValueType, typename ToUnit::ConversionPolicy,
+                typename FromUnit::ValueType, typename FromUnit::ConversionPolicy>(from);
+    }
 
-    private:
-        friend class Unit<Microseconds, Time>;
-
-        static constexpr ValueType ToBase(ValueType value)
-        {
-            return value / 1E+06;
-        }
-
-        static constexpr ValueType FromBase(ValueType value)
-        {
-            return value * 1E+06;
-        }
-    };
-
-    // Nanoseconds
-    struct Nanoseconds : Unit<Nanoseconds, Time>
+    /// @brief ValueCast: convert between units of the same kind with different ValueType (policy/exponents preserved)
+    template<typename ToValueT, typename FromUnit>
+    constexpr auto ValueCast(const FromUnit& from) noexcept
     {
-        using Unit::Unit;
+        using UnitT = Unit<
+                FromUnit::Exponents,
+                ToValueT,
+                typename FromUnit::ConversionPolicy>;
+        return UnitCast<UnitT>(from);
+    }
 
-        static constexpr std::string_view Symbol()
-        {
-            return "ns";
-        }
+    // Example: SI time units
+    using Seconds      = Unit<TIME, double, RatioPolicy<1, 1>>;
+    using Milliseconds = Unit<TIME, double, RatioPolicy<1, 1000>>;
+    using Microseconds = Unit<TIME, double, RatioPolicy<1, 1000000>>;
+    using Nanoseconds  = Unit<TIME, double, RatioPolicy<1, 1000000000>>;
+    using Minutes      = Unit<TIME, double, RatioPolicy<60, 1>>;
+    using Hours        = Unit<TIME, double, RatioPolicy<3600, 1>>;
+    using Days         = Unit<TIME, double, RatioPolicy<86400, 1>>;
+    using Weeks        = Unit<TIME, double, RatioPolicy<604800, 1>>;
+    using Fortnights   = Unit<TIME, double, RatioPolicy<1209600, 1>>;
 
-    private:
-        friend class Unit<Nanoseconds, Time>;
+    // Example: SI length units
+    using Meters      = Unit<LENGTH, double, RatioPolicy<1, 1>>;
+    using Kilometers  = Unit<LENGTH, double, RatioPolicy<1000, 1>>;
+    using Centimeters = Unit<LENGTH, double, RatioPolicy<1, 100>>;
+    using Millimeters = Unit<LENGTH, double, RatioPolicy<1, 1000>>;
 
-        static constexpr ValueType ToBase(ValueType value)
-        {
-            return value / 1E+09;
-        }
+    // Example: SI mass units
+    using Kilograms  = Unit<MASS, double, RatioPolicy<1, 1>>;
+    using Grams      = Unit<MASS, double, RatioPolicy<1, 1000>>;
+    using Milligrams = Unit<MASS, double, RatioPolicy<1, 1000000>>;
 
-        static constexpr ValueType FromBase(ValueType value)
-        {
-            return value * 1E+09;
-        }
-    };
+    // Example: SI current units
+    using Amperes      = Unit<CURRENT, double, RatioPolicy<1, 1>>;
+    using Milliamperes = Unit<CURRENT, double, RatioPolicy<1, 1000>>;
 
-    // Minutes
-    struct Minutes : Unit<Minutes, Time>
+    // Example: SI temperature units
+    using Kelvin     = Unit<TEMPERATURE, double, RatioPolicy<1, 1>>;
+    using Celsius    = Unit<TEMPERATURE, double, OffsetPolicy<273.15>>;
+    using Fahrenheit = Unit<TEMPERATURE, double, FahrenheitToKelvinPolicy>;
+
+    // Example: Derived unit
+    using Velocity = Unit<AddExponents(LENGTH, QuantityExponents {0, 0, -1, 0, 0, 0, 0}), double, RatioPolicy<1, 1>>;
+
+    // User extension example
+    // struct MyUnit : Unit<QuantityExponents{...}, Ratio<...>, float> { ... };
+    // constexpr MyUnit operator"" _my(long double v) { return MyUnit(static_cast<float>(v)); }
+
+    // --- UnitTraits for metadata (symbol, name, etc.) ---
+    template<typename UnitT>
+    struct UnitTraits;
+
+
+    // Specializations for SI time units
+    // Specializations for SI length units
+    template<>
+    struct UnitTraits<Meters>
     {
-        using Unit::Unit;
-
-        static constexpr std::string_view Symbol()
-        {
-            return "m";
-        }
-
-    private:
-        friend class Unit<Minutes, Time>;
-
-        static constexpr ValueType ToBase(ValueType value)
-        {
-            return value * 60.0;
-        }
-
-        static constexpr ValueType FromBase(ValueType value)
-        {
-            return value / 60.0;
-        }
+        static constexpr const char* symbol = "m";
+        static constexpr const char* name   = "meters";
     };
-
-    // Hours
-    struct Hours : Unit<Hours, Time>
+    template<>
+    struct UnitTraits<Kilometers>
     {
-        using Unit::Unit;
-
-        static constexpr std::string_view Symbol()
-        {
-            return "h";
-        }
-
-    private:
-        friend class Unit<Hours, Time>;
-
-        static constexpr ValueType ToBase(ValueType value)
-        {
-            return value * 3600.0;
-        }
-
-        static constexpr ValueType FromBase(ValueType value)
-        {
-            return value / 3600.0;
-        }
+        static constexpr const char* symbol = "km";
+        static constexpr const char* name   = "kilometers";
     };
-
-    // Days
-    struct Days : Unit<Days, Time>
+    template<>
+    struct UnitTraits<Centimeters>
     {
-        using Unit::Unit;
-
-        static constexpr std::string_view Symbol()
-        {
-            return "d";
-        }
-
-    private:
-        friend class Unit<Days, Time>;
-
-        static constexpr ValueType ToBase(ValueType value)
-        {
-            return value * 86400.0;// 24 * 3600
-        }
-
-        static constexpr ValueType FromBase(ValueType value)
-        {
-            return value / 86400.0;
-        }
+        static constexpr const char* symbol = "cm";
+        static constexpr const char* name   = "centimeters";
     };
-
-    struct Weeks : Unit<Weeks, Time>
+    template<>
+    struct UnitTraits<Millimeters>
     {
-        using Unit::Unit;
-
-        static constexpr std::string_view Symbol()
-        {
-            return "wk";
-        }
-
-    private:
-        friend class Unit<Weeks, Time>;
-
-        static constexpr ValueType ToBase(ValueType value)
-        {
-            return value * 604800.0;// 7 days
-        }
-
-        static constexpr ValueType FromBase(ValueType value)
-        {
-            return value / 604800.0;
-        }
+        static constexpr const char* symbol = "mm";
+        static constexpr const char* name   = "millimeters";
     };
 
-    // Fun Time Unit: Fortnights
-    struct Fortnights : Unit<Fortnights, Time>
+    // Specializations for SI mass units
+    template<>
+    struct UnitTraits<Kilograms>
     {
-        using Unit::Unit;
+        static constexpr const char* symbol = "kg";
+        static constexpr const char* name   = "kilograms";
+    };
+    template<>
+    struct UnitTraits<Grams>
+    {
+        static constexpr const char* symbol = "g";
+        static constexpr const char* name   = "grams";
+    };
+    template<>
+    struct UnitTraits<Milligrams>
+    {
+        static constexpr const char* symbol = "mg";
+        static constexpr const char* name   = "milligrams";
+    };
 
-        static constexpr std::string_view Symbol()
-        {
-            return "fn";
-        }
+    template<>
+    struct UnitTraits<Seconds>
+    {
+        static constexpr const char* symbol = "s";
+        static constexpr const char* name   = "seconds";
+    };
+    template<>
+    struct UnitTraits<Milliseconds>
+    {
+        static constexpr const char* symbol = "ms";
+        static constexpr const char* name   = "milliseconds";
+    };
+    template<>
+    struct UnitTraits<Microseconds>
+    {
+        static constexpr const char* symbol = "us";
+        static constexpr const char* name   = "microseconds";
+    };
+    template<>
+    struct UnitTraits<Nanoseconds>
+    {
+        static constexpr const char* symbol = "ns";
+        static constexpr const char* name   = "nanoseconds";
+    };
+    template<>
+    struct UnitTraits<Minutes>
+    {
+        static constexpr const char* symbol = "min";
+        static constexpr const char* name   = "minutes";
+    };
+    template<>
+    struct UnitTraits<Hours>
+    {
+        static constexpr const char* symbol = "h";
+        static constexpr const char* name   = "hours";
+    };
+    template<>
+    struct UnitTraits<Days>
+    {
+        static constexpr const char* symbol = "d";
+        static constexpr const char* name   = "days";
+    };
+    template<>
+    struct UnitTraits<Weeks>
+    {
+        static constexpr const char* symbol = "wk";
+        static constexpr const char* name   = "weeks";
+    };
+    template<>
+    struct UnitTraits<Fortnights>
+    {
+        static constexpr const char* symbol = "fn";
+        static constexpr const char* name   = "fortnights";
+    };
 
-    private:
-        friend class Unit<Fortnights, Time>;
+    template<>
+    struct UnitTraits<Amperes>
+    {
+        static constexpr const char* symbol = "A";
+        static constexpr const char* name   = "amperes";
+    };
+    template<>
+    struct UnitTraits<Milliamperes>
+    {
+        static constexpr const char* symbol = "mA";
+        static constexpr const char* name   = "milliamperes";
+    };
 
-        static constexpr ValueType ToBase(ValueType value)
-        {
-            return value * 1209600.0;// 14 days
-        }
-
-        static constexpr ValueType FromBase(ValueType value)
-        {
-            return value / 1209600.0;
-        }
+    // Specializations for SI temperature units
+    template<>
+    struct UnitTraits<Kelvin>
+    {
+        static constexpr const char* symbol = "K";
+        static constexpr const char* name   = "kelvin";
+    };
+    template<>
+    struct UnitTraits<Celsius>
+    {
+        static constexpr const char* symbol = "°C";
+        static constexpr const char* name   = "celsius";
     };
 
 
-#pragma endregion
+    // Output streaming for units with or without UnitTraits (C++20 requires)
+    template<QuantityExponents Q, typename ValueT, typename Policy>
+    std::ostream& operator<<(std::ostream& os, const Unit<Q, ValueT, Policy>& u)
+        requires requires { UnitTraits<Unit<Q, ValueT, Policy>>::symbol; }
+    {
+        return os << u.GetValue() << ' ' << UnitTraits<Unit<Q, ValueT, Policy>>::symbol;
+    }
 
-    template<typename UnitType, typename QuantityType>
-    concept IsUnitOf = requires {
-        typename UnitType::QuantityType;                                                  // Check that UnitType has a QuantityType
-        std::is_base_of<Unit<UnitType, typename UnitType::QuantityType>, UnitType>::value;// Must derive from Unit
-        std::is_same<typename UnitType::QuantityType, QuantityType>::value;               // Check the quantity matches
+    template<QuantityExponents Q, typename ValueT, typename Policy>
+    std::ostream& operator<<(std::ostream& os, const Unit<Q, ValueT, Policy>& u)
+        requires(!requires { UnitTraits<Unit<Q, ValueT, Policy>>::symbol; })
+    {
+        return os << u.GetValue();
+    }
+
+}// namespace NGIN::Units
+
+#if defined(__cpp_lib_format)
+
+//=== std::formatter integration ===
+namespace std
+{
+    template<
+            NGIN::Units::QuantityExponents Q,
+            typename ValueT,
+            typename Policy,
+            typename CharT>
+    struct formatter<NGIN::Units::Unit<Q, ValueT, Policy>, CharT> : public std::formatter<ValueT, CharT>
+    {
+        // delegate all the number‐parsing work to std::formatter<ValueT,CharT>
+        using Base = std::formatter<ValueT, CharT>;
+
+        // must match exactly what MSVC expects
+        constexpr auto parse(std::format_parse_context& ctx)
+        {
+            return Base::parse(ctx);
+        }
+
+        template<typename FormatContext>
+        auto format(const NGIN::Units::Unit<Q, ValueT, Policy>& u, FormatContext& ctx) const
+        {
+            // format the raw value first
+            auto out_it = Base::format(u.GetValue(), ctx);
+            // if there's a symbol, append it
+            if constexpr (requires {
+                              NGIN::Units::UnitTraits<NGIN::Units::Unit<Q, ValueT, Policy>>::symbol;
+                          })
+            {
+                return std::format_to(ctx.out(), " {}",
+                                      NGIN::Units::UnitTraits<NGIN::Units::Unit<Q, ValueT, Policy>>::symbol);
+            }
+            else
+            {
+                return out_it;
+            }
+        }
     };
-}// namespace NGIN
+}// namespace std
+#endif// __cpp_lib_format
