@@ -53,12 +53,39 @@ suite<"NGIN::Math::BigInt"> bigIntTests = [] {
     };
 
     "Division"_test = [] {
+        // Single-limb division
+        expect((BigInt("123456789") / BigInt("3")) == BigInt("41152263"));
+        expect((BigInt("-123456789") / BigInt("3")) == BigInt("-41152263"));
+        expect((BigInt("123456789") / BigInt("-3")) == BigInt("-41152263"));
+        expect((BigInt("-123456789") / BigInt("-3")) == BigInt("41152263"));
+
+        // Naive (tiny) division (<=4 limbs)
         BigInt a("56088");
         BigInt b("456");
         expect((a / b) == BigInt("123"));
         expect((BigInt("56088") / BigInt("-456")) == BigInt("-123"));
         expect((BigInt("-56088") / BigInt("456")) == BigInt("-123"));
         expect((BigInt("-56088") / BigInt("-456")) == BigInt("123"));
+
+        // Knuth (medium) division (<256 limbs)
+        std::string medA(200, '9');// 200 digits
+        std::string medB(100, '9');// 100 digits
+        BigInt bigA(medA), bigB(medB);
+        BigInt q = bigA / bigB;
+        BigInt r = bigA % bigB;
+        // bigA = bigB * q + r, 0 <= r < bigB
+        expect(bigA == bigB * q + r);
+        expect(r < bigB);
+
+        // Burnikel–Ziegler (large) division (>=256 limbs)
+        std::string largeA(3000, '7');// 3000 digits
+        std::string largeB(1500, '3');// 1500 digits
+        BigInt bigLA(largeA), bigLB(largeB);
+        BigInt qL = bigLA / bigLB;
+        BigInt rL = bigLA % bigLB;
+        expect(bigLA == bigLB * qL + rL);
+        expect(rL < bigLB);
+
         // Additional simple division tests
         expect((BigInt("10") / BigInt("2")) == BigInt("5"));
         expect((BigInt("10") / BigInt("3")) == BigInt("3"));
@@ -73,11 +100,36 @@ suite<"NGIN::Math::BigInt"> bigIntTests = [] {
     };
 
     "Modulo"_test = [] {
+        // Single-limb modulo
+        expect((BigInt("123456789") % BigInt("3")) == BigInt("0"));
+        expect((BigInt("123456789") % BigInt("10")) == BigInt("9"));
+        expect((BigInt("-123456789") % BigInt("10")) == BigInt("-9"));
+
+        // Naive (tiny) modulo (<=4 limbs)
         BigInt a("1001");
         BigInt b("100");
         expect((a % b) == BigInt("1"));
         expect((BigInt("-1001") % b) == BigInt("-1")) << (BigInt("-1001") % b);
         expect((a % BigInt("-100")) == BigInt("1"));
+
+        // Knuth (medium) modulo (<256 limbs)
+        std::string medA(200, '9');
+        std::string medB(100, '9');
+        BigInt bigA(medA), bigB(medB);
+        BigInt q = bigA / bigB;
+        BigInt r = bigA % bigB;
+        expect(bigA == bigB * q + r);
+        expect(r < bigB);
+
+        // Burnikel–Ziegler (large) modulo (>=256 limbs)
+        std::string largeA(3000, '7');
+        std::string largeB(1500, '3');
+        BigInt bigLA(largeA), bigLB(largeB);
+        BigInt qL = bigLA / bigLB;
+        BigInt rL = bigLA % bigLB;
+        expect(bigLA == bigLB * qL + rL);
+        expect(rL < bigLB);
+
         // Additional modulo tests
         expect((BigInt("10") % BigInt("3")) == BigInt("1")) << (BigInt("10") % BigInt("3"));
         expect((BigInt("10") % BigInt("-3")) == BigInt("1"));
