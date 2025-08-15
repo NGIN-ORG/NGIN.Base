@@ -38,7 +38,7 @@ namespace NGIN::Async
             m_allFibers.reserve(numFibers);
             for (size_t i = 0; i < numFibers; ++i)
             {
-                auto fiber = std::make_unique<Fiber>("Fiber_" + std::to_string(i));
+                auto fiber = std::make_unique<Fiber>();
                 m_fiberPool.push(fiber.get());
                 m_allFibers.push_back(std::move(fiber));
             }
@@ -274,16 +274,8 @@ namespace NGIN::Async
                 } catch (const std::exception& ex)
                 {
                     std::cerr << "[FiberScheduler] Exception in fiber: " << ex.what() << std::endl;
-                    // Optionally, can log fiber name/state here
                 }
-
-                // Ensure fiber is not left in a bad state before returning to pool
-                auto st = fiber->GetState();
-                if (st == Fiber::State::Error || st == Fiber::State::Completed)
-                {
-                    // Optionally reset fiber or recreate here for persistent pools
-                    // For now, just reassign job later as needed
-                }
+                // Return fiber to pool
                 {
                     std::lock_guard lock(m_fiberMutex);
                     m_fiberPool.push(fiber);
