@@ -13,8 +13,8 @@ namespace NGIN::Async
     class Fiber
     {
     public:
-        using Job                                    = NGIN::Utilities::Callable<void()>;
-        constexpr static UIntSize DEFAULT_STACK_SIZE = 128 * 1024;
+        using Job = NGIN::Utilities::Callable<void()>;
+        constexpr static UIntSize DEFAULT_STACK_SIZE = 128uz * 1024uz;
         Fiber(const Fiber&)                          = delete;
         Fiber& operator=(const Fiber&)               = delete;
         Fiber(Fiber&&)                               = delete;
@@ -63,8 +63,10 @@ namespace NGIN::Async
 
         ~Fiber()
         {
-            // No direct equivalent to SwitchToFiber, but cleanup can be handled here if needed
+            // No direct equivalent to SwitchToFiber or DeleteFiber for POSIX
             // Context and stack memory are managed by unique_ptr
+            // If currently running, yield back to main context
+            // (Not strictly necessary, but for API symmetry)
         }
 
         void Assign(Job job) noexcept
@@ -74,13 +76,16 @@ namespace NGIN::Async
 
         void Resume()
         {
+            if (!m_stack || !m_ctx.uc_stack.ss_sp)
+                throw std::runtime_error("Invalid fiber context");
             s_fiber = this;
             swapcontext(&s_mainCtx, &m_ctx);
         }
 
         static void Yield()
         {
-            if (s_fiber)
+            // Only yield if not already in main context
+            if (s_fiber && &s_mainCtx != &s_fiber->m_ctx)
                 swapcontext(&s_fiber->m_ctx, &s_mainCtx);
         }
 
@@ -88,27 +93,27 @@ namespace NGIN::Async
         ucontext_t m_ctx;
         Job m_job;
         std::unique_ptr<Byte[]> m_stack;
-        static thread_local Fiber* s_fiber;
-        static thread_local ucontext_t s_mainCtx;
-        static thread_local bool s_mainCtxInitialized;
+        inline static thread_local Fiber* s_fiber = nullptr;
+        inline static thread_local ucontext_t s_mainCtx;
+        inline static thread_local bool s_mainCtxInitialized = false;
 
         static void Trampoline(Fiber* self)
         {
             s_fiber = self;
             while (true)
             {
+                // Wait for a job
                 if (!self->m_job)
                 {
                     Yield();
                     continue;
                 }
+                // Run the job
                 self->m_job();
+                // Clear slot & go back to scheduler
                 self->m_job = {};
                 Yield();
             }
         }
     };
-    thread_local Fiber* Fiber::s_fiber = nullptr;
-    thread_local ucontext_t Fiber::s_mainCtx;
-    thread_local bool Fiber::s_mainCtxInitialized = false;
 }// namespace NGIN::Async
