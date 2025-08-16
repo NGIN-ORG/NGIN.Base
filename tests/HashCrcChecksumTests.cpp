@@ -67,6 +67,18 @@ suite<"NGIN::Hashing::HashCrcChecksum"> hashCrcChecksumTests = [] {
         expect(CRC16::TELEDISK(nullptr, 0) == static_cast<UInt16>(0x0000));
         expect(CRC16::TMS37157(nullptr, 0) == static_cast<UInt16>(0x3791));
         expect(CRC32::IEEE_802_3(nullptr, 0) == 0_u32);
+        expect(CRC32::MPEG_2(nullptr, 0) == static_cast<UInt32>(0xFFFFFFFFu));// initial value folded
+        expect(CRC32::AIXM(nullptr, 0) == 0_u32);
+        expect(CRC32::AUTOSAR(nullptr, 0) == 0_u32);
+        expect(CRC32::BASE91_D(nullptr, 0) == 0_u32);
+        expect(CRC32::BZIP2(nullptr, 0) == 0_u32);
+        expect(CRC32::CD_ROM_EDC(nullptr, 0) == 0_u32);
+        expect(CRC32::CKSUM(nullptr, 0) == static_cast<UInt32>(0xFFFFFFFFu));
+        expect(CRC32::ISCSI(nullptr, 0) == 0_u32);
+        expect(CRC32::ISO_HDLC(nullptr, 0) == 0_u32);
+        expect(CRC32::JAMCRC(nullptr, 0) == static_cast<UInt32>(0xFFFFFFFFu));
+        expect(CRC32::MEF(nullptr, 0) == static_cast<UInt32>(0xFFFFFFFFu));
+        expect(CRC32::XFER(nullptr, 0) == 0_u32);
         expect(CRC64::ISO_3309(nullptr, 0) == 0_u64);
     };
 
@@ -117,6 +129,17 @@ suite<"NGIN::Hashing::HashCrcChecksum"> hashCrcChecksumTests = [] {
         // CRC-32/64
         expect(CRC32::IEEE_802_3(data, len) == static_cast<UInt32>(0xCBF43926));
         expect(CRC32::MPEG_2(data, len) == static_cast<UInt32>(0x0376E6E7));
+        expect(CRC32::AIXM(data, len) == static_cast<UInt32>(0x3010BF7F));
+        expect(CRC32::AUTOSAR(data, len) == static_cast<UInt32>(0x1697D06A));
+        expect(CRC32::BASE91_D(data, len) == static_cast<UInt32>(0x87315576));
+        expect(CRC32::BZIP2(data, len) == static_cast<UInt32>(0xFC891918));
+        expect(CRC32::CD_ROM_EDC(data, len) == static_cast<UInt32>(0x6EC2EDC4));
+        expect(CRC32::CKSUM(data, len) == static_cast<UInt32>(0x765E7680));
+        expect(CRC32::ISCSI(data, len) == static_cast<UInt32>(0xE3069283));
+        expect(CRC32::ISO_HDLC(data, len) == static_cast<UInt32>(0xCBF43926));
+        expect(CRC32::JAMCRC(data, len) == static_cast<UInt32>(0x340BC6D9));
+        expect(CRC32::MEF(data, len) == static_cast<UInt32>(0xD2C22F51));
+        expect(CRC32::XFER(data, len) == static_cast<UInt32>(0xBD0BE338));
         expect(CRC64::ISO_3309(data, len) == static_cast<UInt64>(0xB90956C775A41001ULL));
         expect(CRC64::ECMA_182(data, len) == static_cast<UInt64>(0x6C40DF5F0B497347ULL));
     };
