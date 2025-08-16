@@ -10,11 +10,15 @@
 #include <NGIN/Primitives.hpp>
 #include <NGIN/Memory/AllocatorConcept.hpp>
 #include <NGIN/Memory/SystemAllocator.hpp>
+#include <NGIN/Meta/TypeTraits.hpp>
 #include <cstddef>
 #include <initializer_list>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
+#include <cstring>
+#include <limits>
+#include <memory>
 
 namespace NGIN::Containers
 {
@@ -28,168 +32,220 @@ namespace NGIN::Containers
         using AllocType = Alloc;
 
         Vector() noexcept = default;
-        explicit Vector(std::size_t initialCapacity, Alloc alloc = Alloc {}) : alloc_(std::move(alloc))
+        explicit Vector(std::size_t initialCapacity, Alloc alloc = Alloc {}) : m_alloc(std::move(alloc))
         {
             if (initialCapacity)
                 Reserve(initialCapacity);
         }
-        Vector(std::initializer_list<T> init, Alloc alloc = Alloc {}) : alloc_(std::move(alloc))
+        Vector(std::initializer_list<T> init, Alloc alloc = Alloc {}) : m_alloc(std::move(alloc))
         {
             Reserve(init.size());
             for (auto& v: init)
-                ::new (&data_[size_++]) T(v);
+                ::new (&m_data[m_size++]) T(v);
         }
-        Vector(const Vector& other) : alloc_(other.alloc_)
+        Vector(const Vector& other) : m_alloc(other.m_alloc)
         {
-            Reserve(other.size_);
-            for (std::size_t i = 0; i < other.size_; ++i)
-                ::new (&data_[i]) T(other.data_[i]);
-            size_ = other.size_;
+            Reserve(other.m_size);
+            for (std::size_t i = 0; i < other.m_size; ++i)
+                ::new (&m_data[i]) T(other.m_data[i]);
+            m_size = other.m_size;
         }
         Vector& operator=(const Vector& other)
         {
             if (this != &other)
             {
                 Clear();
-                if (data_)
-                    alloc_.Deallocate(data_, capacity_ * sizeof(T), alignof(T));
-                data_     = nullptr;
-                capacity_ = size_ = 0;
-                Reserve(other.size_);
-                for (std::size_t i = 0; i < other.size_; ++i)
-                    ::new (&data_[i]) T(other.data_[i]);
-                size_ = other.size_;
+                if (m_data)
+                    m_alloc.Deallocate(m_data, m_capacity * sizeof(T), alignof(T));
+                m_data     = nullptr;
+                m_capacity = m_size = 0;
+                Reserve(other.m_size);
+                for (std::size_t i = 0; i < other.m_size; ++i)
+                    ::new (&m_data[i]) T(other.m_data[i]);
+                m_size = other.m_size;
             }
             return *this;
         }
         Vector(Vector&& other) noexcept
-            : alloc_(std::move(other.alloc_)), data_(other.data_), size_(other.size_), capacity_(other.capacity_)
+            : m_alloc(std::move(other.m_alloc)), m_data(other.m_data), m_size(other.m_size), m_capacity(other.m_capacity)
         {
-            other.data_ = nullptr;
-            other.size_ = other.capacity_ = 0;
+            other.m_data = nullptr;
+            other.m_size = other.m_capacity = 0;
         }
         Vector& operator=(Vector&& other) noexcept
         {
             if (this != &other)
             {
                 Clear();
-                if (data_)
-                    alloc_.Deallocate(data_, capacity_ * sizeof(T), alignof(T));
-                alloc_      = std::move(other.alloc_);
-                data_       = other.data_;
-                size_       = other.size_;
-                capacity_   = other.capacity_;
-                other.data_ = nullptr;
-                other.size_ = other.capacity_ = 0;
+                if (m_data)
+                    m_alloc.Deallocate(m_data, m_capacity * sizeof(T), alignof(T));
+                m_alloc      = std::move(other.m_alloc);
+                m_data       = other.m_data;
+                m_size       = other.m_size;
+                m_capacity   = other.m_capacity;
+                other.m_data = nullptr;
+                other.m_size = other.m_capacity = 0;
             }
             return *this;
         }
         ~Vector()
         {
             Clear();
-            if (data_)
-                alloc_.Deallocate(data_, capacity_ * sizeof(T), alignof(T));
+            if (m_data)
+                m_alloc.Deallocate(m_data, m_capacity * sizeof(T), alignof(T));
         }
 
         //=== Element modifiers ===//
 
         /// @brief Push by copy.
-        void PushBack(const T& value)
+        T& PushBack(const T& value)
         {
             EnsureCapacityForOne();
-            ::new (&data_[size_++]) T(value);
+            ::new (&m_data[m_size]) T(value);
+            return m_data[m_size++];
         }
 
         /// @brief Push by move.
-        void PushBack(T&& value)
+        T& PushBack(T&& value)
         {
             EnsureCapacityForOne();
-            ::new (&data_[size_++]) T(std::move(value));
+            ::new (&m_data[m_size]) T(std::move(value));
+            return m_data[m_size++];
         }
 
         /// @brief In-place construct at the end.
         template<typename... Args>
-        void EmplaceBack(Args&&... args)
+        T& EmplaceBack(Args&&... args)
         {
             EnsureCapacityForOne();
-            ::new (&data_[size_++]) T(std::forward<Args>(args)...);
+            ::new (&m_data[m_size]) T(std::forward<Args>(args)...);
+            return m_data[m_size++];
         }
 
         /// @brief Insert by copy at index (shifts elements right).
         void PushAt(UIntSize index, const T& value)
         {
-            if (index > size_)
+            if (index > m_size)
                 throw std::out_of_range("Vector::PushAt: index out of range");
             EnsureCapacityForOne();
-            for (UIntSize i = size_; i > index; --i)
+            if (index == m_size)
             {
-                ::new (&data_[i]) T(std::move(data_[i - 1]));
-                data_[i - 1].~T();
+                ::new (&m_data[m_size++]) T(value);
+                return;
             }
-            ::new (&data_[index]) T(value);
-            ++size_;
+            const std::size_t tailCount = m_size - index;
+            if constexpr (Meta::TypeTraits<T>::IsBitwiseRelocatable())
+            {
+                std::memmove(static_cast<void*>(m_data + index + 1), static_cast<void*>(m_data + index), tailCount * sizeof(T));
+                ::new (&m_data[index]) T(value);
+                ++m_size;
+            }
+            else
+            {
+                // Create space at end then shift via move assignment (basic guarantee).
+                ::new (&m_data[m_size]) T(std::move(m_data[m_size - 1]));
+                for (std::size_t i = m_size - 1; i > index; --i)
+                    m_data[i] = std::move(m_data[i - 1]);
+                m_data[index].~T();
+                ::new (&m_data[index]) T(value);
+                ++m_size;
+            }
         }
 
         /// @brief Insert by move at index (shifts elements right).
         void PushAt(UIntSize index, T&& value)
         {
-            if (index > size_)
+            if (index > m_size)
                 throw std::out_of_range("Vector::PushAt: index out of range");
             EnsureCapacityForOne();
-            for (UIntSize i = size_; i > index; --i)
+            if (index == m_size)
             {
-                ::new (&data_[i]) T(std::move(data_[i - 1]));
-                data_[i - 1].~T();
+                ::new (&m_data[m_size++]) T(std::move(value));
+                return;
             }
-            ::new (&data_[index]) T(std::move(value));
-            ++size_;
+            const std::size_t tailCount = m_size - index;
+            if constexpr (Meta::TypeTraits<T>::IsBitwiseRelocatable())
+            {
+                std::memmove(static_cast<void*>(m_data + index + 1), static_cast<void*>(m_data + index), tailCount * sizeof(T));
+                ::new (&m_data[index]) T(std::move(value));
+                ++m_size;
+            }
+            else
+            {
+                ::new (&m_data[m_size]) T(std::move(m_data[m_size - 1]));
+                for (std::size_t i = m_size - 1; i > index; --i)
+                    m_data[i] = std::move(m_data[i - 1]);
+                m_data[index].~T();
+                ::new (&m_data[index]) T(std::move(value));
+                ++m_size;
+            }
         }
 
         /// @brief In-place insert at index (shifts elements right).
         template<typename... Args>
         void EmplaceAt(UIntSize index, Args&&... args)
         {
-            if (index > size_)
+            if (index > m_size)
                 throw std::out_of_range("Vector::EmplaceAt: index out of range");
             EnsureCapacityForOne();
-            for (UIntSize i = size_; i > index; --i)
+            if (index == m_size)
             {
-                ::new (&data_[i]) T(std::move(data_[i - 1]));
-                data_[i - 1].~T();
+                ::new (&m_data[m_size++]) T(std::forward<Args>(args)...);
+                return;
             }
-            ::new (&data_[index]) T(std::forward<Args>(args)...);
-            ++size_;
+            const std::size_t tailCount = m_size - index;
+            if constexpr (Meta::TypeTraits<T>::IsBitwiseRelocatable())
+            {
+                std::memmove(static_cast<void*>(m_data + index + 1), static_cast<void*>(m_data + index), tailCount * sizeof(T));
+                ::new (&m_data[index]) T(std::forward<Args>(args)...);
+                ++m_size;
+            }
+            else
+            {
+                ::new (&m_data[m_size]) T(std::move(m_data[m_size - 1]));
+                for (std::size_t i = m_size - 1; i > index; --i)
+                    m_data[i] = std::move(m_data[i - 1]);
+                m_data[index].~T();
+                ::new (&m_data[index]) T(std::forward<Args>(args)...);
+                ++m_size;
+            }
         }
 
         /// @brief Pop the last element.
         void PopBack()
         {
-            if (size_ == 0)
+            if (m_size == 0)
                 throw std::out_of_range("Vector::PopBack: vector is empty");
-            data_[size_ - 1].~T();
-            --size_;
+            m_data[m_size - 1].~T();
+            --m_size;
         }
 
         /// @brief Erase at index (shifts down).
         void Erase(UIntSize index)
         {
-            if (index >= size_)
+            if (index >= m_size)
                 throw std::out_of_range("Vector::Erase: index out of range");
-            data_[index].~T();
-            for (UIntSize i = index; i + 1 < size_; ++i)
+            if constexpr (Meta::TypeTraits<T>::IsBitwiseRelocatable())
             {
-                ::new (&data_[i]) T(std::move(data_[i + 1]));
-                data_[i + 1].~T();
+                std::memmove(static_cast<void*>(m_data + index), static_cast<void*>(m_data + index + 1), (m_size - index - 1) * sizeof(T));
+                --m_size;
             }
-            --size_;
+            else
+            {
+                m_data[index].~T();
+                for (UIntSize i = index; i + 1 < m_size; ++i)
+                    m_data[i] = std::move(m_data[i + 1]);
+                m_data[m_size - 1].~T();
+                --m_size;
+            }
         }
 
         /// @brief Remove all elements (capacity remains).
         void Clear() noexcept
         {
-            for (std::size_t i = 0; i < size_; ++i)
-                data_[i].~T();
-            size_ = 0;
+            for (std::size_t i = 0; i < m_size; ++i)
+                m_data[i].~T();
+            m_size = 0;
         }
 
         //=== Capacity management ===//
@@ -197,133 +253,180 @@ namespace NGIN::Containers
         /// @brief Ensure at least `newCapacity` slots.
         void Reserve(UIntSize newCapacity)
         {
-            if (newCapacity <= capacity_)
+            if (newCapacity <= m_capacity)
                 return;
-            void* mem = alloc_.Allocate(newCapacity * sizeof(T), alignof(T));
+            if (newCapacity > (std::numeric_limits<std::size_t>::max() / (sizeof(T) ? sizeof(T) : 1)))
+                throw std::length_error("Vector::Reserve size overflow");
+            void* mem = m_alloc.Allocate(newCapacity * sizeof(T), alignof(T));
             if (!mem)
                 throw std::bad_alloc();
-            T* newData = static_cast<T*>(mem);
-            UIntSize i = 0;
+            T*       newData = static_cast<T*>(mem);
+            UIntSize i       = 0;
             try
             {
-                for (; i < size_; ++i)
-                    ::new (&newData[i]) T(std::move(data_[i]));
+                if constexpr (Meta::TypeTraits<T>::IsBitwiseRelocatable())
+                {
+                    if (m_size)
+                        std::memcpy(newData, m_data, m_size * sizeof(T));
+                }
+                else if constexpr (std::is_nothrow_move_constructible_v<T> || !std::is_copy_constructible_v<T>)
+                {
+                    for (; i < m_size; ++i)
+                        ::new (&newData[i]) T(std::move(m_data[i]));
+                }
+                else
+                {
+                    for (; i < m_size; ++i)
+                        ::new (&newData[i]) T(m_data[i]);
+                }
             } catch (...)
             {
                 for (UIntSize j = 0; j < i; ++j)
                     newData[j].~T();
-                alloc_.Deallocate(newData, newCapacity * sizeof(T), alignof(T));
+                m_alloc.Deallocate(newData, newCapacity * sizeof(T), alignof(T));
                 throw;
             }
-            for (UIntSize j = 0; j < size_; ++j)
-                data_[j].~T();
-            if (data_)
-                alloc_.Deallocate(data_, capacity_ * sizeof(T), alignof(T));
-            data_     = newData;
-            capacity_ = newCapacity;
+            if constexpr (!Meta::TypeTraits<T>::IsBitwiseRelocatable())
+            {
+                for (UIntSize j = 0; j < m_size; ++j)
+                    m_data[j].~T();
+            }
+            if (m_data)
+                m_alloc.Deallocate(m_data, m_capacity * sizeof(T), alignof(T));
+            m_data     = newData;
+            m_capacity = newCapacity;
         }
 
         /// @brief Shrink capacity to match size.
         void ShrinkToFit()
         {
-            if (size_ == capacity_)
+            if (m_size == m_capacity)
                 return;
-            if (size_ == 0)
+            if (m_size == 0)
             {
-                if (data_)
+                if (m_data)
                 {
-                    alloc_.Deallocate(data_, capacity_ * sizeof(T), alignof(T));
-                    data_ = nullptr;
+                    m_alloc.Deallocate(m_data, m_capacity * sizeof(T), alignof(T));
+                    m_data = nullptr;
                 }
-                capacity_ = 0;
+                m_capacity = 0;
                 return;
             }
-            void* mem = alloc_.Allocate(size_ * sizeof(T), alignof(T));
+            // Heuristic: only shrink if wasting more than 50%
+            if (m_capacity < m_size * 2)
+                return;
+            void* mem = m_alloc.Allocate(m_size * sizeof(T), alignof(T));
             if (!mem)
                 throw std::bad_alloc();
             T* newData = static_cast<T*>(mem);
-            for (UIntSize i = 0; i < size_; ++i)
+            if constexpr (Meta::TypeTraits<T>::IsBitwiseRelocatable())
             {
-                ::new (&newData[i]) T(std::move(data_[i]));
-                data_[i].~T();
+                std::memcpy(newData, m_data, m_size * sizeof(T));
             }
-            alloc_.Deallocate(data_, capacity_ * sizeof(T), alignof(T));
-            data_     = newData;
-            capacity_ = size_;
+            else
+            {
+                UIntSize i = 0;
+                try
+                {
+                    if constexpr (std::is_nothrow_move_constructible_v<T> || !std::is_copy_constructible_v<T>)
+                    {
+                        for (; i < m_size; ++i)
+                            ::new (&newData[i]) T(std::move(m_data[i]));
+                    }
+                    else
+                    {
+                        for (; i < m_size; ++i)
+                            ::new (&newData[i]) T(m_data[i]);
+                    }
+                } catch (...)
+                {
+                    for (UIntSize j = 0; j < i; ++j)
+                        newData[j].~T();
+                    m_alloc.Deallocate(newData, m_size * sizeof(T), alignof(T));
+                    throw;
+                }
+                for (UIntSize j = 0; j < m_size; ++j)
+                    m_data[j].~T();
+            }
+            m_alloc.Deallocate(m_data, m_capacity * sizeof(T), alignof(T));
+            m_data     = newData;
+            m_capacity = m_size;
         }
 
         //=== Observers ===//
 
         [[nodiscard]] UIntSize Size() const noexcept
         {
-            return size_;
+            return m_size;
         }
         [[nodiscard]] UIntSize Capacity() const noexcept
         {
-            return capacity_;
+            return m_capacity;
         }
 
         T& At(UIntSize idx)
         {
-            if (idx >= size_)
+            if (idx >= m_size)
                 throw std::out_of_range("Vector::At: index out of range");
-            return data_[idx];
+            return m_data[idx];
         }
         const T& At(UIntSize idx) const
         {
-            if (idx >= size_)
+            if (idx >= m_size)
                 throw std::out_of_range("Vector::At: index out of range");
-            return data_[idx];
+            return m_data[idx];
         }
 
         T& operator[](UIntSize idx)
         {
-            return data_[idx];
+            return m_data[idx];
         }
         const T& operator[](UIntSize idx) const
         {
-            return data_[idx];
+            return m_data[idx];
         }
 
         //=== Iterators & data ===//
 
         [[nodiscard]] T* data() noexcept
         {
-            return data_;
+            return m_data;
         }
         [[nodiscard]] const T* data() const noexcept
         {
-            return data_;
+            return m_data;
         }
         [[nodiscard]] T* begin() noexcept
         {
-            return data_;
+            return m_data;
         }
         [[nodiscard]] const T* begin() const noexcept
         {
-            return data_;
+            return m_data;
         }
         [[nodiscard]] T* end() noexcept
         {
-            return data_ + size_;
+            return m_data + m_size;
         }
         [[nodiscard]] const T* end() const noexcept
         {
-            return data_ + size_;
+            return m_data + m_size;
         }
 
     private:
         void EnsureCapacityForOne()
         {
-            if (size_ >= capacity_)
-                Reserve(capacity_ ? capacity_ * 2 : 1);
+            if (m_size < m_capacity)
+                return;
+            // 1.5x growth (capacity + capacity/2 + 1 to ensure progress) with overflow guard
+            std::size_t next = m_capacity ? m_capacity + (m_capacity >> 1) + 1 : 1;
+            if (next < m_capacity)// overflow
+                next = m_capacity + 1;
+            Reserve(next);
         }
-        Alloc alloc_ {};
-        T* data_ {nullptr};
-        UIntSize size_ {0};
-        UIntSize capacity_ {0};
+        Alloc    m_alloc {};
+        T*       m_data {nullptr};
+        UIntSize m_size {0};
+        UIntSize m_capacity {0};
     };
-
-    // Vector2 removed; Vector now uses allocator concept directly.
-
 }// namespace NGIN::Containers
