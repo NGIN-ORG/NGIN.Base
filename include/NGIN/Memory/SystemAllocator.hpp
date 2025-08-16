@@ -9,16 +9,18 @@
 #include <stdexcept>
 #include <type_traits>
 
+#include <NGIN/Primitives.hpp>
+
 namespace NGIN::Memory
 {
     struct SystemAllocator
     {
-        [[nodiscard]] static bool IsPowerOfTwo(std::size_t v) noexcept
+        [[nodiscard]] static bool IsPowerOfTwo(UIntSize v) noexcept
         {
             return v && ((v & (v - 1)) == 0);
         }
 
-        [[nodiscard]] void* Allocate(std::size_t size, std::size_t alignment) noexcept
+        [[nodiscard]] void* Allocate(UIntSize size, UIntSize alignment) noexcept
         {
             if (size == 0)
                 return nullptr;
@@ -43,7 +45,7 @@ namespace NGIN::Memory
 #endif
         }
 
-        void Deallocate(void* ptr, std::size_t, std::size_t) noexcept
+        void Deallocate(void* ptr, UIntSize, UIntSize) noexcept
         {
             if (!ptr)
                 return;
@@ -54,11 +56,11 @@ namespace NGIN::Memory
 #endif
         }
 
-        [[nodiscard]] constexpr std::size_t MaxSize() const noexcept
+        [[nodiscard]] constexpr UIntSize MaxSize() const noexcept
         {
-            return static_cast<std::size_t>(-1);
+            return static_cast<UIntSize>(-1);
         }
-        [[nodiscard]] constexpr std::size_t Remaining() const noexcept
+        [[nodiscard]] constexpr UIntSize Remaining() const noexcept
         {
             return MaxSize();
         }
