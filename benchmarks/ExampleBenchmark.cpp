@@ -29,7 +29,7 @@ int main()
     Benchmark::Register([](BenchmarkContext& ctx) {
         ctx.start();
         NGIN::Containers::FlatHashMap<int, int> map;
-        std::vector<int> keys(1000);
+        std::vector<int>                        keys(1000);
         for (int i = 0; i < 1000; ++i)
             keys[i] = i;
         std::mt19937 rng(42);
@@ -60,7 +60,7 @@ int main()
     Benchmark::Register([](BenchmarkContext& ctx) {
         ctx.start();
         NGIN::Containers::FlatHashMap<int, int> map;
-        std::vector<int> keys(1000);
+        std::vector<int>                        keys(1000);
         for (int i = 0; i < 1000; ++i)
             keys[i] = i;
         for (int i = 0; i < 1000; ++i)
@@ -72,6 +72,24 @@ int main()
         ctx.stop();
     },
                         "FlatHashMap<int,int> Insert+RandomRemove 1000");
+
+    Benchmark::Register([](BenchmarkContext& ctx) {
+        ctx.start();
+        NGIN::Containers::FlatHashMap<int, int> map;
+        for (int i = 0; i < 1000; ++i)
+            map.Insert(i, i);
+        int sum = 0;
+        for (int i = 0; i < 1000; ++i)
+            sum += map.Get(i);
+        for (int i = 0; i < 1000; i += 2)
+            map.Remove(i);
+        for (int i = 0; i < 1000; ++i)
+            if (map.Contains(i))
+                sum += map.Get(i);
+        ctx.doNotOptimize(sum);
+        ctx.stop();
+    },
+                        "FlatHashMap<int,int> MixedWorkload 1000");
 
     Benchmark::Register([](BenchmarkContext& ctx) {
         ctx.start();
@@ -89,7 +107,7 @@ int main()
     Benchmark::Register([](BenchmarkContext& ctx) {
         ctx.start();
         NGIN::Containers::ConcurrentHashMap<int, int> cmap;
-        std::vector<int> keys(1000);
+        std::vector<int>                              keys(1000);
         for (int i = 0; i < 1000; ++i)
             keys[i] = i;
         std::mt19937 rng(44);
@@ -120,7 +138,7 @@ int main()
     Benchmark::Register([](BenchmarkContext& ctx) {
         ctx.start();
         NGIN::Containers::ConcurrentHashMap<int, int> cmap;
-        std::vector<int> keys(1000);
+        std::vector<int>                              keys(1000);
         for (int i = 0; i < 1000; ++i)
             keys[i] = i;
         for (int i = 0; i < 1000; ++i)
@@ -134,24 +152,6 @@ int main()
                         "ConcurrentHashMap<int,int> Insert+RandomRemove 1000");
 
     // --- Mixed workload: Insert, Get, Remove ---
-    Benchmark::Register([](BenchmarkContext& ctx) {
-        ctx.start();
-        NGIN::Containers::FlatHashMap<int, int> map;
-        for (int i = 0; i < 1000; ++i)
-            map.Insert(i, i);
-        int sum = 0;
-        for (int i = 0; i < 1000; ++i)
-            sum += map.Get(i);
-        for (int i = 0; i < 1000; i += 2)
-            map.Remove(i);
-        for (int i = 0; i < 1000; ++i)
-            if (map.Contains(i))
-                sum += map.Get(i);
-        ctx.doNotOptimize(sum);
-        ctx.stop();
-    },
-                        "FlatHashMap<int,int> MixedWorkload 1000");
-
     Benchmark::Register([](BenchmarkContext& ctx) {
         ctx.start();
         NGIN::Containers::ConcurrentHashMap<int, int> cmap;
