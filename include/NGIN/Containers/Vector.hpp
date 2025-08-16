@@ -8,7 +8,8 @@
 #pragma once
 
 #include <NGIN/Primitives.hpp>
-#include <NGIN/Memory/Mallocator.hpp>
+#include <NGIN/Memory/AllocatorConcept.hpp>
+#include <NGIN/Memory/SystemAllocator.hpp>
 #include <cstddef>
 #include <initializer_list>
 #include <stdexcept>
@@ -17,117 +18,77 @@
 
 namespace NGIN::Containers
 {
-    /// @tparam T         Element type.
-    /// @tparam Allocator Must implement IAllocator and provide
-    ///                   `static Allocator& Instance()`.
-    template<typename T, typename Allocator = NGIN::Memory::IAllocator>
+    /// @tparam T Element type
+    /// @tparam Alloc Allocator satisfying AllocatorConcept (value-stored). Defaults to SystemAllocator.
+    template<class T, NGIN::Memory::AllocatorConcept Alloc = NGIN::Memory::SystemAllocator>
     class Vector
     {
     public:
-        /// @brief Default constructor: uses Allocator::Instance().
-        /// @note Fails to compile if `Allocator::Instance()` doesn't exist.
-        Vector(UIntSize initialCapacity = 0)
-            requires requires { Allocator::Instance(); }
-            : m_allocator(Allocator::Instance()), m_data(nullptr), m_size(0), m_capacity(0)
+        using Value     = T;
+        using AllocType = Alloc;
+
+        Vector() noexcept = default;
+        explicit Vector(std::size_t initialCapacity, Alloc alloc = Alloc {}) : alloc_(std::move(alloc))
         {
-            Reserve(initialCapacity);
+            if (initialCapacity)
+                Reserve(initialCapacity);
         }
-
-
-        /// @brief Default constructor: uses Mallocator::Instance() if Allocator is IAllocator.
-        Vector(UIntSize initialCapacity = 0)
-            requires(std::is_same_v<Allocator, NGIN::Memory::IAllocator>)
-            : m_allocator(NGIN::Memory::Mallocator::Instance()), m_data(nullptr), m_size(0), m_capacity(0)
+        Vector(std::initializer_list<T> init, Alloc alloc = Alloc {}) : alloc_(std::move(alloc))
         {
-            Reserve(initialCapacity);
+            Reserve(init.size());
+            for (auto& v: init)
+                ::new (&data_[size_++]) T(v);
         }
-
-        /// @brief Construct with an explicit external allocator.
-        Vector(Allocator& allocator, UIntSize initialCapacity = 0)
-            : m_allocator(allocator), m_data(nullptr), m_size(0), m_capacity(0)
+        Vector(const Vector& other) : alloc_(other.alloc_)
         {
-            Reserve(initialCapacity);
+            Reserve(other.size_);
+            for (std::size_t i = 0; i < other.size_; ++i)
+                ::new (&data_[i]) T(other.data_[i]);
+            size_ = other.size_;
         }
-
-        /// @brief Initializer-list constructor (uses global Instance).
-        Vector(std::initializer_list<T> list)
-            requires requires { Allocator::Instance(); }
-            : Vector(Allocator::Instance(), list.size())
-        {
-            for (auto& elem: list)
-            {
-                new (m_data + m_size) T(elem);
-                ++m_size;
-            }
-        }
-
-        /// @brief Copy constructor: copies elements but keeps the same allocator.
-        Vector(const Vector& other)
-            : m_allocator(other.m_allocator), m_data(nullptr), m_size(0), m_capacity(0)
-        {
-            Reserve(other.m_capacity);
-            for (UIntSize i = 0; i < other.m_size; ++i)
-            {
-                new (m_data + i) T(other.m_data[i]);
-                ++m_size;
-            }
-        }
-
-        /// @brief Move constructor: steals storage (uses same allocator).
-        Vector(Vector&& other) noexcept
-            : m_allocator(other.m_allocator), m_data(other.m_data), m_size(other.m_size), m_capacity(other.m_capacity)
-        {
-            other.m_data     = nullptr;
-            other.m_size     = 0;
-            other.m_capacity = 0;
-        }
-
-        /// @brief Destructor: destroys elements and deallocates memory.
-        ~Vector()
-        {
-            Destroy();
-            if (m_data)
-                m_allocator.Deallocate(m_data);
-        }
-
-        /// @brief Copy-assign: deep-copy elements into this container.
         Vector& operator=(const Vector& other)
         {
             if (this != &other)
             {
-                Destroy();
-                if (m_data)
-                    m_allocator.Deallocate(m_data);
-
-                m_data     = nullptr;
-                m_capacity = 0;
-                Reserve(other.m_capacity);
-
-                for (UIntSize i = 0; i < other.m_size; ++i)
-                    new (m_data + i) T(other.m_data[i]);
-                m_size = other.m_size;
+                Clear();
+                if (data_)
+                    alloc_.Deallocate(data_, capacity_ * sizeof(T), alignof(T));
+                data_     = nullptr;
+                capacity_ = size_ = 0;
+                Reserve(other.size_);
+                for (std::size_t i = 0; i < other.size_; ++i)
+                    ::new (&data_[i]) T(other.data_[i]);
+                size_ = other.size_;
             }
             return *this;
         }
-
-        /// @brief Move-assign: deep-move elements into this container.
+        Vector(Vector&& other) noexcept
+            : alloc_(std::move(other.alloc_)), data_(other.data_), size_(other.size_), capacity_(other.capacity_)
+        {
+            other.data_ = nullptr;
+            other.size_ = other.capacity_ = 0;
+        }
         Vector& operator=(Vector&& other) noexcept
         {
             if (this != &other)
             {
-                Destroy();
-                if (m_data)
-                    m_allocator.Deallocate(m_data);
-
-                m_data     = other.m_data;
-                m_size     = other.m_size;
-                m_capacity = other.m_capacity;
-
-                other.m_data     = nullptr;
-                other.m_size     = 0;
-                other.m_capacity = 0;
+                Clear();
+                if (data_)
+                    alloc_.Deallocate(data_, capacity_ * sizeof(T), alignof(T));
+                alloc_      = std::move(other.alloc_);
+                data_       = other.data_;
+                size_       = other.size_;
+                capacity_   = other.capacity_;
+                other.data_ = nullptr;
+                other.size_ = other.capacity_ = 0;
             }
             return *this;
+        }
+        ~Vector()
+        {
+            Clear();
+            if (data_)
+                alloc_.Deallocate(data_, capacity_ * sizeof(T), alignof(T));
         }
 
         //=== Element modifiers ===//
@@ -136,16 +97,14 @@ namespace NGIN::Containers
         void PushBack(const T& value)
         {
             EnsureCapacityForOne();
-            new (m_data + m_size) T(value);
-            ++m_size;
+            ::new (&data_[size_++]) T(value);
         }
 
         /// @brief Push by move.
         void PushBack(T&& value)
         {
             EnsureCapacityForOne();
-            new (m_data + m_size) T(std::move(value));
-            ++m_size;
+            ::new (&data_[size_++]) T(std::move(value));
         }
 
         /// @brief In-place construct at the end.
@@ -153,84 +112,84 @@ namespace NGIN::Containers
         void EmplaceBack(Args&&... args)
         {
             EnsureCapacityForOne();
-            new (m_data + m_size) T(std::forward<Args>(args)...);
-            ++m_size;
+            ::new (&data_[size_++]) T(std::forward<Args>(args)...);
         }
 
         /// @brief Insert by copy at index (shifts elements right).
         void PushAt(UIntSize index, const T& value)
         {
-            if (index > m_size)
+            if (index > size_)
                 throw std::out_of_range("Vector::PushAt: index out of range");
             EnsureCapacityForOne();
-            for (UIntSize i = m_size; i > index; --i)
+            for (UIntSize i = size_; i > index; --i)
             {
-                new (m_data + i) T(std::move(m_data[i - 1]));
-                m_data[i - 1].~T();
+                ::new (&data_[i]) T(std::move(data_[i - 1]));
+                data_[i - 1].~T();
             }
-            new (m_data + index) T(value);
-            ++m_size;
+            ::new (&data_[index]) T(value);
+            ++size_;
         }
 
         /// @brief Insert by move at index (shifts elements right).
         void PushAt(UIntSize index, T&& value)
         {
-            if (index > m_size)
+            if (index > size_)
                 throw std::out_of_range("Vector::PushAt: index out of range");
             EnsureCapacityForOne();
-            for (UIntSize i = m_size; i > index; --i)
+            for (UIntSize i = size_; i > index; --i)
             {
-                new (m_data + i) T(std::move(m_data[i - 1]));
-                m_data[i - 1].~T();
+                ::new (&data_[i]) T(std::move(data_[i - 1]));
+                data_[i - 1].~T();
             }
-            new (m_data + index) T(std::move(value));
-            ++m_size;
+            ::new (&data_[index]) T(std::move(value));
+            ++size_;
         }
 
         /// @brief In-place insert at index (shifts elements right).
         template<typename... Args>
         void EmplaceAt(UIntSize index, Args&&... args)
         {
-            if (index > m_size)
+            if (index > size_)
                 throw std::out_of_range("Vector::EmplaceAt: index out of range");
             EnsureCapacityForOne();
-            for (UIntSize i = m_size; i > index; --i)
+            for (UIntSize i = size_; i > index; --i)
             {
-                new (m_data + i) T(std::move(m_data[i - 1]));
-                m_data[i - 1].~T();
+                ::new (&data_[i]) T(std::move(data_[i - 1]));
+                data_[i - 1].~T();
             }
-            new (m_data + index) T(std::forward<Args>(args)...);
-            ++m_size;
+            ::new (&data_[index]) T(std::forward<Args>(args)...);
+            ++size_;
         }
 
         /// @brief Pop the last element.
         void PopBack()
         {
-            if (m_size == 0)
+            if (size_ == 0)
                 throw std::out_of_range("Vector::PopBack: vector is empty");
-            m_data[m_size - 1].~T();
-            --m_size;
+            data_[size_ - 1].~T();
+            --size_;
         }
 
         /// @brief Erase at index (shifts down).
         void Erase(UIntSize index)
         {
-            if (index >= m_size)
+            if (index >= size_)
                 throw std::out_of_range("Vector::Erase: index out of range");
-            m_data[index].~T();
-            for (UIntSize i = index; i + 1 < m_size; ++i)
+            data_[index].~T();
+            for (UIntSize i = index; i + 1 < size_; ++i)
             {
-                new (m_data + i) T(std::move(m_data[i + 1]));
-                m_data[i + 1].~T();
+                ::new (&data_[i]) T(std::move(data_[i + 1]));
+                data_[i + 1].~T();
             }
-            --m_size;
+            --size_;
         }
 
         /// @brief Remove all elements (capacity remains).
-        void Clear()
+        void Clear() noexcept
         {
-            Destroy();
-            m_size = 0;
+            for (std::size_t i = 0; i < size_; ++i)
+                data_[i].~T();
+            size_ = 0;
         }
 
         //=== Capacity management ===//
@@ -238,151 +197,133 @@ namespace NGIN::Containers
         /// @brief Ensure at least `newCapacity` slots.
         void Reserve(UIntSize newCapacity)
         {
-            if (newCapacity <= m_capacity)
+            if (newCapacity <= capacity_)
                 return;
-
-            auto block = m_allocator.Allocate(newCapacity * sizeof(T), alignof(T));
-            T* newData = reinterpret_cast<T*>(block.ptr);
-            if (!newData)
+            void* mem = alloc_.Allocate(newCapacity * sizeof(T), alignof(T));
+            if (!mem)
                 throw std::bad_alloc();
-
-            // Move-construct old elements into new buffer
+            T* newData = static_cast<T*>(mem);
             UIntSize i = 0;
             try
             {
-                for (; i < m_size; ++i)
-                    new (newData + i) T(std::move(m_data[i]));
+                for (; i < size_; ++i)
+                    ::new (&newData[i]) T(std::move(data_[i]));
             } catch (...)
             {
                 for (UIntSize j = 0; j < i; ++j)
                     newData[j].~T();
-                m_allocator.Deallocate(newData);
+                alloc_.Deallocate(newData, newCapacity * sizeof(T), alignof(T));
                 throw;
             }
-
-            // Destroy old and free
-            DestroyElements();
-            if (m_data)
-                m_allocator.Deallocate(m_data);
-
-            m_data     = newData;
-            m_capacity = newCapacity;
+            for (UIntSize j = 0; j < size_; ++j)
+                data_[j].~T();
+            if (data_)
+                alloc_.Deallocate(data_, capacity_ * sizeof(T), alignof(T));
+            data_     = newData;
+            capacity_ = newCapacity;
         }
 
         /// @brief Shrink capacity to match size.
         void ShrinkToFit()
         {
-            if (m_size == m_capacity)
+            if (size_ == capacity_)
                 return;
-            if (m_size == 0)
+            if (size_ == 0)
             {
-                if (m_data)
+                if (data_)
                 {
-                    m_allocator.Deallocate(m_data);
-                    m_data = nullptr;
+                    alloc_.Deallocate(data_, capacity_ * sizeof(T), alignof(T));
+                    data_ = nullptr;
                 }
-                m_capacity = 0;
+                capacity_ = 0;
                 return;
             }
-
-            auto block = m_allocator.Allocate(m_size * sizeof(T), alignof(T));
-            T* newData = reinterpret_cast<T*>(block.ptr);
-            for (UIntSize i = 0; i < m_size; ++i)
+            void* mem = alloc_.Allocate(size_ * sizeof(T), alignof(T));
+            if (!mem)
+                throw std::bad_alloc();
+            T* newData = static_cast<T*>(mem);
+            for (UIntSize i = 0; i < size_; ++i)
             {
-                new (newData + i) T(std::move(m_data[i]));
-                m_data[i].~T();
+                ::new (&newData[i]) T(std::move(data_[i]));
+                data_[i].~T();
             }
-            m_allocator.Deallocate(m_data);
-
-            m_data     = newData;
-            m_capacity = m_size;
+            alloc_.Deallocate(data_, capacity_ * sizeof(T), alignof(T));
+            data_     = newData;
+            capacity_ = size_;
         }
 
         //=== Observers ===//
 
         [[nodiscard]] UIntSize Size() const noexcept
         {
-            return m_size;
+            return size_;
         }
         [[nodiscard]] UIntSize Capacity() const noexcept
         {
-            return m_capacity;
+            return capacity_;
         }
 
         T& At(UIntSize idx)
         {
-            if (idx >= m_size)
+            if (idx >= size_)
                 throw std::out_of_range("Vector::At: index out of range");
-            return m_data[idx];
+            return data_[idx];
         }
         const T& At(UIntSize idx) const
         {
-            if (idx >= m_size)
+            if (idx >= size_)
                 throw std::out_of_range("Vector::At: index out of range");
-            return m_data[idx];
+            return data_[idx];
         }
 
         T& operator[](UIntSize idx)
         {
-            return m_data[idx];
+            return data_[idx];
         }
         const T& operator[](UIntSize idx) const
         {
-            return m_data[idx];
+            return data_[idx];
         }
 
         //=== Iterators & data ===//
 
         [[nodiscard]] T* data() noexcept
         {
-            return m_data;
+            return data_;
         }
         [[nodiscard]] const T* data() const noexcept
         {
-            return m_data;
+            return data_;
         }
         [[nodiscard]] T* begin() noexcept
         {
-            return m_data;
+            return data_;
         }
         [[nodiscard]] const T* begin() const noexcept
         {
-            return m_data;
+            return data_;
         }
         [[nodiscard]] T* end() noexcept
         {
-            return m_data + m_size;
+            return data_ + size_;
         }
         [[nodiscard]] const T* end() const noexcept
         {
-            return m_data + m_size;
+            return data_ + size_;
         }
 
     private:
-        inline void DestroyElements() noexcept
+        void EnsureCapacityForOne()
         {
-            for (UIntSize i = 0; i < m_size; ++i)
-                m_data[i].~T();
+            if (size_ >= capacity_)
+                Reserve(capacity_ ? capacity_ * 2 : 1);
         }
-
-        /// Destroy all elements (does _not_ deallocate).
-        inline void Destroy()
-        {
-            DestroyElements();
-            m_size = 0;
-        }
-
-        /// Grow by one slot if needed.
-        inline void EnsureCapacityForOne()
-        {
-            if (m_size >= m_capacity)
-                Reserve(m_capacity ? m_capacity * 2 : 1);
-        }
-
-        Allocator& m_allocator;
-        T* m_data;
-        UIntSize m_size;
-        UIntSize m_capacity;
+        Alloc alloc_ {};
+        T* data_ {nullptr};
+        UIntSize size_ {0};
+        UIntSize capacity_ {0};
     };
+
+    // Vector2 removed; Vector now uses allocator concept directly.
 
 }// namespace NGIN::Containers
