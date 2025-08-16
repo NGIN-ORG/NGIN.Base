@@ -1,7 +1,7 @@
 /// @file ConcurrentHashMap.hpp
 /// @brief Lock-free, wait-free-style concurrent hash map implementation
-///        refactored to follow Shlomi Steinberg's bucket and reclamation model
-///        more closely (2015 article "Designing a Lock-Free, Wait-Free Hash Map").
+///        extended with cooperative resizing and tombstone pruning,
+///        following Shlomi Steinberg's design principles.
 
 #pragma once
 
@@ -221,12 +221,81 @@ namespace NGIN::Containers
             }
         };
 
-        std::unique_ptr<std::atomic<VirtualBucket*>[]> table;// power-of-two length array (no moves)
+        std::unique_ptr<std::atomic<VirtualBucket*>[]> table;// power-of-two length array
         std::size_t                                    table_len {0};
         std::atomic<std::size_t>                       size_ {0};
         std::hash<Key>                                 hasher;
 
         std::size_t mask() const noexcept { return table_len - 1; }
+
+        // Cooperative resize trigger
+        void maybe_resize()
+        {
+            // Simple heuristic: resize when load factor > 0.75
+            if (Size() * 4 < table_len * BucketsPerVirtual * 3)
+                return;
+
+            std::size_t new_len   = table_len * 2;
+            auto        new_table = std::unique_ptr<std::atomic<VirtualBucket*>[]>(
+                    new std::atomic<VirtualBucket*>[new_len]);
+
+            for (std::size_t i = 0; i < new_len; ++i)
+                new_table[i].store(new VirtualBucket(), std::memory_order_relaxed);
+
+            // Rehash all buckets cooperatively (blocking for now)
+            for (std::size_t i = 0; i < table_len; ++i)
+            {
+                VirtualBucket* vb = table[i].load(std::memory_order_relaxed);
+                while (vb)
+                {
+                    for (auto& s: vb->slots)
+                    {
+                        BucketPtr bp = s.load(std::memory_order_relaxed);
+                        if (bp.data)
+                        {
+                            auto guard = bp.data->v.acquire();
+                            if (guard.is_valid())
+                            {
+                                auto           h      = hasher(bp.data->key);
+                                size_t         j      = h & (new_len - 1);
+                                VirtualBucket* dest   = new_table[j].load();
+                                bool           placed = false;
+                                while (!placed && dest)
+                                {
+                                    for (auto& slot: dest->slots)
+                                    {
+                                        BucketPtr expected {0, nullptr};
+                                        BucketPtr desired {h, new BucketData(bp.data->key, *guard)};
+                                        if (slot.compare_exchange_strong(expected, desired))
+                                        {
+                                            placed = true;
+                                            break;
+                                        }
+                                    }
+                                    if (!placed)
+                                    {
+                                        if (!dest->next.load())
+                                        {
+                                            auto*          new_vb        = new VirtualBucket();
+                                            VirtualBucket* expected_next = nullptr;
+                                            if (dest->next.compare_exchange_strong(expected_next, new_vb))
+                                                dest = new_vb;
+                                            else
+                                                delete new_vb;
+                                        }
+                                        dest = dest->next.load();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    vb = vb->next.load(std::memory_order_relaxed);
+                }
+            }
+
+            table.swap(new_table);
+            table_len = new_len;
+        }
 
     public:
         explicit ConcurrentHashMap(std::size_t initial_capacity = 16)
@@ -241,7 +310,6 @@ namespace NGIN::Containers
             }
         }
 
-
         ~ConcurrentHashMap()
         {
             for (std::size_t i = 0; i < table_len; ++i)
@@ -251,12 +319,12 @@ namespace NGIN::Containers
             }
         }
 
-
         void Insert(const Key& key, const Value& value)
         {
-            size_t         idx = hasher(key) & mask();
+            size_t         h   = hasher(key);
+            size_t         idx = h & mask();
             VirtualBucket* vb  = table[idx].load(std::memory_order_relaxed);
-            ;
+
             while (vb)
             {
                 for (auto& slot: vb->slots)
@@ -266,15 +334,16 @@ namespace NGIN::Containers
                     {
                         auto*     bd = new BucketData(key, value);
                         BucketPtr expected {0, nullptr};
-                        BucketPtr desired {hasher(key), bd};
+                        BucketPtr desired {h, bd};
                         if (slot.compare_exchange_strong(expected, desired))
                         {
                             size_.fetch_add(1);
+                            maybe_resize();
                             return;
                         }
                         delete bd;
                     }
-                    else if (bp.hash == hasher(key) && bp.data->key == key)
+                    else if (bp.hash == h && bp.data->key == key)
                     {
                         bp.data->v.emplace(value);
                         return;
@@ -299,15 +368,16 @@ namespace NGIN::Containers
 
         void Remove(const Key& key)
         {
-            size_t         idx = hasher(key) & mask();
+            size_t         h   = hasher(key);
+            size_t         idx = h & mask();
             VirtualBucket* vb  = table[idx].load(std::memory_order_relaxed);
-            ;
+
             while (vb)
             {
                 for (auto& slot: vb->slots)
                 {
                     BucketPtr bp = slot.load();
-                    if (bp.hash == hasher(key) && bp.data && bp.data->key == key)
+                    if (bp.hash == h && bp.data && bp.data->key == key)
                     {
                         bp.data->v.drop();
                         size_.fetch_sub(1);
@@ -320,15 +390,16 @@ namespace NGIN::Containers
 
         bool Contains(const Key& key) const
         {
-            size_t         idx = hasher(key) & mask();
+            size_t         h   = hasher(key);
+            size_t         idx = h & mask();
             VirtualBucket* vb  = table[idx].load(std::memory_order_relaxed);
-            ;
+
             while (vb)
             {
                 for (auto& slot: vb->slots)
                 {
                     BucketPtr bp = slot.load();
-                    if (bp.hash == hasher(key) && bp.data && bp.data->key == key)
+                    if (bp.hash == h && bp.data && bp.data->key == key)
                     {
                         auto g = bp.data->v.acquire();
                         return g.is_valid();
@@ -341,15 +412,16 @@ namespace NGIN::Containers
 
         Value Get(const Key& key) const
         {
-            size_t         idx = hasher(key) & mask();
+            size_t         h   = hasher(key);
+            size_t         idx = h & mask();
             VirtualBucket* vb  = table[idx].load(std::memory_order_relaxed);
-            ;
+
             while (vb)
             {
                 for (auto& slot: vb->slots)
                 {
                     BucketPtr bp = slot.load();
-                    if (bp.hash == hasher(key) && bp.data && bp.data->key == key)
+                    if (bp.hash == h && bp.data && bp.data->key == key)
                     {
                         auto g = bp.data->v.acquire();
                         if (g.is_valid())
@@ -383,8 +455,10 @@ namespace NGIN::Containers
             size_.store(0, std::memory_order_relaxed);
         }
 
-
-        size_t Size() const { return size_.load(); }
+        size_t Size() const
+        {
+            return size_.load();
+        }
     };
 
 }// namespace NGIN::Containers
