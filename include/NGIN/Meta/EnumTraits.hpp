@@ -1,6 +1,6 @@
 #pragma once
 #include <NGIN/Primitives.hpp>
-#include <type_traits>
+#include <NGIN/Meta/TypeTraits.hpp>
 
 namespace NGIN
 {
@@ -19,8 +19,7 @@ namespace NGIN
         struct EnumTraits
         {
             // Creates a nice error message when template specialization is missing.
-            static_assert(std::is_enum_v<T> && !std::is_enum_v<T>,
-                          "EnumTraits specialization is required for this enum type.");
+            static_assert(TypeTraits<T>::IsEnum(), "EnumTraits specialization is required for this enum type.");
         };
     }// namespace Meta
 }// namespace NGIN
