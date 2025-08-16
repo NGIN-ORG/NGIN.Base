@@ -1,289 +1,390 @@
 /// @file ConcurrentHashMap.hpp
-/// @brief Lock-free, wait-free concurrent hash map implementation inspired by Shlomi Steinberg's design.
+/// @brief Lock-free, wait-free-style concurrent hash map implementation
+///        refactored to follow Shlomi Steinberg's bucket and reclamation model
+///        more closely (2015 article "Designing a Lock-Free, Wait-Free Hash Map").
 
 #pragma once
 
 #include <atomic>
-#include <memory>
-#include <vector>
 #include <array>
 #include <cassert>
-#include <thread>
+#include <cstddef>
+#include <cstdint>
 #include <functional>
-#include <utility>
-#include <type_traits>
+#include <memory>
+#include <new>
 #include <stdexcept>
+#include <type_traits>
+#include <utility>
+#include <vector>
 
 namespace NGIN::Containers
 {
 
-//-------------------- SharedDoubleReferenceGuard --------------------//
+    // ============================================================
+    // SharedDoubleReferenceGuard
+    // ============================================================
 
-/// @brief Lock-free double reference counted guard for safe concurrent memory reclamation.
-template <typename DataType>
-class SharedDoubleReferenceGuard {
-private:
-    struct DataStruct {
-        std::atomic<int> internal_counter;
-        DataType object;
-
-        template <typename ... Ts>
-        DataStruct(Ts&&... args)
-            : object(std::forward<Ts>(args)...), internal_counter(0) {}
-
-        void release_ref() {
-            if (internal_counter.fetch_add(1) == -1)
-                destroy();
-        }
-
-        void destroy() {
-            delete this;
-        }
-    };
-
-    struct DataPtrStruct {
-        int external_counter;
-        DataStruct* ptr;
-    };
-
-    std::atomic<DataPtrStruct> data_ptr;
-
-    void release(DataPtrStruct& old_data_ptr) {
-        if (!old_data_ptr.ptr)
-            return;
-        auto external = old_data_ptr.external_counter;
-        if (old_data_ptr.ptr->internal_counter.fetch_sub(external) == external - 1)
-            old_data_ptr.ptr->destroy();
-        else
-            old_data_ptr.ptr->release_ref();
-    }
-
-public:
-    class DataGuard {
-        friend class SharedDoubleReferenceGuard<DataType>;
-    private:
-        DataStruct* ptr;
-    public:
-        DataGuard(DataStruct* p) : ptr(p) {}
-        DataGuard(const DataGuard&) = delete;
-        DataGuard& operator=(const DataGuard&) = delete;
-        DataGuard(DataGuard&& d) noexcept : ptr(d.ptr) { d.ptr = nullptr; }
-        DataGuard& operator=(DataGuard&& d) noexcept {
-            if (ptr) ptr->release_ref();
-            ptr = d.ptr;
-            d.ptr = nullptr;
-            return *this;
-        }
-        ~DataGuard() { if (ptr) ptr->release_ref(); }
-        bool is_valid() const { return !!ptr; }
-        DataType* operator->() { return &ptr->object; }
-        DataType& operator*() { return ptr->object; }
-        const DataType* operator->() const { return &ptr->object; }
-        const DataType& operator*() const { return ptr->object; }
-    };
-
-    SharedDoubleReferenceGuard() {
-        DataPtrStruct new_data_ptr{0, nullptr};
-        data_ptr.store(new_data_ptr);
-    }
-    ~SharedDoubleReferenceGuard() {
-        DataPtrStruct old_data_ptr = data_ptr.load();
-        release(old_data_ptr);
-    }
-    DataGuard acquire() {
-        DataPtrStruct new_data_ptr;
-        DataPtrStruct old_data_ptr = data_ptr.load();
-        do {
-            new_data_ptr = old_data_ptr;
-            ++new_data_ptr.external_counter;
-        } while (!data_ptr.compare_exchange_weak(old_data_ptr, new_data_ptr));
-        return DataGuard(new_data_ptr.ptr);
-    }
-    template <typename ... Ts>
-    void emplace(Ts&&... args) {
-        DataStruct* new_data = new DataStruct(std::forward<Ts>(args)...);
-        DataPtrStruct new_data_ptr{1, new_data};
-        DataPtrStruct old_data_ptr = data_ptr.load();
-        while (!data_ptr.compare_exchange_weak(old_data_ptr, new_data_ptr));
-        release(old_data_ptr);
-    }
-    template <typename ... Ts>
-    bool try_emplace(DataGuard& old_data, Ts&&... args) {
-        DataStruct* new_data = new DataStruct(std::forward<Ts>(args)...);
-        DataPtrStruct new_data_ptr{1, new_data};
-        DataPtrStruct old_data_ptr = data_ptr.load();
-        bool success = false;
-        while (old_data_ptr.ptr == old_data.ptr && !(success = data_ptr.compare_exchange_weak(old_data_ptr, new_data_ptr)));
-        if (success)
-            release(old_data_ptr);
-        else
-            delete new_data;
-        return success;
-    }
-    void drop() {
-        DataPtrStruct new_data_ptr{0, nullptr};
-        DataPtrStruct old_data_ptr = data_ptr.load();
-        while (!data_ptr.compare_exchange_weak(old_data_ptr, new_data_ptr));
-        release(old_data_ptr);
-    }
-};
-
-//-------------------- ConcurrentHashMap --------------------//
-
-/// @brief Lock-free, wait-free concurrent hash map.
-template <typename Key, typename Value, size_t BucketCount = 8>
-class ConcurrentHashMap {
-    struct BucketData {
-        Key key;
-        SharedDoubleReferenceGuard<Value> value_guard;
-        std::atomic<bool> tombstone{false};
-        BucketData() = default;
-        template <typename K, typename ... Ts>
-        BucketData(K&& k, Ts&&... args)
-            : key(std::forward<K>(k)), value_guard() {
-            value_guard.emplace(std::forward<Ts>(args)...);
-        }
-    };
-
-    struct VirtualBucket {
-        std::array<std::atomic<BucketData*>, BucketCount> buckets;
-        std::atomic<VirtualBucket*> next{nullptr};
-        VirtualBucket() {
-            for (auto& b : buckets) b.store(nullptr);
-        }
-        ~VirtualBucket() {
-            auto ptr = next.load();
-            if (ptr) delete ptr;
-            for (auto& bucket : buckets) {
-                auto bucket_ptr = bucket.load();
-                if (bucket_ptr) delete bucket_ptr;
-            }
-        }
-    };
-
-    std::vector<std::atomic<VirtualBucket*>> table;
-    std::atomic<size_t> size_{0};
-    std::hash<Key> hasher;
-
-    size_t hash_index(const Key& key) const {
-        return hasher(key) & (table.size() - 1);
-    }
-
-public:
-    ConcurrentHashMap(size_t initial_capacity = 16)
-        : table(initial_capacity)
+    template<typename DataType>
+    class SharedDoubleReferenceGuard
     {
-        for (auto& vb : table) vb.store(new VirtualBucket());
-    }
-    ~ConcurrentHashMap() {
-        for (auto& vb : table) {
-            auto ptr = vb.load();
-            if (ptr) delete ptr;
-        }
-    }
+    private:
+        struct DataStruct
+        {
+            std::atomic<int> internal_counter;
+            DataType         object;
 
-    void Insert(const Key& key, const Value& value) {
-        size_t idx = hash_index(key);
-        VirtualBucket* vb = table[idx].load();
-        while (vb) {
-            for (size_t i = 0; i < BucketCount; ++i) {
-                BucketData* bd = vb->buckets[i].load();
-                if (!bd) {
-                    auto* new_bd = new BucketData(key, value);
-                    if (vb->buckets[i].compare_exchange_strong(bd, new_bd)) {
-                        size_.fetch_add(1);
+            template<typename... Ts>
+            explicit DataStruct(Ts&&... args)
+                : internal_counter(0), object(std::forward<Ts>(args)...)
+            {}
+
+            void release_ref() noexcept
+            {
+                if (internal_counter.fetch_add(1, std::memory_order_acq_rel) == -1)
+                    delete this;
+            }
+        };
+
+        struct DataPtrStruct
+        {
+            int         external_counter;
+            DataStruct* ptr;
+        };
+
+        static_assert(std::is_trivially_copyable_v<DataPtrStruct>,
+                      "DataPtrStruct must be trivially copyable for atomic CAS");
+
+        std::atomic<DataPtrStruct> data_ptr;
+
+        void release(DataPtrStruct& old_data_ptr) noexcept
+        {
+            if (!old_data_ptr.ptr)
+                return;
+            int external = old_data_ptr.external_counter;
+            if (old_data_ptr.ptr->internal_counter.fetch_sub(external, std::memory_order_acq_rel) == external - 1)
+            {
+                delete old_data_ptr.ptr;
+            }
+            else
+            {
+                old_data_ptr.ptr->release_ref();
+            }
+        }
+
+    public:
+        class DataGuard
+        {
+            friend class SharedDoubleReferenceGuard<DataType>;
+            DataStruct* ptr;
+            explicit DataGuard(DataStruct* p) : ptr(p) {}
+
+        public:
+            DataGuard(const DataGuard&)            = delete;
+            DataGuard& operator=(const DataGuard&) = delete;
+            DataGuard(DataGuard&& other) noexcept : ptr(other.ptr) { other.ptr = nullptr; }
+            DataGuard& operator=(DataGuard&& other) noexcept
+            {
+                if (this != &other)
+                {
+                    if (ptr)
+                        ptr->release_ref();
+                    ptr       = other.ptr;
+                    other.ptr = nullptr;
+                }
+                return *this;
+            }
+            ~DataGuard()
+            {
+                if (ptr)
+                    ptr->release_ref();
+            }
+
+            bool            is_valid() const noexcept { return ptr != nullptr; }
+            DataType*       operator->() noexcept { return &ptr->object; }
+            DataType&       operator*() noexcept { return ptr->object; }
+            const DataType* operator->() const noexcept { return &ptr->object; }
+            const DataType& operator*() const noexcept { return ptr->object; }
+        };
+
+        SharedDoubleReferenceGuard() noexcept
+        {
+            DataPtrStruct init {0, nullptr};
+            data_ptr.store(init, std::memory_order_relaxed);
+        }
+
+        ~SharedDoubleReferenceGuard()
+        {
+            auto old = data_ptr.load();
+            release(old);
+        }
+
+        DataGuard acquire() noexcept
+        {
+            DataPtrStruct new_data_ptr {};
+            DataPtrStruct old_data_ptr = data_ptr.load(std::memory_order_relaxed);
+            do
+            {
+                new_data_ptr = old_data_ptr;
+                ++new_data_ptr.external_counter;
+            } while (!data_ptr.compare_exchange_weak(
+                    old_data_ptr, new_data_ptr,
+                    std::memory_order_acq_rel, std::memory_order_relaxed));
+            return DataGuard(new_data_ptr.ptr);
+        }
+
+        template<typename... Ts>
+        void emplace(Ts&&... args)
+        {
+            auto*         new_data = new DataStruct(std::forward<Ts>(args)...);
+            DataPtrStruct new_dp {1, new_data};
+            DataPtrStruct old_dp = data_ptr.load(std::memory_order_relaxed);
+            while (!data_ptr.compare_exchange_weak(
+                    old_dp, new_dp,
+                    std::memory_order_acq_rel, std::memory_order_relaxed)) {}
+            release(old_dp);
+        }
+
+        void drop()
+        {
+            DataPtrStruct new_dp {0, nullptr};
+            DataPtrStruct old_dp = data_ptr.load(std::memory_order_relaxed);
+            while (!data_ptr.compare_exchange_weak(
+                    old_dp, new_dp,
+                    std::memory_order_acq_rel, std::memory_order_relaxed)) {}
+            release(old_dp);
+        }
+    };
+
+    // ============================================================
+    // ConcurrentHashMap
+    // ============================================================
+
+    template<typename Key, typename Value, std::size_t BucketsPerVirtual = 8>
+    class ConcurrentHashMap
+    {
+        static inline std::size_t next_pow2(std::size_t n)
+        {
+            if (n < 2)
+                return 2;
+            --n;
+            n |= n >> 1;
+            n |= n >> 2;
+            n |= n >> 4;
+            n |= n >> 8;
+            n |= n >> 16;
+            if constexpr (sizeof(std::size_t) >= 8)
+                n |= n >> 32;
+            return n + 1;
+        }
+
+        struct BucketData
+        {
+            Key                               key;
+            SharedDoubleReferenceGuard<Value> v;
+            template<typename K, typename... Ts>
+            BucketData(K&& k, Ts&&... args) : key(std::forward<K>(k)), v()
+            {
+                v.emplace(std::forward<Ts>(args)...);
+            }
+        };
+
+        struct BucketPtr
+        {
+            std::size_t hash;
+            BucketData* data;
+            friend bool operator==(const BucketPtr& a, const BucketPtr& b) noexcept
+            {
+                return a.hash == b.hash && a.data == b.data;
+            }
+        };
+
+        struct VirtualBucket
+        {
+            std::array<std::atomic<BucketPtr>, BucketsPerVirtual> slots;
+            std::atomic<VirtualBucket*>                           next {nullptr};
+            VirtualBucket()
+            {
+                for (auto& s: slots)
+                    s.store(BucketPtr {0, nullptr}, std::memory_order_relaxed);
+            }
+            ~VirtualBucket()
+            {
+                if (auto* p = next.load())
+                    delete p;
+                for (auto& s: slots)
+                {
+                    auto bp = s.load();
+                    if (bp.data)
+                        delete bp.data;
+                }
+            }
+        };
+
+        std::unique_ptr<std::atomic<VirtualBucket*>[]> table;// power-of-two length array (no moves)
+        std::size_t                                    table_len {0};
+        std::atomic<std::size_t>                       size_ {0};
+        std::hash<Key>                                 hasher;
+
+        std::size_t mask() const noexcept { return table_len - 1; }
+
+    public:
+        explicit ConcurrentHashMap(std::size_t initial_capacity = 16)
+        {
+            const std::size_t cap = next_pow2(initial_capacity);
+            table_len             = cap;
+            table                 = std::unique_ptr<std::atomic<VirtualBucket*>[]>(
+                    new std::atomic<VirtualBucket*>[cap]);
+            for (std::size_t i = 0; i < cap; ++i)
+            {
+                table[i].store(new VirtualBucket(), std::memory_order_relaxed);
+            }
+        }
+
+
+        ~ConcurrentHashMap()
+        {
+            for (std::size_t i = 0; i < table_len; ++i)
+            {
+                if (auto* vb = table[i].load(std::memory_order_relaxed))
+                    delete vb;
+            }
+        }
+
+
+        void Insert(const Key& key, const Value& value)
+        {
+            size_t         idx = hasher(key) & mask();
+            VirtualBucket* vb  = table[idx].load(std::memory_order_relaxed);
+            ;
+            while (vb)
+            {
+                for (auto& slot: vb->slots)
+                {
+                    BucketPtr bp = slot.load();
+                    if (bp.data == nullptr)
+                    {
+                        auto*     bd = new BucketData(key, value);
+                        BucketPtr expected {0, nullptr};
+                        BucketPtr desired {hasher(key), bd};
+                        if (slot.compare_exchange_strong(expected, desired))
+                        {
+                            size_.fetch_add(1);
+                            return;
+                        }
+                        delete bd;
+                    }
+                    else if (bp.hash == hasher(key) && bp.data->key == key)
+                    {
+                        bp.data->v.emplace(value);
                         return;
-                    } else {
-                        delete new_bd;
                     }
-                } else if (bd->key == key && !bd->tombstone.load()) {
-                    bd->value_guard.emplace(value);
-                    return;
                 }
-            }
-            // Move to next bucket in chain, or create if missing
-            VirtualBucket* next = vb->next.load();
-            if (!next) {
-                auto* new_vb = new VirtualBucket();
-                if (vb->next.compare_exchange_strong(next, new_vb)) {
-                    vb = new_vb;
-                } else {
-                    delete new_vb;
+                VirtualBucket* next = vb->next.load();
+                if (!next)
+                {
+                    auto* new_vb = new VirtualBucket();
+                    if (vb->next.compare_exchange_strong(next, new_vb))
+                        vb = new_vb;
+                    else
+                    {
+                        delete new_vb;
+                        vb = next;
+                    }
+                }
+                else
                     vb = next;
-                }
-            } else {
-                vb = next;
             }
         }
-    }
 
-    void Remove(const Key& key) {
-        size_t idx = hash_index(key);
-        VirtualBucket* vb = table[idx].load();
-        while (vb) {
-            for (size_t i = 0; i < BucketCount; ++i) {
-                BucketData* bd = vb->buckets[i].load();
-                if (bd && bd->key == key && !bd->tombstone.load()) {
-                    bd->tombstone.store(true);
-                    size_.fetch_sub(1);
-                    bd->value_guard.drop();
-                    return;
-                }
-            }
-            vb = vb->next.load();
-        }
-    }
-
-    bool Contains(const Key& key) const {
-        size_t idx = hash_index(key);
-        VirtualBucket* vb = table[idx].load();
-        while (vb) {
-            for (size_t i = 0; i < BucketCount; ++i) {
-                BucketData* bd = vb->buckets[i].load();
-                if (bd && bd->key == key && !bd->tombstone.load()) {
-                    return true;
-                }
-            }
-            vb = vb->next.load();
-        }
-        return false;
-    }
-
-    Value Get(const Key& key) const {
-        size_t idx = hash_index(key);
-        VirtualBucket* vb = table[idx].load();
-        while (vb) {
-            for (size_t i = 0; i < BucketCount; ++i) {
-                BucketData* bd = vb->buckets[i].load();
-                if (bd && bd->key == key && !bd->tombstone.load()) {
-                    auto guard = bd->value_guard.acquire();
-                    if (guard.is_valid()) {
-                        return *guard;
+        void Remove(const Key& key)
+        {
+            size_t         idx = hasher(key) & mask();
+            VirtualBucket* vb  = table[idx].load(std::memory_order_relaxed);
+            ;
+            while (vb)
+            {
+                for (auto& slot: vb->slots)
+                {
+                    BucketPtr bp = slot.load();
+                    if (bp.hash == hasher(key) && bp.data && bp.data->key == key)
+                    {
+                        bp.data->v.drop();
+                        size_.fetch_sub(1);
+                        return;
                     }
                 }
+                vb = vb->next.load();
             }
-            vb = vb->next.load();
         }
-        throw std::out_of_range("Key not found in concurrent hashmap");
-    }
 
-    void Clear() {
-        for (auto& vb : table) {
-            VirtualBucket* bucket = vb.load();
-            for (size_t i = 0; i < BucketCount; ++i) {
-                BucketData* bd = bucket->buckets[i].load();
-                if (bd) {
-                    bd->tombstone.store(true);
-                    bd->value_guard.drop();
+        bool Contains(const Key& key) const
+        {
+            size_t         idx = hasher(key) & mask();
+            VirtualBucket* vb  = table[idx].load(std::memory_order_relaxed);
+            ;
+            while (vb)
+            {
+                for (auto& slot: vb->slots)
+                {
+                    BucketPtr bp = slot.load();
+                    if (bp.hash == hasher(key) && bp.data && bp.data->key == key)
+                    {
+                        auto g = bp.data->v.acquire();
+                        return g.is_valid();
+                    }
+                }
+                vb = vb->next.load();
+            }
+            return false;
+        }
+
+        Value Get(const Key& key) const
+        {
+            size_t         idx = hasher(key) & mask();
+            VirtualBucket* vb  = table[idx].load(std::memory_order_relaxed);
+            ;
+            while (vb)
+            {
+                for (auto& slot: vb->slots)
+                {
+                    BucketPtr bp = slot.load();
+                    if (bp.hash == hasher(key) && bp.data && bp.data->key == key)
+                    {
+                        auto g = bp.data->v.acquire();
+                        if (g.is_valid())
+                            return *g;
+                        break;
+                    }
+                }
+                vb = vb->next.load();
+            }
+            throw std::out_of_range("Key not found");
+        }
+
+        void Clear()
+        {
+            for (std::size_t i = 0; i < table_len; ++i)
+            {
+                VirtualBucket* vb = table[i].load(std::memory_order_relaxed);
+                while (vb)
+                {
+                    for (auto& s: vb->slots)
+                    {
+                        BucketPtr bp = s.load(std::memory_order_relaxed);
+                        if (bp.data)
+                        {
+                            bp.data->v.drop();
+                        }
+                    }
+                    vb = vb->next.load(std::memory_order_relaxed);
                 }
             }
+            size_.store(0, std::memory_order_relaxed);
         }
-        size_.store(0);
-    }
 
-    size_t Size() const {
-        return size_.load();
-    }
-};
 
-} // namespace NGIN::Containers
+        size_t Size() const { return size_.load(); }
+    };
+
+}// namespace NGIN::Containers
