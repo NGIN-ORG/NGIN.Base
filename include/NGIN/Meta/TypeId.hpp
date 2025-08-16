@@ -3,7 +3,7 @@
 
 #include <NGIN/Primitives.hpp>
 #include <NGIN/Meta/TypeTraits.hpp>
-
+#include <Hashing/FNV.hpp>
 namespace NGIN::Meta
 {
     // FNV-1a 64-bit constexpr hash
@@ -24,7 +24,7 @@ namespace NGIN::Meta
         static constexpr UInt64 GetId() noexcept
         {
             constexpr auto name = Meta::TypeTraits<T>::qualifiedName;
-            return FNV1a(name.data(), name.size());
+            return NGIN::Hashing::FNV1a64(name.data(), name.size());
         }
     };
 
