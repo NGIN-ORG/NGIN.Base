@@ -5,16 +5,16 @@
 #include <vector>
 
 #include <NGIN/Memory/FallbackAllocator.hpp>
-#include <NGIN/Memory/BumpArena.hpp>
+#include <NGIN/Memory/LinearAllocator.hpp>
 #include <NGIN/Memory/SystemAllocator.hpp>
 
 using namespace boost::ut;
 
 struct DummySmallAllocator
 {
-    std::byte storage[256] {};
+    std::byte   storage[256] {};
     std::size_t used {0};
-    void* Allocate(std::size_t n, std::size_t a) noexcept
+    void*       Allocate(std::size_t n, std::size_t a) noexcept
     {
         if (!n)
             return nullptr;
@@ -28,7 +28,7 @@ struct DummySmallAllocator
         used += padding + n;
         return reinterpret_cast<void*>(aligned);
     }
-    void Deallocate(void*, std::size_t, std::size_t) noexcept {}
+    void        Deallocate(void*, std::size_t, std::size_t) noexcept {}
     std::size_t MaxSize() const noexcept
     {
         return sizeof(storage);
@@ -46,8 +46,8 @@ struct DummySmallAllocator
 
 suite<"NGIN::Memory::FallbackAllocator"> fallbackAllocatorSuite = [] {
     "PrimaryThenSecondary"_test = [] {
-        DummySmallAllocator small;
-        NGIN::Memory::SystemAllocator sys;
+        DummySmallAllocator             small;
+        NGIN::Memory::SystemAllocator   sys;
         NGIN::Memory::FallbackAllocator fb {small, sys};
         // Exhaust small then allocate large in secondary.
         std::vector<void*> primaryPtrs;
@@ -64,12 +64,12 @@ suite<"NGIN::Memory::FallbackAllocator"> fallbackAllocatorSuite = [] {
     };
 
     "MixedOwnershipDeallocate"_test = [] {
-        using Arena = NGIN::Memory::BumpArena<>;
-        Arena primary {128};
-        NGIN::Memory::SystemAllocator sys;
+        using Arena = NGIN::Memory::LinearAllocator<>;
+        Arena                           primary {128};
+        NGIN::Memory::SystemAllocator   sys;
         NGIN::Memory::FallbackAllocator fb {std::move(primary), sys};
-        void* a = fb.Allocate(64, 8); // likely from primary
-        void* b = fb.Allocate(256, 8);// must come from secondary
+        void*                           a = fb.Allocate(64, 8); // likely from primary
+        void*                           b = fb.Allocate(256, 8);// must come from secondary
         expect(a != nullptr && b != nullptr);
         fb.Deallocate(a, 64, 8);
         fb.Deallocate(b, 256, 8);
