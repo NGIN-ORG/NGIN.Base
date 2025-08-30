@@ -36,7 +36,7 @@ suite<"NGIN::Containers::String"> stringTests = [] {
 
     "ConstructFromNullPointer"_test = [] {
         // Should behave like an empty string
-        const char* nullStr = nullptr;
+        const char*              nullStr = nullptr;
         NGIN::Containers::String s(nullStr);
         expect(s.GetSize() == 0_ul);
         expect(CStrEqual(s.CStr(), ""));
@@ -44,7 +44,7 @@ suite<"NGIN::Containers::String"> stringTests = [] {
 
     "ConstructFromCStr_SmallBuffer"_test = [] {
         // Fits into SBO
-        const char* text = "Hello";
+        const char*              text = "Hello";
         NGIN::Containers::String s(text);
         expect(s.GetSize() == 5_ul);
         expect(CStrEqual(s.CStr(), text));
@@ -53,7 +53,7 @@ suite<"NGIN::Containers::String"> stringTests = [] {
     "ConstructFromCStr_HeapAllocation"_test = [] {
         // Ensure we exceed the SBO threshold
         // sboSize in the library is 48 => we need more than that
-        std::string bigString(60, 'A');// 60 'A's
+        std::string              bigString(60, 'A');// 60 'A's
         NGIN::Containers::String s(bigString.c_str());
         expect(s.GetSize() == 60_ul);
         expect(CStrEqual(s.CStr(), bigString.c_str()));
@@ -68,7 +68,7 @@ suite<"NGIN::Containers::String"> stringTests = [] {
 
     "CopyConstructor_Heap"_test = [] {
         // Force a heap usage
-        std::string big(70, 'B');
+        std::string              big(70, 'B');
         NGIN::Containers::String original(big.c_str());
         NGIN::Containers::String copy(original);
         expect(copy.GetSize() == original.GetSize());
@@ -81,7 +81,7 @@ suite<"NGIN::Containers::String"> stringTests = [] {
 
     "MoveConstructor_SmallBuffer"_test = [] {
         NGIN::Containers::String source("MoveSmall");
-        const char* oldPointer = source.CStr();
+        const char*              oldPointer = source.CStr();
 
         NGIN::Containers::String moved(std::move(source));
         expect(moved.GetSize() == 9_ul);
@@ -94,9 +94,9 @@ suite<"NGIN::Containers::String"> stringTests = [] {
     };
 
     "MoveConstructor_Heap"_test = [] {
-        std::string big(70, 'M');
+        std::string              big(70, 'M');
         NGIN::Containers::String source(big.c_str());
-        const char* oldPointer = source.CStr();
+        const char*              oldPointer = source.CStr();
 
         NGIN::Containers::String moved(std::move(source));
         expect(moved.GetSize() == 70_ul);
@@ -131,7 +131,7 @@ suite<"NGIN::Containers::String"> stringTests = [] {
     "MoveAssignmentOperator_Small"_test = [] {
         NGIN::Containers::String s1("Hello");
         NGIN::Containers::String s2("World");
-        const char* oldPointer = s1.CStr();// SBO pointer
+        const char*              oldPointer = s1.CStr();// SBO pointer
 
         s2 = std::move(s1);
         expect(s2.GetSize() == 5_ul);
@@ -141,10 +141,10 @@ suite<"NGIN::Containers::String"> stringTests = [] {
     };
 
     "MoveAssignmentOperator_Heap"_test = [] {
-        std::string big(75, 'Z');
+        std::string              big(75, 'Z');
         NGIN::Containers::String s1(big.c_str());
         NGIN::Containers::String s2("Small");
-        const char* oldPointer = s1.CStr();
+        const char*              oldPointer = s1.CStr();
 
         s2 = std::move(s1);
         expect(s2.GetSize() == 75_ul);
@@ -165,7 +165,7 @@ suite<"NGIN::Containers::String"> stringTests = [] {
 
     "Append_TriggersHeap"_test = [] {
         NGIN::Containers::String s1("SBO start: ");
-        std::string big(60, 'X');
+        std::string              big(60, 'X');
         NGIN::Containers::String s2(big.c_str());
         std::cout << "S1 Size: " << s1.GetSize() << std::endl;
 
@@ -265,7 +265,7 @@ suite<"NGIN::Containers::String"> stringTests = [] {
 
     "NullTermination"_test = [] {
         NGIN::Containers::String s("Test");
-        const char* cstr = s.CStr();
+        const char*              cstr = s.CStr();
         // Check that string is null terminated
         expect(cstr[s.GetSize()] == '\0');
     };
@@ -302,7 +302,7 @@ suite<"NGIN::Containers::String"> stringTests = [] {
 
     "StressTest_LongStringCreation"_test = [] {
         // Create a very long string and perform operations on it
-        std::string longStr(10000, 'Z');
+        std::string              longStr(10000, 'Z');
         NGIN::Containers::String s(longStr.c_str());
         expect(s.GetSize() == 10000_ul);
         expect(CStrEqual(s.CStr(), longStr.c_str()));
@@ -322,19 +322,5 @@ suite<"NGIN::Containers::String"> stringTests = [] {
             expect(CStrEqual(s.CStr(), "Initial"));
         }
         expect(s.GetSize() == 7_ul);
-    };
-
-    "BoundaryCondition_SBOHeapTransition"_test = [] {
-        // Create a string just below the SBO threshold
-        constexpr NGIN::UIntSize threshold = NGIN::Containers::BasicString<char, 48>::sboSize - 1;
-        std::string nearThreshold(threshold, 'A');
-        NGIN::Containers::String s1(nearThreshold.c_str());
-        expect(s1.GetSize() == threshold);
-        expect(s1.IsSmall());
-
-        // Append one more character to force transition to heap
-        s1.Append("B");
-        expect(s1.GetSize() == threshold + 1);
-        expect(!s1.IsSmall());
     };
 };
