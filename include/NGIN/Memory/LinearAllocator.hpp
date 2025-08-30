@@ -1,201 +1,271 @@
 /// @file LinearAllocator.hpp
-/// @brief Declaration of the LinearAllocator class, an arena-style allocator.
+/// @brief Linear (bump-pointer) allocator with an owning upstream buffer and optional rollback markers.
 ///
-/// @details
-/// A LinearAllocator manages a single contiguous block of memory in a linear fashion.
-/// Allocation is fast and sequential, but no per-allocation deallocation is supported.
-/// You can only free all allocations at once by calling `Reset()`.
-
+/// This allocator obtains one large contiguous block from an upstream allocator at construction time,
+/// then serves sub-allocations linearly by advancing a bump pointer. Individual Deallocate calls are
+/// no-ops; memory can be reclaimed wholesale via Reset() or Rollback(marker).
+///
+/// ### Design goals
+/// - **Owning slab**: acquires a single slab from `Upstream` and releases it in the destructor.
+/// - **Fast hot-path**: O(1) Allocate using `std::align`, no per-allocation headers.
+/// - **Deterministic**: not thread-safe by design; intended for thread-confined usage.
+/// - **Customizable base alignment**: caller may request a base alignment for the slab (defaults to `alignof(std::max_align_t)`).
+/// - **Extended allocation support**: implements `AllocateEx` returning `NGIN::Memory::MemoryBlock`
+///   for tools/telemetry and composite allocators.
+///
+/// ### Typical usage
+/// @code
+/// using namespace NGIN::Memory;
+///
+/// // Stateless upstream (e.g., SystemAllocator) by value
+/// LinearAllocator<> frameArena(1u << 20); // 1 MiB
+///
+/// void* p1 = frameArena.Allocate(1024, 16);
+/// void* p2 = frameArena.Allocate(2048, 32);
+/// // ...
+/// frameArena.Reset(); // reclaim all
+/// @endcode
+///
+/// To share a single global heap across many arenas, pass a lightweight handle or a reference-wrapper
+/// type as the `Upstream` template parameter (so the arenas do not "own" the global heap instance).
 #pragma once
 
-#include <NGIN/Memory/Mallocator.hpp>
 #include <cstddef>
 #include <cstdint>
-#include <stdexcept>
+#include <utility>
+#include <new>
+#include <algorithm>
+#include <memory>// std::align
+
+#include <NGIN/Memory/AllocatorConcept.hpp>
+#include <NGIN/Memory/SystemAllocator.hpp>
 
 namespace NGIN::Memory
 {
-    /// @brief An arena-style allocator which allocates from a contiguous memory block in a linear fashion.
-    /// @details
-    ///  - Fast allocation by bumping a pointer.
-    ///  - No per-allocation deallocation.
-    ///  - All allocations can be freed at once with Reset().
-    class LinearAllocator : public Mallocator
+    /// @class LinearAllocator
+    /// @brief Simple linear (bump-pointer) allocator with an owning upstream slab.
+    ///
+    /// @tparam Upstream  Upstream allocator type satisfying `AllocatorConcept`. Default is `SystemAllocator`.
+    ///
+    /// The allocator requests a single buffer of `capacity` bytes from the upstream in the constructor,
+    /// aligned to `baseAlignmentInBytes`. Subsequent allocations linearly carve memory from this buffer.
+    /// Individual deallocations are ignored; `Reset()` resets the bump pointer to the start, and
+    /// `Rollback(marker)` rolls the bump pointer back to a saved marker returned by `Mark()`.
+    ///
+    /// This allocator is **not thread-safe** and should be used by a single thread at a time.
+    template<class Upstream = SystemAllocator>
+    class LinearAllocator
     {
     public:
-        /// @brief Constructor that disallows default creation. A memory block or capacity must be specified.
+        /// @brief Convenient alias for the upstream allocator type.
+        using UpstreamAllocator = Upstream;
+
+        /// @brief Deleted default constructor. A capacity must be provided.
         LinearAllocator() = delete;
 
-        /// @brief Construct from an existing memory block (unowned).
-        /// @param block A pre-allocated memory block to use.
-        explicit LinearAllocator(MemoryBlock block);
+        /// @brief Construct an owning allocator by acquiring a slab from the upstream allocator.
+        ///
+        /// @param capacityInBytes     Number of bytes to request from the upstream allocator.
+        /// @param upstream            Upstream allocator instance. For stateless allocators this is typically a cheap value type.
+        ///                            For shared/global allocators, consider passing a lightweight handle/reference wrapper.
+        /// @param baseAlignmentInBytes Alignment in bytes for the slab allocated from upstream. Defaults to `alignof(std::max_align_t)`.
+        ///
+        /// The constructor requests a single block of `capacityInBytes` aligned to `baseAlignmentInBytes`.
+        /// If the upstream allocation fails, the allocator becomes empty (capacity zero) and all allocation
+        /// requests will return `nullptr`.
+        explicit LinearAllocator(std::size_t capacityInBytes,
+                                 Upstream    upstream             = {},
+                                 std::size_t baseAlignmentInBytes = std::max(std::size_t(alignof(std::max_align_t)), std::size_t(64)))
+            : m_upstreamInstance(std::move(upstream)), m_baseAlignmentInBytes(baseAlignmentInBytes)
+        {
+            void* base        = m_upstreamInstance.Allocate(capacityInBytes, m_baseAlignmentInBytes);
+            m_basePointer     = static_cast<std::byte*>(base);
+            m_currentPointer  = m_basePointer;
+            m_capacityInBytes = base ? capacityInBytes : 0;// guard on failure
+        }
 
-        /// @brief Construct by allocating a new block of the given capacity. (Owned)
-        /// @param capacity Size in bytes of the block to allocate.
-        explicit LinearAllocator(std::size_t capacity = 1024);
-
-        /// @brief Disallow copy-construction.
+        /// @brief Deleted copy constructor.
         LinearAllocator(const LinearAllocator&) = delete;
-        /// @brief Disallow copy-assignment.
+        /// @brief Deleted copy assignment.
         LinearAllocator& operator=(const LinearAllocator&) = delete;
 
-        /// @brief Allow move-construction.
-        LinearAllocator(LinearAllocator&& other) noexcept;
-        /// @brief Allow move-assignment.
-        LinearAllocator& operator=(LinearAllocator&& other) noexcept;
+        /// @brief Move constructor. Transfers slab ownership and internal state.
+        LinearAllocator(LinearAllocator&& other) noexcept
+            : m_upstreamInstance(std::move(other.m_upstreamInstance)), m_baseAlignmentInBytes(other.m_baseAlignmentInBytes), m_basePointer(other.m_basePointer), m_currentPointer(other.m_currentPointer), m_capacityInBytes(other.m_capacityInBytes)
+        {
+            other.m_basePointer = other.m_currentPointer = nullptr;
+            other.m_capacityInBytes                      = 0;
+            other.m_baseAlignmentInBytes                 = alignof(std::max_align_t);
+        }
 
-        /// @brief Destructor.
-        /// @note Does not free memory if constructed with a borrowed MemoryBlock.
-        ///       If allocated internally, it will free that memory.
-        virtual ~LinearAllocator();
+        /// @brief Move assignment. Releases current slab (if any) and takes ownership of @p other 's slab.
+        LinearAllocator& operator=(LinearAllocator&& other) noexcept
+        {
+            if (this != &other)
+            {
+                Release();
+                m_upstreamInstance     = std::move(other.m_upstreamInstance);
+                m_baseAlignmentInBytes = other.m_baseAlignmentInBytes;
+                m_basePointer          = other.m_basePointer;
+                m_currentPointer       = other.m_currentPointer;
+                m_capacityInBytes      = other.m_capacityInBytes;
 
-        /// @brief Allocates a block of memory of the given size and alignment.
-        /// @param size The size of the block in bytes.
-        /// @param alignment The required alignment (must be a power of two).
-        /// @return Pointer to the allocated memory.
-        MemoryBlock Allocate(std::size_t size, std::size_t alignment = alignof(std::max_align_t)) override;
+                other.m_basePointer = other.m_currentPointer = nullptr;
+                other.m_capacityInBytes                      = 0;
+                other.m_baseAlignmentInBytes                 = alignof(std::max_align_t);
+            }
+            return *this;
+        }
 
-        /// @brief LinearAllocator does not support deallocation of individual blocks.
-        /// @param ptr The pointer to deallocate (ignored).
-        void Deallocate(void* ptr) noexcept override {}
+        /// @brief Destructor. Returns the slab to the upstream allocator if allocated.
+        ~LinearAllocator() { Release(); }
 
-        /// @brief Resets the allocator to the beginning of its block.
-        /// @details All previously allocated blocks are invalidated.
-        void Reset() noexcept override;
+        /// @brief Return whether a value is a power-of-two (helper).
+        /// @param value Any non-negative size.
+        /// @return True if @p value is a power-of-two.
+        [[nodiscard]] static constexpr bool IsPowerOfTwo(std::size_t value) noexcept
+        {
+            return value && ((value & (value - 1)) == 0);
+        }
 
-        /// @brief Checks if this allocator owns the given pointer.
-        /// @param ptr The pointer to check.
-        /// @return True if within the allocator's memory range, false otherwise.
-        bool Owns(const void* ptr) const noexcept override;
+        /// @brief Normalize an alignment to a power-of-two and at least `alignof(std::max_align_t)`.
+        /// @param alignmentInBytes Requested alignment (may be zero or non power-of-two).
+        /// @return A valid power-of-two alignment, clamped to at least `alignof(std::max_align_t)`.
+        [[nodiscard]] static constexpr std::size_t NormalizeAlignment(std::size_t alignmentInBytes) noexcept
+        {
+            if (alignmentInBytes == 0)
+                alignmentInBytes = 1;
+            if (!IsPowerOfTwo(alignmentInBytes))
+            {
+                // Round up to next power-of-two
+                std::size_t a = alignmentInBytes - 1;
+                a |= a >> 1;
+                a |= a >> 2;
+                a |= a >> 4;
+                a |= a >> 8;
+                a |= a >> 16;
+#if INTPTR_MAX == INT64_MAX
+                a |= a >> 32;
+#endif
+                alignmentInBytes = a + 1;
+            }
+            if (alignmentInBytes < alignof(std::max_align_t))
+                alignmentInBytes = alignof(std::max_align_t);
+            return alignmentInBytes;
+        }
 
-        /// @brief Returns the total number of bytes allocated so far (beyond the base pointer).
-        /// @return The number of bytes used.
-        std::size_t GetUsedSize() const noexcept override;
+        /// @brief Allocate a block of memory from the linear arena.
+        ///
+        /// Uses `std::align` to find an aligned region within the remaining space, then advances
+        /// the bump pointer. This is O(1) and does not store per-allocation headers.
+        ///
+        /// @param sizeInBytes      Number of bytes to allocate.
+        /// @param alignmentInBytes Alignment in bytes (may be zero or non power-of-two; it will be normalized).
+        /// @return Pointer to the aligned block on success; `nullptr` if there is insufficient space or the allocator is empty.
+        [[nodiscard]] void* Allocate(std::size_t sizeInBytes, std::size_t alignmentInBytes) noexcept
+        {
+            if (sizeInBytes == 0 || !m_basePointer)
+                return nullptr;
 
-        /// @brief Returns the total capacity of the managed memory block.
-        /// @return The capacity in bytes.
-        std::size_t GetCapacity() const noexcept override;
+            const std::size_t normalizedAlignment = NormalizeAlignment(alignmentInBytes);
+
+            // Align within remaining space using std::align to avoid overflow-prone arithmetic
+            std::size_t space = m_capacityInBytes - Used();
+            void*       ptr   = m_currentPointer;
+            if (std::align(normalizedAlignment, sizeInBytes, ptr, space) == nullptr)
+                return nullptr;
+
+            m_currentPointer = static_cast<std::byte*>(ptr) + sizeInBytes;
+            return ptr;
+        }
+
+        /// @brief Extended allocation returning rich metadata.
+        ///
+        /// This satisfies the "extended allocator" capability probed by `AllocatorTraits`.
+        /// The returned `MemoryBlock` reports the granted size (equal to the requested size for a linear allocator)
+        /// and the alignment that was enforced (after normalization).
+        ///
+        /// @param sizeInBytes      Number of bytes to allocate.
+        /// @param alignmentInBytes Alignment in bytes (may be zero or non power-of-two; it will be normalized).
+        /// @return `MemoryBlock` with pointer and metadata; if allocation fails the block contains a null pointer.
+        [[nodiscard]] MemoryBlock AllocateEx(std::size_t sizeInBytes, std::size_t alignmentInBytes) noexcept
+        {
+            const std::size_t normalizedAlignment = NormalizeAlignment(alignmentInBytes);
+            void*             p                   = Allocate(sizeInBytes, normalizedAlignment);
+            if (!p)
+                return MemoryBlock {};
+            return MemoryBlock {p, sizeInBytes, normalizedAlignment, 0};
+        }
+
+        /// @brief Deallocate is a no-op for a linear allocator.
+        /// @param pointer           Ignored.
+        /// @param sizeInBytes       Ignored.
+        /// @param alignmentInBytes  Ignored.
+        void Deallocate(void*, std::size_t, std::size_t) noexcept
+        {
+            // Intentionally empty: individual frees are not supported.
+        }
+
+        /// @brief Return the total capacity (bytes) of the slab.
+        [[nodiscard]] std::size_t MaxSize() const noexcept { return m_capacityInBytes; }
+
+        /// @brief Return the number of bytes remaining (free) in the slab.
+        [[nodiscard]] std::size_t Remaining() const noexcept { return m_capacityInBytes - Used(); }
+
+        /// @brief Return the number of bytes used so far in the slab.
+        [[nodiscard]] std::size_t Used() const noexcept
+        {
+            return static_cast<std::size_t>(m_currentPointer - m_basePointer);
+        }
+
+        /// @brief Conservative ownership test: returns true if @p pointer lies within the slab range.
+        /// @param pointer Pointer to test.
+        /// @return True if @p pointer is within [base, base + capacity); false otherwise.
+        [[nodiscard]] bool Owns(const void* pointer) const noexcept
+        {
+            const auto addr = reinterpret_cast<const std::byte*>(pointer);
+            return addr >= m_basePointer && addr < m_basePointer + m_capacityInBytes;
+        }
+
+        /// @brief Reset the bump pointer to the beginning of the slab (reclaim all allocations).
+        void Reset() noexcept { m_currentPointer = m_basePointer; }
+
+        /// @brief Marker capturing the current bump pointer for later rollback.
+        /// @return An `ArenaMarker` referring to the current bump pointer.
+        [[nodiscard]] ArenaMarker Mark() const noexcept { return {m_currentPointer}; }
+
+        /// @brief Roll back the bump pointer to a previously acquired marker.
+        /// @param marker Marker returned by `Mark()`. If it does not refer into the slab, the call is ignored.
+        void Rollback(ArenaMarker marker) noexcept
+        {
+            if (marker.ptr >= m_basePointer && marker.ptr <= m_basePointer + m_capacityInBytes)
+                m_currentPointer = static_cast<std::byte*>(marker.ptr);
+        }
 
     private:
-        /// @brief The pointer to the beginning of the memory block.
-        void* m_basePtr = nullptr;
+        /// @brief Release the slab back to the upstream allocator, if present.
+        void Release() noexcept
+        {
+            if (m_basePointer)
+            {
+                m_upstreamInstance.Deallocate(m_basePointer, m_capacityInBytes, m_baseAlignmentInBytes);
+            }
+            m_basePointer = m_currentPointer = nullptr;
+            m_capacityInBytes                = 0;
+        }
 
-        /// @brief The pointer to the current allocation position.
-        void* m_currentPtr = nullptr;
+        // Upstream allocator instance (by value). For shared/global allocators, pass a handle/ref-wrapper here.
+        [[no_unique_address]] Upstream m_upstreamInstance {};
 
-        /// @brief The total capacity (in bytes) of the memory block.
-        std::size_t m_capacity = 0;
+        // Slab properties
+        std::size_t m_baseAlignmentInBytes {alignof(std::max_align_t)};
+        std::byte*  m_basePointer {nullptr};
+        std::byte*  m_currentPointer {nullptr};
+        std::size_t m_capacityInBytes {0};
     };
 
-    /// @brief Construct using an existing, user-managed MemoryBlock.
-    /// @param block The pre-allocated memory block to use.
-    inline LinearAllocator::LinearAllocator(MemoryBlock block)
-        : m_basePtr(block.ptr), m_currentPtr(block.ptr), m_capacity(block.size)
-    {
-        // No new allocation here, we just borrow the memory.
-    }
-
-    /// @brief Construct by allocating a new block of the given capacity.
-    /// @param capacity The size in bytes of the block to allocate.
-    inline LinearAllocator::LinearAllocator(std::size_t capacity)
-        : m_basePtr(nullptr), m_currentPtr(nullptr), m_capacity(capacity)
-    {
-        // Allocate using Mallocator, store base pointer, current pointer starts there
-        MemoryBlock block = Mallocator::Allocate(capacity);
-        m_basePtr         = block.ptr;
-        m_currentPtr      = block.ptr;
-    }
-
-    /// @brief Move-constructor.
-    /// @param other The LinearAllocator to move from.
-    inline LinearAllocator::LinearAllocator(LinearAllocator&& other) noexcept
-        : m_basePtr(std::exchange(other.m_basePtr, nullptr)), m_currentPtr(std::exchange(other.m_currentPtr, nullptr)), m_capacity(std::exchange(other.m_capacity, 0))
-    {
-    }
-
-    /// @brief Move-assignment operator.
-    /// @param other The LinearAllocator to move from.
-    /// @return Reference to this object.
-    inline LinearAllocator& LinearAllocator::operator=(LinearAllocator&& other) noexcept
-    {
-        if (this != &other)
-        {
-            m_basePtr    = std::exchange(other.m_basePtr, nullptr);
-            m_currentPtr = std::exchange(other.m_currentPtr, nullptr);
-            m_capacity   = std::exchange(other.m_capacity, 0);
-        }
-        return *this;
-    }
-
-    /// @brief Destructor.
-    inline LinearAllocator::~LinearAllocator()
-    {
-    }
-
-    /// @brief Allocate a block of memory from the linear region.
-    /// @param size The size of the block in bytes.
-    /// @param alignment The required alignment (power of two).
-    /// @return A MemoryBlock pointing to the allocated region.
-    inline MemoryBlock LinearAllocator::Allocate(std::size_t size, std::size_t alignment)
-    {
-        if (!m_basePtr)
-            return {nullptr, 0};
-
-        // Bump-pointer alignment
-        const std::uintptr_t currentAddr = reinterpret_cast<std::uintptr_t>(m_currentPtr);
-        const std::uintptr_t alignedAddr = (currentAddr + alignment - 1) & ~(alignment - 1);
-        const std::size_t padding        = alignedAddr - currentAddr;
-        const std::size_t bytesNeeded    = padding + size;
-
-        const std::uintptr_t baseAddr = reinterpret_cast<std::uintptr_t>(m_basePtr);
-        const std::size_t usedSoFar   = currentAddr - baseAddr;
-        const std::size_t totalNeeded = usedSoFar + bytesNeeded;
-
-        if (totalNeeded > m_capacity)
-            return {nullptr, 0};
-
-
-        void* userPtr = reinterpret_cast<void*>(alignedAddr);
-        m_currentPtr  = reinterpret_cast<void*>(alignedAddr + size);
-
-        return {userPtr, size};
-    }
-
-    /// @brief Resets the allocator back to the base pointer.
-    inline void LinearAllocator::Reset() noexcept
-    {
-        m_currentPtr = m_basePtr;
-    }
-
-    /// @brief Check if the pointer is within the range of [basePtr, basePtr + capacity).
-    /// @param ptr The pointer to check.
-    /// @return True if owned by this allocator, false otherwise.
-    inline bool LinearAllocator::Owns(const void* ptr) const noexcept
-    {
-        if (!m_basePtr || !ptr)
-        {
-            return false;
-        }
-
-        std::uintptr_t baseAddr = reinterpret_cast<std::uintptr_t>(m_basePtr);
-        std::uintptr_t check    = reinterpret_cast<std::uintptr_t>(ptr);
-        return (check >= baseAddr) && (check < (baseAddr + m_capacity));
-    }
-
-    /// @brief Get the total number of bytes used so far.
-    /// @return The used size in bytes.
-    inline std::size_t LinearAllocator::GetUsedSize() const noexcept
-    {
-        const std::uintptr_t baseAddr    = reinterpret_cast<std::uintptr_t>(m_basePtr);
-        const std::uintptr_t currentAddr = reinterpret_cast<std::uintptr_t>(m_currentPtr);
-        return static_cast<std::size_t>(currentAddr - baseAddr);
-    }
-
-    /// @brief Get the total capacity of this allocator.
-    /// @return The capacity in bytes.
-    inline std::size_t LinearAllocator::GetCapacity() const noexcept
-    {
-        return m_capacity;
-    }
+    // Ensure the allocator satisfies the core concept
+    static_assert(AllocatorConcept<LinearAllocator<SystemAllocator>>,
+                  "LinearAllocator must satisfy AllocatorConcept (Allocate/Deallocate).");
 
 }// namespace NGIN::Memory
