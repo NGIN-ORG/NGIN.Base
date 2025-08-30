@@ -31,6 +31,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <thread>
 #include <memory>
 #include <new>
 #include <stdexcept>
@@ -45,54 +46,58 @@ namespace NGIN::Containers
 {
 
     // ============================================================
-    // SharedDoubleReferenceGuard (revised implementation)
+    // SharedDoubleReferenceGuard (RCU / epoch variant)
     // ============================================================
-    // Previous custom double-counter scheme had correctness issues (use-after-free & leaks).
-    // Simplify to an atomic shared_ptr providing:
-    //  - acquire(): snapshot shared_ptr (copy increments refcount)
-    //  - emplace(): installs new value and returns whether prior state was tombstone (nullptr)
-    //  - drop(): atomically tombstones, returning whether a live value was removed
-    // This makes Size() accounting race-free by acting only on successful state transitions.
+    // Replaces shared_ptr-based guard with raw pointer + epoch retirement.
+    // Semantics preserved for existing call sites:
+    //  - acquire(): returns DataGuard with raw pointer (valid while epoch guard held)
+    //  - emplace(args...): allocates new Value; returns true iff previous pointer was null (tombstone->live)
+    //  - drop(): atomically sets pointer to null; returns true iff previous was non-null (live->tombstone)
+    // Lifetime: old values retired via EpochReclaimer ensuring safe reclamation after quiescence.
     template<typename DataType>
     class SharedDoubleReferenceGuard
     {
-        std::atomic<std::shared_ptr<DataType>> data {nullptr};
+        std::atomic<DataType*> m_ptr {nullptr};
 
     public:
         class DataGuard
         {
-            std::shared_ptr<DataType> sp;
-            explicit DataGuard(std::shared_ptr<DataType> p) : sp(std::move(p)) {}
+            DataType* p {nullptr};
+            explicit DataGuard(DataType* raw) : p(raw) {}
             friend class SharedDoubleReferenceGuard<DataType>;
 
         public:
             DataGuard() = default;
-            bool            is_valid() const noexcept { return static_cast<bool>(sp); }
-            const DataType* operator->() const noexcept { return sp.get(); }
-            const DataType& operator*() const noexcept { return *sp; }
-            // Intentionally omit non-const accessors to prevent unsynchronized mutation.
+            bool            is_valid() const noexcept { return p != nullptr; }
+            const DataType* operator->() const noexcept { return p; }
+            const DataType& operator*() const noexcept { return *p; }
         };
 
-        SharedDoubleReferenceGuard()  = default;
-        ~SharedDoubleReferenceGuard() = default;
-
-        DataGuard acquire() const noexcept
-        {
-            return DataGuard(data.load(std::memory_order_acquire));
-        }
+        DataGuard acquire() const noexcept { return DataGuard(m_ptr.load(std::memory_order_acquire)); }
 
         template<typename... Ts>
         bool emplace(Ts&&... args)
         {
-            auto newSp = std::make_shared<DataType>(std::forward<Ts>(args)...);
-            auto old   = data.exchange(std::move(newSp), std::memory_order_acq_rel);
-            return old == nullptr;// true if transition null -> live (resurrection or first publish)
+            NGIN::Memory::EpochReclaimer::Guard g;
+            auto*                               fresh = new DataType(std::forward<Ts>(args)...);
+            DataType*                           old   = m_ptr.exchange(fresh, std::memory_order_acq_rel);
+            if (old)
+            {
+                NGIN::Memory::EpochReclaimer::Instance().Retire(old, [](void* p) { delete static_cast<DataType*>(p); });
+                return false;
+            }
+            return true;
         }
 
         bool drop() noexcept
         {
-            auto old = data.exchange(nullptr, std::memory_order_acq_rel);
-            return old != nullptr;// true if live -> tombstone
+            DataType* old = m_ptr.exchange(nullptr, std::memory_order_acq_rel);
+            if (old)
+            {
+                NGIN::Memory::EpochReclaimer::Instance().Retire(old, [](void* p) { delete static_cast<DataType*>(p); });
+                return true;
+            }
+            return false;
         }
     };
 
@@ -169,20 +174,20 @@ namespace NGIN::Containers
             }
             ~VirtualBucket()
             {
-                // Iteratively delete chain to avoid deep recursion.
-                auto* p = next.load(std::memory_order_relaxed);
+                // Iteratively delete chain to avoid recursion; detach first to be idempotent.
+                VirtualBucket* p = next.exchange(nullptr, std::memory_order_acq_rel);
                 while (p)
                 {
-                    auto* nxt = p->next.load(std::memory_order_relaxed);
-                    p->next.store(nullptr, std::memory_order_relaxed);
+                    VirtualBucket* nxt = p->next.exchange(nullptr, std::memory_order_acq_rel);
                     delete p;
                     p = nxt;
                 }
+
                 if constexpr (kUsePairCAS)
                 {
                     for (auto& s: slots)
                     {
-                        auto bp = s.load();
+                        auto bp = s.load(std::memory_order_relaxed);
                         if (bp.data)
                             delete bp.data;
                     }
@@ -191,8 +196,7 @@ namespace NGIN::Containers
                 {
                     for (auto& s: slots)
                     {
-                        auto* ptr = s.load();
-                        if (ptr)
+                        if (auto* ptr = s.load(std::memory_order_relaxed))
                             delete ptr;
                     }
                 }
@@ -212,15 +216,34 @@ namespace NGIN::Containers
         {
             std::atomic<VirtualBucket*>* buckets;
             std::size_t                  len;
+            std::atomic<bool>            retired {false};// <<< add this
             TableAllocationNode*         next;
         };
+
         std::atomic<TableAllocationNode*> allocationsHead {nullptr};
 
         void TrackAllocation(std::atomic<VirtualBucket*>* buckets, std::size_t len) noexcept
         {
-            auto* node = new TableAllocationNode {buckets, len, allocationsHead.load(std::memory_order_relaxed)};
-            while (!allocationsHead.compare_exchange_weak(node->next, node,
-                                                          std::memory_order_release, std::memory_order_relaxed)) {}
+            auto* node    = new TableAllocationNode {};
+            node->buckets = buckets;
+            node->len     = len;
+            node->retired.store(false, std::memory_order_relaxed);
+            node->next = allocationsHead.load(std::memory_order_relaxed);
+            while (!allocationsHead.compare_exchange_weak(
+                    node->next, node, std::memory_order_release, std::memory_order_relaxed)) {}
+        }
+
+
+        void MarkRetired(std::atomic<VirtualBucket*>* which) noexcept
+        {
+            for (auto* n = allocationsHead.load(std::memory_order_acquire); n; n = n->next)
+            {
+                if (n->buckets == which)
+                {
+                    n->retired.store(true, std::memory_order_release);
+                    break;
+                }
+            }
         }
 
         static void FreeTable(std::atomic<VirtualBucket*>* buckets, std::size_t len) noexcept
@@ -462,47 +485,78 @@ namespace NGIN::Containers
 
         void HelpResize()
         {
-            // Active mutation scope participates in epoch protection.
+            NGIN::Memory::EpochReclaimer::Guard epochGuard;// <— pin lifetime of resize structures
+
             ResizeState* state = resizeState.load(std::memory_order_acquire);
             if (!state)
                 return;
-            // Perform a bounded amount of work (1 bucket) to keep latency predictable.
+
             MigrateOne(state);
-            // Check for completion
+
             if (state->migratedCount.load(std::memory_order_acquire) == state->old_len)
             {
-                // Install new table by publishing a new header atomically (prevents torn snapshot).
                 auto* newHdr = new TableHeader {state->new_len, state->new_table};
                 auto* oldHdr = tableHeader.load(std::memory_order_acquire);
                 tableHeader.store(newHdr, std::memory_order_release);
-                // Retire small old header (tables reclaimed later via allocations list / destructor).
-                NGIN::Memory::EpochReclaimer::Instance().Retire(oldHdr, [](void* p) { delete static_cast<TableHeader*>(p); });
-                // Clear resize state (single thread wins)
+
+                // Retire the tiny header with EBR
+                NGIN::Memory::EpochReclaimer::Instance().Retire(oldHdr, [](void* p) {
+                    delete static_cast<TableHeader*>(p);
+                });
+
+                // Only the winning thread clears the state
                 ResizeState* expected = state;
                 if (resizeState.compare_exchange_strong(expected, nullptr, std::memory_order_acq_rel, std::memory_order_relaxed))
                 {
-                    // Retire the resize state via epoch reclamation. We intentionally do NOT reclaim the old table
-                    // array here (left to destructor) to avoid lock-free stack removal complexity. Only the small
-                    // ResizeState object is reclaimed once quiescent.
-                    NGIN::Memory::EpochReclaimer::Instance().Retire(state, [](void* p) { delete static_cast<ResizeState*>(p); });
+                    // ALSO retire the OLD TABLE ARRAY under EBR to prevent UAF in MigrateOne
+                    auto* old_tab = state->old_table;
+                    auto  old_len = state->old_len;
+
+                    MarkRetired(old_tab);
+
+                    NGIN::Memory::EpochReclaimer::Instance().Retire(old_tab, [old_len](void* p) {
+                        auto* buckets = static_cast<std::atomic<VirtualBucket*>*>(p);
+                        if (!buckets)
+                            return;
+                        for (std::size_t i = 0; i < old_len; ++i)
+                        {
+                            if (auto* vb = buckets[i].load(std::memory_order_relaxed))
+                                delete vb;// VirtualBucket dtor deletes its chain & payloads
+                        }
+                        delete[] buckets;
+                    });
+
+                    // Finally retire the ResizeState itself
+                    NGIN::Memory::EpochReclaimer::Instance().Retire(state, [](void* p) {
+                        delete static_cast<ResizeState*>(p);
+                    });
                 }
             }
         }
 
-        // Live post-publication dual write: consult current resize state and marker AFTER publishing in old table.
+
+        // Dual write with finalize-aware fallback: if resizeState vanished after old-table insert, mirror into current header table.
         template<typename V>
         void DualWriteIfNeeded(std::size_t idx, std::size_t h, const Key& key, const V& value,
-                               std::atomic<VirtualBucket*>* currentTable)
+                               std::atomic<VirtualBucket*>* srcTable)
         {
-            ResizeState* rs = resizeState.load(std::memory_order_acquire);
-            if (!rs || rs->old_table != currentTable)
+            if (ResizeState* rs = resizeState.load(std::memory_order_acquire);
+                rs && rs->old_table == srcTable && idx < rs->old_len)
+            {
+                if (rs->markers[idx].load(std::memory_order_acquire) >= 1)
+                {
+                    auto* root = rs->new_table[h & (rs->new_len - 1)].load(std::memory_order_acquire);
+                    PlaceInto(root, h, key, value);
+                }
                 return;
-            if (idx >= rs->old_len)
-                return;
-            if (rs->markers[idx].load(std::memory_order_acquire) < 1)
-                return;// not yet claimed/scanned
-            VirtualBucket* root = rs->new_table[h & (rs->new_len - 1)].load(std::memory_order_acquire);
-            PlaceInto(root, h, key, value);// duplicate/tombstone safe
+            }
+            // Fallback: resize finalized; if we inserted into a non-current table, replicate into current table.
+            TableHeader* hdr = tableHeader.load(std::memory_order_acquire);
+            if (hdr && hdr->buckets != srcTable)
+            {
+                auto* root = hdr->buckets[h & (hdr->len - 1)].load(std::memory_order_acquire);
+                PlaceInto(root, h, key, value);
+            }
         }
 
         // Determine whether a dual lookup is needed and whether to prefer new table first.
@@ -524,37 +578,66 @@ namespace NGIN::Containers
             return false;
         }
 
-        // Live dual-drop after old-table successful drop.
-        void DualDropIfNeeded(std::size_t idx, std::size_t h, const Key& key, std::atomic<VirtualBucket*>* currentTable)
+        // Dual drop with finalize-aware fallback mirroring.
+        void DualDropIfNeeded(std::size_t idx, std::size_t h, const Key& key, std::atomic<VirtualBucket*>* srcTable)
         {
-            ResizeState* rs = resizeState.load(std::memory_order_acquire);
-            if (!rs || rs->old_table != currentTable)
-                return;
-            if (idx >= rs->old_len)
-                return;
-            if (rs->markers[idx].load(std::memory_order_acquire) < 1)
-                return;
-            auto* newRoot = rs->new_table[h & (rs->new_len - 1)].load(std::memory_order_acquire);
-            for (VirtualBucket* vb = newRoot; vb; vb = vb->next.load(std::memory_order_acquire))
+            if (ResizeState* rs = resizeState.load(std::memory_order_acquire);
+                rs && rs->old_table == srcTable && idx < rs->old_len &&
+                rs->markers[idx].load(std::memory_order_acquire) >= 1)
             {
-                for (auto& slot: vb->slots)
+                auto* newRoot = rs->new_table[h & (rs->new_len - 1)].load(std::memory_order_acquire);
+                for (VirtualBucket* vb = newRoot; vb; vb = vb->next.load(std::memory_order_acquire))
                 {
-                    if constexpr (kUsePairCAS)
+                    for (auto& slot: vb->slots)
                     {
-                        BucketPtr bp = slot.load(std::memory_order_acquire);
-                        if (bp.data && bp.hash == h && bp.data->key == key)
+                        if constexpr (kUsePairCAS)
                         {
-                            bp.data->v.drop();
-                            return;
+                            BucketPtr bp = slot.load(std::memory_order_acquire);
+                            if (bp.data && bp.hash == h && bp.data->key == key)
+                            {
+                                bp.data->v.drop();
+                                return;
+                            }
+                        }
+                        else
+                        {
+                            BucketData* ptr = slot.load(std::memory_order_acquire);
+                            if (ptr && ptr->hash == h && ptr->key == key)
+                            {
+                                ptr->v.drop();
+                                return;
+                            }
                         }
                     }
-                    else
+                }
+                return;
+            }
+            // Finalized fallback
+            TableHeader* hdr = tableHeader.load(std::memory_order_acquire);
+            if (hdr && hdr->buckets != srcTable)
+            {
+                auto* curRoot = hdr->buckets[h & (hdr->len - 1)].load(std::memory_order_acquire);
+                for (VirtualBucket* vb = curRoot; vb; vb = vb->next.load(std::memory_order_acquire))
+                {
+                    for (auto& slot: vb->slots)
                     {
-                        BucketData* ptr = slot.load(std::memory_order_acquire);
-                        if (ptr && ptr->hash == h && ptr->key == key)
+                        if constexpr (kUsePairCAS)
                         {
-                            ptr->v.drop();
-                            return;
+                            BucketPtr bp = slot.load(std::memory_order_acquire);
+                            if (bp.data && bp.hash == h && bp.data->key == key)
+                            {
+                                bp.data->v.drop();
+                                return;
+                            }
+                        }
+                        else
+                        {
+                            BucketData* ptr = slot.load(std::memory_order_acquire);
+                            if (ptr && ptr->hash == h && ptr->key == key)
+                            {
+                                ptr->v.drop();
+                                return;
+                            }
                         }
                     }
                 }
@@ -593,22 +676,28 @@ namespace NGIN::Containers
 
         ~ConcurrentHashMap()
         {
-            // Walk all tracked allocations; delete every root bucket chain, then array.
-            TableAllocationNode* node = allocationsHead.load(std::memory_order_acquire);
+            // Ensure any scheduled frees (from resizes) actually run now.
+            NGIN::Memory::EpochReclaimer::Instance().ForceDrain();
+
+            auto* node = allocationsHead.load(std::memory_order_acquire);
             while (node)
             {
-                for (std::size_t i = 0; i < node->len; ++i)
+                if (!node->retired.load(std::memory_order_acquire))
                 {
-                    if (auto* vb = node->buckets[i].load(std::memory_order_relaxed))
-                        delete vb;// safe: VirtualBucket dtor iterative
+                    // Not retired via EBR → we own freeing it here.
+                    for (std::size_t i = 0; i < node->len; ++i)
+                    {
+                        if (auto* vb = node->buckets[i].load(std::memory_order_relaxed))
+                            delete vb;// VirtualBucket dtor handles chain and values
+                    }
+                    delete[] node->buckets;
                 }
                 auto* next = node->next;
-                delete[] node->buckets;
                 delete node;
                 node = next;
             }
             if (auto* hdr = tableHeader.load(std::memory_order_acquire))
-                delete hdr;// buckets already freed via allocations list
+                delete hdr;// tiny
         }
 
         // Debug / test helper: fully drain any in-progress resize so subsequent Contains/Get
