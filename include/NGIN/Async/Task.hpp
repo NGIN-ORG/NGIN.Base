@@ -41,7 +41,7 @@ namespace NGIN::Async
             struct Awaiter
             {
                 IScheduler* sched;
-                bool await_ready() const noexcept
+                bool        await_ready() const noexcept
                 {
                     return false;
                 }
@@ -59,8 +59,8 @@ namespace NGIN::Async
         {
             struct DelayAwaiter
             {
-                IScheduler* sched;
-                std::chrono::milliseconds dur;
+                IScheduler*                           sched;
+                std::chrono::milliseconds             dur;
                 std::chrono::steady_clock::time_point until;
 
                 DelayAwaiter(IScheduler* s, std::chrono::milliseconds d)
@@ -116,11 +116,11 @@ namespace NGIN::Async
     public:
         struct promise_type
         {
-            T m_value;
-            std::exception_ptr m_error;
-            std::mutex m_mutex;
+            T                       m_value;
+            std::exception_ptr      m_error;
+            std::mutex              m_mutex;
             std::condition_variable m_cv;
-            bool m_finished {false};
+            bool                    m_finished {false};
             std::coroutine_handle<> m_continuation {};
 
             promise_type() = default;
@@ -245,7 +245,7 @@ namespace NGIN::Async
 
         void Wait()
         {
-            auto& p = m_handle.promise();
+            auto&            p = m_handle.promise();
             std::unique_lock lk(p.m_mutex);
             p.m_cv.wait(lk, [&p] { return p.m_finished; });
         }
@@ -259,28 +259,28 @@ namespace NGIN::Async
             return std::move(p.m_value);
         }
 
-        bool IsCompleted() const noexcept
+        [[nodiscard]] bool IsCompleted() const noexcept
         {
-            auto& p = m_handle.promise();
+            auto&           p = m_handle.promise();
             std::lock_guard lk(p.m_mutex);
             return p.m_finished;
         }
 
-        bool IsRunning() const noexcept
+        [[nodiscard]] bool IsRunning() const noexcept
         {
-            auto& p = m_handle.promise();
+            auto&           p = m_handle.promise();
             std::lock_guard lk(p.m_mutex);
             return !p.m_finished && m_handle && !m_handle.done();
         }
 
-        bool IsFaulted() const noexcept
+        [[nodiscard]] bool IsFaulted() const noexcept
         {
-            auto& p = m_handle.promise();
+            auto&           p = m_handle.promise();
             std::lock_guard lk(p.m_mutex);
             return p.m_error != nullptr;
         }
 
-        bool IsCanceled() const noexcept
+        [[nodiscard]] bool IsCanceled() const noexcept
         {
             // No cancellation support yet, always false
             return false;
@@ -296,40 +296,47 @@ namespace NGIN::Async
         auto Then(F&& func)
         {
             using RetTask = decltype(func(std::declval<T>()));
-            struct Awaiter {
+            struct Awaiter
+            {
                 Task& parent;
-                F func;
-                bool await_ready() const noexcept { return parent.IsCompleted(); }
-                auto await_suspend(std::coroutine_handle<> h) {
-                    struct Cont {
+                F     func;
+                bool  await_ready() const noexcept { return parent.IsCompleted(); }
+                auto  await_suspend(std::coroutine_handle<> h)
+                {
+                    struct Cont
+                    {
                         std::coroutine_handle<> h;
-                        Task* parent;
-                        F func;
-                        void operator()() {
-                            try {
-                                auto result = parent->Get();
+                        Task*                   parent;
+                        F                       func;
+                        void                    operator()()
+                        {
+                            try
+                            {
+                                auto result   = parent->Get();
                                 auto nextTask = func(std::move(result));
                                 nextTask.Start(*parent->m_scheduler_ctx);
                                 nextTask.Wait();
-                            } catch (...) {}
+                            } catch (...)
+                            {}
                             h.resume();
                         }
                     };
-                    std::thread(Cont{h, &parent, std::move(func)}).detach();
+                    std::thread(Cont {h, &parent, std::move(func)}).detach();
                 }
                 auto await_resume() {}
             };
-            struct ContTask {
+            struct ContTask
+            {
                 Task& parent;
-                F func;
-                auto operator co_await() { return Awaiter{parent, std::move(func)}; }
+                F     func;
+                auto  operator co_await() { return Awaiter {parent, std::move(func)}; }
             };
-            return ContTask{*this, std::forward<F>(func)};
+            return ContTask {*this, std::forward<F>(func)};
         }
 
     private:
-        handle_type m_handle;
-        IScheduler* m_scheduler;
+        handle_type      m_handle;
+        IScheduler*      m_scheduler;
         std::atomic_bool m_started;
 
         // For continuation support
@@ -346,10 +353,10 @@ namespace NGIN::Async
     public:
         struct promise_type
         {
-            std::exception_ptr m_error;
-            std::mutex m_mutex;
+            std::exception_ptr      m_error;
+            std::mutex              m_mutex;
             std::condition_variable m_cv;
-            bool m_finished {false};
+            bool                    m_finished {false};
             std::coroutine_handle<> m_continuation {};
 
             promise_type() = default;
@@ -466,7 +473,7 @@ namespace NGIN::Async
 
         void Wait()
         {
-            auto& p = m_handle.promise();
+            auto&            p = m_handle.promise();
             std::unique_lock lk(p.m_mutex);
             p.m_cv.wait(lk, [&p] { return p.m_finished; });
         }
@@ -481,21 +488,21 @@ namespace NGIN::Async
 
         bool IsCompleted() const noexcept
         {
-            auto& p = m_handle.promise();
+            auto&           p = m_handle.promise();
             std::lock_guard lk(p.m_mutex);
             return p.m_finished;
         }
 
         bool IsRunning() const noexcept
         {
-            auto& p = m_handle.promise();
+            auto&           p = m_handle.promise();
             std::lock_guard lk(p.m_mutex);
             return !p.m_finished && m_handle && !m_handle.done();
         }
 
         bool IsFaulted() const noexcept
         {
-            auto& p = m_handle.promise();
+            auto&           p = m_handle.promise();
             std::lock_guard lk(p.m_mutex);
             return p.m_error != nullptr;
         }
@@ -516,40 +523,47 @@ namespace NGIN::Async
         auto Then(F&& func)
         {
             using RetTask = decltype(func());
-            struct Awaiter {
+            struct Awaiter
+            {
                 Task& parent;
-                F func;
-                bool await_ready() const noexcept { return parent.IsCompleted(); }
-                auto await_suspend(std::coroutine_handle<> h) {
-                    struct Cont {
+                F     func;
+                bool  await_ready() const noexcept { return parent.IsCompleted(); }
+                auto  await_suspend(std::coroutine_handle<> h)
+                {
+                    struct Cont
+                    {
                         std::coroutine_handle<> h;
-                        Task* parent;
-                        F func;
-                        void operator()() {
-                            try {
+                        Task*                   parent;
+                        F                       func;
+                        void                    operator()()
+                        {
+                            try
+                            {
                                 parent->Get();
                                 auto nextTask = func();
                                 nextTask.Start(*parent->m_scheduler_ctx);
                                 nextTask.Wait();
-                            } catch (...) {}
+                            } catch (...)
+                            {}
                             h.resume();
                         }
                     };
-                    std::thread(Cont{h, &parent, std::move(func)}).detach();
+                    std::thread(Cont {h, &parent, std::move(func)}).detach();
                 }
                 auto await_resume() {}
             };
-            struct ContTask {
+            struct ContTask
+            {
                 Task& parent;
-                F func;
-                auto operator co_await() { return Awaiter{parent, std::move(func)}; }
+                F     func;
+                auto  operator co_await() { return Awaiter {parent, std::move(func)}; }
             };
-            return ContTask{*this, std::forward<F>(func)};
+            return ContTask {*this, std::forward<F>(func)};
         }
 
     private:
-        handle_type m_handle;
-        IScheduler* m_scheduler;
+        handle_type      m_handle;
+        IScheduler*      m_scheduler;
         std::atomic_bool m_started;
 
         // For continuation support
@@ -562,9 +576,9 @@ namespace NGIN::Async
         {
             struct Awaiter
             {
-                IScheduler* sched;
+                IScheduler*               sched;
                 std::chrono::milliseconds dur;
-                bool await_ready() const noexcept
+                bool                      await_ready() const noexcept
                 {
                     return dur.count() == 0;
                 }

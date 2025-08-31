@@ -15,9 +15,8 @@ option(NGIN_BASE_DEVELOPMENT_MODE
        "Enable Development Mode with dummy source file"
        OFF)
 
-if(NGIN_BASE_DEVELOPMENT_MODE)
-  set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-endif()
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_CXX_USE_RESPONSE_FILE_FOR_INCLUDES Off)
 
 #-------------------------------------------------------------------------------
 # Library Definition

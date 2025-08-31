@@ -10,12 +10,10 @@
 #pragma once
 
 #include <cstddef>
-#include <cstdint>
 #include <atomic>
 #include <utility>
 #include <type_traits>
 #include <new>
-#include <stdexcept>
 
 #include <NGIN/Memory/AllocatorConcept.hpp>
 #include <NGIN/Memory/AllocationHelpers.hpp>
@@ -379,38 +377,39 @@ namespace NGIN::Memory
     {
         using Control = detail::SharedControl<T, Alloc>;
 
-        // Compute a conservative total size: control + padding + T
         constexpr std::size_t tAlign    = alignof(T);
         constexpr std::size_t ctrlAlign = alignof(Control);
         const std::size_t     alignment = ctrlAlign > tAlign ? ctrlAlign : tAlign;
 
-        const std::size_t ctrlSize   = sizeof(Control);
-        const std::size_t paddingMax = (tAlign - 1);
-        const std::size_t total      = ctrlSize + paddingMax + sizeof(T);
+        // conservative size: control + possible padding + T
+        const std::size_t total = sizeof(Control) + (tAlign - 1) + sizeof(T);
 
         void* base = alloc.Allocate(total, alignment);
         if (!base)
-            throw std::bad_alloc();
+            throw std::bad_alloc {};
 
-        std::byte*     b      = static_cast<std::byte*>(base);
-        std::uintptr_t afterC = reinterpret_cast<std::uintptr_t>(b + ctrlSize);
-        std::uintptr_t tAddr  = (afterC + (tAlign - 1)) & ~(static_cast<std::uintptr_t>(tAlign) - 1);
-        T*             objPtr = reinterpret_cast<T*>(tAddr);
+        // place the control block at base
+        auto* ctrl = ::new (base) Control(std::move(alloc), base, total, alignment, nullptr);
 
-        // Construct control block with allocator and layout metadata
-        Control* ctrl = ::new (static_cast<void*>(b)) Control(std::move(alloc), base, total, alignment, objPtr);
-        ctrl->strong.store(1, std::memory_order_relaxed);
-        ctrl->weak.store(1, std::memory_order_relaxed);// control's self-weak
+        // carve out space for T after the control block
+        auto*       raw   = static_cast<std::byte*>(base) + sizeof(Control);
+        std::size_t space = total - sizeof(Control);
 
-        try
+        // use std::align to find a properly aligned spot for T within the remaining space
+        void* objVoid = static_cast<void*>(raw);
+        if (std::align(alignof(T), sizeof(T), objVoid, space) == nullptr)
         {
-            ::new (static_cast<void*>(objPtr)) T(std::forward<Args>(args)...);
-        } catch (...)
-        {
-            // rollback
+            // Should not happen with the above sizing; fail safe:
             ctrl->DeallocateSelf();
-            throw;
+            throw std::bad_alloc {};
         }
+
+        // construct T in-place
+        T* objPtr = std::construct_at(static_cast<T*>(objVoid), std::forward<Args>(args)...);
+
+        ctrl->objectPtr = objPtr;
+        ctrl->strong.store(1, std::memory_order_relaxed);
+        ctrl->weak.store(1, std::memory_order_relaxed);// control’s self-weak
 
         return Shared<T, Alloc>(ctrl);
     }

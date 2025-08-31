@@ -95,7 +95,7 @@ suite<"NGIN::Memory::LinearAllocator"> linear_allocator_tests = [] {
         expect(blk.SizeInBytes == kRequest);
         expect(blk.AlignmentInBytes >= kAlign);// may be normalized up
 
-        auto addr = reinterpret_cast<std::uintptr_t>(blk.PointerValue);
+        auto addr = reinterpret_cast<std::uintptr_t>(blk.ptr);
         expect((addr % blk.AlignmentInBytes) == 0_ul);
         expect(arena.Used() == kRequest);
     };
@@ -265,7 +265,7 @@ suite<"NGIN::Memory::LinearAllocator"> linear_allocator_tests = [] {
         expect(is_pow2 == true);
         expect(reported >= alignof(std::max_align_t));
 
-        auto addr = reinterpret_cast<std::uintptr_t>(blk.PointerValue);
+        auto addr = reinterpret_cast<std::uintptr_t>(blk.ptr);
         expect((addr % reported) == 0_ul);
     };
 };

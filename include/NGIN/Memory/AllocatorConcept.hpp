@@ -19,22 +19,22 @@ namespace NGIN::Memory
     public:
         using Pointer = void*;
 
-        Pointer        PointerValue {nullptr};// Base pointer to the allocated block
-        std::size_t    SizeInBytes {0};       // Granted size in bytes (0 if unknown)
-        std::size_t    AlignmentInBytes {0};  // Actual alignment met (0 if unknown)
-        std::uintptr_t Cookie {0};            // Optional routing or debugging tag
+        Pointer        ptr {nullptr};       // Base pointer to the allocated block
+        std::size_t    SizeInBytes {0};     // Granted size in bytes (0 if unknown)
+        std::size_t    AlignmentInBytes {0};// Actual alignment met (0 if unknown)
+        std::uintptr_t Cookie {0};          // Optional routing or debugging tag
 
         MemoryBlock() = default;
 
         MemoryBlock(Pointer p, std::size_t size, std::size_t alignment = 0, std::uintptr_t cookie = 0) noexcept
-            : PointerValue(p), SizeInBytes(size), AlignmentInBytes(alignment), Cookie(cookie) {}
+            : ptr(p), SizeInBytes(size), AlignmentInBytes(alignment), Cookie(cookie) {}
 
-        explicit operator bool() const noexcept { return PointerValue != nullptr; }
+        explicit operator bool() const noexcept { return ptr != nullptr; }
 
         template<class T>
         T* As() const noexcept
         {
-            return static_cast<T*>(PointerValue);
+            return static_cast<T*>(ptr);
         }
     };
 

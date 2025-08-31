@@ -148,4 +148,3 @@ suite<"NGIN::Memory::SmartPointers"> smartPtrSuite = [] {
         expect(tracking.GetStats().currentCount == 0_u);
     };
 };
-

@@ -4,20 +4,26 @@ Checks: >
   -readability-magic-numbers,
   cppcoreguidelines-*,
   -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-init-variables,
+  -cppcoreguidelines-missing-std-forward,
+  clang-diagnostic-*,
   clang-analyzer-*,
   performance-*,
   modernize-*,
   -modernize-use-trailing-return-type,
   bugprone-*,
   -bugprone-easily-swappable-parameters,
+  -bugprone-infinite-loop,
   misc-*
 
 CheckOptions:
   - key: bugprone-easily-swappable-parameters.ModelImplicitConversions
     value: 'false'
+  - key: cppcoreguidelines-non-private-member-variables-in-classes.IgnoreClassesWithAllMemberVariablesBeingPublic
+    value: true
+  - key: misc-non-private-member-variables-in-classes.IgnoreClassesWithAllMemberVariablesBeingPublic
+    value: true
 # Naming options
-  - key: readability-identifier-naming.NamespaceCase
-    value: CamelCase
   - key: readability-identifier-naming.ParameterCase
     value: camelBack
   - key: readability-identifier-naming.VariableCase
@@ -36,7 +42,7 @@ CheckOptions:
     value: CamelCase
   - key: readability-identifier-naming.MemberCase
     value: camelBack
-  - key: readability-identifier-naming.MemberPrefix
+  - key: readability-identifier-naming.PrivateMemberPrefix
     value: m_
   - key: readability-identifier-naming.ClassMemberPrefix
     value: s_
