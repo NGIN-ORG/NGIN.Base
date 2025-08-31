@@ -16,7 +16,6 @@ option(NGIN_BASE_DEVELOPMENT_MODE
        OFF)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-set(CMAKE_CXX_USE_RESPONSE_FILE_FOR_INCLUDES Off)
 
 #-------------------------------------------------------------------------------
 # Library Definition
