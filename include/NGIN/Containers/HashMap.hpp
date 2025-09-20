@@ -298,7 +298,7 @@ namespace NGIN::Containers
         // Create a new table with double the capacity (power-of-two is preserved)
         Vector<Entry> newTable(Capacity() * 2);
 
-        for (int i = 0; i < newTable.Capacity(); i++)
+        for (UIntSize i = 0; i < newTable.Capacity(); i++)
         {
             newTable.EmplaceBack();
         }
@@ -312,7 +312,7 @@ namespace NGIN::Containers
     inline FlatHashMap<Key, Value, Hash, KeyEqual>::FlatHashMap()
         : m_table(initialCapacity), m_size(0), m_hash(Hash {}), m_equal(KeyEqual {})
     {
-        for (int i = 0; i < m_table.Capacity(); i++)
+        for (UIntSize i = 0; i < m_table.Capacity(); i++)
         {
             m_table.EmplaceBack();
         }
