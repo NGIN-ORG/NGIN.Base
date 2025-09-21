@@ -1,77 +1,87 @@
 /// @file FallbackAllocatorTests.cpp
-/// @brief Tests for FallbackAllocator behavior.
-
-#include <boost/ut.hpp>
-#include <vector>
+/// @brief Tests for FallbackAllocator behavior using Catch2.
 
 #include <NGIN/Memory/FallbackAllocator.hpp>
 #include <NGIN/Memory/LinearAllocator.hpp>
 #include <NGIN/Memory/SystemAllocator.hpp>
-
-using namespace boost::ut;
+#include <catch2/catch_test_macros.hpp>
+#include <vector>
 
 struct DummySmallAllocator
 {
     std::byte   storage[256] {};
     std::size_t used {0};
-    void*       Allocate(std::size_t n, std::size_t a) noexcept
+
+    void* Allocate(std::size_t size, std::size_t alignment) noexcept
     {
-        if (!n)
+        if (size == 0)
+        {
             return nullptr;
-        if (a == 0)
-            a = 1;
+        }
+        if (alignment == 0)
+        {
+            alignment = 1;
+        }
         auto base    = reinterpret_cast<std::uintptr_t>(storage) + used;
-        auto aligned = (base + (a - 1)) & ~(std::uintptr_t(a) - 1);
+        auto aligned = (base + (alignment - 1)) & ~(std::uintptr_t(alignment) - 1);
         auto padding = aligned - base;
-        if (padding + n > (sizeof(storage) - used))
+        if (padding + size > (sizeof(storage) - used))
+        {
             return nullptr;
-        used += padding + n;
+        }
+        used += padding + size;
         return reinterpret_cast<void*>(aligned);
     }
+
     void        Deallocate(void*, std::size_t, std::size_t) noexcept {}
-    std::size_t MaxSize() const noexcept
+    std::size_t MaxSize() const noexcept { return sizeof(storage); }
+    std::size_t Remaining() const noexcept { return sizeof(storage) - used; }
+
+    bool Owns(const void* pointer) const noexcept
     {
-        return sizeof(storage);
-    }
-    std::size_t Remaining() const noexcept
-    {
-        return sizeof(storage) - used;
-    }
-    bool Owns(const void* p) const noexcept
-    {
-        auto b = reinterpret_cast<const std::byte*>(p);
-        return b >= storage && b < storage + sizeof(storage);
+        auto bytes = reinterpret_cast<const std::byte*>(pointer);
+        return bytes >= storage && bytes < storage + sizeof(storage);
     }
 };
 
-suite<"NGIN::Memory::FallbackAllocator"> fallbackAllocatorSuite = [] {
-    "PrimaryThenSecondary"_test = [] {
-        DummySmallAllocator             small;
-        NGIN::Memory::SystemAllocator   sys;
-        NGIN::Memory::FallbackAllocator fb {small, sys};
-        // Exhaust small then allocate large in secondary.
-        std::vector<void*> primaryPtrs;
-        for (int i = 0; i < 32; ++i)
+TEST_CASE("FallbackAllocator uses primary before secondary", "[Memory][FallbackAllocator]")
+{
+    DummySmallAllocator             primary;
+    NGIN::Memory::SystemAllocator   secondary;
+    NGIN::Memory::FallbackAllocator allocator {primary, secondary};
+
+    std::vector<void*> primaryBlocks;
+    for (int i = 0; i < 32; ++i)
+    {
+        if (void* block = allocator.Allocate(8, alignof(std::max_align_t)))
         {
-            if (void* p = fb.Allocate(8, alignof(std::max_align_t)))
-                primaryPtrs.push_back(p);
+            primaryBlocks.push_back(block);
         }
-        void* large = fb.Allocate(1024, alignof(std::max_align_t));
-        expect(large != nullptr);
-        for (auto p: primaryPtrs)
-            fb.Deallocate(p, 8, alignof(std::max_align_t));
-        fb.Deallocate(large, 1024, alignof(std::max_align_t));
-    };
+    }
 
-    "MixedOwnershipDeallocate"_test = [] {
-        using Arena = NGIN::Memory::LinearAllocator<>;
-        Arena                           primary {128};
-        NGIN::Memory::SystemAllocator   sys;
-        NGIN::Memory::FallbackAllocator fb {std::move(primary), sys};
-        void*                           a = fb.Allocate(64, 8); // likely from primary
-        void*                           b = fb.Allocate(256, 8);// must come from secondary
-        expect(a != nullptr && b != nullptr);
-        fb.Deallocate(a, 64, 8);
-        fb.Deallocate(b, 256, 8);
-    };
-};
+    void* large = allocator.Allocate(1024, alignof(std::max_align_t));
+    REQUIRE(large != nullptr);
+
+    for (auto* block: primaryBlocks)
+    {
+        allocator.Deallocate(block, 8, alignof(std::max_align_t));
+    }
+    allocator.Deallocate(large, 1024, alignof(std::max_align_t));
+}
+
+TEST_CASE("FallbackAllocator routes deallocation correctly", "[Memory][FallbackAllocator]")
+{
+    using Arena = NGIN::Memory::LinearAllocator<>;
+    Arena                           primary {128};
+    NGIN::Memory::SystemAllocator   secondary;
+    NGIN::Memory::FallbackAllocator allocator {std::move(primary), secondary};
+
+    void* small = allocator.Allocate(64, 8);
+    void* large = allocator.Allocate(256, 8);
+
+    REQUIRE(small != nullptr);
+    REQUIRE(large != nullptr);
+
+    allocator.Deallocate(small, 64, 8);
+    allocator.Deallocate(large, 256, 8);
+}

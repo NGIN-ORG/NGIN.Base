@@ -1,154 +1,159 @@
 /// @file ConcurrentHashMapTest.cpp
-/// @brief Tests for NGIN::Containers::ConcurrentHashMap using boost::ut.
-/// @details
-/// Baseline (single-thread) validation for phases 1-3: insertion, update, rvalue paths,
-/// tombstone (remove + reinsert), TryGet / GetOptional semantics, approximate collision
-/// chain coverage, resize growth, idempotent removal, and clear behavior. Concurrent
-/// multi-thread stress & cooperative online resize will be added in later phases.
+/// @brief Tests for NGIN::Containers::ConcurrentHashMap using Catch2.
 
 #include <NGIN/Containers/ConcurrentHashMap.hpp>
-#include <boost/ut.hpp>
-#include <string>
+#include <catch2/catch_test_macros.hpp>
 #include <stdexcept>
+#include <string>
 
-using namespace boost::ut;
+using NGIN::Containers::ConcurrentHashMap;
 
-suite<"NGIN::Containers::ConcurrentHashMap"> concurrent_hashmap_tests = [] {
-    "DefaultConstruction"_test = [] {
-        NGIN::Containers::ConcurrentHashMap<int, int> map;
-        expect(map.Size() == 0_ul);
-    };
+TEST_CASE("ConcurrentHashMap default construction", "[Containers][ConcurrentHashMap]")
+{
+    ConcurrentHashMap<int, int> map;
+    CHECK(map.Size() == 0U);
+}
 
-    "InsertAndGet"_test = [] {
-        NGIN::Containers::ConcurrentHashMap<std::string, int> map;
-        map.Insert("one", 1);
-        map.Insert("two", 2);
-        expect(map.Size() == 2_ul);
-        expect(map.Get("one") == 1_i);
-        expect(map.Get("two") == 2_i);
-    };
+TEST_CASE("ConcurrentHashMap insert and get", "[Containers][ConcurrentHashMap]")
+{
+    ConcurrentHashMap<std::string, int> map;
+    map.Insert("one", 1);
+    map.Insert("two", 2);
+    CHECK(map.Size() == 2U);
+    CHECK(map.Get("one") == 1);
+    CHECK(map.Get("two") == 2);
+}
 
-    "InsertUpdateValue"_test = [] {
-        NGIN::Containers::ConcurrentHashMap<std::string, int> map;
-        map.Insert("key", 10);
-        map.Insert("key", 20);// update
-        expect(map.Size() == 1_ul);
-        expect(map.Get("key") == 20_i);
-    };
+TEST_CASE("ConcurrentHashMap updates values", "[Containers][ConcurrentHashMap]")
+{
+    ConcurrentHashMap<std::string, int> map;
+    map.Insert("key", 10);
+    map.Insert("key", 20);
+    CHECK(map.Size() == 1U);
+    CHECK(map.Get("key") == 20);
+}
 
-    "InsertRvalue"_test = [] {
-        NGIN::Containers::ConcurrentHashMap<std::string, std::string> map;
-        std::string                                                   val = "value";
-        map.Insert("key", std::move(val));
-        expect(map.Get("key") == "value");
-    };
+TEST_CASE("ConcurrentHashMap handles rvalues", "[Containers][ConcurrentHashMap]")
+{
+    ConcurrentHashMap<std::string, std::string> map;
+    std::string                                 value = "value";
+    map.Insert("key", std::move(value));
+    CHECK(map.Get("key") == "value");
+}
 
-    "RemoveKey"_test = [] {
-        NGIN::Containers::ConcurrentHashMap<int, int> map;
-        map.Insert(1, 100);
-        map.Insert(2, 200);
-        map.Remove(1);
-        expect(map.Size() == 1_ul);
-        expect(throws<std::out_of_range>([&] { map.Get(1); }));
-        expect(map.Get(2) == 200_i);
-    };
+TEST_CASE("ConcurrentHashMap removes keys", "[Containers][ConcurrentHashMap]")
+{
+    ConcurrentHashMap<int, int> map;
+    map.Insert(1, 100);
+    map.Insert(2, 200);
+    map.Remove(1);
 
-    "ContainsKey"_test = [] {
-        NGIN::Containers::ConcurrentHashMap<int, int> map;
-        // Absent key
-        expect(map.Contains(42) == false);
-        // Single insert
-        map.Insert(42, 99);
-        expect(map.Contains(42) == true);
-        expect(map.Contains(99) == false);// different value used as key
-        // Additional key lifecycle
-        expect(map.Contains(100) == false);
-        map.Insert(100, 1);
-        expect(map.Contains(100) == true);
-        map.Remove(100);
-        expect(map.Contains(100) == false);// tombstoned
-        map.Insert(100, 2);                // reinsert after tombstone
-        expect(map.Contains(100) == true);
-        // Update existing key value should not change Contains result
-        map.Insert(42, 1234);
-        expect(map.Contains(42) == true);
-        // Remove original key and ensure Contains reflects tombstone
-        map.Remove(42);
-        expect(map.Contains(42) == false);
-        // Reinsertion after removal
-        map.Insert(42, 777);
-        expect(map.Contains(42) == true);
-    };
+    CHECK(map.Size() == 1U);
+    CHECK_THROWS_AS(map.Get(1), std::out_of_range);
+    CHECK(map.Get(2) == 200);
+}
 
-    "ClearResetsSize"_test = [] {
-        NGIN::Containers::ConcurrentHashMap<int, int> map;
-        map.Insert(1, 1);
-        map.Insert(2, 2);
-        map.Clear();
-        expect(map.Size() == 0_ul);
-    };
+TEST_CASE("ConcurrentHashMap contains lifecycle", "[Containers][ConcurrentHashMap]")
+{
+    ConcurrentHashMap<int, int> map;
+    CHECK_FALSE(map.Contains(42));
 
-    "GetThrowsIfNotFound"_test = [] {
-        NGIN::Containers::ConcurrentHashMap<int, int> map;
-        expect(throws<std::out_of_range>([&] { map.Get(999); }));
-    };
+    map.Insert(42, 99);
+    CHECK(map.Contains(42));
+    CHECK_FALSE(map.Contains(99));
 
-    "RemoveNonExistentKeyDoesNotThrow"_test = [] {
-        NGIN::Containers::ConcurrentHashMap<int, int> map;
-        map.Insert(1, 1);
-        map.Remove(999);// Should not throw
-        expect(map.Size() == 1_ul);
-    };
+    CHECK_FALSE(map.Contains(100));
+    map.Insert(100, 1);
+    CHECK(map.Contains(100));
+    map.Remove(100);
+    CHECK_FALSE(map.Contains(100));
+    map.Insert(100, 2);
+    CHECK(map.Contains(100));
 
-    "InsertManyElementsAndResize"_test = [] {
-        NGIN::Containers::ConcurrentHashMap<int, int> map(8);
-        const int                                     num = 500;// large enough to trigger several resizes (load factor > 0.75)
-        for (int i = 0; i < num; ++i)
-        {
-            map.Insert(i, i * 2);
-        }
-        expect(map.Size() == static_cast<std::size_t>(num));
-        // spot checks
-        expect(map.Get(0) == 0_i);
-        expect(map.Get(123) == 246_i);
-        expect(map.Get(num - 1) == ((num - 1) * 2));
-    };
+    map.Insert(42, 1234);
+    CHECK(map.Contains(42));
+    map.Remove(42);
+    CHECK_FALSE(map.Contains(42));
+    map.Insert(42, 777);
+    CHECK(map.Contains(42));
+}
 
-    "TryGetAndOptional"_test = [] {
-        NGIN::Containers::ConcurrentHashMap<int, int> map;
-        map.Insert(7, 70);
-        int out = 0;
-        expect(map.TryGet(7, out) == true);
-        expect(out == 70_i);
-        expect(map.TryGet(99, out) == false);
-        auto opt = map.GetOptional(7);
-        expect(bool(opt) == true);
-        expect(*opt == 70_i);
-        expect(!map.GetOptional(88));
-    };
+TEST_CASE("ConcurrentHashMap clear", "[Containers][ConcurrentHashMap]")
+{
+    ConcurrentHashMap<int, int> map;
+    map.Insert(1, 1);
+    map.Insert(2, 2);
+    map.Clear();
+    CHECK(map.Size() == 0U);
+}
 
-    "TombstoneReinsert"_test = [] {
-        NGIN::Containers::ConcurrentHashMap<int, int> map;
-        map.Insert(5, 500);
-        map.Remove(5);
-        expect(map.Contains(5) == false);
-        auto szAfterRemove = map.Size();
-        map.Remove(5);// idempotent remove should not change size
-        expect(map.Size() == szAfterRemove);
-        map.Insert(5, 600);
-        expect(map.Get(5) == 600_i);
-        expect(eq(map.Size(), szAfterRemove + 1));
-    };
+TEST_CASE("ConcurrentHashMap Get throws when missing", "[Containers][ConcurrentHashMap]")
+{
+    ConcurrentHashMap<int, int> map;
+    CHECK_THROWS_AS(map.Get(999), std::out_of_range);
+}
 
-    "CollisionChainApprox"_test = [] {
-        NGIN::Containers::ConcurrentHashMap<std::string, int> map(4);
-        // Create keys likely to collide by varying suffix; reliance on std::hash distribution.
-        for (int i = 0; i < 64; ++i)
-        {
-            map.Insert("k_" + std::to_string(i * 16), i);
-        }
-        expect(map.Size() == 64_ul);
-        expect(map.Contains("k_0") == true);
-        expect(map.Get("k_0") == 0_i);
-    };
-};
+TEST_CASE("ConcurrentHashMap ignores missing removals", "[Containers][ConcurrentHashMap]")
+{
+    ConcurrentHashMap<int, int> map;
+    map.Insert(1, 1);
+    map.Remove(999);
+    CHECK(map.Size() == 1U);
+}
+
+TEST_CASE("ConcurrentHashMap resizes as it grows", "[Containers][ConcurrentHashMap]")
+{
+    ConcurrentHashMap<int, int> map(8);
+    constexpr int               count = 500;
+    for (int i = 0; i < count; ++i)
+    {
+        map.Insert(i, i * 2);
+    }
+
+    CHECK(map.Size() == static_cast<std::size_t>(count));
+    CHECK(map.Get(0) == 0);
+    CHECK(map.Get(123) == 246);
+    CHECK(map.Get(count - 1) == (count - 1) * 2);
+}
+
+TEST_CASE("ConcurrentHashMap TryGet and optional", "[Containers][ConcurrentHashMap]")
+{
+    ConcurrentHashMap<int, int> map;
+    map.Insert(7, 70);
+    int value = 0;
+    CHECK(map.TryGet(7, value));
+    CHECK(value == 70);
+    CHECK_FALSE(map.TryGet(99, value));
+
+    auto optional = map.GetOptional(7);
+    REQUIRE(optional.has_value());
+    CHECK(*optional == 70);
+    CHECK_FALSE(map.GetOptional(88).has_value());
+}
+
+TEST_CASE("ConcurrentHashMap handles tombstones", "[Containers][ConcurrentHashMap]")
+{
+    ConcurrentHashMap<int, int> map;
+    map.Insert(5, 500);
+    map.Remove(5);
+    CHECK_FALSE(map.Contains(5));
+    const auto sizeAfterRemove = map.Size();
+    map.Remove(5);
+    CHECK(map.Size() == sizeAfterRemove);
+    map.Insert(5, 600);
+    CHECK(map.Get(5) == 600);
+    CHECK(map.Size() == sizeAfterRemove + 1);
+}
+
+TEST_CASE("ConcurrentHashMap handles collision chains", "[Containers][ConcurrentHashMap]")
+{
+    ConcurrentHashMap<std::string, int> map(4);
+    for (int i = 0; i < 64; ++i)
+    {
+        map.Insert("k_" + std::to_string(i * 16), i);
+    }
+
+    CHECK(map.Size() == 64U);
+    CHECK(map.Contains("k_0"));
+    CHECK(map.Get("k_0") == 0);
+}

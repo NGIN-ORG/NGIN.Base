@@ -1,5 +1,5 @@
 /// @file LinearAllocatorTest.cpp
-/// @brief Tests for NGIN::Memory::LinearAllocator using boost::ut
+/// @brief Tests for NGIN::Memory::LinearAllocator using Catch2
 ///
 /// @details
 /// This file exercises the modern LinearAllocator API:
@@ -13,9 +13,9 @@
 ///   - Owns checks
 ///   - Deallocate no-op semantics
 ///
-/// The tests use boost::ut for a lightweight, header-only unit test framework.
+/// The tests rely on Catch2 for a lightweight, header-only unit test framework.
 
-#include <boost/ut.hpp>
+#include <catch2/catch_test_macros.hpp>
 
 #include <NGIN/Memory/LinearAllocator.hpp>
 #include <NGIN/Memory/SystemAllocator.hpp>
@@ -26,64 +26,67 @@
 #include <string>
 #include <type_traits>
 
-using namespace boost::ut;
-
 namespace nm = NGIN::Memory;
 
-suite<"NGIN::Memory::LinearAllocator"> linear_allocator_tests = [] {
+TEST_CASE("NGIN::Memory::LinearAllocator", "[Memory][LinearAllocator]")
+{
     // -------------------------------------------------------------------------
     // Construction + basic properties
     // -------------------------------------------------------------------------
-    "ConstructWithCapacityAndDefaults"_test = [] {
+    SECTION("ConstructWithCapacityAndDefaults")
+    {
         constexpr std::size_t kCapacity = 1024;
         nm::LinearAllocator<> arena {kCapacity};// upstream = SystemAllocator by default
 
-        expect(arena.MaxSize() == kCapacity);
-        expect(arena.Used() == 0_ul);
-        expect(arena.Remaining() == kCapacity);
-    };
+        CHECK(arena.MaxSize() == kCapacity);
+        CHECK(arena.Used() == 0UL);
+        CHECK(arena.Remaining() == kCapacity);
+    }
 
-    "ConstructZeroCapacity_YieldsEmptyArena"_test = [] {
+    SECTION("ConstructZeroCapacity_YieldsEmptyArena")
+    {
         // SystemAllocator::Allocate(0, align) returns nullptr, so arena becomes empty
         nm::LinearAllocator<> arena {0};
 
-        expect(arena.MaxSize() == 0_ul);
-        expect(arena.Used() == 0_ul);
-        expect(arena.Remaining() == 0_ul);
+        CHECK(arena.MaxSize() == 0UL);
+        CHECK(arena.Used() == 0UL);
+        CHECK(arena.Remaining() == 0UL);
 
         void* p = arena.Allocate(1, 8);
-        expect(p == nullptr);
+        CHECK(p == nullptr);
     };
 
     // -------------------------------------------------------------------------
     // Allocate / AllocateEx
     // -------------------------------------------------------------------------
-    "Allocate_BasicAndRemainingTracking"_test = [] {
+    SECTION("Allocate_BasicAndRemainingTracking")
+    {
         constexpr std::size_t kCapacity = 256;
         nm::LinearAllocator<> arena {kCapacity};
 
         void* a = arena.Allocate(64, 8);
-        expect(a != nullptr);
-        expect(arena.Used() == 64_ul);
-        expect(arena.Remaining() == (kCapacity - 64));
+        CHECK(a != nullptr);
+        CHECK(arena.Used() == 64UL);
+        CHECK(arena.Remaining() == (kCapacity - 64));
 
         void* b = arena.Allocate(32, 8);
-        expect(b != nullptr);
-        expect(arena.Used() == 96_ul);
-        expect(arena.Remaining() == (kCapacity - 96));
+        CHECK(b != nullptr);
+        CHECK(arena.Used() == 96UL);
+        CHECK(arena.Remaining() == (kCapacity - 96));
 
         // Exhaust the remainder exactly
         void* c = arena.Allocate(kCapacity - 96, 8);
-        expect(c != nullptr);
-        expect(arena.Used() == kCapacity);
-        expect(arena.Remaining() == 0_ul);
+        CHECK(c != nullptr);
+        CHECK(arena.Used() == kCapacity);
+        CHECK(arena.Remaining() == 0UL);
 
         // One more should fail
         void* d = arena.Allocate(1, 8);
-        expect(d == nullptr);
-    };
+        CHECK(d == nullptr);
+    }
 
-    "AllocateEx_ReturnsMemoryBlockWithMetadata"_test = [] {
+    SECTION("AllocateEx_ReturnsMemoryBlockWithMetadata")
+    {
         constexpr std::size_t kCapacity = 128;
         nm::LinearAllocator<> arena {kCapacity};
 
@@ -91,181 +94,190 @@ suite<"NGIN::Memory::LinearAllocator"> linear_allocator_tests = [] {
         constexpr std::size_t kAlign   = 32;
 
         nm::MemoryBlock blk = arena.AllocateEx(kRequest, kAlign);
-        expect(bool(blk) == true);
-        expect(blk.SizeInBytes == kRequest);
-        expect(blk.AlignmentInBytes >= kAlign);// may be normalized up
+        CHECK(bool(blk));
+        CHECK(blk.SizeInBytes == kRequest);
+        CHECK(blk.AlignmentInBytes >= kAlign);// may be normalized up
 
         auto addr = reinterpret_cast<std::uintptr_t>(blk.ptr);
-        expect((addr % blk.AlignmentInBytes) == 0_ul);
-        expect(arena.Used() == kRequest);
+        CHECK((addr % blk.AlignmentInBytes) == 0UL);
+        CHECK(arena.Used() == kRequest);
     };
 
     // -------------------------------------------------------------------------
     // Alignment behavior
     // -------------------------------------------------------------------------
-    "Alignment_NormalizationToPowerOfTwo_AndAtLeastMaxAlignT"_test = [] {
+    SECTION("Alignment_NormalizationToPowerOfTwo_AndAtLeastMaxAlignT")
+    {
         constexpr std::size_t kCapacity = 256;
         nm::LinearAllocator<> arena {kCapacity};
 
         // Request an odd, non-power-of-two alignment; allocator will normalize it.
         constexpr std::size_t requested = 18;
         void*                 p         = arena.Allocate(8, requested);
-        expect(p != nullptr);
+        CHECK(p != nullptr);
 
         // The actual alignment is at least alignof(max_align_t) and power-of-two.
         auto                  addr     = reinterpret_cast<std::uintptr_t>(p);
         constexpr std::size_t minAlign = alignof(std::max_align_t);
-        expect((addr % minAlign) == 0_ul);
-    };
+        CHECK((addr % minAlign) == 0UL);
+    }
 
-    "Alignment_ExactPowerOfTwoIsRespected"_test = [] {
+    SECTION("Alignment_ExactPowerOfTwoIsRespected")
+    {
         constexpr std::size_t kCapacity = 256;
         nm::LinearAllocator<> arena {kCapacity};
 
         for (std::size_t align: {std::size_t(8), std::size_t(16), std::size_t(32), std::size_t(64)})
         {
             void* p = arena.Allocate(8, align);
-            expect(p != nullptr);
+            CHECK(p != nullptr);
             auto addr = reinterpret_cast<std::uintptr_t>(p);
-            expect((addr % align) == 0_ul);
+            CHECK((addr % align) == 0UL);
         }
     };
 
     // -------------------------------------------------------------------------
     // Reset / Mark / Rollback
     // -------------------------------------------------------------------------
-    "Reset_ReclaimsAll"_test = [] {
+    SECTION("Reset_ReclaimsAll")
+    {
         constexpr std::size_t kCapacity = 128;
         nm::LinearAllocator<> arena {kCapacity};
 
         void* p1 = arena.Allocate(40, 8);
-        expect(p1 != nullptr);
-        expect(arena.Used() == 40_ul);
+        CHECK(p1 != nullptr);
+        CHECK(arena.Used() == 40UL);
 
         arena.Reset();
-        expect(arena.Used() == 0_ul);
-        expect(arena.Remaining() == kCapacity);
+        CHECK(arena.Used() == 0UL);
+        CHECK(arena.Remaining() == kCapacity);
 
         // Allocate again after reset
         void* p2 = arena.Allocate(64, 16);
-        expect(p2 != nullptr);
-        expect(arena.Used() == 64_ul);
-        expect(arena.Remaining() == (kCapacity - 64));
-    };
+        CHECK(p2 != nullptr);
+        CHECK(arena.Used() == 64UL);
+        CHECK(arena.Remaining() == (kCapacity - 64));
+    }
 
-    "MarkAndRollback_MoveBumpPointerBack"_test = [] {
+    SECTION("MarkAndRollback_MoveBumpPointerBack")
+    {
         constexpr std::size_t kCapacity = 256;
         nm::LinearAllocator<> arena {kCapacity};
 
         void* a = arena.Allocate(32, 8);
-        expect(a != nullptr);
+        CHECK(a != nullptr);
         auto mark = arena.Mark();
 
         void* b = arena.Allocate(64, 16);
-        expect(b != nullptr);
-        expect(arena.Used() == 96_ul);
+        CHECK(b != nullptr);
+        CHECK(arena.Used() == 96UL);
 
         arena.Rollback(mark);
         // After rollback, Used() should be back to 32
-        expect(arena.Used() == 32_ul);
+        CHECK(arena.Used() == 32UL);
 
         // Reallocate the same 64 bytes again and it should still fit
         void* c = arena.Allocate(64, 16);
-        expect(c != nullptr);
-        expect(arena.Used() == 96_ul);
+        CHECK(c != nullptr);
+        CHECK(arena.Used() == 96UL);
     };
 
     // -------------------------------------------------------------------------
     // Move semantics
     // -------------------------------------------------------------------------
-    "MoveConstructor_TransfersSlabOwnership"_test = [] {
+    SECTION("MoveConstructor_TransfersSlabOwnership")
+    {
         constexpr std::size_t kCapacity = 128;
         nm::LinearAllocator<> src {kCapacity};
 
         void* p = src.Allocate(32, 8);
-        expect(p != nullptr);
-        expect(src.Used() == 32_ul);
+        CHECK(p != nullptr);
+        CHECK(src.Used() == 32UL);
 
         nm::LinearAllocator<> dst {std::move(src)};
 
         // Source becomes empty
-        expect(src.MaxSize() == 0_ul);
-        expect(src.Used() == 0_ul);
+        CHECK(src.MaxSize() == 0UL);
+        CHECK(src.Used() == 0UL);
 
         // Destination has prior state
-        expect(dst.MaxSize() == kCapacity);
-        expect(dst.Used() == 32_ul);
-        expect(dst.Owns(p) == true);
-    };
+        CHECK(dst.MaxSize() == kCapacity);
+        CHECK(dst.Used() == 32UL);
+        CHECK(dst.Owns(p));
+    }
 
-    "MoveAssignment_TransfersSlabOwnership"_test = [] {
+    SECTION("MoveAssignment_TransfersSlabOwnership")
+    {
         constexpr std::size_t kSrcCap = 96;
         nm::LinearAllocator<> src {kSrcCap};
         void*                 p = src.Allocate(48, 8);
-        expect(p != nullptr);
-        expect(src.Used() == 48_ul);
+        CHECK(p != nullptr);
+        CHECK(src.Used() == 48UL);
 
         constexpr std::size_t kDstCap = 64;
         nm::LinearAllocator<> dst {kDstCap};
 
         dst = std::move(src);
 
-        expect(src.MaxSize() == 0_ul);
-        expect(src.Used() == 0_ul);
+        CHECK(src.MaxSize() == 0UL);
+        CHECK(src.Used() == 0UL);
 
-        expect(dst.MaxSize() == kSrcCap);
-        expect(dst.Used() == 48_ul);
-        expect(dst.Owns(p) == true);
+        CHECK(dst.MaxSize() == kSrcCap);
+        CHECK(dst.Used() == 48UL);
+        CHECK(dst.Owns(p));
     };
 
     // -------------------------------------------------------------------------
     // Owns and Deallocate semantics
     // -------------------------------------------------------------------------
-    "Owns_ReturnsTrueForPointersInsideSlab"_test = [] {
+    SECTION("Owns_ReturnsTrueForPointersInsideSlab")
+    {
         constexpr std::size_t kCapacity = 128;
         nm::LinearAllocator<> arena {kCapacity};
 
         void* p = arena.Allocate(16, 8);
-        expect(p != nullptr);
-        expect(arena.Owns(p) == true);
+        CHECK(p != nullptr);
+        CHECK(arena.Owns(p));
 
         std::string external = "not in arena";
-        expect(arena.Owns(external.data()) == false);
-    };
+        CHECK_FALSE(arena.Owns(external.data()));
+    }
 
-    "Deallocate_IsNoOp"_test = [] {
+    SECTION("Deallocate_IsNoOp")
+    {
         constexpr std::size_t kCapacity = 128;
         nm::LinearAllocator<> arena {kCapacity};
 
         void* p = arena.Allocate(32, 16);
-        expect(p != nullptr);
+        CHECK(p != nullptr);
         auto usedBefore = arena.Used();
 
         // Deallocate does nothing (API still accepts size and alignment)
         arena.Deallocate(p, 32, 16);
 
-        expect(arena.Used() == usedBefore);
-        expect(arena.Remaining() == (kCapacity - usedBefore));
+        CHECK(arena.Used() == usedBefore);
+        CHECK(arena.Remaining() == (kCapacity - usedBefore));
     };
 
     // -------------------------------------------------------------------------
     // AllocateEx + alignment normalization checks combined
     // -------------------------------------------------------------------------
-    "AllocateEx_NormalizesAlignmentAndReportsIt"_test = [] {
+    SECTION("AllocateEx_NormalizesAlignmentAndReportsIt")
+    {
         constexpr std::size_t kCapacity = 512;
         nm::LinearAllocator<> arena {kCapacity};
 
         // Request a non power-of-two alignment (e.g., 18) -> will normalize
         nm::MemoryBlock blk = arena.AllocateEx(40, 18);
-        expect(bool(blk) == true);
+        CHECK(bool(blk));
 
         // Reported alignment should be power-of-two and at least alignof(max_align_t)
         const std::size_t reported = blk.AlignmentInBytes;
         auto              is_pow2  = (reported & (reported - 1)) == 0;
-        expect(is_pow2 == true);
-        expect(reported >= alignof(std::max_align_t));
+        CHECK(is_pow2);
+        CHECK(reported >= alignof(std::max_align_t));
 
         auto addr = reinterpret_cast<std::uintptr_t>(blk.ptr);
-        expect((addr % reported) == 0_ul);
-    };
-};
+        CHECK((addr % reported) == 0UL);
+    }
+}

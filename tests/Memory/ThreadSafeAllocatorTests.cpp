@@ -1,82 +1,97 @@
 /// @file ThreadSafeAllocatorTests.cpp
 /// @brief Tests focused on ThreadSafeAllocator wrapper behavior.
 
-#include <boost/ut.hpp>
+#include <NGIN/Memory/LinearAllocator.hpp>
+#include <NGIN/Memory/ThreadSafeAllocator.hpp>
+#include <NGIN/Memory/TrackingAllocator.hpp>
+#include <atomic>
+#include <catch2/catch_test_macros.hpp>
 #include <thread>
 #include <vector>
-#include <atomic>
 
-#include <NGIN/Memory/ThreadSafeAllocator.hpp>
-#include <NGIN/Memory/LinearAllocator.hpp>
-#include <NGIN/Memory/TrackingAllocator.hpp>
+TEST_CASE("ThreadSafeAllocator allocates and deallocates", "[Memory][ThreadSafeAllocator]")
+{
+    using Arena      = NGIN::Memory::LinearAllocator<>;
+    using ThreadSafe = NGIN::Memory::ThreadSafeAllocator<Arena>;
 
-using namespace boost::ut;
+    ThreadSafe allocator {Arena {256}};
+    void*      first  = allocator.Allocate(32, 8);
+    void*      second = allocator.Allocate(32, 8);
 
-suite<"NGIN::Memory::ThreadSafeAllocator"> threadSafeAllocatorSuite = [] {
-    "BasicAllocateDeallocate"_test = [] {
-        using Arena = NGIN::Memory::LinearAllocator<>;
-        using TS    = NGIN::Memory::ThreadSafeAllocator<Arena>;
-        TS    ts {Arena {256}};
-        void* p1 = ts.Allocate(32, 8);
-        void* p2 = ts.Allocate(32, 8);
-        expect(p1 != nullptr && p2 != nullptr);
-        ts.Deallocate(p1, 32, 8);
-        ts.Deallocate(p2, 32, 8);
-    };
+    REQUIRE(first != nullptr);
+    REQUIRE(second != nullptr);
 
-    "OwnershipProxy"_test = [] {
-        using Arena = NGIN::Memory::LinearAllocator<>;
-        using TS    = NGIN::Memory::ThreadSafeAllocator<Arena>;
-        TS    ts {Arena {128}};
-        void* p = ts.Allocate(16, 8);
-        expect(p != nullptr);
-        expect(ts.Owns(p));
-        ts.Deallocate(p, 16, 8);
-    };
+    allocator.Deallocate(first, 32, 8);
+    allocator.Deallocate(second, 32, 8);
+}
 
-    "ConcurrentStress"_test = [] {
-        using Arena = NGIN::Memory::LinearAllocator<>;
-        using TS    = NGIN::Memory::ThreadSafeAllocator<Arena>;
-        // Larger arena to allow many small allocations.
-        TS                       ts {Arena {8 * 1024}};
-        constexpr int            threads    = 8;
-        constexpr int            iterations = 1000;
-        std::atomic<int>         allocCount {0};
-        std::vector<std::thread> workers;
-        workers.reserve(threads);
-        for (int t = 0; t < threads; ++t)
-        {
-            workers.emplace_back([&] {
-                for (int i = 0; i < iterations; ++i)
+TEST_CASE("ThreadSafeAllocator exposes ownership checks", "[Memory][ThreadSafeAllocator]")
+{
+    using Arena      = NGIN::Memory::LinearAllocator<>;
+    using ThreadSafe = NGIN::Memory::ThreadSafeAllocator<Arena>;
+
+    ThreadSafe allocator {Arena {128}};
+    void*      pointer = allocator.Allocate(16, 8);
+    REQUIRE(pointer != nullptr);
+    CHECK(allocator.Owns(pointer));
+    allocator.Deallocate(pointer, 16, 8);
+}
+
+TEST_CASE("ThreadSafeAllocator handles concurrent access", "[Memory][ThreadSafeAllocator]")
+{
+    using Arena      = NGIN::Memory::LinearAllocator<>;
+    using ThreadSafe = NGIN::Memory::ThreadSafeAllocator<Arena>;
+
+    ThreadSafe    allocator {Arena {8 * 1024}};
+    constexpr int threadCount = 8;
+    constexpr int iterations  = 1000;
+
+    std::atomic<int>         allocationCount {0};
+    std::vector<std::thread> workers;
+    workers.reserve(threadCount);
+
+    for (int i = 0; i < threadCount; ++i)
+    {
+        workers.emplace_back([&] {
+            for (int iteration = 0; iteration < iterations; ++iteration)
+            {
+                void* block = allocator.Allocate(8, alignof(std::max_align_t));
+                if (block != nullptr)
                 {
-                    void* p = ts.Allocate(8, alignof(std::max_align_t));
-                    if (p)
-                    {
-                        ++allocCount;
-                        ts.Deallocate(p, 8, alignof(std::max_align_t));
-                    }
+                    ++allocationCount;
+                    allocator.Deallocate(block, 8, alignof(std::max_align_t));
                 }
-            });
-        }
-        for (auto& th: workers)
-            th.join();
-        expect(allocCount.load() > 0_i);
-    };
+            }
+        });
+    }
 
-    "TrackingDecoratorThreadSafe"_test = [] {
-        using Arena   = NGIN::Memory::LinearAllocator<>;
-        using Tracked = NGIN::Memory::Tracking<Arena>;
-        using TS      = NGIN::Memory::ThreadSafeAllocator<Tracked>;
-        TS    ts {Tracked {Arena {512}}};
-        void* a = ts.Allocate(64, 16);
-        void* b = ts.Allocate(32, 8);
-        expect(a != nullptr && b != nullptr);
-        auto& innerTracked = ts.InnerAllocator();
-        auto  stats        = innerTracked.GetStats();
-        expect(stats.currentBytes == 96_u);
-        ts.Deallocate(a, 64, 16);
-        ts.Deallocate(b, 32, 8);
-        stats = innerTracked.GetStats();
-        expect(stats.currentBytes == 0_u);
-    };
-};
+    for (auto& worker: workers)
+    {
+        worker.join();
+    }
+
+    CHECK(allocationCount.load() > 0);
+}
+
+TEST_CASE("ThreadSafeAllocator composes with tracking decorator", "[Memory][ThreadSafeAllocator]")
+{
+    using Arena      = NGIN::Memory::LinearAllocator<>;
+    using Tracked    = NGIN::Memory::Tracking<Arena>;
+    using ThreadSafe = NGIN::Memory::ThreadSafeAllocator<Tracked>;
+
+    ThreadSafe allocator {Tracked {Arena {512}}};
+    void*      first  = allocator.Allocate(64, 16);
+    void*      second = allocator.Allocate(32, 8);
+
+    REQUIRE(first != nullptr);
+    REQUIRE(second != nullptr);
+
+    auto& tracked = allocator.InnerAllocator();
+    auto  stats   = tracked.GetStats();
+    CHECK(stats.currentBytes == 96U);
+
+    allocator.Deallocate(first, 64, 16);
+    allocator.Deallocate(second, 32, 8);
+    stats = tracked.GetStats();
+    CHECK(stats.currentBytes == 0U);
+}

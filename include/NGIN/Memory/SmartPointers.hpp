@@ -9,14 +9,15 @@
 /// - Deterministic deallocation through the provided allocator.
 #pragma once
 
-#include <cstddef>
 #include <atomic>
-#include <utility>
-#include <type_traits>
+#include <cstddef>
+#include <memory>
 #include <new>
+#include <type_traits>
+#include <utility>
 
-#include <NGIN/Memory/AllocatorConcept.hpp>
 #include <NGIN/Memory/AllocationHelpers.hpp>
+#include <NGIN/Memory/AllocatorConcept.hpp>
 #include <NGIN/Memory/SystemAllocator.hpp>
 
 namespace NGIN::Memory
@@ -86,7 +87,8 @@ namespace NGIN::Memory
         constexpr Scoped() noexcept = default;
         constexpr Scoped(std::nullptr_t) noexcept {}
 
-        explicit Scoped(T* ptr, Alloc alloc = Alloc {}) noexcept : m_ptr(ptr), m_alloc(std::move(alloc)) {}
+        explicit Scoped(T* ptr, Alloc alloc = Alloc {}) noexcept
+            : m_ptr(ptr), m_alloc(std::move(alloc)) {}
 
         Scoped(const Scoped&)            = delete;
         Scoped& operator=(const Scoped&) = delete;
@@ -190,7 +192,8 @@ namespace NGIN::Memory
 
         // Copy: bump strong
         /// \brief Copy bumps strong count (relaxed since it's diagnostic-only).
-        Shared(const Shared& other) noexcept : m_ctrl(other.m_ctrl)
+        Shared(const Shared& other) noexcept
+            : m_ctrl(other.m_ctrl)
         {
             if (m_ctrl)
                 m_ctrl->strong.fetch_add(1, std::memory_order_relaxed);
@@ -208,7 +211,8 @@ namespace NGIN::Memory
         }
 
         // Move: transfer
-        Shared(Shared&& other) noexcept : m_ctrl(other.m_ctrl) { other.m_ctrl = nullptr; }
+        Shared(Shared&& other) noexcept
+            : m_ctrl(other.m_ctrl) { other.m_ctrl = nullptr; }
         Shared& operator=(Shared&& other) noexcept
         {
             if (this != &other)
@@ -251,7 +255,8 @@ namespace NGIN::Memory
     private:
         using Control = detail::SharedControl<T, Alloc>;
 
-        explicit Shared(Control* ctrl) noexcept : m_ctrl(ctrl) {}
+        explicit Shared(Control* ctrl) noexcept
+            : m_ctrl(ctrl) {}
 
         /// \brief Release one strong reference; destroy object on last strong, free on last weak.
         void Release() noexcept
@@ -283,7 +288,8 @@ namespace NGIN::Memory
 
         // Copy: bump weak
         /// \brief Copy bumps weak count (relaxed).
-        Ticket(const Ticket& other) noexcept : m_ctrl(other.m_ctrl)
+        Ticket(const Ticket& other) noexcept
+            : m_ctrl(other.m_ctrl)
         {
             if (m_ctrl)
                 m_ctrl->weak.fetch_add(1, std::memory_order_relaxed);
@@ -301,7 +307,8 @@ namespace NGIN::Memory
         }
 
         // Move
-        Ticket(Ticket&& other) noexcept : m_ctrl(other.m_ctrl) { other.m_ctrl = nullptr; }
+        Ticket(Ticket&& other) noexcept
+            : m_ctrl(other.m_ctrl) { other.m_ctrl = nullptr; }
         Ticket& operator=(Ticket&& other) noexcept
         {
             if (this != &other)
@@ -344,7 +351,8 @@ namespace NGIN::Memory
     private:
         using Control = detail::SharedControl<T, Alloc>;
 
-        explicit Ticket(Control* ctrl) noexcept : m_ctrl(ctrl) {}
+        explicit Ticket(Control* ctrl) noexcept
+            : m_ctrl(ctrl) {}
 
         /// \brief Drop one weak reference; free control if this was last weak and no strong remain.
         void Release() noexcept

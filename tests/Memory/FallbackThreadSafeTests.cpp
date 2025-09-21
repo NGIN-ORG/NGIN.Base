@@ -1,102 +1,122 @@
+#include <NGIN/Memory/AllocationHelpers.hpp>
 #include <NGIN/Memory/FallbackAllocator.hpp>
-#include <NGIN/Memory/ThreadSafeAllocator.hpp>
 #include <NGIN/Memory/LinearAllocator.hpp>
 #include <NGIN/Memory/SystemAllocator.hpp>
+#include <NGIN/Memory/ThreadSafeAllocator.hpp>
 #include <NGIN/Memory/TrackingAllocator.hpp>
-#include <NGIN/Memory/AllocationHelpers.hpp>
-#include <boost/ut.hpp>
+#include <catch2/catch_test_macros.hpp>
 #include <thread>
 #include <vector>
-
-using namespace boost::ut;
 
 struct DummySmallAllocator
 {
     std::byte   storage[256] {};
     std::size_t used {0};
-    void*       Allocate(std::size_t n, std::size_t a) noexcept
+
+    void* Allocate(std::size_t size, std::size_t alignment) noexcept
     {
-        if (!n)
+        if (size == 0)
+        {
             return nullptr;
-        if (a == 0)
-            a = 1;
+        }
+        if (alignment == 0)
+        {
+            alignment = 1;
+        }
+
         auto base    = reinterpret_cast<std::uintptr_t>(storage) + used;
-        auto aligned = (base + (a - 1)) & ~(std::uintptr_t(a) - 1);
+        auto aligned = (base + (alignment - 1)) & ~(std::uintptr_t(alignment) - 1);
         auto padding = aligned - base;
-        if (padding + n > (sizeof(storage) - used))
+        if (padding + size > (sizeof(storage) - used))
+        {
             return nullptr;
-        used += padding + n;
+        }
+
+        used += padding + size;
         return reinterpret_cast<void*>(aligned);
     }
-    void        Deallocate(void*, std::size_t, std::size_t) noexcept {}
-    std::size_t MaxSize() const noexcept
+
+    void Deallocate(void*, std::size_t, std::size_t) noexcept {}
+
+    std::size_t MaxSize() const noexcept { return sizeof(storage); }
+    std::size_t Remaining() const noexcept { return sizeof(storage) - used; }
+
+    bool Owns(const void* pointer) const noexcept
     {
-        return sizeof(storage);
-    }
-    std::size_t Remaining() const noexcept
-    {
-        return sizeof(storage) - used;
-    }
-    bool Owns(const void* p) const noexcept
-    {
-        auto b = reinterpret_cast<const std::byte*>(p);
-        return b >= storage && b < storage + sizeof(storage);
+        auto bytes = reinterpret_cast<const std::byte*>(pointer);
+        return bytes >= storage && bytes < storage + sizeof(storage);
     }
 };
 
-suite<"NGIN::Memory::FallbackAndThreadSafe"> fallbackAndThreadSafe = [] {
-    "FallbackAllocator basic"_test = [] {
-        DummySmallAllocator             small;
-        NGIN::Memory::SystemAllocator   sys;
-        NGIN::Memory::FallbackAllocator fb {small, sys};
-        // First allocate many small blocks until small exhausted
-        std::vector<void*> primaryPtrs;
-        for (int i = 0; i < 32; ++i)
-        {
-            if (void* p = fb.Allocate(8, alignof(std::max_align_t)))
-                primaryPtrs.push_back(p);
-        }
-        // Large allocation should fall back to system
-        void* large = fb.Allocate(1024, alignof(std::max_align_t));
-        expect(large != nullptr);
-        // Deallocate (ownership dispatch)
-        for (auto p: primaryPtrs)
-            fb.Deallocate(p, 8, alignof(std::max_align_t));
-        fb.Deallocate(large, 1024, alignof(std::max_align_t));
-    };
+TEST_CASE("FallbackAllocator uses primary allocator until exhausted", "[Memory][FallbackAllocator]")
+{
+    DummySmallAllocator             primary;
+    NGIN::Memory::SystemAllocator   system;
+    NGIN::Memory::FallbackAllocator allocator {primary, system};
 
-    "ThreadSafeConcurrency"_test = [] {
-        using Arena = NGIN::Memory::LinearAllocator<>;
-        Arena                                    arena {8 * 1024};
-        NGIN::Memory::ThreadSafeAllocator<Arena> ts {std::move(arena)};
-        constexpr int                            threads = 4;
-        constexpr int                            iters   = 500;
-        std::vector<std::thread>                 ths;
-        ths.reserve(threads);
-        for (int t = 0; t < threads; ++t)
+    std::vector<void*> primaryAllocations;
+    for (int i = 0; i < 32; ++i)
+    {
+        if (void* block = allocator.Allocate(8, alignof(std::max_align_t)))
         {
-            ths.emplace_back([&] {
-                for (int i = 0; i < iters; ++i)
+            primaryAllocations.push_back(block);
+        }
+    }
+
+    void* large = allocator.Allocate(1024, alignof(std::max_align_t));
+    REQUIRE(large != nullptr);
+
+    for (void* block: primaryAllocations)
+    {
+        allocator.Deallocate(block, 8, alignof(std::max_align_t));
+    }
+    allocator.Deallocate(large, 1024, alignof(std::max_align_t));
+}
+
+TEST_CASE("ThreadSafeAllocator supports concurrent allocations", "[Memory][ThreadSafeAllocator]")
+{
+    using Arena = NGIN::Memory::LinearAllocator<>;
+    Arena                                    arena {8 * 1024};
+    NGIN::Memory::ThreadSafeAllocator<Arena> allocator {std::move(arena)};
+
+    constexpr int threadCount = 4;
+    constexpr int iterations  = 500;
+
+    std::vector<std::thread> workers;
+    workers.reserve(threadCount);
+
+    for (int i = 0; i < threadCount; ++i)
+    {
+        workers.emplace_back([&] {
+            for (int iteration = 0; iteration < iterations; ++iteration)
+            {
+                if (void* block = allocator.Allocate(16, alignof(std::max_align_t)))
                 {
-                    void* p = ts.Allocate(16, alignof(std::max_align_t));
-                    (void) p;
+                    allocator.Deallocate(block, 16, alignof(std::max_align_t));
                 }
-            });
-        }
-        for (auto& th: ths)
-            th.join();
-        // Remaining should be <= capacity
-        expect(ts.InnerAllocator().Used() <= ts.InnerAllocator().MaxSize());
-    };
+            }
+        });
+    }
 
-    "TrackingDecorator"_test = [] {
-        NGIN::Memory::Tracking<NGIN::Memory::SystemAllocator> track {NGIN::Memory::SystemAllocator {}};
-        void*                                                 p1 = track.Allocate(64, alignof(std::max_align_t));
-        void*                                                 p2 = track.Allocate(32, alignof(std::max_align_t));
-        expect(track.GetStats().currentBytes == 96_u);
-        track.Deallocate(p1, 64, alignof(std::max_align_t));
-        expect(track.GetStats().currentBytes == 32_u);
-        track.Deallocate(p2, 32, alignof(std::max_align_t));
-        expect(track.GetStats().currentBytes == 0_u);
-    };
-};
+    for (auto& worker: workers)
+    {
+        worker.join();
+    }
+
+    CHECK(allocator.InnerAllocator().Used() <= allocator.InnerAllocator().MaxSize());
+}
+
+TEST_CASE("Tracking allocator reports usage", "[Memory][TrackingAllocator]")
+{
+    NGIN::Memory::Tracking<NGIN::Memory::SystemAllocator> tracking {NGIN::Memory::SystemAllocator {}};
+    void*                                                 first  = tracking.Allocate(64, alignof(std::max_align_t));
+    void*                                                 second = tracking.Allocate(32, alignof(std::max_align_t));
+
+    CHECK(tracking.GetStats().currentBytes == 96U);
+
+    tracking.Deallocate(first, 64, alignof(std::max_align_t));
+    CHECK(tracking.GetStats().currentBytes == 32U);
+
+    tracking.Deallocate(second, 32, alignof(std::max_align_t));
+    CHECK(tracking.GetStats().currentBytes == 0U);
+}

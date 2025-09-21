@@ -1,14 +1,11 @@
 /// @file SmartPtrTests.cpp
 /// @brief Tests for Scoped, Shared, and Ticket smart pointers with allocator support.
 
-#include <boost/ut.hpp>
-
-#include <NGIN/Memory/SmartPointers.hpp>
-#include <NGIN/Memory/TrackingAllocator.hpp>
-#include <NGIN/Memory/SystemAllocator.hpp>
 #include <NGIN/Memory/AllocatorRef.hpp>
-
-using namespace boost::ut;
+#include <NGIN/Memory/SmartPointers.hpp>
+#include <NGIN/Memory/SystemAllocator.hpp>
+#include <NGIN/Memory/TrackingAllocator.hpp>
+#include <catch2/catch_test_macros.hpp>
 
 namespace
 {
@@ -18,133 +15,135 @@ namespace
         static inline int destructed  = 0;
 
         int value {0};
-        explicit Probe(int v) : value(v) { ++constructed; }
-        Probe(const Probe& p) : value(p.value) { ++constructed; }
-        Probe(Probe&& p) noexcept : value(p.value) { ++constructed; }
+
+        explicit Probe(int v)
+            : value(v) { ++constructed; }
+        Probe(const Probe& other)
+            : value(other.value) { ++constructed; }
+        Probe(Probe&& other) noexcept
+            : value(other.value) { ++constructed; }
         ~Probe() { ++destructed; }
     };
 }// namespace
 
-suite<"NGIN::Memory::SmartPointers"> smartPtrSuite = [] {
-    "ScopedBasic"_test = [] {
-        using Tracked      = NGIN::Memory::Tracking<NGIN::Memory::SystemAllocator>;
-        Probe::constructed = Probe::destructed = 0;
+TEST_CASE("Scoped pointers manage lifetime", "[Memory][SmartPointers]")
+{
+    using Tracked = NGIN::Memory::Tracking<NGIN::Memory::SystemAllocator>;
+
+    Probe::constructed = 0;
+    Probe::destructed  = 0;
+
+    {
+        Tracked allocator {NGIN::Memory::SystemAllocator {}};
+        auto    scoped = NGIN::Memory::MakeScoped<Probe>(allocator, 42);
+        REQUIRE(scoped);
+        CHECK(scoped->value == 42);
+        CHECK(Probe::constructed == 1);
+
+        const auto stats = scoped.Allocator().GetStats();
+        CHECK(stats.currentCount == 1U);
+        CHECK(stats.currentBytes >= sizeof(Probe));
+    }
+
+    CHECK(Probe::destructed == 1);
+}
+
+TEST_CASE("Scoped pointers support move and release", "[Memory][SmartPointers]")
+{
+    using Tracked = NGIN::Memory::Tracking<NGIN::Memory::SystemAllocator>;
+
+    Probe::constructed = 0;
+    Probe::destructed  = 0;
+
+    Tracked allocator {NGIN::Memory::SystemAllocator {}};
+    auto    scoped = NGIN::Memory::MakeScoped<Probe>(allocator, 5);
+    REQUIRE(scoped);
+
+    auto moved = std::move(scoped);
+    CHECK_FALSE(scoped);
+    REQUIRE(moved);
+    CHECK(moved->value == 5);
+
+    Probe* raw = moved.Release();
+    CHECK_FALSE(moved);
+    NGIN::Memory::DeallocateObject<Tracked, Probe>(allocator, raw);
+
+    CHECK(Probe::constructed == 1);
+    CHECK(Probe::destructed == 1);
+}
+
+TEST_CASE("Shared and ticket pointers manage reference counts", "[Memory][SmartPointers]")
+{
+    using Tracked = NGIN::Memory::Tracking<NGIN::Memory::SystemAllocator>;
+
+    Probe::constructed = 0;
+    Probe::destructed  = 0;
+
+    Tracked           tracking {NGIN::Memory::SystemAllocator {}};
+    auto              allocatorRef = NGIN::Memory::AllocatorRef(tracking);
+    const std::size_t baseline     = tracking.GetStats().currentBytes;
+
+    {
+        auto shared = NGIN::Memory::MakeShared<Probe>(allocatorRef, 7);
+        REQUIRE(shared);
+        CHECK(shared.UseCount() == 1U);
+        CHECK(shared->value == 7);
+        CHECK(tracking.GetStats().currentCount == 1U);
+
         {
-            Tracked alloc {NGIN::Memory::SystemAllocator {}};
-            auto    scoped = NGIN::Memory::MakeScoped<Probe>(alloc, 42);
-            expect(!!scoped);
-            expect(scoped->value == 42_i);
-            expect(Probe::constructed == 1_i);
-            // Query stats from the allocator stored inside the Scoped instance
-            expect(scoped.Allocator().GetStats().currentCount == 1_u);
-            expect(scoped.Allocator().GetStats().currentBytes >= sizeof(Probe)) << "size counted";
-        }
-        // Scoped destroyed
-        expect(Probe::destructed == 1_i);
-    };
+            auto sharedCopy = shared;
+            CHECK(shared.UseCount() == 2U);
 
-    "ScopedMoveAndRelease"_test = [] {
-        using Tracked      = NGIN::Memory::Tracking<NGIN::Memory::SystemAllocator>;
-        Probe::constructed = Probe::destructed = 0;
-
-        Tracked alloc {NGIN::Memory::SystemAllocator {}};
-        auto    s1 = NGIN::Memory::MakeScoped<Probe>(alloc, 5);
-        expect(!!s1);
-
-        // Move should transfer ownership and keep allocator alive
-        auto s2 = std::move(s1);
-        expect(!s1);
-        expect(!!s2);
-        expect(s2->value == 5_i);
-
-        // Release returns the raw pointer; we must clean it up manually
-        Probe* raw = s2.Release();
-        expect(!s2);
-        // Destruct + deallocate via the same tracking allocator
-        NGIN::Memory::DeallocateObject<Tracked, Probe>(alloc, raw);
-
-        expect(Probe::constructed == 1_i);
-        expect(Probe::destructed == 1_i);
-    };
-
-    "SharedAndTicketLifecycle"_test = [] {
-        using Tracked      = NGIN::Memory::Tracking<NGIN::Memory::SystemAllocator>;
-        Probe::constructed = Probe::destructed = 0;
-        Tracked     tracking {NGIN::Memory::SystemAllocator {}};
-        auto        allocRef = NGIN::Memory::AllocatorRef(tracking);
-        std::size_t baseline = tracking.GetStats().currentBytes;
-
-        {
-            auto sp = NGIN::Memory::MakeShared<Probe>(allocRef, 7);
-            expect(!!sp);
-            expect(sp.UseCount() == 1_u);
-            expect(sp->value == 7_i);
-            // One allocation for control+object
-            expect(tracking.GetStats().currentCount == 1_u);
-
-            // Copy increases strong count
-            {
-                auto sp2 = sp;
-                expect(sp.UseCount() == 2_u);
-
-                // Make a weak ticket
-                auto wk = NGIN::Memory::MakeTicket(sp);
-                expect(!wk.Expired());
-                auto locked = wk.Lock();
-                expect(!!locked);
-                expect(locked.UseCount() == 3_u);
-            }
-
-            // sp2 and locked destroyed, expect one owner left
-            expect(sp.UseCount() == 1_u);
-
-            // Keep a weak ticket alive after last shared
-            auto wk2 = NGIN::Memory::MakeTicket(sp);
-            expect(!wk2.Expired());
-
-            // After resetting the last shared, object gets destroyed but block remains due to weak
-            sp.Reset();
-            expect(sp.UseCount() == 0_u);
-            expect(wk2.Expired());
-
-            // Memory for control+object should still be accounted until weak drops
-            expect(tracking.GetStats().currentBytes >= baseline);
-
-            // Drop weak; block should be released
-            wk2.Reset();
+            auto ticket = NGIN::Memory::MakeTicket(shared);
+            CHECK_FALSE(ticket.Expired());
+            auto locked = ticket.Lock();
+            REQUIRE(locked);
+            CHECK(locked.UseCount() == 3U);
         }
 
-        expect(Probe::constructed == 1_i);
-        expect(Probe::destructed == 1_i);
-        // All memory released
-        expect(tracking.GetStats().currentBytes == baseline);
-        expect(tracking.GetStats().currentCount == 0_u);
-    };
+        CHECK(shared.UseCount() == 1U);
 
-    "WeakLockEdgeCases"_test = [] {
-        using Tracked      = NGIN::Memory::Tracking<NGIN::Memory::SystemAllocator>;
-        Probe::constructed = Probe::destructed = 0;
-        Tracked tracking {NGIN::Memory::SystemAllocator {}};
-        auto    ref = NGIN::Memory::AllocatorRef(tracking);
+        auto ticket = NGIN::Memory::MakeTicket(shared);
+        CHECK_FALSE(ticket.Expired());
 
-        // Empty Ticket
-        NGIN::Memory::Ticket<Probe, decltype(ref)> emptyTicket;
-        expect(emptyTicket.Expired());
-        auto l0 = emptyTicket.Lock();
-        expect(!l0);
+        shared.Reset();
+        CHECK(shared.UseCount() == 0U);
+        CHECK(ticket.Expired());
+        CHECK(tracking.GetStats().currentBytes >= baseline);
 
-        // Create shared then immediately reset
-        auto sp = NGIN::Memory::MakeShared<Probe>(ref, 1);
-        auto wk = NGIN::Memory::MakeTicket(sp);
-        expect(!wk.Expired());
-        sp.Reset();
-        expect(wk.Expired());
-        auto l1 = wk.Lock();
-        expect(!l1);
-        wk.Reset();
+        ticket.Reset();
+    }
 
-        expect(Probe::constructed == 1_i);
-        expect(Probe::destructed == 1_i);
-        expect(tracking.GetStats().currentCount == 0_u);
-    };
-};
+    CHECK(Probe::constructed == 1);
+    CHECK(Probe::destructed == 1);
+    CHECK(tracking.GetStats().currentBytes == baseline);
+    CHECK(tracking.GetStats().currentCount == 0U);
+}
+
+TEST_CASE("Tickets handle edge cases", "[Memory][SmartPointers]")
+{
+    using Tracked = NGIN::Memory::Tracking<NGIN::Memory::SystemAllocator>;
+
+    Probe::constructed = 0;
+    Probe::destructed  = 0;
+
+    Tracked tracking {NGIN::Memory::SystemAllocator {}};
+    auto    allocatorRef = NGIN::Memory::AllocatorRef(tracking);
+
+    NGIN::Memory::Ticket<Probe, decltype(allocatorRef)> emptyTicket;
+    CHECK(emptyTicket.Expired());
+    CHECK_FALSE(emptyTicket.Lock());
+
+    auto shared = NGIN::Memory::MakeShared<Probe>(allocatorRef, 1);
+    auto ticket = NGIN::Memory::MakeTicket(shared);
+    CHECK_FALSE(ticket.Expired());
+
+    shared.Reset();
+    CHECK(ticket.Expired());
+    CHECK_FALSE(ticket.Lock());
+    ticket.Reset();
+
+    CHECK(Probe::constructed == 1);
+    CHECK(Probe::destructed == 1);
+    CHECK(tracking.GetStats().currentCount == 0U);
+}

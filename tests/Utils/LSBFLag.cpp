@@ -1,114 +1,115 @@
 /// @file test_lsb_flag.cpp
-/// @brief Enhanced unit tests for NGIN::Utilities::LSBFlag
+/// @brief Enhanced unit tests for NGIN::Utilities::LSBFlag using Catch2.
 
 #include <NGIN/Utilities/LSBFlag.hpp>
-#include <boost/ut.hpp>
-#include <sstream>
+#include <catch2/catch_test_macros.hpp>
 #include <cstdint>
 #include <limits>
+#include <sstream>
+#include <string>
 
-using namespace boost::ut;
 using namespace NGIN::Utilities;
 
-suite<"LSBFlag"> lsbflag_tests = [] {
-    "DefaultConstructedFlag_IsZeroAndFalse"_test = [] {
-        LSBFlag<uint32_t> f;
-        expect(f.GetValue() == 0_u32);
-        expect(!f.GetFlag());
-        expect(f.GetRaw() == 0_u32);
-    };
+TEST_CASE("LSBFlag default construction", "[Utilities][LSBFlag]")
+{
+    LSBFlag<uint32_t> flag;
+    CHECK(flag.GetValue() == 0U);
+    CHECK_FALSE(flag.GetFlag());
+    CHECK(flag.GetRaw() == 0U);
+}
 
-    "Construct_WithValueAndTrueFlag_RetainsValueAndFlag"_test = [] {
-        constexpr uint32_t input = 703710u;// decimal literal
-        LSBFlag<uint32_t> f(input, true);
-        expect(f.GetValue() == input);
-        expect(f.GetFlag());
-        expect(f.GetRaw() == ((input << 1) | LSBFlag<uint32_t>::flagMask));
-    };
+TEST_CASE("LSBFlag stores value and flag", "[Utilities][LSBFlag]")
+{
+    constexpr uint32_t input = 703710U;
+    LSBFlag<uint32_t>  flag(input, true);
+    CHECK(flag.GetValue() == input);
+    CHECK(flag.GetFlag());
+    CHECK(flag.GetRaw() == ((input << 1) | LSBFlag<uint32_t>::flagMask));
 
-    "Construct_WithValueAndFalseFlag_RetainsValue"_test = [] {
-        constexpr uint16_t input = 4660u;// decimal literal
-        LSBFlag<uint16_t> f(input, false);
-        expect(f.GetValue() == input);
-        expect(!f.GetFlag());
-        expect(f.GetRaw() == static_cast<uint16_t>(input << 1));
-    };
+    LSBFlag<uint16_t> off(4660U, false);
+    CHECK(off.GetValue() == 4660U);
+    CHECK_FALSE(off.GetFlag());
+    CHECK(off.GetRaw() == static_cast<uint16_t>(4660U << 1));
+}
 
-    "SetValue_PreservesFlag"_test = [] {
-        LSBFlag<uint32_t> f(7u, true);
-        f.SetValue(42u);
-        expect(f.GetValue() == 42_u32);
-        expect(f.GetFlag());
-    };
+TEST_CASE("LSBFlag SetValue keeps flag", "[Utilities][LSBFlag]")
+{
+    LSBFlag<uint32_t> flag(7U, true);
+    flag.SetValue(42U);
+    CHECK(flag.GetValue() == 42U);
+    CHECK(flag.GetFlag());
+}
 
-    "SetFlag_PreservesValue"_test = [] {
-        LSBFlag<uint32_t> f(99u, false);
-        f.SetFlag(true);
-        expect(f.GetFlag());
-        expect(f.GetValue() == 99u);
-        f.SetFlag(false);
-        expect(!f.GetFlag());
-        expect(f.GetValue() == 99u);
-    };
+TEST_CASE("LSBFlag SetFlag keeps value", "[Utilities][LSBFlag]")
+{
+    LSBFlag<uint32_t> flag(99U, false);
+    flag.SetFlag(true);
+    CHECK(flag.GetFlag());
+    CHECK(flag.GetValue() == 99U);
+    flag.SetFlag(false);
+    CHECK_FALSE(flag.GetFlag());
+    CHECK(flag.GetValue() == 99U);
+}
 
-    "Set_BothValueAndFlag_UpdatesRaw"_test = [] {
-        LSBFlag<uint32_t> f;
-        f.Set(77u, true);
-        expect(f.GetValue() == 77u);
-        expect(f.GetFlag());
-        expect(f.GetRaw() == ((77u << 1) | LSBFlag<uint32_t>::flagMask));
+TEST_CASE("LSBFlag Set updates raw state", "[Utilities][LSBFlag]")
+{
+    LSBFlag<uint32_t> flag;
+    flag.Set(77U, true);
+    CHECK(flag.GetValue() == 77U);
+    CHECK(flag.GetFlag());
+    CHECK(flag.GetRaw() == ((77U << 1) | LSBFlag<uint32_t>::flagMask));
 
-        f.Set(88u, false);
-        expect(f.GetValue() == 88_u32);
-        expect(!f.GetFlag());
-    };
+    flag.Set(88U, false);
+    CHECK(flag.GetValue() == 88U);
+    CHECK_FALSE(flag.GetFlag());
+}
 
-    "SetRaw_ClearsAndSetsFlag"_test = [] {
-        LSBFlag<uint32_t> f;
-        // Use an odd raw value: flag bit = 1
-        uint32_t raw1 = 2021u * 2u + 1u;// ensures odd
-        f.SetRaw(raw1);
-        expect(f.GetRaw() == raw1);
-        expect(f.GetFlag());
-        expect(f.GetValue() == (raw1 >> 1));
+TEST_CASE("LSBFlag SetRaw interprets bits", "[Utilities][LSBFlag]")
+{
+    LSBFlag<uint32_t> flag;
+    uint32_t          odd = 2021U * 2U + 1U;
+    flag.SetRaw(odd);
+    CHECK(flag.GetRaw() == odd);
+    CHECK(flag.GetFlag());
+    CHECK(flag.GetValue() == (odd >> 1));
 
-        // Use an even raw value: flag bit = 0
-        uint32_t raw2 = 2022u * 2u;// ensures even
-        f.SetRaw(raw2);
-        expect(!f.GetFlag());
-        expect(f.GetValue() == (raw2 >> 1));
-    };
+    uint32_t even = 2022U * 2U;
+    flag.SetRaw(even);
+    CHECK_FALSE(flag.GetFlag());
+    CHECK(flag.GetValue() == (even >> 1));
+}
 
-    "Equality_Inequality_WorksOnRawData"_test = [] {
-        LSBFlag<uint16_t> a(100u, true);
-        LSBFlag<uint16_t> b(100u, true);
-        LSBFlag<uint16_t> c(100u, false);
-        expect(a == b);
-        expect(a != c);
-        expect(b != c);
-    };
+TEST_CASE("LSBFlag equality compares raw state", "[Utilities][LSBFlag]")
+{
+    LSBFlag<uint16_t> a(100U, true);
+    LSBFlag<uint16_t> b(100U, true);
+    LSBFlag<uint16_t> c(100U, false);
+    CHECK(a == b);
+    CHECK(a != c);
+    CHECK(b != c);
+}
 
-    "MaxValue_ReturnsHalfMax"_test = [] {
-        constexpr auto maxVal   = LSBFlag<uint32_t>::MaxValue();
-        constexpr auto expected = (std::numeric_limits<uint32_t>::max() >> 1);
-        expect(maxVal == expected);
-    };
+TEST_CASE("LSBFlag reports maximum value", "[Utilities][LSBFlag]")
+{
+    constexpr auto maxValue = LSBFlag<uint32_t>::MaxValue();
+    constexpr auto expected = std::numeric_limits<uint32_t>::max() >> 1;
+    CHECK(maxValue == expected);
+}
 
-    "StreamInsertion_FormatsValueAndFlag"_test = [] {
-        LSBFlag<uint32_t> f(42u, true);
-        std::ostringstream oss;
-        oss << f;
-        expect(oss.str() == std::string("Value=42, Flag=true"));
-    };
+TEST_CASE("LSBFlag formats output", "[Utilities][LSBFlag]")
+{
+    LSBFlag<uint32_t>  flag(42U, true);
+    std::ostringstream stream;
+    stream << flag;
+    CHECK(stream.str() == std::string {"Value=42, Flag=true"});
+}
 
-    "DifferentTypes_WorksForUint8AndUint64"_test = [] {
-        LSBFlag<uint8_t> f8(5u, true);
-        LSBFlag<uint64_t> f64(12345ull, false);
-        expect(f8.GetValue() == 5_u8);
-        expect(f8.GetFlag());
-        expect(f64.GetValue() == 12345_u64);
-        expect(!f64.GetFlag());
-    };
-
-    // No runtime tests for overflow: assert-protected
-};
+TEST_CASE("LSBFlag supports multiple widths", "[Utilities][LSBFlag]")
+{
+    LSBFlag<uint8_t>  flag8(5U, true);
+    LSBFlag<uint64_t> flag64(12345ULL, false);
+    CHECK(flag8.GetValue() == 5U);
+    CHECK(flag8.GetFlag());
+    CHECK(flag64.GetValue() == 12345ULL);
+    CHECK_FALSE(flag64.GetFlag());
+}

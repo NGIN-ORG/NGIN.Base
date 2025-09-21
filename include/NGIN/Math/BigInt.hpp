@@ -1,11 +1,11 @@
 #pragma once
 #include <NGIN/Primitives.hpp>
-#include <vector>
-#include <string>
-#include <iostream>
 #include <algorithm>
 #include <cstring>
 #include <iomanip>
+#include <iostream>
+#include <string>
+#include <vector>
 namespace NGIN::Math
 {
 
@@ -33,7 +33,8 @@ namespace NGIN::Math
             return result;
         }
         // Construct from std::string
-        explicit BigInt(const std::string& str) : BigInt(str.c_str()) {}
+        explicit BigInt(const std::string& str)
+            : BigInt(str.c_str()) {}
 
         // Construct from UInt32 (internal use)
         explicit BigInt(UInt32 value)
@@ -125,7 +126,8 @@ namespace NGIN::Math
         }
 
         // Default constructor (zero)
-        BigInt() : m_digits {0}, m_negative(false)
+        BigInt()
+            : m_digits {0}, m_negative(false)
         {}
 
         // Construct from C-string (const char*)
@@ -140,7 +142,7 @@ namespace NGIN::Math
             m_negative     = (str[0] == '-');
             UIntSize start = m_negative ? 1 : 0;
             m_digits.clear();
-            UIntSize len = std::strlen(str);
+            UIntSize            len = std::strlen(str);
             std::vector<UInt32> temp_digits;
             for (Int64 i = len; i > static_cast<Int64>(start); i -= BASE_DIGITS)
             {
@@ -309,15 +311,15 @@ namespace NGIN::Math
     private:
         static constexpr UInt32 BASE        = 1000000000;// 10^9
         static constexpr UInt32 BASE_DIGITS = 9;         // Number of decimal digits per element
-        std::vector<UInt32> m_digits {};                 // Least significant digit first
-        bool m_negative = false;
+        std::vector<UInt32>     m_digits {};             // Least significant digit first
+        bool                    m_negative = false;
 
         static std::vector<UInt32> AddDigits(const std::vector<UInt32>& a, const std::vector<UInt32>& b)
         {
             std::vector<UInt32> result;
             result.reserve(std::max(a.size(), b.size()) + 1);
-            UIntSize n   = std::max(a.size(), b.size());
-            UInt64 carry = 0;
+            UIntSize n     = std::max(a.size(), b.size());
+            UInt64   carry = 0;
             for (UIntSize i = 0; i < n || carry; ++i)
             {
                 UInt64 d1  = i < a.size() ? a[i] : 0;
@@ -513,10 +515,10 @@ namespace NGIN::Math
 
         static void KnuthDivMod(const BigInt& a, const BigInt& b, BigInt& q, BigInt& r)
         {
-            using UInt      = UInt32;
-            BigInt dividend = a.Abs();
-            BigInt divisor  = b.Abs();
-            std::size_t n   = dividend.m_digits.size();
+            using UInt           = UInt32;
+            BigInt      dividend = a.Abs();
+            BigInt      divisor  = b.Abs();
+            std::size_t n        = dividend.m_digits.size();
             q.m_digits.assign(n, 0);
             BigInt rem(0);
             for (int i = int(n) - 1; i >= 0; --i)
@@ -526,7 +528,7 @@ namespace NGIN::Math
                 UInt low = 0, high = BASE - 1, qd = 0;
                 while (low <= high)
                 {
-                    UInt mid    = low + ((high - low) >> 1);
+                    UInt   mid  = low + ((high - low) >> 1);
                     BigInt prod = divisor * BigInt(mid);
                     if (prod <= rem)
                     {
@@ -573,11 +575,10 @@ namespace NGIN::Math
 
             // Choose block size k (must be >= m/2)
             size_t k = (m + 1) / 2;
-            size_t s = (n + k - 1) / k;// number of blocks in a
             // Split a and b into blocks of k limbs
             auto split_blocks = [](const BigInt& x, size_t blocksize) -> std::vector<BigInt> {
                 std::vector<BigInt> blocks;
-                size_t total = x.m_digits.size();
+                size_t              total = x.m_digits.size();
                 for (size_t i = 0; i < total; i += blocksize)
                 {
                     std::vector<UInt32> part;
