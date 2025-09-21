@@ -1,5 +1,6 @@
 #pragma once
 
+#include <print>
 #include <stacktrace>
 #include <optional>
 #include <exception>
@@ -18,9 +19,6 @@ namespace NGIN::Exceptions
     class Exception : public std::runtime_error
     {
     public:
-        /// @brief Default constructor.
-        Exception() noexcept = default;
-
         /// @brief Constructor.
         Exception(const char* message) noexcept : std::runtime_error(message) {}
 
@@ -29,18 +27,19 @@ namespace NGIN::Exceptions
 
         /// @brief Returns the exception message.
         /// @return A string containing the exception message.
-        const char* GetMessage() const noexcept {return this->what();};
+        const char* GetMessage() const noexcept { return this->what(); };
 
         /// @brief Returns the stacktrace of the exception.
         /// @details The stacktrace is lazily initialized and only computed when this method is called.
         /// @return A `std::stacktrace` reference containing the stacktrace of the exception.
-        inline const std::stacktrace& GetStacktrace() const 
+        inline const std::stacktrace& GetStacktrace() const
         {
-            if (!stacktrace.has_value()) 
+            if (!stacktrace.has_value())
                 stacktrace = std::stacktrace::current();
             return stacktrace.value();
         }
+
     private:
-       mutable std::optional<std::stacktrace> stacktrace; ///< The stacktrace of the exception.
+        mutable std::optional<std::stacktrace> stacktrace;///< The stacktrace of the exception.
     };
-} // namespace NGIN::Exceptions
+}// namespace NGIN::Exceptions

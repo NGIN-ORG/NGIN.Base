@@ -12,7 +12,8 @@
       "binaryDir": "${sourceDir}/build/coverage",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "CODE_COVERAGE": "ON"
+        "CODE_COVERAGE": "ON",
+        "NGIN_BASE_BUILD_STATIC": "ON"
       }
     },
     {
@@ -23,7 +24,8 @@
       "cacheVariables": {
         "NGIN_BASE_DEVELOPMENT_MODE": "ON",
         "NGIN_BASE_BUILD_EXAMPLES": "OFF",
-        "NGIN_BASE_BUILD_TESTS": "OFF"
+        "NGIN_BASE_BUILD_TESTS": "OFF",
+        "NGIN_BASE_BUILD_STATIC": "ON"
       }
     },
     {
@@ -33,7 +35,8 @@
       "generator": "Ninja Multi-Config",
       "binaryDir": "${sourceDir}/build/install",
       "cacheVariables": {
-        "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install"
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install",
+        "NGIN_BASE_BUILD_STATIC": "ON"
       }
     },
     {
@@ -44,7 +47,8 @@
       "cacheVariables": {
         "NGIN_BASE_BUILD_TESTS": "ON",
         "NGIN_BASE_BUILD_EXAMPLES": "OFF",
-        "NGIN_BASE_BUILD_BENCHMARKS": "OFF"
+        "NGIN_BASE_BUILD_BENCHMARKS": "OFF",
+        "NGIN_BASE_BUILD_STATIC": "ON"
       }
     },
     {
@@ -55,7 +59,8 @@
       "cacheVariables": {
         "NGIN_BASE_BUILD_BENCHMARKS": "ON",
         "NGIN_BASE_BUILD_TESTS": "OFF",
-        "NGIN_BASE_BUILD_EXAMPLES": "OFF"
+        "NGIN_BASE_BUILD_EXAMPLES": "OFF",
+        "NGIN_BASE_BUILD_STATIC": "ON"
       }
     },
     {
@@ -66,7 +71,9 @@
       "cacheVariables": {
         "NGIN_BASE_BUILD_BENCHMARKS": "OFF",
         "NGIN_BASE_BUILD_TESTS": "OFF",
-        "NGIN_BASE_BUILD_EXAMPLES": "ON"
+        "NGIN_BASE_BUILD_EXAMPLES": "ON",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "NGIN_BASE_BUILD_STATIC": "ON"
       }
     }
   ],

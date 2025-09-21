@@ -28,7 +28,7 @@ int main()
 
     // Arithmetic
     auto totalM = m + UnitCast<Meters>(Kilometers(1.0));
-    std::cout << "Total meters (5m + 1km): " << total_m << std::endl;
+    std::cout << "Total meters (5m + 1km): " << totalM << std::endl;
 
     auto speed = m / s;
     std::cout << "Speed (m/s): " << speed.GetValue() << std::endl;

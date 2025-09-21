@@ -22,21 +22,25 @@ High‑level principles that apply to every component:
 ## Code Style & Namespacing
 
 Namespaces:
+
 - All code resides under `NGIN` root. Sub‑namespaces reflect domains (e.g. `NGIN::Utilities`, `NGIN::Units`, `NGIN::Async`, `NGIN::Meta`, `NGIN::Containers`).
 - No anonymous namespaces in headers. Use `detail` nested namespace for implementation internals: `namespace NGIN::Utilities::detail { ... }`.
 
 Formatting & Layout:
+
 - Enforce repository `.clang-format`; re-run after edits.
 - 4 spaces, no tabs. Keep lines ≤ ~120 chars when practical.
 - Opening brace on same line: `constexpr auto Foo() {` / `class Bar {`.
 - Trailing commas for multiline enums/initializers encouraged when clang-format permits.
 
 Keyword & Qualifier Use:
+
 - Prefer `constexpr` / `consteval` / `constinit` when semantically correct.
 - Use `noexcept` when implementation is observably non‑throwing; do not over‑promise.
 - Use `final` / `override` explicitly for derived virtuals (rare here).
 
 Naming Conventions:
+
 - Types / templates: `PascalCase` (e.g. `LinearAllocator`, `ConcurrentHashMap`).
 - Functions / methods: `PascalCase` (e.g. `ComputeHash`, `UpdateState`).
 - Member data prefix: `m_`  (e.g `m_foo`, `m_someData`)
@@ -47,6 +51,7 @@ Naming Conventions:
 - Constants: `ALL_CAPS` only for macro guards.
 
 Type Usage:
+
 - Use `auto` when the type is obvious from the right-hand side or prevents repetition.
 - Avoid implicit narrowing; use explicit `static_cast`.
 - Prefer uniform initialization.
@@ -56,10 +61,12 @@ Type Usage:
 ## Dependency Policy
 
 Production Code:
+
 - Standard library only. No third‑party runtime dependencies added without prior approval.
 
 Tests / Tooling:
-- May use Boost.UT (`boost::ut`) and other explicitly approved test‑only or benchmark libraries.
+
+- May use Catch2 and other explicitly approved test-only or benchmark libraries.
 - Benchmarks should remain isolated under `benchmarks/` and not leak dependencies into public headers.
 
 ---
@@ -74,6 +81,7 @@ include/NGIN/Async/README.md
 ```
 
 Template for a component README:
+
 1. Purpose & Scope
 2. Key Types / Concepts
 3. Usage Examples (concise)
@@ -90,24 +98,32 @@ If a component lacks a README, follow general patterns outlined here and inspect
 Goals: correctness, safety, performance regressions caught early.
 
 Tests:
+
 1. Every new feature: at least one positive (success) and one negative (failure / defensive) test.
-2. Use existing Boost.UT style:
+2. Use existing Catch2 style:
+
    ```cpp
-   "scenario"_test = [] { /* expectations */ };
+   TEST_CASE("scenario") {
+       // REQUIRE/SECTION assertions
+   }
    ```
+
 3. Cover: invariants, boundary conditions (empty, moved-from, max size, alignment), exception or error pathways.
 4. Avoid relying on unspecified order or undefined behavior.
 
 Benchmarks:
+
 - For measurable performance-sensitive additions add/extend benchmarks in `benchmarks/` naming them descriptively (`SchedulerBenchmarks.cpp`, etc.).
 - Keep benchmarks isolated from test-only headers.
 
 Static & Dynamic Analysis (recommended before PR merge):
+
 - `clang-tidy` on changed files (respect local suppression comments only when justified).
 - Sanitizers (ASan, UBSan) in a debug build for new low-level logic.
 - Optional: compile with `-Wall -Wextra -Wpedantic` (or MSVC equivalents) and zero new warnings.
 
 Checklist Summary:
+
 - [ ] Positive test
 - [ ] Negative test
 - [ ] Benchmark (if perf critical)
@@ -137,6 +153,7 @@ Checklist Summary:
 ## Patterns to Follow / Avoid (Cheat Sheet)
 
 Follow:
+
 - Consistent value construction: `constexpr explicit Type(T v) noexcept : value_(v) {}`.
 - Policy / traits indirection for customization instead of conditionals.
 - Conversion pipeline: source policy → base → target policy → target cast.
@@ -145,6 +162,7 @@ Follow:
 - #pragma once
 
 Avoid:
+
 - Raw `new` / `delete` outside controlled abstractions.
 - RTTI for core logic; prefer traits / concepts.
 - Global singletons / hidden mutable state.
@@ -171,6 +189,7 @@ Avoid:
 
 Title: Short imperative (e.g., "Add units conversion ratio helper").
 Body Outline:
+
 - Motivation / Problem
 - Solution Summary (key types & algorithms)
 - Tests & Verification Steps (mention benchmarks if added)

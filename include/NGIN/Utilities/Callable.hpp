@@ -433,21 +433,34 @@ namespace NGIN::Utilities
                 throw std::runtime_error("Callable: copy attempted on non-copyable target");
             }
 
-            m_size      = other.m_size;
-            m_usingHeap = other.m_usingHeap;
+            const auto otherSize     = other.m_size;
+            const bool otherUsesHeap = other.m_usingHeap;
 
-            if (other.m_usingHeap)
+            if (otherUsesHeap)
             {
-                // Allocate exactly other.m_size bytes with max alignment ALIGNMENT.
-                void* raw = ::operator new(other.m_size, std::align_val_t {ALIGNMENT});
-                other.m_copy(raw, other.GetPtr());
-                m_storage.heapPtr = raw;
+                // Allocate exactly otherSize bytes with max alignment ALIGNMENT.
+                void* raw = ::operator new(otherSize, std::align_val_t {ALIGNMENT});
+                try
+                {
+                    other.m_copy(raw, other.GetPtr());
+                    m_storage.heapPtr = raw;
+                    m_usingHeap       = true;
+                } catch (...)
+                {
+                    ::operator delete(raw, otherSize, std::align_val_t {ALIGNMENT});
+                    m_storage.heapPtr = nullptr;
+                    m_usingHeap       = false;
+                    throw;
+                }
             }
             else
             {
                 // Inline copy
                 other.m_copy(static_cast<void*>(m_storage.buffer), other.GetPtr());
+                m_usingHeap = false;
             }
+
+            m_size = otherSize;
 
             // Copy all function-pointers:
             m_invoke  = other.m_invoke;

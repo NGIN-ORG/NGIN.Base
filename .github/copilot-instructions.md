@@ -43,7 +43,7 @@ Naming Conventions:
 
 - Types / templates: `PascalCase` (e.g. `LinearAllocator`, `ConcurrentHashMap`).
 - Functions / methods: `PascalCase` (e.g. `ComputeHash`, `UpdateState`).
-- Member data prefix: `m_` (e.g `m_foo`, `m_someData`)
+- Member data prefix: `m_`  (e.g `m_foo`, `m_someData`)
 - Static data prefix: `s_camelCase` (e.g `s_foo`, `s_someData`).
 - Local / function-scope variables: `camelCase`.
 - Template parameters: `PascalCase` short (e.g. `class T`, `typename Alloc`).
@@ -66,7 +66,7 @@ Production Code:
 
 Tests / Tooling:
 
-- May use Boost.UT (`boost::ut`) and other explicitly approved test‑only or benchmark libraries.
+- May use Catch2 and other explicitly approved test-only or benchmark libraries.
 - Benchmarks should remain isolated under `benchmarks/` and not leak dependencies into public headers.
 
 ---
@@ -100,10 +100,14 @@ Goals: correctness, safety, performance regressions caught early.
 Tests:
 
 1. Every new feature: at least one positive (success) and one negative (failure / defensive) test.
-2. Use existing Boost.UT style:
+2. Use existing Catch2 style:
+
    ```cpp
-   "scenario"_test = [] { /* expectations */ };
+   TEST_CASE("scenario") {
+       // REQUIRE/SECTION assertions
+   }
    ```
+
 3. Cover: invariants, boundary conditions (empty, moved-from, max size, alignment), exception or error pathways.
 4. Avoid relying on unspecified order or undefined behavior.
 

@@ -27,8 +27,8 @@ namespace NGIN::Meta
     constexpr std::size_t RemoveTokens(std::string_view input, char* outBuffer, std::size_t outBufferSize) noexcept
     {
         constexpr std::array<std::string_view, 4> tokens = {"class ", "struct ", "enum ", "union "};
-        constexpr std::array<std::size_t, 4> length      = {6, 7, 5, 6};
-        std::size_t i = 0, out = 0;
+        constexpr std::array<std::size_t, 4>      length = {6, 7, 5, 6};
+        std::size_t                               i = 0, out = 0;
         while (i < input.size() && out + 1 < outBufferSize)
         {
             bool matched = false;
@@ -108,7 +108,7 @@ namespace NGIN::Meta
                 return buf;
 
             std::string_view rawView = signature.substr(contentPos, end - contentPos);
-            auto len                 = RemoveTokens(rawView, buf.data(), buf.size());
+            auto             len     = RemoveTokens(rawView, buf.data(), buf.size());
             if (len < buf.size())
                 RTrim(buf.data(), len);
 
@@ -131,8 +131,8 @@ namespace NGIN::Meta
         }
 
         inline static constexpr std::array<char, MAX_NAME_BUFFER> buffer = BuildRawBuffer();
-        inline static constexpr std::size_t length                       = ConstexprStrnlen(buffer.data(), buffer.size());
-        inline static constexpr std::string_view name                    = std::string_view(buffer.data(), length);
+        inline static constexpr std::size_t                       length = ConstexprStrnlen(buffer.data(), buffer.size());
+        inline static constexpr std::string_view                  name   = std::string_view(buffer.data(), length);
     };
 
     //================ TypeName primary (non-template types) =================//
@@ -143,13 +143,13 @@ namespace NGIN::Meta
         using Base = std::remove_cv_t<std::remove_reference_t<T>>;
 
     public:
-        inline static const std::string_view rawName         = RawTypeNameBuilder<Base>::name;
-        inline static const std::string_view qualifiedName   = rawName;
-        inline static const std::string_view unqualifiedName = []() {
+        inline static constexpr std::string_view rawName         = RawTypeNameBuilder<Base>::name;
+        inline static constexpr std::string_view qualifiedName   = rawName;
+        inline static constexpr std::string_view unqualifiedName = []() {
             auto pos = FindLastTopLevelDoubleColon(qualifiedName);
             return (pos == std::string_view::npos) ? qualifiedName : qualifiedName.substr(pos + 2);
         }();
-        inline static const std::string_view namespaceName = []() {
+        inline static constexpr std::string_view namespaceName = []() {
             auto pos = FindLastTopLevelDoubleColon(qualifiedName);
             return (pos == std::string_view::npos) ? std::string_view {} : qualifiedName.substr(0, pos);
         }();
@@ -166,11 +166,11 @@ namespace NGIN::Meta
         static constexpr std::array<char, MAX_NAME_BUFFER> BuildNameBuffer() noexcept
         {
             std::array<char, MAX_NAME_BUFFER> buf {};
-            std::size_t p          = 0;
-            constexpr auto raw     = RawTypeNameBuilder<ThisT>::name;
-            auto baseEnd           = raw.find('<');
-            std::string_view base  = (baseEnd == std::string_view::npos) ? raw : raw.substr(0, baseEnd);
-            std::string_view qbase = base;
+            std::size_t                       p       = 0;
+            constexpr auto                    raw     = RawTypeNameBuilder<ThisT>::name;
+            auto                              baseEnd = raw.find('<');
+            std::string_view                  base    = (baseEnd == std::string_view::npos) ? raw : raw.substr(0, baseEnd);
+            std::string_view                  qbase   = base;
             if constexpr (!Qualified)
             {
                 auto pos = FindLastTopLevelDoubleColon(base);
@@ -205,16 +205,16 @@ namespace NGIN::Meta
             return buf;
         }
 
-        inline static const auto qualBuf        = BuildNameBuffer<true>();
-        inline static const std::size_t qualLen = ConstexprStrnlen(qualBuf.data(), qualBuf.size());
-        inline static const auto unqBuf         = BuildNameBuffer<false>();
-        inline static const std::size_t unqLen  = ConstexprStrnlen(unqBuf.data(), unqBuf.size());
+        inline static constexpr auto        qualBuf = BuildNameBuffer<true>();
+        inline static constexpr std::size_t qualLen = ConstexprStrnlen(qualBuf.data(), qualBuf.size());
+        inline static constexpr auto        unqBuf  = BuildNameBuffer<false>();
+        inline static constexpr std::size_t unqLen  = ConstexprStrnlen(unqBuf.data(), unqBuf.size());
 
     public:
-        inline static const std::string_view rawName         = RawTypeNameBuilder<ThisT>::name;
-        inline static const std::string_view qualifiedName   = std::string_view(qualBuf.data(), qualLen);
-        inline static const std::string_view unqualifiedName = std::string_view(unqBuf.data(), unqLen);
-        inline static const std::string_view namespaceName   = []() {
+        inline static constexpr std::string_view rawName         = RawTypeNameBuilder<ThisT>::name;
+        inline static constexpr std::string_view qualifiedName   = std::string_view(qualBuf.data(), qualLen);
+        inline static constexpr std::string_view unqualifiedName = std::string_view(unqBuf.data(), unqLen);
+        inline static constexpr std::string_view namespaceName   = []() {
             auto pos = FindLastTopLevelDoubleColon(qualifiedName);
             return (pos == std::string_view::npos) ? std::string_view {} : qualifiedName.substr(0, pos);
         }();

@@ -5,7 +5,10 @@
 /// copy/move behavior, exception conditions, and edge cases.
 
 #include <NGIN/Utilities/Callable.hpp>// Include your Callable header
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Weverything"// or the specific warnings
 #include <catch2/catch_test_macros.hpp>
+#pragma clang diagnostic pop
 #include <memory>// For std::unique_ptr
 #include <stdexcept>
 
