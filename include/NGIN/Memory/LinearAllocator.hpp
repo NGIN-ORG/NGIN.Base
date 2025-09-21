@@ -75,7 +75,7 @@ namespace NGIN::Memory
         /// requests will return `nullptr`.
         explicit LinearAllocator(std::size_t capacityInBytes,
                                  Upstream    upstream             = {},
-                                 std::size_t baseAlignmentInBytes = std::max(std::size_t(alignof(std::max_align_t)), std::size_t(64)))
+                                 std::size_t baseAlignmentInBytes = (std::max) (std::size_t(alignof(std::max_align_t)), std::size_t(64)))
             : m_upstreamInstance(std::move(upstream)), m_baseAlignmentInBytes(baseAlignmentInBytes)
         {
             void* base        = m_upstreamInstance.Allocate(capacityInBytes, m_baseAlignmentInBytes);

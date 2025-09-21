@@ -50,6 +50,13 @@ set(NGIN_BASE_PLATFORM_DEFINITIONS
   $<$<STREQUAL:$<PLATFORM_ID>,Linux>:NGIN_PLATFORM=\"Linux\">
 )
 
+# On Windows, prevent the global min/max macros from <windows.h> from colliding with std::min/std::max.
+# This is a ubiquitous defensive definition across the codebase to avoid needing to locally parenthesize
+# every std::max / std::min usage. (See build failure in LinearAllocator / LSBFlag.)
+if (WIN32)
+  list(APPEND NGIN_BASE_PLATFORM_DEFINITIONS NOMINMAX)
+endif()
+
 set(NGIN_BASE_EXPORT_TARGETS)
 set(ngin_base_primary_target "")
 
