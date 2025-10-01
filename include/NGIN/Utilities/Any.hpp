@@ -585,6 +585,22 @@ namespace NGIN::Utilities
             return m_allocator;
         }
 
+        /// <summary>Mutable pointer to the stored object, or nullptr when empty.</summary>
+        [[nodiscard]] void* Data() noexcept
+        {
+            if (m_descriptor == nullptr)
+                return nullptr;
+            return m_descriptor->access(m_storage);
+        }
+
+        /// <summary>Const pointer to the stored object, or nullptr when empty.</summary>
+        [[nodiscard]] const void* Data() const noexcept
+        {
+            if (m_descriptor == nullptr)
+                return nullptr;
+            return m_descriptor->accessConst(m_storage);
+        }
+
         static Any MakeVoid() noexcept
         {
             return Any {};
