@@ -11,12 +11,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <limits>
+#include <new>
 #include <optional>
 #include <stdexcept>
 #include <thread>
 #include <type_traits>
 #include <utility>
-#include <new>
 
 namespace NGIN::Containers
 {
@@ -50,7 +51,7 @@ namespace NGIN::Containers
         {
             std::atomic<std::uint8_t> control {static_cast<std::uint8_t>(SlotState::Empty)};
             std::size_t               hash {0};
-            alignas(Key) unsigned char   keyStorage[sizeof(Key)] {};
+            alignas(Key) unsigned char keyStorage[sizeof(Key)] {};
             alignas(Value) unsigned char valueStorage[sizeof(Value)] {};
 
             constexpr SlotStorage() noexcept = default;
@@ -91,15 +92,13 @@ namespace NGIN::Containers
                     try
                     {
                         ::new (static_cast<void*>(valueStorage)) Value(std::forward<V>(value));
-                    }
-                    catch (...)
+                    } catch (...)
                     {
                         keyPtr->~Key();
                         hash = 0;
                         throw;
                     }
-                }
-                catch (...)
+                } catch (...)
                 {
                     hash = 0;
                     throw;
@@ -108,8 +107,8 @@ namespace NGIN::Containers
 
             void DestroyPayload() noexcept
             {
-                KeyRef().~Key();
                 ValueRef().~Value();
+                KeyRef().~Key();
                 hash = 0;
             }
 
@@ -161,31 +160,31 @@ namespace NGIN::Containers
     /// @brief Concurrent hash map leveraging open addressing and cooperative resizing.
     template<class Key,
              class Value,
-             class Hash   = std::hash<Key>,
-             class Equal  = std::equal_to<Key>,
+             class Hash                         = std::hash<Key>,
+             class Equal                        = std::equal_to<Key>,
              Memory::AllocatorConcept Allocator = Memory::SystemAllocator,
-             std::size_t GroupSize              = 16>
+             std::size_t              GroupSize = 16>
     class ConcurrentHashMap
     {
         static_assert(detail::IsPowerOfTwo(GroupSize), "GroupSize must be a power of two.");
 
     public:
-        using key_type        = Key;
-        using mapped_type     = Value;
-        using hash_type       = Hash;
-        using key_equal       = Equal;
-        using allocator_type  = Allocator;
-        using size_type       = std::size_t;
-        using value_type      = std::pair<const Key, Value>;
+        using key_type                         = Key;
+        using mapped_type                      = Value;
+        using hash_type                        = Hash;
+        using key_equal                        = Equal;
+        using allocator_type                   = Allocator;
+        using size_type                        = std::size_t;
+        using value_type                       = std::pair<const Key, Value>;
         static constexpr size_type kGroupSize  = GroupSize;
         static constexpr double    kLoadFactor = 0.75;
 
         ConcurrentHashMap() : ConcurrentHashMap(64) {}
 
-        explicit ConcurrentHashMap(size_type initialCapacity,
-                                    const Hash& hash   = Hash {},
-                                    const Equal& equal = Equal {},
-                                    const Allocator& allocator = Allocator {})
+        explicit ConcurrentHashMap(size_type        initialCapacity,
+                                   const Hash&      hash      = Hash {},
+                                   const Equal&     equal     = Equal {},
+                                   const Allocator& allocator = Allocator {})
             : m_hash(hash), m_equal(equal), m_allocator(allocator)
         {
             Initialize(initialCapacity);
@@ -200,14 +199,14 @@ namespace NGIN::Containers
               m_allocator(std::move(other.m_allocator))
         {
             other.DrainMigration();
-            m_table            = other.m_table;
-            m_capacity         = other.m_capacity;
-            m_mask             = other.m_mask;
+            m_table    = other.m_table;
+            m_capacity = other.m_capacity;
+            m_mask     = other.m_mask;
             m_size.store(other.m_size.load(std::memory_order_relaxed), std::memory_order_relaxed);
-            m_resizeThreshold  = other.m_resizeThreshold;
-            other.m_table      = {};
-            other.m_capacity   = 0;
-            other.m_mask       = 0;
+            m_resizeThreshold       = other.m_resizeThreshold;
+            other.m_table           = {};
+            other.m_capacity        = 0;
+            other.m_mask            = 0;
             other.m_resizeThreshold = 0;
             other.m_size.store(0, std::memory_order_relaxed);
         }
@@ -224,15 +223,15 @@ namespace NGIN::Containers
                 m_allocator = std::move(other.m_allocator);
 
                 other.DrainMigration();
-                m_table            = other.m_table;
-                m_capacity         = other.m_capacity;
-                m_mask             = other.m_mask;
+                m_table    = other.m_table;
+                m_capacity = other.m_capacity;
+                m_mask     = other.m_mask;
                 m_size.store(other.m_size.load(std::memory_order_relaxed), std::memory_order_relaxed);
-                m_resizeThreshold  = other.m_resizeThreshold;
+                m_resizeThreshold = other.m_resizeThreshold;
 
-                other.m_table      = {};
-                other.m_capacity   = 0;
-                other.m_mask       = 0;
+                other.m_table           = {};
+                other.m_capacity        = 0;
+                other.m_mask            = 0;
                 other.m_resizeThreshold = 0;
                 other.m_size.store(0, std::memory_order_relaxed);
             }
@@ -309,27 +308,31 @@ namespace NGIN::Containers
 
         bool Remove(const Key& key)
         {
-            const std::size_t hash = ComputeHash(key);
-            TableView         primary = CurrentView();
+            const std::size_t hash      = ComputeHash(key);
+            TableView         primary   = CurrentView();
+            MigrationState*   migration = AcquireMigration();
+            bool              finalized = false;
+
+            bool removed = false;
 
             if (auto* slot = AcquireForMutation(primary, key, hash))
             {
                 slot->DestroyPayload();
                 slot->UnlockTo(detail::SlotState::Tombstone);
                 m_size.fetch_sub(1, std::memory_order_acq_rel);
-                if (auto* migration = m_migration.load(std::memory_order_acquire))
+                removed = true;
+                if (migration)
                 {
                     RemoveFromOld(migration, key, hash);
                     HelpMigration(migration);
+                    finalized = FinalizeMigration(migration);
                 }
                 else
                 {
                     MaybeStartMigration();
                 }
-                return true;
             }
-
-            if (auto* migration = m_migration.load(std::memory_order_acquire))
+            else if (migration)
             {
                 TableView oldView {migration->oldGroups, migration->oldMask};
                 if (auto* slot = AcquireForMutation(oldView, key, hash))
@@ -337,29 +340,32 @@ namespace NGIN::Containers
                     slot->DestroyPayload();
                     slot->UnlockTo(detail::SlotState::Tombstone);
                     m_size.fetch_sub(1, std::memory_order_acq_rel);
+                    removed = true;
                     HelpMigration(migration);
-                    return true;
+                    finalized = FinalizeMigration(migration);
                 }
             }
 
-            return false;
+            ReleaseAndMaybeDestroy(migration, finalized);
+            return removed;
         }
 
         [[nodiscard]] bool Contains(const Key& key) const noexcept
         {
-            const std::size_t hash = ComputeHash(key);
+            const std::size_t hash    = ComputeHash(key);
             TableView         primary = CurrentView();
-
             if (ContainsInView(primary, key, hash))
                 return true;
 
-            if (auto* migration = m_migration.load(std::memory_order_acquire))
+            MigrationState* migration = AcquireMigration();
+            bool            found     = false;
+            if (migration)
             {
                 TableView oldView {migration->oldGroups, migration->oldMask};
-                if (ContainsInView(oldView, key, hash))
-                    return true;
+                found = ContainsInView(oldView, key, hash);
             }
-            return false;
+            ReleaseMigration(migration);
+            return found;
         }
 
         Value Get(const Key& key) const
@@ -372,19 +378,21 @@ namespace NGIN::Containers
 
         bool TryGet(const Key& key, Value& outValue) const
         {
-            const std::size_t hash = ComputeHash(key);
+            const std::size_t hash    = ComputeHash(key);
             TableView         primary = CurrentView();
 
             if (TryCopyValueInView(primary, key, hash, outValue))
                 return true;
 
-            if (auto* migration = m_migration.load(std::memory_order_acquire))
+            MigrationState* migration = AcquireMigration();
+            bool            result    = false;
+            if (migration)
             {
                 TableView oldView {migration->oldGroups, migration->oldMask};
-                if (TryCopyValueInView(oldView, key, hash, outValue))
-                    return true;
+                result = TryCopyValueInView(oldView, key, hash, outValue);
             }
-            return false;
+            ReleaseMigration(migration);
+            return result;
         }
 
         [[nodiscard]] std::optional<Value> GetOptional(const Key& key) const
@@ -400,10 +408,12 @@ namespace NGIN::Containers
             if (desiredCapacity <= m_capacity)
                 return;
             StartMigration(desiredCapacity);
-            if (auto* migration = m_migration.load(std::memory_order_acquire))
+            MigrationState* migration = AcquireMigration();
+            if (migration)
             {
                 HelpMigration(migration, migration->oldGroupCount);
-                FinalizeMigration(migration);
+                const bool finalized = FinalizeMigration(migration);
+                ReleaseAndMaybeDestroy(migration, finalized);
             }
         }
 
@@ -453,26 +463,29 @@ namespace NGIN::Containers
 
         struct MigrationState
         {
-            Group*                oldGroups {nullptr};
-            size_type             oldGroupCount {0};
-            size_type             oldMask {0};
-            Group*                newGroups {nullptr};
-            size_type             newGroupCount {0};
-            size_type             newMask {0};
-            size_type             newThreshold {0};
+            Group*                 oldGroups {nullptr};
+            size_type              oldGroupCount {0};
+            size_type              oldMask {0};
+            Group*                 newGroups {nullptr};
+            size_type              newGroupCount {0};
+            size_type              newMask {0};
+            size_type              newThreshold {0};
             std::atomic<size_type> nextGroup {0};
             std::atomic<size_type> migratedGroups {0};
+            std::atomic<size_type> activeUsers {0};
+            std::atomic<bool>      finalized {false};
+            std::atomic<bool>      destroyed {false};
         };
 
-        Table                         m_table {};
-        size_type                     m_capacity {0};
-        size_type                     m_mask {0};
-        std::atomic<size_type>        m_size {0};
-        size_type                     m_resizeThreshold {0};
-        Hash                          m_hash {};
-        Equal                         m_equal {};
-        Allocator                     m_allocator {};
-        std::atomic<MigrationState*>  m_migration {nullptr};
+        Table                        m_table {};
+        size_type                    m_capacity {0};
+        size_type                    m_mask {0};
+        std::atomic<size_type>       m_size {0};
+        size_type                    m_resizeThreshold {0};
+        Hash                         m_hash {};
+        Equal                        m_equal {};
+        Allocator                    m_allocator {};
+        std::atomic<MigrationState*> m_migration {nullptr};
 
         static constexpr size_type kGroupMask  = GroupSize - 1;
         static constexpr size_type kGroupShift = detail::ConstLog2(GroupSize);
@@ -487,7 +500,7 @@ namespace NGIN::Containers
         void Initialize(size_type initialCapacity)
         {
             DrainMigration();
-            initialCapacity = std::max<size_type>(GroupSize, std::bit_ceil(initialCapacity));
+            initialCapacity      = std::max<size_type>(GroupSize, std::bit_ceil(initialCapacity));
             size_type groupCount = initialCapacity / GroupSize;
             Group*    groups     = AllocateGroups(groupCount);
 
@@ -565,9 +578,9 @@ namespace NGIN::Containers
         {
             if (capacity <= 1)
                 return 1;
-            const double raw       = static_cast<double>(capacity) * kLoadFactor;
-            const auto   threshold = static_cast<size_type>(raw);
-            const size_type capped = threshold >= capacity ? capacity - 1 : threshold;
+            const double    raw       = static_cast<double>(capacity) * kLoadFactor;
+            const auto      threshold = static_cast<size_type>(raw);
+            const size_type capped    = threshold >= capacity ? capacity - 1 : threshold;
             return capped == 0 ? 1 : capped;
         }
 
@@ -578,25 +591,126 @@ namespace NGIN::Containers
             const size_type projected = m_size.load(std::memory_order_acquire) + additional;
             if (projected <= m_resizeThreshold)
                 return;
-            StartMigration(m_capacity ? m_capacity * 2 : GroupSize);
+            size_type       target     = m_capacity ? m_capacity * 2 : GroupSize;
+            const size_type scaledBase = projected + (projected / 3) + GroupSize;
+            const size_type scaled     = std::bit_ceil(std::max<size_type>(GroupSize, scaledBase));
+            target                     = std::max(target, scaled);
+            StartMigration(target);
+        }
+
+        MigrationState* AcquireMigration() const noexcept
+        {
+            while (true)
+            {
+                MigrationState* state = m_migration.load(std::memory_order_acquire);
+                if (!state)
+                    return nullptr;
+                state->activeUsers.fetch_add(1, std::memory_order_acquire);
+                if (state == m_migration.load(std::memory_order_acquire))
+                    return state;
+                state->activeUsers.fetch_sub(1, std::memory_order_acq_rel);
+            }
+        }
+
+        void ReleaseMigration(MigrationState* state) const noexcept
+        {
+            if (state)
+                state->activeUsers.fetch_sub(1, std::memory_order_acq_rel);
+        }
+
+        void DestroyMigrationState(MigrationState* state) noexcept
+        {
+            if (!state)
+                return;
+            while (state->activeUsers.load(std::memory_order_acquire) != 0)
+            {
+                std::this_thread::yield();
+            }
+            ReleaseGroups(state->oldGroups, state->oldGroupCount);
+            delete state;
+        }
+
+        void ReleaseAndMaybeDestroy(MigrationState* state, bool finalized) noexcept
+        {
+            if (!state)
+                return;
+            const bool alreadyFinalized = state->finalized.load(std::memory_order_acquire);
+            ReleaseMigration(state);
+            if (finalized)
+            {
+                if (!state->destroyed.exchange(true, std::memory_order_acq_rel))
+                    DestroyMigrationState(state);
+                return;
+            }
+            if (alreadyFinalized)
+            {
+                if (!state->destroyed.exchange(true, std::memory_order_acq_rel))
+                    DestroyMigrationState(state);
+            }
         }
 
         void StartMigration(size_type desiredCapacity)
         {
-            desiredCapacity = std::max<size_type>(GroupSize, std::bit_ceil(desiredCapacity));
-            size_type newGroupCount = desiredCapacity / GroupSize;
+            const size_type currentSize = m_size.load(std::memory_order_acquire);
+
+            const size_type surgeBase = std::max<size_type>(GroupSize, currentSize / 2 + GroupSize);
+            size_type       demand    = currentSize + surgeBase;
+            if (demand < currentSize)// overflow check
+                demand = std::numeric_limits<size_type>::max();
+
+            size_type requiredCapacity;
+            if (demand > (std::numeric_limits<size_type>::max() - 2) / 4)
+            {
+                requiredCapacity = std::numeric_limits<size_type>::max();
+            }
+            else
+            {
+                requiredCapacity = (demand * 4 + 2) / 3;// ceil(demand / 0.75)
+            }
+
+            size_type minimumCapacity = std::max(desiredCapacity, requiredCapacity);
+            if (m_capacity)
+            {
+                const size_type growthBuffer = std::max<size_type>(m_capacity / 2, GroupSize);
+                if (m_capacity > std::numeric_limits<size_type>::max() - growthBuffer)
+                    minimumCapacity = std::numeric_limits<size_type>::max();
+                else
+                    minimumCapacity = std::max(minimumCapacity, m_capacity + growthBuffer);
+            }
+            else
+            {
+                minimumCapacity = std::max(minimumCapacity, GroupSize * 2);
+            }
+
+            minimumCapacity = std::max(minimumCapacity, static_cast<size_type>(GroupSize));
+
+            const size_type maxPowerOfTwo = size_type {1} << (std::numeric_limits<size_type>::digits - 1);
+            size_type       targetCapacity;
+            if (minimumCapacity > maxPowerOfTwo)
+            {
+                targetCapacity = maxPowerOfTwo;
+            }
+            else
+            {
+                targetCapacity = std::bit_ceil(minimumCapacity);
+            }
+
+            size_type newGroupCount = targetCapacity / GroupSize;
             Group*    newGroups     = AllocateGroups(newGroupCount);
 
-            auto* state            = new MigrationState();
-            state->oldGroups       = m_table.groups;
-            state->oldGroupCount   = m_table.groupCount;
-            state->oldMask         = m_mask;
-            state->newGroups       = newGroups;
-            state->newGroupCount   = newGroupCount;
-            state->newMask         = desiredCapacity - 1;
-            state->newThreshold    = ComputeThreshold(desiredCapacity);
+            auto* state          = new MigrationState();
+            state->oldGroups     = m_table.groups;
+            state->oldGroupCount = m_table.groupCount;
+            state->oldMask       = m_mask;
+            state->newGroups     = newGroups;
+            state->newGroupCount = newGroupCount;
+            state->newMask       = targetCapacity - 1;
+            state->newThreshold  = ComputeThreshold(targetCapacity);
             state->nextGroup.store(0, std::memory_order_relaxed);
             state->migratedGroups.store(0, std::memory_order_relaxed);
+            state->activeUsers.store(1, std::memory_order_relaxed);
+            state->finalized.store(false, std::memory_order_relaxed);
+            state->destroyed.store(false, std::memory_order_relaxed);
 
             MigrationState* expected = nullptr;
             if (m_migration.compare_exchange_strong(
@@ -607,13 +721,18 @@ namespace NGIN::Containers
             {
                 m_table.groups     = newGroups;
                 m_table.groupCount = newGroupCount;
-                m_capacity         = desiredCapacity;
+                m_capacity         = targetCapacity;
                 m_mask             = state->newMask;
                 m_resizeThreshold  = state->newThreshold;
                 HelpMigration(state, 1);
+                const bool finalized = FinalizeMigration(state);
+                ReleaseMigration(state);
+                if (finalized && !state->destroyed.exchange(true, std::memory_order_acq_rel))
+                    DestroyMigrationState(state);
             }
             else
             {
+                state->activeUsers.store(0, std::memory_order_relaxed);
                 ReleaseGroups(newGroups, newGroupCount);
                 delete state;
             }
@@ -621,10 +740,14 @@ namespace NGIN::Containers
 
         void DrainMigration() noexcept
         {
-            while (auto* migration = m_migration.load(std::memory_order_acquire))
+            while (true)
             {
+                MigrationState* migration = AcquireMigration();
+                if (!migration)
+                    break;
                 HelpMigration(migration, migration->oldGroupCount);
-                FinalizeMigration(migration);
+                const bool finalized = FinalizeMigration(migration);
+                ReleaseAndMaybeDestroy(migration, finalized);
             }
         }
 
@@ -643,94 +766,180 @@ namespace NGIN::Containers
                 state->migratedGroups.fetch_add(1, std::memory_order_acq_rel);
                 ++processed;
             }
-            if (state->migratedGroups.load(std::memory_order_acquire) >= totalGroups)
-            {
-                FinalizeMigration(state);
-            }
         }
 
-        void FinalizeMigration(MigrationState* state) noexcept
+        bool FinalizeMigration(MigrationState* state) noexcept
         {
             if (!state)
-                return;
+                return false;
             if (state->migratedGroups.load(std::memory_order_acquire) < state->oldGroupCount)
-                return;
+                return false;
 
             MigrationState* expected = state;
-            if (m_migration.compare_exchange_strong(
+            if (!m_migration.compare_exchange_strong(
                         expected,
                         nullptr,
                         std::memory_order_acq_rel,
                         std::memory_order_relaxed))
             {
-                ReleaseGroups(state->oldGroups, state->oldGroupCount);
-                delete state;
+                return false;
             }
+            state->finalized.store(true, std::memory_order_release);
+            return true;
         }
 
         void MigrateGroup(MigrationState* state, size_type groupIndex) noexcept
         {
             if (!state)
                 return;
-            TableView oldView {state->oldGroups, state->oldMask};
+            TableView       oldView {state->oldGroups, state->oldMask};
             const size_type base = groupIndex << kGroupShift;
-            for (size_type offset = 0; offset < GroupSize; ++offset)
+            bool            pendingWork;
+            do
             {
-                const size_type index = (base + offset) & state->oldMask;
-                auto&           slot  = SlotAt(oldView, index);
-
-                while (true)
+                pendingWork = false;
+                for (size_type offset = 0; offset < GroupSize; ++offset)
                 {
-                    const auto slotState = slot.State(std::memory_order_acquire);
-                    if (slotState == detail::SlotState::Empty)
+                    const size_type index = (base + offset) & state->oldMask;
+                    auto&           slot  = SlotAt(oldView, index);
+
+                    while (true)
                     {
-                        break;
-                    }
-                    if (slotState == detail::SlotState::Tombstone)
-                    {
-                        if (slot.TryLockFrom(detail::SlotState::Tombstone))
+                        const auto slotState = slot.State(std::memory_order_acquire);
+                        if (slotState == detail::SlotState::Empty)
                         {
-                            slot.hash = 0;
-                            slot.UnlockTo(detail::SlotState::Empty);
+                            break;
                         }
-                        break;
-                    }
-                    if (slotState == detail::SlotState::PendingInsert)
-                    {
-                        std::this_thread::yield();
-                        continue;
-                    }
-                    if (slotState == detail::SlotState::Occupied)
-                    {
-                        if (!slot.TryLockFrom(detail::SlotState::Occupied))
+                        if (slotState == detail::SlotState::Tombstone)
                         {
+                            if (slot.TryLockFrom(detail::SlotState::Tombstone))
+                            {
+                                slot.hash = 0;
+                                slot.UnlockTo(detail::SlotState::Empty);
+                            }
+                            break;
+                        }
+                        if (slotState == detail::SlotState::PendingInsert)
+                        {
+                            pendingWork = true;
                             std::this_thread::yield();
-                            continue;
+                            break;
                         }
+                        if (slotState == detail::SlotState::Occupied)
+                        {
+                            if (!slot.TryLockFrom(detail::SlotState::Occupied))
+                            {
+                                pendingWork = true;
+                                std::this_thread::yield();
+                                break;
+                            }
 
-                        Key   keyCopy   = std::move(slot.KeyRef());
-                        Value valueCopy = std::move(slot.ValueRef());
-                        const std::size_t hash = slot.hash;
-                        slot.DestroyPayload();
-                        slot.UnlockTo(detail::SlotState::Tombstone);
+                            Key               keyCopy   = std::move(slot.KeyRef());
+                            Value             valueCopy = std::move(slot.ValueRef());
+                            const std::size_t hash      = slot.hash;
+                            slot.DestroyPayload();
+                            slot.UnlockTo(detail::SlotState::Tombstone);
 
-                        InsertMigrated(state, hash, std::move(keyCopy), std::move(valueCopy));
-                        break;
+                            InsertMigrated(state, hash, std::move(keyCopy), std::move(valueCopy));
+                            break;
+                        }
                     }
                 }
-            }
+                if (pendingWork)
+                    std::this_thread::yield();
+            } while (pendingWork);
         }
 
         void InsertMigrated(MigrationState* state, std::size_t hash, Key&& key, Value&& value)
         {
-            TableView newView {state->newGroups, state->newMask};
+            Key   migrationKey   = std::move(key);
+            Value migrationValue = std::move(value);
             while (true)
             {
-                InsertProbe probe = LocateForInsert(newView, key, hash);
+                TableView   newView = TableView {state->newGroups, state->newMask};
+                InsertProbe probe   = LocateForInsert(newView, migrationKey, hash);
                 if (!probe.slot)
                 {
-                    // Table unexpectedly full; trigger a follow-up growth.
-                    StartMigration(m_capacity ? m_capacity * 2 : GroupSize);
+                    TableView   oldView {state->oldGroups, state->oldMask};
+                    InsertProbe oldProbe = LocateForInsert(oldView, migrationKey, hash);
+                    if (oldProbe.slot)
+                    {
+                        if (!oldProbe.isNew)
+                        {
+                            try
+                            {
+                                oldProbe.slot->AssignValue(migrationValue);
+                            } catch (...)
+                            {
+                                oldProbe.slot->UnlockTo(detail::SlotState::Occupied);
+                                throw;
+                            }
+                            oldProbe.slot->UnlockTo(detail::SlotState::Occupied);
+                            return;
+                        }
+
+                        try
+                        {
+                            oldProbe.slot->ConstructPayload(hash, std::move(migrationKey), std::move(migrationValue));
+                            oldProbe.slot->UnlockTo(detail::SlotState::Occupied);
+                            return;
+                        } catch (...)
+                        {
+                            oldProbe.slot->hash = 0;
+                            oldProbe.slot->UnlockTo(oldProbe.previousState);
+                            throw;
+                        }
+                    }
+
+                    HelpMigration(state, state->oldGroupCount);
+                    const bool finalized = FinalizeMigration(state);
+                    if (finalized)
+                    {
+                        size_type targetCapacity = m_capacity ? m_capacity * 2 : GroupSize;
+                        targetCapacity           = std::max(targetCapacity, m_capacity + GroupSize);
+                        StartMigration(targetCapacity);
+                        TableView primary = CurrentView();
+                        while (true)
+                        {
+                            InsertProbe retryProbe = LocateForInsert(primary, migrationKey, hash);
+                            if (!retryProbe.slot)
+                            {
+                                size_type nextTarget = m_capacity ? m_capacity * 2 : GroupSize;
+                                nextTarget           = std::max(nextTarget, m_capacity + GroupSize);
+                                StartMigration(nextTarget);
+                                primary = CurrentView();
+                                continue;
+                            }
+
+                            if (!retryProbe.isNew)
+                            {
+                                try
+                                {
+                                    retryProbe.slot->AssignValue(migrationValue);
+                                } catch (...)
+                                {
+                                    retryProbe.slot->UnlockTo(detail::SlotState::Occupied);
+                                    throw;
+                                }
+                                retryProbe.slot->UnlockTo(detail::SlotState::Occupied);
+                                return;
+                            }
+
+                            try
+                            {
+                                retryProbe.slot->ConstructPayload(hash, std::move(migrationKey), std::move(migrationValue));
+                                retryProbe.slot->UnlockTo(detail::SlotState::Occupied);
+                                return;
+                            } catch (...)
+                            {
+                                retryProbe.slot->hash = 0;
+                                retryProbe.slot->UnlockTo(retryProbe.previousState);
+                                throw;
+                            }
+                        }
+                    }
+
+                    std::this_thread::yield();
                     continue;
                 }
 
@@ -738,9 +947,8 @@ namespace NGIN::Containers
                 {
                     try
                     {
-                        probe.slot->AssignValue(value);
-                    }
-                    catch (...)
+                        probe.slot->AssignValue(migrationValue);
+                    } catch (...)
                     {
                         probe.slot->UnlockTo(detail::SlotState::Occupied);
                         throw;
@@ -751,53 +959,15 @@ namespace NGIN::Containers
 
                 try
                 {
-                    probe.slot->ConstructPayload(hash, std::move(key), std::move(value));
+                    probe.slot->ConstructPayload(hash, std::move(migrationKey), std::move(migrationValue));
                     probe.slot->UnlockTo(detail::SlotState::Occupied);
                     return;
-                }
-                catch (...)
+                } catch (...)
                 {
                     probe.slot->hash = 0;
                     probe.slot->UnlockTo(probe.previousState);
                     throw;
                 }
-            }
-        }
-
-        void UpdateOldValue(MigrationState* migration, const Key& key, std::size_t hash, const Value& value)
-        {
-            if (!migration)
-                return;
-            TableView oldView {migration->oldGroups, migration->oldMask};
-            size_type index = hash & oldView.mask;
-            for (size_type probe = 0; probe <= oldView.mask; ++probe)
-            {
-                auto& slot  = SlotAt(oldView, index);
-                auto  state = slot.State(std::memory_order_acquire);
-                if (state == detail::SlotState::Empty)
-                    return;
-                if (state == detail::SlotState::PendingInsert)
-                {
-                    std::this_thread::yield();
-                }
-                else if (state == detail::SlotState::Occupied && slot.hash == hash && m_equal(slot.KeyRef(), key))
-                {
-                    if (slot.TryLockFrom(detail::SlotState::Occupied))
-                    {
-                        try
-                        {
-                            slot.AssignValue(value);
-                        }
-                        catch (...)
-                        {
-                            slot.UnlockTo(detail::SlotState::Occupied);
-                            throw;
-                        }
-                        slot.UnlockTo(detail::SlotState::Occupied);
-                    }
-                    return;
-                }
-                index = (index + 1) & oldView.mask;
             }
         }
 
@@ -823,24 +993,36 @@ namespace NGIN::Containers
                 auto  state = slot.State(std::memory_order_acquire);
                 switch (state)
                 {
-                case detail::SlotState::Empty:
-                    if (slot.TryLockFrom(detail::SlotState::Empty))
-                        return {&slot, detail::SlotState::Empty, true};
-                    break;
-                case detail::SlotState::Tombstone:
-                    if (slot.TryLockFrom(detail::SlotState::Tombstone))
-                        return {&slot, detail::SlotState::Tombstone, true};
-                    break;
-                case detail::SlotState::Occupied:
-                    if (slot.hash == hash && m_equal(slot.KeyRef(), key))
-                    {
-                        if (slot.TryLockFrom(detail::SlotState::Occupied))
-                            return {&slot, detail::SlotState::Occupied, false};
+                    case detail::SlotState::Empty:
+                        if (slot.TryLockFrom(detail::SlotState::Empty))
+                            return {&slot, detail::SlotState::Empty, true};
+                        break;
+                    case detail::SlotState::Tombstone:
+                        if (slot.TryLockFrom(detail::SlotState::Tombstone))
+                            return {&slot, detail::SlotState::Tombstone, true};
+                        break;
+                    case detail::SlotState::Occupied: {
+                        if (slot.hash == hash)
+                        {
+                            if (slot.TryLockFrom(detail::SlotState::Occupied))
+                            {
+                                const bool match = m_equal(slot.KeyRef(), key);
+                                if (match)
+                                {
+                                    return {&slot, detail::SlotState::Occupied, false};
+                                }
+                                slot.UnlockTo(detail::SlotState::Occupied);
+                            }
+                            else
+                            {
+                                std::this_thread::yield();
+                            }
+                        }
+                        break;
                     }
-                    break;
-                case detail::SlotState::PendingInsert:
-                    std::this_thread::yield();
-                    break;
+                    case detail::SlotState::PendingInsert:
+                        std::this_thread::yield();
+                        break;
                 }
                 index = (index + 1) & view.mask;
             }
@@ -861,10 +1043,18 @@ namespace NGIN::Containers
                 {
                     std::this_thread::yield();
                 }
-                else if (state == detail::SlotState::Occupied && slot.hash == hash && m_equal(slot.KeyRef(), key))
+                else if (state == detail::SlotState::Occupied && slot.hash == hash)
                 {
                     if (slot.TryLockFrom(detail::SlotState::Occupied))
-                        return &slot;
+                    {
+                        if (m_equal(slot.KeyRef(), key))
+                            return &slot;
+                        slot.UnlockTo(detail::SlotState::Occupied);
+                    }
+                    else
+                    {
+                        std::this_thread::yield();
+                    }
                 }
                 index = (index + 1) & view.mask;
             }
@@ -875,22 +1065,34 @@ namespace NGIN::Containers
         bool ContainsInView(const TableView& view, const K& key, std::size_t hash) const noexcept
         {
             size_type index = hash & view.mask;
-            for (size_type probe = 0; probe <= view.mask; ++probe)
+            for (size_type probe = 0; probe <= view.mask;)
             {
-                const auto& slot  = SlotAt(view, index);
-                const auto  state = slot.State(std::memory_order_acquire);
+                auto&      slot  = SlotAt(view, index);
+                const auto state = slot.State(std::memory_order_acquire);
                 if (state == detail::SlotState::Empty)
                     return false;
                 if (state == detail::SlotState::PendingInsert)
                 {
                     std::this_thread::yield();
+                    ++probe;
+                    index = (index + 1) & view.mask;
+                    continue;
                 }
-                else if (state == detail::SlotState::Occupied && slot.hash == hash && m_equal(slot.KeyRef(), key))
+                else if (state == detail::SlotState::Occupied)
                 {
-                    const auto verify = slot.State(std::memory_order_acquire);
-                    if (verify == detail::SlotState::Occupied)
-                        return true;
+                    const std::size_t observedHash = slot.hash;
+                    if (observedHash == hash)
+                    {
+                        const Key& candidateKey = slot.KeyRef();
+                        const auto verifyState  = slot.State(std::memory_order_acquire);
+                        if (verifyState == detail::SlotState::Occupied && slot.hash == observedHash &&
+                            m_equal(candidateKey, key))
+                        {
+                            return true;
+                        }
+                    }
                 }
+                ++probe;
                 index = (index + 1) & view.mask;
             }
             return false;
@@ -900,26 +1102,36 @@ namespace NGIN::Containers
         bool TryCopyValueInView(const TableView& view, const K& key, std::size_t hash, Value& outValue) const
         {
             size_type index = hash & view.mask;
-            for (size_type probe = 0; probe <= view.mask; ++probe)
+            for (size_type probe = 0; probe <= view.mask;)
             {
-                const auto& slot  = SlotAt(view, index);
-                const auto  state = slot.State(std::memory_order_acquire);
+                auto&      slot  = SlotAt(view, index);
+                const auto state = slot.State(std::memory_order_acquire);
                 if (state == detail::SlotState::Empty)
                     return false;
                 if (state == detail::SlotState::PendingInsert)
                 {
                     std::this_thread::yield();
+                    ++probe;
+                    index = (index + 1) & view.mask;
+                    continue;
                 }
-                else if (state == detail::SlotState::Occupied && slot.hash == hash && m_equal(slot.KeyRef(), key))
+                else if (state == detail::SlotState::Occupied)
                 {
-                    Value snapshot = slot.ValueRef();
-                    const auto verify = slot.State(std::memory_order_acquire);
-                    if (verify == detail::SlotState::Occupied)
+                    const std::size_t observedHash = slot.hash;
+                    if (observedHash == hash)
                     {
-                        outValue = std::move(snapshot);
-                        return true;
+                        Value      snapshot     = slot.ValueRef();
+                        const Key& candidateKey = slot.KeyRef();
+                        const auto verifyState  = slot.State(std::memory_order_acquire);
+                        if (verifyState == detail::SlotState::Occupied && slot.hash == observedHash &&
+                            m_equal(candidateKey, key))
+                        {
+                            outValue = std::move(snapshot);
+                            return true;
+                        }
                     }
                 }
+                ++probe;
                 index = (index + 1) & view.mask;
             }
             return false;
@@ -931,11 +1143,13 @@ namespace NGIN::Containers
             const std::size_t hash = ComputeHash(key);
             while (true)
             {
-                TableView         primary   = CurrentView();
-                MigrationState*   migration = m_migration.load(std::memory_order_acquire);
-                InsertProbe       probe     = LocateForInsert(primary, key, hash);
+                TableView       primary   = CurrentView();
+                MigrationState* migration = AcquireMigration();
+                bool            finalized = false;
+                InsertProbe     probe     = LocateForInsert(primary, key, hash);
                 if (!probe.slot)
                 {
+                    ReleaseAndMaybeDestroy(migration, finalized);
                     MaybeStartMigration();
                     continue;
                 }
@@ -945,22 +1159,23 @@ namespace NGIN::Containers
                     try
                     {
                         probe.slot->AssignValue(std::forward<V>(value));
-                    }
-                    catch (...)
+                    } catch (...)
                     {
                         probe.slot->UnlockTo(detail::SlotState::Occupied);
+                        ReleaseAndMaybeDestroy(migration, finalized);
                         throw;
                     }
                     probe.slot->UnlockTo(detail::SlotState::Occupied);
                     if (migration)
                     {
-                        UpdateOldValue(migration, probe.slot->KeyRef(), hash, probe.slot->ValueRef());
                         HelpMigration(migration);
+                        finalized = FinalizeMigration(migration);
                     }
                     else
                     {
                         MaybeStartMigration();
                     }
+                    ReleaseAndMaybeDestroy(migration, finalized);
                     return false;
                 }
 
@@ -968,11 +1183,11 @@ namespace NGIN::Containers
                 {
                     probe.slot->ConstructPayload(hash, std::forward<K>(key), std::forward<V>(value));
                     probe.slot->UnlockTo(detail::SlotState::Occupied);
-                }
-                catch (...)
+                } catch (...)
                 {
                     probe.slot->hash = 0;
                     probe.slot->UnlockTo(probe.previousState);
+                    ReleaseAndMaybeDestroy(migration, finalized);
                     throw;
                 }
 
@@ -980,13 +1195,15 @@ namespace NGIN::Containers
 
                 if (migration)
                 {
-                    UpdateOldValue(migration, probe.slot->KeyRef(), hash, probe.slot->ValueRef());
                     HelpMigration(migration);
+                    finalized = FinalizeMigration(migration);
                 }
                 else
                 {
-                    MaybeStartMigration();
+                    MaybeStartMigration(1);
                 }
+
+                ReleaseAndMaybeDestroy(migration, finalized);
                 return true;
             }
         }
@@ -997,11 +1214,13 @@ namespace NGIN::Containers
             const std::size_t hash = ComputeHash(key);
             while (true)
             {
-                TableView         primary   = CurrentView();
-                MigrationState*   migration = m_migration.load(std::memory_order_acquire);
-                InsertProbe       probe     = LocateForInsert(primary, key, hash);
+                TableView       primary   = CurrentView();
+                MigrationState* migration = AcquireMigration();
+                bool            finalized = false;
+                InsertProbe     probe     = LocateForInsert(primary, key, hash);
                 if (!probe.slot)
                 {
+                    ReleaseAndMaybeDestroy(migration, finalized);
                     MaybeStartMigration();
                     continue;
                 }
@@ -1011,22 +1230,23 @@ namespace NGIN::Containers
                     try
                     {
                         std::invoke(std::forward<Updater>(updater), probe.slot->ValueRef(), std::forward<V>(value));
-                    }
-                    catch (...)
+                    } catch (...)
                     {
                         probe.slot->UnlockTo(detail::SlotState::Occupied);
+                        ReleaseAndMaybeDestroy(migration, finalized);
                         throw;
                     }
                     probe.slot->UnlockTo(detail::SlotState::Occupied);
                     if (migration)
                     {
-                        UpdateOldValue(migration, probe.slot->KeyRef(), hash, probe.slot->ValueRef());
                         HelpMigration(migration);
+                        finalized = FinalizeMigration(migration);
                     }
                     else
                     {
                         MaybeStartMigration();
                     }
+                    ReleaseAndMaybeDestroy(migration, finalized);
                     return false;
                 }
 
@@ -1034,11 +1254,11 @@ namespace NGIN::Containers
                 {
                     probe.slot->ConstructPayload(hash, std::forward<K>(key), std::forward<V>(value));
                     probe.slot->UnlockTo(detail::SlotState::Occupied);
-                }
-                catch (...)
+                } catch (...)
                 {
                     probe.slot->hash = 0;
                     probe.slot->UnlockTo(probe.previousState);
+                    ReleaseAndMaybeDestroy(migration, finalized);
                     throw;
                 }
 
@@ -1046,13 +1266,15 @@ namespace NGIN::Containers
 
                 if (migration)
                 {
-                    UpdateOldValue(migration, probe.slot->KeyRef(), hash, probe.slot->ValueRef());
                     HelpMigration(migration);
+                    finalized = FinalizeMigration(migration);
                 }
                 else
                 {
-                    MaybeStartMigration();
+                    MaybeStartMigration(1);
                 }
+
+                ReleaseAndMaybeDestroy(migration, finalized);
                 return true;
             }
         }
