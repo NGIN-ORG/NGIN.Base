@@ -5,6 +5,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 using NGIN::Containers::ConcurrentHashMap;
 
@@ -17,18 +18,19 @@ TEST_CASE("ConcurrentHashMap default construction", "[Containers][ConcurrentHash
 TEST_CASE("ConcurrentHashMap insert and get", "[Containers][ConcurrentHashMap]")
 {
     ConcurrentHashMap<std::string, int> map;
-    map.Insert("one", 1);
-    map.Insert("two", 2);
+    CHECK(map.Insert("one", 1));
+    CHECK(map.Insert("two", 2));
+    CHECK_FALSE(map.Insert("one", 3));
     CHECK(map.Size() == 2U);
-    CHECK(map.Get("one") == 1);
+    CHECK(map.Get("one") == 3);
     CHECK(map.Get("two") == 2);
 }
 
 TEST_CASE("ConcurrentHashMap updates values", "[Containers][ConcurrentHashMap]")
 {
     ConcurrentHashMap<std::string, int> map;
-    map.Insert("key", 10);
-    map.Insert("key", 20);
+    CHECK(map.Insert("key", 10));
+    CHECK_FALSE(map.Insert("key", 20));
     CHECK(map.Size() == 1U);
     CHECK(map.Get("key") == 20);
 }
@@ -44,11 +46,12 @@ TEST_CASE("ConcurrentHashMap handles rvalues", "[Containers][ConcurrentHashMap]"
 TEST_CASE("ConcurrentHashMap removes keys", "[Containers][ConcurrentHashMap]")
 {
     ConcurrentHashMap<int, int> map;
-    map.Insert(1, 100);
-    map.Insert(2, 200);
-    map.Remove(1);
+    CHECK(map.Insert(1, 100));
+    CHECK(map.Insert(2, 200));
+    CHECK(map.Remove(1));
 
     CHECK(map.Size() == 1U);
+    CHECK_FALSE(map.Remove(1));
     CHECK_THROWS_AS(map.Get(1), std::out_of_range);
     CHECK(map.Get(2) == 200);
 }
@@ -63,28 +66,29 @@ TEST_CASE("ConcurrentHashMap contains lifecycle", "[Containers][ConcurrentHashMa
     CHECK_FALSE(map.Contains(99));
 
     CHECK_FALSE(map.Contains(100));
-    map.Insert(100, 1);
+    CHECK(map.Insert(100, 1));
     CHECK(map.Contains(100));
-    map.Remove(100);
+    CHECK(map.Remove(100));
     CHECK_FALSE(map.Contains(100));
-    map.Insert(100, 2);
+    CHECK(map.Insert(100, 2));
     CHECK(map.Contains(100));
 
-    map.Insert(42, 1234);
+    CHECK_FALSE(map.Insert(42, 1234));
     CHECK(map.Contains(42));
-    map.Remove(42);
+    CHECK(map.Remove(42));
     CHECK_FALSE(map.Contains(42));
-    map.Insert(42, 777);
+    CHECK(map.Insert(42, 777));
     CHECK(map.Contains(42));
 }
 
 TEST_CASE("ConcurrentHashMap clear", "[Containers][ConcurrentHashMap]")
 {
     ConcurrentHashMap<int, int> map;
-    map.Insert(1, 1);
-    map.Insert(2, 2);
+    CHECK(map.Insert(1, 1));
+    CHECK(map.Insert(2, 2));
     map.Clear();
     CHECK(map.Size() == 0U);
+    CHECK(map.Empty());
 }
 
 TEST_CASE("ConcurrentHashMap Get throws when missing", "[Containers][ConcurrentHashMap]")
@@ -119,7 +123,7 @@ TEST_CASE("ConcurrentHashMap resizes as it grows", "[Containers][ConcurrentHashM
 TEST_CASE("ConcurrentHashMap TryGet and optional", "[Containers][ConcurrentHashMap]")
 {
     ConcurrentHashMap<int, int> map;
-    map.Insert(7, 70);
+    CHECK(map.Insert(7, 70));
     int value = 0;
     CHECK(map.TryGet(7, value));
     CHECK(value == 70);
@@ -134,13 +138,13 @@ TEST_CASE("ConcurrentHashMap TryGet and optional", "[Containers][ConcurrentHashM
 TEST_CASE("ConcurrentHashMap handles tombstones", "[Containers][ConcurrentHashMap]")
 {
     ConcurrentHashMap<int, int> map;
-    map.Insert(5, 500);
-    map.Remove(5);
+    CHECK(map.Insert(5, 500));
+    CHECK(map.Remove(5));
     CHECK_FALSE(map.Contains(5));
     const auto sizeAfterRemove = map.Size();
-    map.Remove(5);
+    CHECK_FALSE(map.Remove(5));
     CHECK(map.Size() == sizeAfterRemove);
-    map.Insert(5, 600);
+    CHECK(map.Insert(5, 600));
     CHECK(map.Get(5) == 600);
     CHECK(map.Size() == sizeAfterRemove + 1);
 }
@@ -150,10 +154,42 @@ TEST_CASE("ConcurrentHashMap handles collision chains", "[Containers][Concurrent
     ConcurrentHashMap<std::string, int> map(4);
     for (int i = 0; i < 64; ++i)
     {
-        map.Insert("k_" + std::to_string(i * 16), i);
+        CHECK(map.Insert("k_" + std::to_string(i * 16), i));
     }
 
     CHECK(map.Size() == 64U);
     CHECK(map.Contains("k_0"));
     CHECK(map.Get("k_0") == 0);
+}
+
+TEST_CASE("ConcurrentHashMap upsert merges existing values", "[Containers][ConcurrentHashMap]")
+{
+    ConcurrentHashMap<int, int> map;
+
+    CHECK(map.Upsert(1, 10, [](int& current, int fresh) {
+        current += fresh;
+    }));
+
+    CHECK_FALSE(map.Upsert(1, 5, [](int& current, int fresh) {
+        current += fresh;
+    }));
+
+    CHECK(map.Get(1) == 15);
+}
+
+TEST_CASE("ConcurrentHashMap ForEach captures consistent snapshots", "[Containers][ConcurrentHashMap]")
+{
+    ConcurrentHashMap<int, int> map;
+    CHECK(map.Insert(1, 1));
+    CHECK(map.Insert(2, 2));
+    CHECK_FALSE(map.Insert(2, 3));
+
+    std::vector<std::pair<int, int>> items;
+    map.ForEach([&](const int key, int value) {
+        items.emplace_back(key, value);
+    });
+
+    CHECK(items.size() == 2U);
+    CHECK(((items[0].first == 1 && items[0].second == 1) || (items[1].first == 1 && items[1].second == 1)));
+    CHECK(((items[0].first == 2 && items[0].second == 3) || (items[1].first == 2 && items[1].second == 3)));
 }

@@ -10,17 +10,17 @@ include(${CMAKE_SOURCE_DIR}/cmake/CPM.cmake)
 
 # Add a benchmark executable
 add_executable(ExampleBenchmark ExampleBenchmark.cpp)
-target_link_libraries(ExampleBenchmark PRIVATE NGIN.Base)
+target_link_libraries(ExampleBenchmark PRIVATE NGIN::Base)
 
 # Optionally, add more benchmarks here
 add_executable(SchedulerBenchmarks SchedulerBenchmarks.cpp)
-target_link_libraries(SchedulerBenchmarks PRIVATE NGIN.Base)
+target_link_libraries(SchedulerBenchmarks PRIVATE NGIN::Base)
 
 add_executable(StringBenchmarks StringBenchmarks.cpp)
-target_link_libraries(StringBenchmarks PRIVATE NGIN.Base)
+target_link_libraries(StringBenchmarks PRIVATE NGIN::Base)
 
 add_executable(VectorBenchmarks VectorBenchmarks.cpp)
-target_link_libraries(VectorBenchmarks PRIVATE NGIN.Base)
+target_link_libraries(VectorBenchmarks PRIVATE NGIN::Base)
 
 # Optional: concurrent map comparison benchmarks (TBB via system or CPM)
 option(NGIN_TBB_STATIC "Prefer static TBB build via CPM" ON)
@@ -49,9 +49,9 @@ if(_have_tbb)
 	message(STATUS "TBB available (system or CPM); enabling ConcurrentMapBench")
 	add_executable(ConcurrentMapBench ConcurrentMapBench.cpp)
 	if(TARGET TBB::tbb)
-		target_link_libraries(ConcurrentMapBench PRIVATE NGIN.Base TBB::tbb)
+		target_link_libraries(ConcurrentMapBench PRIVATE NGIN::Base TBB::tbb)
 	else()
-		target_link_libraries(ConcurrentMapBench PRIVATE NGIN.Base tbb)
+		target_link_libraries(ConcurrentMapBench PRIVATE NGIN::Base tbb)
 	endif()
 	target_compile_definitions(ConcurrentMapBench PRIVATE NGIN_HAVE_TBB=1)
 

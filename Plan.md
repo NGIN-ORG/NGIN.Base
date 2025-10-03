@@ -1,95 +1,134 @@
-# Migration Plan: Reflection Utilities → NGIN.Base
+# Implementation Plan: ConcurrentHashMap Reinvention
 
-## Objectives
+## Vision & Success Criteria
 
-- Graduate reusable reflection runtime primitives (type-erased storage, string interning, name helpers, adapters) into NGIN.Base while honoring base library guidelines.
-- Provide a clear path for module placement, API surface adjustments, and verification so downstream repos can adopt the new facilities without breaking changes.
-- Identify quality-of-life improvements that make the migrated utilities broadly useful beyond the reflection registry.
+- Deliver a header-only `NGIN::Containers::ConcurrentHashMap` that meets the performance, scalability, and safety targets outlined in the technical requirements.
+- Achieve linearizable `Insert`, `Upsert`, `Find`, `Contains`, and `Remove` operations without external locks while supporting custom allocators that model `NGIN::Memory::AllocatorConcept`.
+- Match or surpass throughput of Folly F14 concurrent maps and Intel TBB concurrent hash map under mixed read/write workloads on 64-bit Windows and Unix.
+- Provide maintainable, well-documented internals ready for further evolution (RCU variants, instrumentation toggles) without breaking ABI/ODR guarantees.
 
-## Guardrails & Prereqs
+## Current Status (2025-02-14)
 
-- Follow header-only/public-header rule; any `.cpp` remains for tests/examples only.
-- Require C++23 features already enabled in NGIN.Base (constexpr-if, `std::expected`, `std::pmr` interop where applicable).
-- Align with existing allocator concepts in `NGIN::Memory` and container patterns in `NGIN::Containers`.
-- Ensure no hidden coupling to the reflection registry (no global registries, RTTI, or static non-inline state).
+- Implemented cooperative resizing with migration descriptors; mutating threads assist bucket movement without stop-the-world coordination.
+- Slot-level CAS protocol covers inserts, upserts, erases, and read paths with dual-table lookups while migration is active.
+- Stress suite exercises resize storms and insert/remove churn; benchmarks highlight remaining scaling gaps vs. TBB at high thread counts.
+- Outstanding: integrate epoch-based reclamation for deferred group release, add instrumentation toggles, and broaden benchmarks once reclamation lands.
 
-## Migration Targets & High-Level Notes
+## Constraints & Non-Negotiables
 
-1. **Type-Erased Box (`Reflection::Any`)** – move to `NGIN::Utilities::Any`, keep SBO, allocator override, hash support via `Meta::TypeName`.
-2. **String Interner (`detail::StringInterner`)** – promote to public header (likely `NGIN::Utilities::StringInterner`) with allocator configurability and thread-safety consideration.
-3. **Name Extraction Helpers (`MemberNameFromPretty`)** – fold into `NGIN::Meta` alongside `TypeName`, ensure constexpr coverage and compilers support.
-4. **Container Adapters (`Reflection::Adapters`)** – relocate to `NGIN::Utilities::AnyAdapters` once `Any` lands; broaden adapter set to cover core NGIN containers and std types.
+- Header-only core under `include/NGIN/Containers`; implementation resides in `ConcurrentHashMap.hpp` and supporting detail headers if required.
+- C++23 language features only; avoid non-portable intrinsics. Depend solely on the standard library plus existing NGIN facilities (hashing, memory, utilities).
+- No global state, no anonymous namespaces in public headers. All helpers live in `NGIN::Containers::detail`.
+- All allocations route through the provided allocator instance; no direct `new`/`delete`.
+- Operations marked `noexcept` only when enforced by invariants; throw only standard exceptions.
 
-## Detailed Workstreams
+## Architecture Outline
 
-### 1. Establish `NGIN::Utilities::Any`
+### Table Layout
 
-- Audit the Reflection implementation: document layout (SBO size, alignment guarantees, allocator fallbacks) and identify references to registry internals.
-- Port into `include/NGIN/Utilities/Any.hpp`; expose doxygen docs, inline implementation, and detail namespace for helpers (vtable, storage traits).
-- Replace `Meta::TypeName` usage with existing `NGIN::Meta::TypeName` utilities (confirm hashing strategy; consider providing a customizable hash functor instead of hard-wiring type names).
-- Introduce concepts/traits for detecting trivially relocatable types to maximize constexpr/noexcept coverage.
-- Provide conversion helpers (e.g., `TryCast`, `Visit`) consistent with Base naming and exception policy; ensure defensive checks throw `std::bad_any_cast` or `std::logic_error` equivalents already used in Base.
-- Tests: create `tests/Utilities/Any.cpp` with Catch2 test cases covering SBO hit/miss, allocator override, const/volatile qualification, move-only types, visiting, and error cases.
+- Adopt segmented open addressing:
+  - Table split into power-of-two bucket groups sized to cache lines (e.g., 16 entries aligned to 64 bytes) to preserve locality and reduce false sharing.
+  - Each entry stores control byte (state machine), key, value pointer/reference wrapper. Control bytes encode `EMPTY`, `PENDING_INSERT`, `OCCUPIED`, `TOMBSTONE`, using `std::uint8_t` atomics.
+  - Robin Hood style probing with fingerprinting to reduce variance and bound probe length.
 
-### 2. Promote `StringInterner`
+### Concurrency Model
 
-- Extract logic into `include/NGIN/Utilities/StringInterner.hpp`, wrapping mutable interned storage with allocator template parameter (default `Memory::SystemAllocator`).
-- Align stored string type with `NGIN::Containers::String` (or `BasicString`) to avoid redundant string implementations; explore accepting `std::string_view` inputs without allocation when already interned.
-- Evaluate thread-safety: document default (likely single-threaded). If multi-threading is desired, add policy-based locking or provide separate `ThreadSafeStringInterner` wrapper.
-- Add instrumentation hooks (debug assertions, optional capacity stats) under `detail` utilities without runtime overhead when disabled.
-- Tests: `tests/Utilities/StringInterner.cpp` verifying deduplication, allocator substitution, move semantics, and negative cases (e.g., exhausting capacity, invalid deintern attempts).
+- `Find`/`Contains` use wait-free optimistic reads with snapshot of control bytes via `std::atomic<std::uint8_t>` using acquire semantics.
+- `Insert`/`Upsert` leverage CAS on control bytes to claim slots; employ per-bucket lightweight spinlock (single-flag CAS) only when multiple writers collide in same bucket to guarantee progress.
+- `Remove` marks tombstones via atomic exchange and publishes removal epoch for safe reclamation.
+- Sharded metadata (size counters, rehash state) aligned to cache lines to avoid contention.
 
-### 3. Relocate Name Utilities
+### Memory Reclamation
 
-- Create `include/NGIN/Meta/NameUtils.hpp` or extend existing `TypeName.hpp` with a documented `ExtractMemberName` API; ensure implementation relies solely on compiler pretty function strings handled via constexpr parsing.
-- Expand compiler coverage (GCC/Clang/MSVC) with dedicated tests using `static_assert` and Catch2 checks.
-- Provide fallback for unsupported compilers (returning original pretty string) with clear documentation.
-- Verify interaction with existing `Meta::TypeId` and `TypeName` to avoid duplicated code paths.
-- Tests: augment existing meta tests or add `tests/Meta/NameUtils.cpp` verifying member-function name extraction, lambdas, and edge cases (templates, overloaded operators).
+- Integrate epoch-based reclamation service:
+  - Provide lightweight `EpochHandle` inside map; threads call `EnterEpoch`/`LeaveEpoch` via RAII guard when mutating.
+  - Defers node deallocation (for closed addressing fallback) and deferred value destruction until all earlier epochs are quiescent.
+- Offer policy hook (`detail::ReclamationPolicy`) so future hazard-pointer strategy can be swapped without redesign.
 
-### 4. Rehome Any Adapters
+### Resizing Strategy
 
-- After `Any` is in Base, port adapter templates into `include/NGIN/Utilities/AnyAdapters.hpp` (may live in `detail` nested namespace with public entry points).
-- Normalize adapter naming to Base conventions (e.g., `AdaptIterable`, `AdaptOptional`, `AdaptVariant`). Consider concepts (`IterableConcept`) to guard template participation.
-- Support `std::optional`, `NGIN::Containers::Optional` (if present), `std::variant`, and tuple-like types; ensure adapters do not bring in heavy headers unnecessarily (use forward declarations and lazy includes where possible).
-- Provide bridging utilities for visiting containers (e.g., `ForEachElement`) that work directly with `Any` storage.
-- Tests: `tests/Utilities/AnyAdapters.cpp` covering conversion of std/NGIN containers, error reporting when types unsupported, and verifying adapter composition.
+- Maintain capacity metadata as power-of-two bucket count; expand when load factor surpasses configurable threshold (~0.75).
+- Resize proceeds in cooperative phases:
+  1. Promote new bucket array using allocator (double capacity, allocate aligned storage).
+  2. Flag resize state globally (atomic pointer to migration descriptor).
+  3. Mutating threads assist by migrating a bounded number of bucket groups before continuing their operation (helping strategy).
+  4. Readers detect migration descriptor and consult both tables until migration complete.
+- Use phased tombstone reclamation: when load < shrink threshold and tombstones dominate, trigger compaction to reduce probe chains.
 
-## Cross-Cutting Tasks
+### API Surface (initial)
 
-- Update `include/NGIN/NGIN.hpp` aggregator to expose new headers when stable.
-- Add component README stubs (`include/NGIN/Utilities/README.md` section update) describing new utilities and usage snippets.
-- Ensure `CMakeLists.txt` install/export sets include new headers (header-only, but ensure packaging).
-- Run `.clang-format` across new headers/tests; add clang-tidy configuration notes if specialized suppressions are required.
-- Review allocator + exception guarantees; annotate `noexcept` accurately and add assertions for programmer errors (e.g., invalid casts).
+- Core type: `template<class Key, class Value, class Hash = std::hash<Key>, class Equal = std::equal_to<Key>, class Alloc = Memory::SystemAllocator>`
+- Operations:
+  - `Insert(const Key&, const Value&)`, `Insert(Key&&, Value&&)` returning `bool` success flag.
+  - `Upsert` with callable to merge existing value or emplace new.
+  - `Find(const Key&) const` returning `std::optional<Value>` or callback-based accessor to avoid copies.
+  - `Contains(const Key&) const noexcept`.
+  - `Remove(const Key&)` returning `bool` for removal success.
+  - `Size() const noexcept` (approximate), `ExactSize()` requiring quiescent point if needed.
+  - `Clear()`, `Reserve(size_t)`, `LoadFactor()`, `BucketCount()` for observability.
+- Iteration: supply safe traversal via `ForEach(function)` that grabs consistent snapshot of control bytes; no raw iterators initially.
 
-## Implementation Phasing
+### Instrumentation & Debug Hooks
 
-1. **Analysis & Design Notes** – capture current Reflection behavior, confirm allocator + type trait expectations (no code changes yet).
-2. **Introduce `Any` + Tests** – land core type, include documentation, adjust CMake, add unit coverage.
-3. **Add String Interner** – ensure independence from reflection data; include tests and optional locking decisions.
-4. **Move Name Utilities** – update meta headers/tests; ensure reflection repo can include new location without breakage.
-5. **Publish Adapters** – rely on the new `Any`; adjust includes in reflection repo to consume from Base.
-6. **Integration Cleanup** – update aggregator headers, README, and ensure reflection module compiles against revised includes.
+- Compile-time switch via template parameter or constexpr bool to enable debug assertions (probe depth, epoch misuse).
+- Optional stats struct capturing collision counts, resize assists, and tombstone density for benchmarking.
 
-## Analysis Notes (2025-02-14)
+## Workstreams & Milestones
 
-- **Reflection::Any** currently defines a 32-byte SBO with `SystemAllocator` fallback, hashes types using `Meta::TypeName` + FNV1a64, and exposes `As<T>` without runtime checks. Copy/move rely on stored function pointers; heap stores alignment alongside pointer. Destruction path always consults optional dtor pointer before optionally freeing heap memory.
-- **detail::StringInterner** manages geometrically growing `Page` buffers (min 4 KiB), tracks entries with FNV hash buckets implemented via `FlatHashMap` of vectors, and returns stable `std::string_view` lifetimes; allocator usage is limited to `SystemAllocator`. No synchronization or allocator customization hooks exist.
-- **Utilities::StringInterner** now lives in Base with allocator + thread-policy template parameters, page-backed storage, `InsertOrGet`/`TryGetId`/`Intern` helpers, and built-in statistics counters so subsystems can opt into locking and instrumentation.
-- **detail::MemberNameFromPretty** extracts identifiers using compiler-specific pretty-function strings, trimming the class qualifier. Output is a `consteval std::string_view` suitable for compile-time member metadata.
-- **Adapters namespace** offers detection traits and thin wrappers for sequence, tuple, variant, optional, and map-like types, building on `Reflection::Any` and `ConvertAny`. Traits are ad-hoc; adapter APIs return `Any` boxes and rely on reflection detail conversions to round-trip keys/values.
-- Cross-cutting dependencies include `Hashing/FNV`, `Containers::Vector`/`FlatHashMap`, and reflection-specific `ConvertAny` logic; allocator interactions assume `Memory::SystemAllocator` and there are no `noexcept` guarantees documented today.
+1. **Foundational Design & Scaffolding (Week 1)**
+   - Document public API in header skeleton with doxygen comments; outline `detail` structures (control byte enum, bucket type, metadata blocks).
+   - Integrate allocator concept checks and `static_assert` guards.
+   - Provide stubbed epoch manager interface ready for implementation.
 
-## Verification Strategy
+2. **Core Table Mechanics (Week 2)**
+   - Implement bucket group layout, control byte transitions, and probing strategy in isolation (single-threaded unit tests).
+   - Add robin-hood insertion logic and tombstone handling without concurrency yet.
 
-- Unit tests per feature (positive + negative) under `tests/Utilities/` and `tests/Meta/` with Catch2.
-- Build matrix: standard Debug/Release on Clang & GCC; ensure MSVC builds if in CI.
-- Optional benchmarks (place under `benchmarks/Utilities/`) for `Any` SBO performance vs. std::any and for interner lookup.
-- Consider ASan/UBSan runs for `Any` storage correctness and interner memory handling.
+3. **Concurrency Layer (Weeks 3-4)**
+   - Introduce atomic control bytes, per-slot CAS claims, and optimistic read path.
+   - Implement writer backoff/spin behavior with exponential backoff under contention.
+   - Ensure memory order contracts documented inline (acquire/release semantics per transition).
+   - Develop epoch-based reclamation (per-thread handle pool, retire lists) and integrate with erase path.
 
-## Follow-Up Items for NGIN.Reflection
+4. **Resizing & Sharding (Weeks 5-6)**
+   - Implement migration descriptor, cooperative resize loops, and dual-table lookup bridging.
+   - Validate correctness under concurrent resizes via stress tests.
+   - Tune shard count heuristics (based on CPU core count or user override) and align metadata to cache line boundaries.
 
-- Replace internal includes with new Base headers; add migration notes in that repo to avoid duplicate definitions.
-- Remove deprecated code after a compatibility window; optionally provide shim headers forwarding to Base versions.
-- Evaluate additional reflection utilities for future migration once these land successfully.
+5. **Public API Completion & Polishing (Week 7)**
+   - Finalize `Insert`, `Upsert`, `Find`, `Contains`, `Remove`, `Clear`, `Reserve`, `ForEach` with allocator-aware overloads.
+   - Ensure exception paths roll back control bytes and retire pending allocations safely.
+   - Add instrumentation toggles and debug assertions.
+
+6. **Testing & Verification (Weeks 2-8 overlapping)**
+   - Unit tests (Catch2) for single-thread semantics, allocator propagation, load factor limits, tombstone reuse.
+   - Concurrency tests using stress harness (multi-threaded inserts/reads/removes, resize storm scenarios, epoch retirement validation).
+   - Negative tests for erroneous usage (double remove, mutation during callback) ensuring asserts/exceptions fire.
+   - Performance benchmarks comparing against Folly/TBB baselines; include `benchmarks/Containers/ConcurrentHashMapBench.cpp`.
+   - Static analysis (`clang-tidy`) and sanitizers (ASan/TSan) on representative builds.
+
+7. **Documentation & Integration (Week 8)**
+   - Update `include/NGIN/NGIN.hpp` to export the new header and document in `include/NGIN/Containers/README.md`.
+   - Provide design notes and usage examples in component README.
+   - Add migration guidance outlining differences from legacy attempt.
+
+## Dependencies & Open Questions
+
+- Confirm availability or need to implement shared epoch manager (reuse existing facility if present in repo?).
+- Decide whether to expose snapshot iterator in v1 or delay until post-MVP.
+- Determine default shard count heuristics (fixed power-of-two vs. dynamic per hardware concurrency) and provide overrides.
+- Validate allocator traits support for aligned allocations required by bucket groups; add adapter if allocator lacks `allocate_bytes`.
+
+## Risk Mitigation
+
+- Early micro-benchmarks to validate probing strategy before full concurrency layer.
+- Keep concurrency modeling encapsulated; provide compile-time switch to fallback to sharded-lock variant for debugging.
+- Thorough assertions in debug builds for epoch discipline and control byte transitions to catch logic bugs before release builds.
+
+## Verification Checklist
+
+- [ ] Positive tests for each operation under single-thread and multi-thread scenarios.
+- [ ] Negative tests covering contention, invalid usage, and exception safety.
+- [ ] Benchmarks demonstrating parity or improvement vs. Folly/TBB baselines.
+- [ ] clang-format and clang-tidy clean.
+- [ ] Sanitizer runs (ASan, TSAN) with no reported issues.

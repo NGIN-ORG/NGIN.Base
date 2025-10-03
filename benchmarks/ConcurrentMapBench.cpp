@@ -46,6 +46,7 @@ int main()
     {
         Benchmark::Register([cfg](BenchmarkContext& ctx) {
             Map map(1024);
+            map.Reserve(cfg.keyCount * 2);
             ctx.start();
             std::vector<std::thread> ts;
             for (int t = 0; t < cfg.threads; ++t)

@@ -117,3 +117,116 @@ TEST_CASE("ConcurrentHashMap mixed read/write stress", "[Containers][ConcurrentH
 
     CHECK(map.Size() <= 20001U);
 }
+
+TEST_CASE("ConcurrentHashMap coordinates reserve during contention", "[Containers][ConcurrentHashMap][Stress]")
+{
+    ConcurrentHashMap<int, int> map(4);
+    constexpr int               inserterThreads     = 6;
+    constexpr int               insertsPerThread    = 2000;
+    std::atomic<bool>           start {false};
+    std::vector<std::thread>    workers;
+
+    for (int t = 0; t < inserterThreads; ++t)
+    {
+        workers.emplace_back([t, &map, &start] {
+            while (!start.load(std::memory_order_acquire))
+            {
+                std::this_thread::yield();
+            }
+            const int base = t * insertsPerThread;
+            for (int i = 0; i < insertsPerThread; ++i)
+            {
+                map.Insert(base + i, base + i);
+            }
+        });
+    }
+
+    std::thread resizer([&map, &start] {
+        while (!start.load(std::memory_order_acquire))
+        {
+            std::this_thread::yield();
+        }
+        for (int step = 1; step <= 6; ++step)
+        {
+            map.Reserve(static_cast<std::size_t>(step) * insertsPerThread * 2);
+        }
+    });
+
+    start.store(true, std::memory_order_release);
+
+    for (auto& worker: workers)
+    {
+        worker.join();
+    }
+    resizer.join();
+
+    const auto expected = static_cast<std::size_t>(inserterThreads * insertsPerThread);
+    CHECK(map.Size() == expected);
+    CHECK(map.Contains(0));
+    CHECK(map.Contains(expected - 1));
+}
+
+TEST_CASE("ConcurrentHashMap handles insert/remove churn", "[Containers][ConcurrentHashMap][Stress]")
+{
+    ConcurrentHashMap<int, int> map(8);
+    constexpr int               producerThreads  = 4;
+    constexpr int               consumerThreads  = 4;
+    constexpr int               opsPerProducer   = 4000;
+    constexpr int               keySpace         = producerThreads * opsPerProducer;
+
+    std::atomic<bool> start {false};
+    std::atomic<int>  removedCount {0};
+
+    std::vector<std::thread> producers;
+    std::vector<std::thread> consumers;
+
+    for (int p = 0; p < producerThreads; ++p)
+    {
+        producers.emplace_back([p, &map, &start] {
+            while (!start.load(std::memory_order_acquire))
+            {
+                std::this_thread::yield();
+            }
+            const int base = p * opsPerProducer;
+            for (int i = 0; i < opsPerProducer; ++i)
+            {
+                map.Insert(base + i, base + i);
+            }
+        });
+    }
+
+    for (int c = 0; c < consumerThreads; ++c)
+    {
+        consumers.emplace_back([c, &map, &start, &removedCount] {
+            std::mt19937                       rng(9000 + c);
+            std::uniform_int_distribution<int> keys(0, keySpace - 1);
+            while (!start.load(std::memory_order_acquire))
+            {
+                std::this_thread::yield();
+            }
+            for (int i = 0; i < opsPerProducer; ++i)
+            {
+                if (map.Remove(keys(rng)))
+                {
+                    removedCount.fetch_add(1, std::memory_order_relaxed);
+                }
+            }
+        });
+    }
+
+    start.store(true, std::memory_order_release);
+
+    for (auto& producer: producers)
+    {
+        producer.join();
+    }
+    for (auto& consumer: consumers)
+    {
+        consumer.join();
+    }
+
+    const auto totalInserted = static_cast<std::size_t>(producerThreads * opsPerProducer);
+    const auto totalRemoved  = static_cast<std::size_t>(removedCount.load());
+    CHECK(map.Size() + totalRemoved == totalInserted);
+    CHECK(map.Size() <= totalInserted);
+}

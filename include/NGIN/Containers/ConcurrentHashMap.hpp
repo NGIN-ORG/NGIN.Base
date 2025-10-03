@@ -1,1625 +1,1066 @@
 /// @file ConcurrentHashMap.hpp
-/// @brief Lock-free style concurrent hash map (experimental).
-///
-/// Invariants / Design Notes:
-/// 1. Fast path: Each slot stores (hash, BucketData*) in an atomic BucketPtr (two‑word CAS)
-///    when the platform provides a lock‑free atomic for the pair. Fallback path: each slot
-///    stores only BucketData* (single‑word CAS) and the hash lives inside BucketData.
-///    Once a non‑null slot is published with a release CAS, the pointed BucketData and its
-///    associated hash are immutable for the lifetime of the map (no relocation, no reuse).
-/// 2. Logical deletion is performed by calling BucketData::v.drop() which converts the
-///    guarded value into a tombstone (guard no longer valid). We never reclaim / free a
-///    BucketData during map lifetime; full reclamation only occurs at map destruction.
-/// 3. Readers perform an acquire load of the slot before dereferencing BucketData ensuring
-///    visibility of the fully constructed object published under release semantics.
-/// 4. Chaining: Additional VirtualBucket nodes are appended with a release CAS on the
-///    'next' pointer. Once linked they remain reachable (no removal) until destruction.
-/// 5. Size accounting increments only on first successful publication of a non-null slot
-///    and decrements only on a transition from live -> tombstone (Phase 1 keeps existing
-///    semantics; further tightening may occur in later phases).
-/// 6. Destruction requires external quiescence: user must ensure no concurrent operations
-///    are in-flight when destroying the map (epoch based reclamation may be added later).
-/// 7. Fast path uses lock-free atomic<BucketPtr>; if the platform does not provide a
-///    lock-free two-word CAS the implementation transparently falls back to a single-word
-///    pointer CAS storing the hash inside BucketData.
+/// @brief Concurrent hash map with cooperative resizing and cache-friendly bucket groups.
 
 #pragma once
 
+#include <NGIN/Memory/AllocatorConcept.hpp>
+#include <NGIN/Memory/SystemAllocator.hpp>
+
 #include <atomic>
-#include <array>
-#include <cassert>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <thread>
-#include <memory>
-#include <new>
+#include <optional>
 #include <stdexcept>
+#include <thread>
 #include <type_traits>
 #include <utility>
-#include <vector>
-#include <optional>
-// Phase 6: epoch based reclamation (experimental)
-#include <NGIN/Memory/EpochReclaimer.hpp>
+#include <new>
 
 namespace NGIN::Containers
 {
-
-    // ============================================================
-    // SharedDoubleReferenceGuard (RCU / epoch variant)
-    // ============================================================
-    // Replaces shared_ptr-based guard with raw pointer + epoch retirement.
-    // Semantics preserved for existing call sites:
-    //  - acquire(): returns DataGuard with raw pointer (valid while epoch guard held)
-    //  - emplace(args...): allocates new Value; returns true iff previous pointer was null (tombstone->live)
-    //  - drop(): atomically sets pointer to null; returns true iff previous was non-null (live->tombstone)
-    // Lifetime: old values retired via EpochReclaimer ensuring safe reclamation after quiescence.
-    template<typename DataType>
-    class SharedDoubleReferenceGuard
+    namespace detail
     {
-        std::atomic<DataType*> m_ptr {nullptr};
-
-    public:
-        class DataGuard
+        enum class SlotState : std::uint8_t
         {
-            DataType* p {nullptr};
-            explicit DataGuard(DataType* raw) : p(raw) {}
-            friend class SharedDoubleReferenceGuard<DataType>;
-
-        public:
-            DataGuard() = default;
-            bool            is_valid() const noexcept { return p != nullptr; }
-            const DataType* operator->() const noexcept { return p; }
-            const DataType& operator*() const noexcept { return *p; }
+            Empty = 0,
+            PendingInsert,
+            Occupied,
+            Tombstone,
         };
 
-        DataGuard acquire() const noexcept { return DataGuard(m_ptr.load(std::memory_order_acquire)); }
-
-        template<typename... Ts>
-        bool emplace(Ts&&... args)
+        constexpr bool IsPowerOfTwo(std::size_t value) noexcept
         {
-            NGIN::Memory::EpochReclaimer::Guard g;
-            auto*                               fresh = new DataType(std::forward<Ts>(args)...);
-            DataType*                           old   = m_ptr.exchange(fresh, std::memory_order_acq_rel);
-            if (old)
-            {
-                NGIN::Memory::EpochReclaimer::Instance().Retire(old, [](void* p) { delete static_cast<DataType*>(p); });
-                return false;
-            }
-            return true;
+            return value && ((value & (value - 1)) == 0);
         }
 
-        bool drop() noexcept
+        constexpr std::size_t ConstLog2(std::size_t value) noexcept
         {
-            DataType* old = m_ptr.exchange(nullptr, std::memory_order_acq_rel);
-            if (old)
+            std::size_t shift = 0;
+            while ((static_cast<std::size_t>(1) << shift) < value)
             {
-                NGIN::Memory::EpochReclaimer::Instance().Retire(old, [](void* p) { delete static_cast<DataType*>(p); });
-                return true;
+                ++shift;
             }
-            return false;
+            return shift;
         }
-    };
 
-    // ============================================================
-    // ConcurrentHashMap
-    // ============================================================
+        template<class Key, class Value>
+        struct SlotStorage
+        {
+            std::atomic<std::uint8_t> control {static_cast<std::uint8_t>(SlotState::Empty)};
+            std::size_t               hash {0};
+            alignas(Key) unsigned char   keyStorage[sizeof(Key)] {};
+            alignas(Value) unsigned char valueStorage[sizeof(Value)] {};
 
-    template<typename Key, typename Value, std::size_t BucketsPerVirtual = 8>
+            constexpr SlotStorage() noexcept = default;
+
+            [[nodiscard]] SlotState State(std::memory_order order = std::memory_order_acquire) const noexcept
+            {
+                return static_cast<SlotState>(control.load(order));
+            }
+
+            void Reset() noexcept
+            {
+                hash = 0;
+                control.store(static_cast<std::uint8_t>(SlotState::Empty), std::memory_order_release);
+            }
+
+            bool TryLockFrom(SlotState expected) noexcept
+            {
+                auto expectedRaw = static_cast<std::uint8_t>(expected);
+                return control.compare_exchange_strong(
+                        expectedRaw,
+                        static_cast<std::uint8_t>(SlotState::PendingInsert),
+                        std::memory_order_acq_rel,
+                        std::memory_order_relaxed);
+            }
+
+            void UnlockTo(SlotState state) noexcept
+            {
+                control.store(static_cast<std::uint8_t>(state), std::memory_order_release);
+            }
+
+            template<class K, class V>
+            void ConstructPayload(std::size_t h, K&& key, V&& value)
+            {
+                hash = h;
+                try
+                {
+                    auto* keyPtr = ::new (static_cast<void*>(keyStorage)) Key(std::forward<K>(key));
+                    try
+                    {
+                        ::new (static_cast<void*>(valueStorage)) Value(std::forward<V>(value));
+                    }
+                    catch (...)
+                    {
+                        keyPtr->~Key();
+                        hash = 0;
+                        throw;
+                    }
+                }
+                catch (...)
+                {
+                    hash = 0;
+                    throw;
+                }
+            }
+
+            void DestroyPayload() noexcept
+            {
+                KeyRef().~Key();
+                ValueRef().~Value();
+                hash = 0;
+            }
+
+            template<class V>
+            void AssignValue(V&& value)
+            {
+                ValueRef() = std::forward<V>(value);
+            }
+
+            [[nodiscard]] Key& KeyRef() noexcept
+            {
+                return *std::launder(reinterpret_cast<Key*>(keyStorage));
+            }
+
+            [[nodiscard]] const Key& KeyRef() const noexcept
+            {
+                return *std::launder(reinterpret_cast<const Key*>(keyStorage));
+            }
+
+            [[nodiscard]] Value& ValueRef() noexcept
+            {
+                return *std::launder(reinterpret_cast<Value*>(valueStorage));
+            }
+
+            [[nodiscard]] const Value& ValueRef() const noexcept
+            {
+                return *std::launder(reinterpret_cast<const Value*>(valueStorage));
+            }
+        };
+
+        template<class Key, class Value, std::size_t GroupSize>
+        struct alignas(64) BucketGroup
+        {
+            SlotStorage<Key, Value> slots[GroupSize];
+
+            constexpr BucketGroup() noexcept
+            {
+                Reset();
+            }
+
+            void Reset() noexcept
+            {
+                for (auto& slot: slots)
+                    slot.Reset();
+            }
+        };
+    }// namespace detail
+
+    /// @brief Concurrent hash map leveraging open addressing and cooperative resizing.
+    template<class Key,
+             class Value,
+             class Hash   = std::hash<Key>,
+             class Equal  = std::equal_to<Key>,
+             Memory::AllocatorConcept Allocator = Memory::SystemAllocator,
+             std::size_t GroupSize              = 16>
     class ConcurrentHashMap
     {
-        static_assert(std::is_copy_constructible_v<Value>, "Value must be copy constructible (Phase 2 requirement)");
-        static inline std::size_t next_pow2(std::size_t n)
-        {
-            if (n < 2)
-                return 2;
-            --n;
-            n |= n >> 1;
-            n |= n >> 2;
-            n |= n >> 4;
-            n |= n >> 8;
-            n |= n >> 16;
-            if constexpr (sizeof(std::size_t) >= 8)
-                n |= n >> 32;
-            return n + 1;
-        }
-
-        struct BucketData
-        {
-            std::size_t                       hash;// always stored (even in pair-CAS path) for portability & debug
-            Key                               key;
-            SharedDoubleReferenceGuard<Value> v;
-            template<typename K, typename... Ts>
-            BucketData(std::size_t h, K&& k, Ts&&... args) : hash(h), key(std::forward<K>(k)), v()
-            {
-                v.emplace(std::forward<Ts>(args)...);
-            }
-        };
-
-        struct BucketPtr
-        {
-            std::size_t hash;
-            BucketData* data;
-            friend bool operator==(const BucketPtr& a, const BucketPtr& b) noexcept
-            {
-                return a.hash == b.hash && a.data == b.data;
-            }
-        };
-        static_assert(std::is_trivially_copyable_v<BucketPtr>, "BucketPtr must be trivially copyable");
-
-#ifndef NGIN_CONCURRENT_HASHMAP_FORCE_FALLBACK
-        static constexpr bool kUsePairCAS = std::atomic<BucketPtr>::is_always_lock_free;
-#else
-        static constexpr bool kUsePairCAS = false;
-#endif
-
-        struct VirtualBucket
-        {
-            using PairSlotArray     = std::array<std::atomic<BucketPtr>, BucketsPerVirtual>;
-            using FallbackSlotArray = std::array<std::atomic<BucketData*>, BucketsPerVirtual>;
-            std::conditional_t<kUsePairCAS, PairSlotArray, FallbackSlotArray> slots;
-            std::atomic<VirtualBucket*>                                       next {nullptr};
-            VirtualBucket()
-            {
-                if constexpr (kUsePairCAS)
-                {
-                    for (auto& s: slots)
-                        s.store(BucketPtr {0, nullptr}, std::memory_order_relaxed);
-                }
-                else
-                {
-                    for (auto& s: slots)
-                        s.store(nullptr, std::memory_order_relaxed);
-                }
-            }
-            ~VirtualBucket()
-            {
-                // Iteratively delete chain to avoid recursion; detach first to be idempotent.
-                VirtualBucket* p = next.exchange(nullptr, std::memory_order_acq_rel);
-                while (p)
-                {
-                    VirtualBucket* nxt = p->next.exchange(nullptr, std::memory_order_acq_rel);
-                    delete p;
-                    p = nxt;
-                }
-
-                if constexpr (kUsePairCAS)
-                {
-                    for (auto& s: slots)
-                    {
-                        auto bp = s.load(std::memory_order_relaxed);
-                        if (bp.data)
-                            delete bp.data;
-                    }
-                }
-                else
-                {
-                    for (auto& s: slots)
-                    {
-                        if (auto* ptr = s.load(std::memory_order_relaxed))
-                            delete ptr;
-                    }
-                }
-            }
-        };
-
-        struct TableHeader
-        {
-            std::size_t                  len;
-            std::atomic<VirtualBucket*>* buckets;
-        };
-        // Single atomic pointer publish of header (len + buckets) avoids torn snapshot issues.
-        std::atomic<TableHeader*> tableHeader {nullptr};
-        std::atomic<std::size_t>  size_ {0};
-        // Track allocated tables via a lock-free stack (avoid unsynchronized std::vector access during concurrent resizes)
-        struct TableAllocationNode
-        {
-            std::atomic<VirtualBucket*>* buckets;
-            std::size_t                  len;
-            std::atomic<bool>            retired {false};// <<< add this
-            TableAllocationNode*         next;
-        };
-
-        std::atomic<TableAllocationNode*> allocationsHead {nullptr};
-
-        void TrackAllocation(std::atomic<VirtualBucket*>* buckets, std::size_t len) noexcept
-        {
-            auto* node    = new TableAllocationNode {};
-            node->buckets = buckets;
-            node->len     = len;
-            node->retired.store(false, std::memory_order_relaxed);
-            node->next = allocationsHead.load(std::memory_order_relaxed);
-            while (!allocationsHead.compare_exchange_weak(
-                    node->next, node, std::memory_order_release, std::memory_order_relaxed)) {}
-        }
-
-
-        void MarkRetired(std::atomic<VirtualBucket*>* which) noexcept
-        {
-            for (auto* n = allocationsHead.load(std::memory_order_acquire); n; n = n->next)
-            {
-                if (n->buckets == which)
-                {
-                    n->retired.store(true, std::memory_order_release);
-                    break;
-                }
-            }
-        }
-
-        static void FreeTable(std::atomic<VirtualBucket*>* buckets, std::size_t len) noexcept
-        {
-            if (!buckets)
-                return;
-            for (std::size_t i = 0; i < len; ++i)
-            {
-                if (auto* vb = buckets[i].load(std::memory_order_relaxed))
-                    delete vb;// VirtualBucket dtor iteratively frees chain
-            }
-            delete[] buckets;
-        }
-        std::hash<Key> hasher;
-
-        // ------------------------------------------------------------
-        // Phase 4: Cooperative (incremental) resize state
-        // ------------------------------------------------------------
-        struct ResizeState
-        {
-            // Old (source) table
-            std::atomic<VirtualBucket*>* old_table;
-            std::size_t                  old_len;
-            // New (destination) table
-            std::atomic<VirtualBucket*>* new_table;
-            std::size_t                  new_len;
-            // Per-bucket migration markers: 0 = not started, 1 = in progress, 2 = done
-            std::unique_ptr<std::atomic<int>[]> markers;
-            std::atomic<std::size_t>            nextIndex {0};
-            std::atomic<std::size_t>            migratedCount {0};
-
-            ResizeState(std::atomic<VirtualBucket*>* o, std::size_t ol,
-                        std::atomic<VirtualBucket*>* nt, std::size_t nl)
-                : old_table(o), old_len(ol), new_table(nt), new_len(nl)
-            {
-                markers = std::unique_ptr<std::atomic<int>[]>(new std::atomic<int>[old_len]);
-                for (std::size_t i = 0; i < old_len; ++i)
-                    markers[i].store(0, std::memory_order_relaxed);
-            }
-        };
-        std::atomic<ResizeState*> resizeState {nullptr};
-
-        std::size_t mask() const noexcept
-        {
-            auto* hdr = tableHeader.load(std::memory_order_acquire);
-            return hdr->len - 1;
-        }
-
-        struct TableView
-        {
-            std::atomic<VirtualBucket*>* buckets;
-            std::size_t                  len;
-        };
-
-        // Acquire a self-consistent snapshot of (buckets pointer, length).
-        // Publisher order: BUCKETS then LEN. We double-load BUCKETS and accept when
-        // stable so that LEN corresponds to the same buckets array; this avoids the
-        // torn state (new len with old buckets) that can cause out-of-bounds access.
-        TableView LoadTable() const noexcept
-        {
-            auto* hdr = tableHeader.load(std::memory_order_acquire);
-            return {hdr->buckets, hdr->len};
-        }
-
-        // Attempt to start a cooperative resize (non-blocking).
-        void MaybeStartResize()
-        {
-            // Heuristic: load factor > 0.75 triggers resize attempt.
-            auto* hdr    = tableHeader.load(std::memory_order_acquire);
-            auto  curLen = hdr->len;
-            if (Size() * 4 < curLen * BucketsPerVirtual * 3)
-                return;
-
-            if (resizeState.load(std::memory_order_acquire) != nullptr)
-                return;// already resizing
-
-            std::size_t new_len = curLen * 2;
-            auto*       new_tab = new std::atomic<VirtualBucket*>[new_len];
-            for (std::size_t i = 0; i < new_len; ++i)
-            {
-                new_tab[i].store(new VirtualBucket(), std::memory_order_release);
-            }
-            // Create state object (not yet published)
-            auto*        state    = new ResizeState(hdr->buckets, curLen, new_tab, new_len);
-            ResizeState* expected = nullptr;
-            if (!resizeState.compare_exchange_strong(expected, state, std::memory_order_release, std::memory_order_relaxed))
-            {
-                // Lost race; free newly allocated table & state (was never published)
-                FreeTable(new_tab, new_len);
-                delete state;
-            }
-            else
-            {
-                // Track only after successful publication attempt wins.
-                TrackAllocation(new_tab, new_len);
-            }
-        }
-
-        // Place (hash,key,value) into destination table (used during migration). Two-pass duplicate-safe.
-        void PlaceInto(VirtualBucket* root, std::size_t h, const Key& key, const Value& value)
-        {
-            // Pass A: scan entire chain for existing key (live or tombstoned) BEFORE attempting any insert.
-            for (VirtualBucket* scan = root; scan; scan = scan->next.load(std::memory_order_acquire))
-            {
-                if constexpr (kUsePairCAS)
-                {
-                    for (auto& slot: scan->slots)
-                    {
-                        BucketPtr bp = slot.load(std::memory_order_acquire);
-                        if (bp.data && bp.hash == h && bp.data->key == key)
-                        {
-                            auto g = bp.data->v.acquire();
-                            if (!g.is_valid())
-                                bp.data->v.emplace(value);// resurrection handled (size accounted by caller)
-                            return;
-                        }
-                    }
-                }
-                else
-                {
-                    for (auto& slot: scan->slots)
-                    {
-                        BucketData* ptr = slot.load(std::memory_order_acquire);
-                        if (ptr && ptr->hash == h && ptr->key == key)
-                        {
-                            auto g = ptr->v.acquire();
-                            if (!g.is_valid())
-                                ptr->v.emplace(value);
-                            return;
-                        }
-                    }
-                }
-            }
-            // Pass B: attempt insertion; re-check for duplicate in each node before claiming empties (in case race inserted it).
-            VirtualBucket* vb = root;
-            while (vb)
-            {
-                if constexpr (kUsePairCAS)
-                {
-                    for (auto& slot: vb->slots)
-                    {
-                        BucketPtr bp = slot.load(std::memory_order_acquire);
-                        if (bp.data && bp.hash == h && bp.data->key == key)
-                            return;// another thread inserted between passes
-                        if (bp.data == nullptr)
-                        {
-                            auto*     bd = new BucketData(h, key, value);
-                            BucketPtr expected {0, nullptr};
-                            BucketPtr desired {h, bd};
-                            if (slot.compare_exchange_strong(expected, desired, std::memory_order_release, std::memory_order_relaxed))
-                                return;
-                            delete bd;
-                        }
-                    }
-                }
-                else
-                {
-                    for (auto& slot: vb->slots)
-                    {
-                        BucketData* cur = slot.load(std::memory_order_acquire);
-                        if (cur && cur->hash == h && cur->key == key)
-                            return;
-                        if (cur == nullptr)
-                        {
-                            auto* expected = static_cast<BucketData*>(nullptr);
-                            auto* desired  = new BucketData(h, key, value);
-                            if (slot.compare_exchange_strong(expected, desired, std::memory_order_release, std::memory_order_relaxed))
-                                return;
-                            delete desired;
-                        }
-                    }
-                }
-                VirtualBucket* next = vb->next.load(std::memory_order_acquire);
-                if (!next)
-                {
-                    auto* new_vb = new VirtualBucket();
-                    if (vb->next.compare_exchange_strong(next, new_vb, std::memory_order_release, std::memory_order_relaxed))
-                        vb = new_vb;
-                    else
-                    {
-                        delete new_vb;
-                        vb = next;
-                    }
-                }
-                else
-                    vb = next;
-            }
-        }
-
-        // Migrate a single bucket index; returns true if any work was performed.
-        bool MigrateOne(ResizeState* state)
-        {
-            std::size_t i = state->nextIndex.fetch_add(1, std::memory_order_acq_rel);
-            if (i >= state->old_len)
-                return false;
-            // Claim marker
-            int expected = 0;
-            if (!state->markers[i].compare_exchange_strong(expected, 1, std::memory_order_acq_rel, std::memory_order_relaxed))
-                return true;// another thread is/was migrating; count as helping
-
-            VirtualBucket* vb = state->old_table[i].load(std::memory_order_acquire);
-            while (vb)
-            {
-                if constexpr (kUsePairCAS)
-                {
-                    for (auto& s: vb->slots)
-                    {
-                        BucketPtr bp = s.load(std::memory_order_acquire);
-                        if (bp.data)
-                        {
-                            auto g = bp.data->v.acquire();
-                            if (g.is_valid())
-                                // Acquire to observe fully constructed VirtualBucket published at allocation.
-                                PlaceInto(state->new_table[bp.hash & (state->new_len - 1)].load(std::memory_order_acquire), bp.hash, bp.data->key, *g);
-                        }
-                    }
-                }
-                else
-                {
-                    for (auto& s: vb->slots)
-                    {
-                        BucketData* ptr = s.load(std::memory_order_acquire);
-                        if (ptr)
-                        {
-                            auto g = ptr->v.acquire();
-                            if (g.is_valid())
-                                // Acquire to observe fully constructed VirtualBucket published at allocation.
-                                PlaceInto(state->new_table[ptr->hash & (state->new_len - 1)].load(std::memory_order_acquire), ptr->hash, ptr->key, *g);
-                        }
-                    }
-                }
-                vb = vb->next.load(std::memory_order_acquire);
-            }
-
-            state->markers[i].store(2, std::memory_order_release);
-            state->migratedCount.fetch_add(1, std::memory_order_acq_rel);
-            return true;
-        }
-
-        void HelpResize()
-        {
-            NGIN::Memory::EpochReclaimer::Guard epochGuard;// <— pin lifetime of resize structures
-
-            ResizeState* state = resizeState.load(std::memory_order_acquire);
-            if (!state)
-                return;
-
-            MigrateOne(state);
-
-            if (state->migratedCount.load(std::memory_order_acquire) == state->old_len)
-            {
-                auto* newHdr = new TableHeader {state->new_len, state->new_table};
-                auto* oldHdr = tableHeader.load(std::memory_order_acquire);
-                tableHeader.store(newHdr, std::memory_order_release);
-
-                // Retire the tiny header with EBR
-                NGIN::Memory::EpochReclaimer::Instance().Retire(oldHdr, [](void* p) {
-                    delete static_cast<TableHeader*>(p);
-                });
-
-                // Only the winning thread clears the state
-                ResizeState* expected = state;
-                if (resizeState.compare_exchange_strong(expected, nullptr, std::memory_order_acq_rel, std::memory_order_relaxed))
-                {
-                    // ALSO retire the OLD TABLE ARRAY under EBR to prevent UAF in MigrateOne
-                    auto* old_tab = state->old_table;
-                    auto  old_len = state->old_len;
-
-                    MarkRetired(old_tab);
-
-                    NGIN::Memory::EpochReclaimer::Instance().Retire(old_tab, [old_len](void* p) {
-                        auto* buckets = static_cast<std::atomic<VirtualBucket*>*>(p);
-                        if (!buckets)
-                            return;
-                        for (std::size_t i = 0; i < old_len; ++i)
-                        {
-                            if (auto* vb = buckets[i].load(std::memory_order_relaxed))
-                                delete vb;// VirtualBucket dtor deletes its chain & payloads
-                        }
-                        delete[] buckets;
-                    });
-
-                    // Finally retire the ResizeState itself
-                    NGIN::Memory::EpochReclaimer::Instance().Retire(state, [](void* p) {
-                        delete static_cast<ResizeState*>(p);
-                    });
-                }
-            }
-        }
-
-
-        // Dual write with finalize-aware fallback: if resizeState vanished after old-table insert, mirror into current header table.
-        template<typename V>
-        void DualWriteIfNeeded(std::size_t idx, std::size_t h, const Key& key, const V& value,
-                               std::atomic<VirtualBucket*>* srcTable)
-        {
-            if (ResizeState* rs = resizeState.load(std::memory_order_acquire);
-                rs && rs->old_table == srcTable && idx < rs->old_len)
-            {
-                if (rs->markers[idx].load(std::memory_order_acquire) >= 1)
-                {
-                    auto* root = rs->new_table[h & (rs->new_len - 1)].load(std::memory_order_acquire);
-                    PlaceInto(root, h, key, value);
-                }
-                return;
-            }
-            // Fallback: resize finalized; if we inserted into a non-current table, replicate into current table.
-            TableHeader* hdr = tableHeader.load(std::memory_order_acquire);
-            if (hdr && hdr->buckets != srcTable)
-            {
-                auto* root = hdr->buckets[h & (hdr->len - 1)].load(std::memory_order_acquire);
-                PlaceInto(root, h, key, value);
-            }
-        }
-
-        // Determine whether a dual lookup is needed and whether to prefer new table first.
-        bool NeedDualLookup(std::size_t idx, const TableView& tv, ResizeState* rs, bool& preferNew) const noexcept
-        {
-            preferNew = false;
-            if (!rs)
-                return false;
-            if (rs->old_table != tv.buckets)
-                return false;
-            if (idx >= rs->old_len)
-                return false;
-            int marker = rs->markers[idx].load(std::memory_order_acquire);
-            if (marker >= 1)
-            {
-                preferNew = (marker == 2);
-                return true;
-            }
-            return false;
-        }
-
-        // Dual drop with finalize-aware fallback mirroring.
-        void DualDropIfNeeded(std::size_t idx, std::size_t h, const Key& key, std::atomic<VirtualBucket*>* srcTable)
-        {
-            if (ResizeState* rs = resizeState.load(std::memory_order_acquire);
-                rs && rs->old_table == srcTable && idx < rs->old_len &&
-                rs->markers[idx].load(std::memory_order_acquire) >= 1)
-            {
-                auto* newRoot = rs->new_table[h & (rs->new_len - 1)].load(std::memory_order_acquire);
-                for (VirtualBucket* vb = newRoot; vb; vb = vb->next.load(std::memory_order_acquire))
-                {
-                    for (auto& slot: vb->slots)
-                    {
-                        if constexpr (kUsePairCAS)
-                        {
-                            BucketPtr bp = slot.load(std::memory_order_acquire);
-                            if (bp.data && bp.hash == h && bp.data->key == key)
-                            {
-                                bp.data->v.drop();
-                                return;
-                            }
-                        }
-                        else
-                        {
-                            BucketData* ptr = slot.load(std::memory_order_acquire);
-                            if (ptr && ptr->hash == h && ptr->key == key)
-                            {
-                                ptr->v.drop();
-                                return;
-                            }
-                        }
-                    }
-                }
-                return;
-            }
-            // Finalized fallback
-            TableHeader* hdr = tableHeader.load(std::memory_order_acquire);
-            if (hdr && hdr->buckets != srcTable)
-            {
-                auto* curRoot = hdr->buckets[h & (hdr->len - 1)].load(std::memory_order_acquire);
-                for (VirtualBucket* vb = curRoot; vb; vb = vb->next.load(std::memory_order_acquire))
-                {
-                    for (auto& slot: vb->slots)
-                    {
-                        if constexpr (kUsePairCAS)
-                        {
-                            BucketPtr bp = slot.load(std::memory_order_acquire);
-                            if (bp.data && bp.hash == h && bp.data->key == key)
-                            {
-                                bp.data->v.drop();
-                                return;
-                            }
-                        }
-                        else
-                        {
-                            BucketData* ptr = slot.load(std::memory_order_acquire);
-                            if (ptr && ptr->hash == h && ptr->key == key)
-                            {
-                                ptr->v.drop();
-                                return;
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        static_assert(detail::IsPowerOfTwo(GroupSize), "GroupSize must be a power of two.");
 
     public:
-        explicit ConcurrentHashMap(std::size_t initial_capacity = 16)
+        using key_type        = Key;
+        using mapped_type     = Value;
+        using hash_type       = Hash;
+        using key_equal       = Equal;
+        using allocator_type  = Allocator;
+        using size_type       = std::size_t;
+        using value_type      = std::pair<const Key, Value>;
+        static constexpr size_type kGroupSize  = GroupSize;
+        static constexpr double    kLoadFactor = 0.75;
+
+        ConcurrentHashMap() : ConcurrentHashMap(64) {}
+
+        explicit ConcurrentHashMap(size_type initialCapacity,
+                                    const Hash& hash   = Hash {},
+                                    const Equal& equal = Equal {},
+                                    const Allocator& allocator = Allocator {})
+            : m_hash(hash), m_equal(equal), m_allocator(allocator)
         {
-            const std::size_t cap     = next_pow2(initial_capacity);
-            auto*             buckets = new std::atomic<VirtualBucket*>[cap];
-            for (std::size_t i = 0; i < cap; ++i)
+            Initialize(initialCapacity);
+        }
+
+        ConcurrentHashMap(const ConcurrentHashMap&)            = delete;
+        ConcurrentHashMap& operator=(const ConcurrentHashMap&) = delete;
+
+        ConcurrentHashMap(ConcurrentHashMap&& other) noexcept
+            : m_hash(std::move(other.m_hash)),
+              m_equal(std::move(other.m_equal)),
+              m_allocator(std::move(other.m_allocator))
+        {
+            other.DrainMigration();
+            m_table            = other.m_table;
+            m_capacity         = other.m_capacity;
+            m_mask             = other.m_mask;
+            m_size.store(other.m_size.load(std::memory_order_relaxed), std::memory_order_relaxed);
+            m_resizeThreshold  = other.m_resizeThreshold;
+            other.m_table      = {};
+            other.m_capacity   = 0;
+            other.m_mask       = 0;
+            other.m_resizeThreshold = 0;
+            other.m_size.store(0, std::memory_order_relaxed);
+        }
+
+        ConcurrentHashMap& operator=(ConcurrentHashMap&& other) noexcept
+        {
+            if (this != &other)
             {
-                buckets[i].store(new VirtualBucket(), std::memory_order_release);
+                DrainMigration();
+                DestroyTable();
+
+                m_hash      = std::move(other.m_hash);
+                m_equal     = std::move(other.m_equal);
+                m_allocator = std::move(other.m_allocator);
+
+                other.DrainMigration();
+                m_table            = other.m_table;
+                m_capacity         = other.m_capacity;
+                m_mask             = other.m_mask;
+                m_size.store(other.m_size.load(std::memory_order_relaxed), std::memory_order_relaxed);
+                m_resizeThreshold  = other.m_resizeThreshold;
+
+                other.m_table      = {};
+                other.m_capacity   = 0;
+                other.m_mask       = 0;
+                other.m_resizeThreshold = 0;
+                other.m_size.store(0, std::memory_order_relaxed);
             }
-            auto* hdr = new TableHeader {cap, buckets};
-            tableHeader.store(hdr, std::memory_order_release);
-            TrackAllocation(buckets, cap);
-            assert(cap && (cap & (cap - 1)) == 0 && "table_len must be power of two");
-#ifndef NDEBUG
-            {
-                std::atomic<BucketPtr> test;
-                (void) test;// silence unused warning
-                if constexpr (kUsePairCAS)
-                {
-                    // Pair-CAS path selected; sanity check it is indeed lock-free.
-                    assert(test.is_lock_free() && "Expected lock-free atomic<BucketPtr> for pair-CAS fast path");
-                }
-                else
-                {
-                    // Fallback path active (non lock-free pair CAS). No assertion; documented behavior.
-                }
-            }
-#endif
+            return *this;
         }
 
         ~ConcurrentHashMap()
         {
-            // Ensure any scheduled frees (from resizes) actually run now.
-            NGIN::Memory::EpochReclaimer::Instance().ForceDrain();
-
-            auto* node = allocationsHead.load(std::memory_order_acquire);
-            while (node)
-            {
-                if (!node->retired.load(std::memory_order_acquire))
-                {
-                    // Not retired via EBR → we own freeing it here.
-                    for (std::size_t i = 0; i < node->len; ++i)
-                    {
-                        if (auto* vb = node->buckets[i].load(std::memory_order_relaxed))
-                            delete vb;// VirtualBucket dtor handles chain and values
-                    }
-                    delete[] node->buckets;
-                }
-                auto* next = node->next;
-                delete node;
-                node = next;
-            }
-            if (auto* hdr = tableHeader.load(std::memory_order_acquire))
-                delete hdr;// tiny
+            DrainMigration();
+            DestroyTable();
         }
 
-        // Debug / test helper: fully drain any in-progress resize so subsequent Contains/Get
-        // observe the final table. Bounded helping loop.
-        void DebugDrainResize()
+        [[nodiscard]] size_type Size() const noexcept
         {
-            NGIN::Memory::EpochReclaimer::Guard epochGuard;// protect resizeState during draining
-            for (int i = 0; i < 100000; ++i)               // large upper bound; exits early when done
-            {
-                if (!resizeState.load(std::memory_order_acquire))
-                    return;
-                HelpResize();
-            }
+            return m_size.load(std::memory_order_acquire);
         }
 
-        void Insert(const Key& key, const Value& value)
+        [[nodiscard]] bool Empty() const noexcept
         {
-            NGIN::Memory::EpochReclaimer::Guard epochGuard;
-            const size_t                        h       = hasher(key);
-            auto                                tv      = LoadTable();
-            const size_t                        idx     = h & (tv.len - 1);
-            auto*                               buckets = tv.buckets;
-            VirtualBucket*                      vb      = buckets[idx].load(std::memory_order_acquire);
-
-            // If a resize is active and this bucket was already migrated, insert/update in new table (two-pass)
-            if (auto* rs = resizeState.load(std::memory_order_acquire); rs && rs->old_table == tv.buckets && idx < rs->old_len)
-            {
-                int migratedState = rs->markers[idx].load(std::memory_order_acquire);
-                if (migratedState == 2)
-                {
-                    auto*          newRoot = rs->new_table[h & (rs->new_len - 1)].load(std::memory_order_acquire);
-                    VirtualBucket* cur     = newRoot;
-                    // Pass A: search
-                    for (VirtualBucket* scan = cur; scan; scan = scan->next.load(std::memory_order_acquire))
-                    {
-                        if constexpr (kUsePairCAS)
-                        {
-                            for (auto& slot: scan->slots)
-                            {
-                                BucketPtr bp = slot.load(std::memory_order_acquire);
-                                if (bp.data && bp.hash == h && bp.data->key == key)
-                                {
-                                    bool inserted = bp.data->v.emplace(value);
-                                    if (inserted)
-                                        size_.fetch_add(1);
-                                    DualWriteIfNeeded(idx, h, key, value, tv.buckets);
-                                    MaybeStartResize();
-                                    HelpResize();
-                                    return;
-                                }
-                            }
-                        }
-                        else
-                        {
-                            for (auto& slot: scan->slots)
-                            {
-                                BucketData* ptr = slot.load(std::memory_order_acquire);
-                                if (ptr && ptr->hash == h && ptr->key == key)
-                                {
-                                    bool inserted = ptr->v.emplace(value);
-                                    if (inserted)
-                                        size_.fetch_add(1);
-                                    DualWriteIfNeeded(idx, h, key, value, tv.buckets);
-                                    MaybeStartResize();
-                                    HelpResize();
-                                    return;
-                                }
-                            }
-                        }
-                    }
-                    // Pass B: insert
-                    while (cur)
-                    {
-                        if constexpr (kUsePairCAS)
-                        {
-                            for (auto& slot: cur->slots)
-                            {
-                                BucketPtr bp = slot.load(std::memory_order_acquire);
-                                if (bp.data && bp.hash == h && bp.data->key == key)
-                                {
-                                    bool inserted = bp.data->v.emplace(value);
-                                    if (inserted)
-                                        size_.fetch_add(1);
-                                    DualWriteIfNeeded(idx, h, key, value, tv.buckets);
-                                    MaybeStartResize();
-                                    HelpResize();
-                                    return;
-                                }
-                                if (bp.data == nullptr)
-                                {
-                                    auto*     bd = new BucketData(h, key, value);
-                                    BucketPtr expected {0, nullptr};
-                                    BucketPtr desired {h, bd};
-                                    if (slot.compare_exchange_strong(expected, desired, std::memory_order_release, std::memory_order_relaxed))
-                                    {
-                                        size_.fetch_add(1);
-                                        DualWriteIfNeeded(idx, h, key, value, tv.buckets);
-                                        MaybeStartResize();
-                                        HelpResize();
-                                        return;
-                                    }
-                                    delete bd;
-                                }
-                            }
-                        }
-                        else
-                        {
-                            for (auto& slot: cur->slots)
-                            {
-                                BucketData* ptr = slot.load(std::memory_order_acquire);
-                                if (ptr && ptr->hash == h && ptr->key == key)
-                                {
-                                    bool inserted = ptr->v.emplace(value);
-                                    if (inserted)
-                                        size_.fetch_add(1);
-                                    DualWriteIfNeeded(idx, h, key, value, tv.buckets);
-                                    MaybeStartResize();
-                                    HelpResize();
-                                    return;
-                                }
-                                if (ptr == nullptr)
-                                {
-                                    auto* expected = static_cast<BucketData*>(nullptr);
-                                    auto* desired  = new BucketData(h, key, value);
-                                    if (slot.compare_exchange_strong(expected, desired, std::memory_order_release, std::memory_order_relaxed))
-                                    {
-                                        size_.fetch_add(1);
-                                        DualWriteIfNeeded(idx, h, key, value, tv.buckets);
-                                        MaybeStartResize();
-                                        HelpResize();
-                                        return;
-                                    }
-                                    delete desired;
-                                }
-                            }
-                        }
-                        VirtualBucket* next = cur->next.load(std::memory_order_acquire);
-                        if (!next)
-                        {
-                            auto* new_vb = new VirtualBucket();
-                            if (cur->next.compare_exchange_strong(next, new_vb, std::memory_order_release, std::memory_order_relaxed))
-                                cur = new_vb;
-                            else
-                            {
-                                delete new_vb;
-                                cur = next;
-                            }
-                        }
-                        else
-                            cur = next;
-                    }
-                }
-            }
-
-            // Pass A: scan entire chain for existing key first
-            for (VirtualBucket* scan = vb; scan; scan = scan->next.load(std::memory_order_acquire))
-            {
-                if constexpr (kUsePairCAS)
-                {
-                    for (auto& slot: scan->slots)
-                    {
-                        BucketPtr bp = slot.load(std::memory_order_acquire);
-                        if (bp.data && bp.hash == h && bp.data->key == key)
-                        {
-                            bool inserted = bp.data->v.emplace(value);
-                            if (inserted)
-                                size_.fetch_add(1);
-                            DualWriteIfNeeded(idx, h, key, value, tv.buckets);
-                            return;
-                        }
-                    }
-                }
-                else
-                {
-                    for (auto& slot: scan->slots)
-                    {
-                        BucketData* ptr = slot.load(std::memory_order_acquire);
-                        if (ptr && ptr->hash == h && ptr->key == key)
-                        {
-                            bool inserted = ptr->v.emplace(value);
-                            if (inserted)
-                                size_.fetch_add(1);
-                            DualWriteIfNeeded(idx, h, key, value, tv.buckets);
-                            return;
-                        }
-                    }
-                }
-            }
-            // Pass B: insert
-            while (vb)
-            {
-                if constexpr (kUsePairCAS)
-                {
-                    for (auto& slot: vb->slots)
-                    {
-                        BucketPtr bp = slot.load(std::memory_order_acquire);
-                        if (bp.data && bp.hash == h && bp.data->key == key)
-                        {
-                            bool inserted = bp.data->v.emplace(value);
-                            if (inserted)
-                                size_.fetch_add(1);
-                            DualWriteIfNeeded(idx, h, key, value, tv.buckets);
-                            return;
-                        }
-                        if (bp.data == nullptr)
-                        {
-                            auto*     bd = new BucketData(h, key, value);
-                            BucketPtr expected {0, nullptr};
-                            BucketPtr desired {h, bd};
-                            if (slot.compare_exchange_strong(expected, desired, std::memory_order_release, std::memory_order_relaxed))
-                            {
-                                size_.fetch_add(1);
-                                DualWriteIfNeeded(idx, h, key, value, tv.buckets);
-                                MaybeStartResize();
-                                HelpResize();
-                                return;
-                            }
-                            delete bd;
-                        }
-                    }
-                }
-                else
-                {
-                    for (auto& slot: vb->slots)
-                    {
-                        BucketData* ptr = slot.load(std::memory_order_acquire);
-                        if (ptr && ptr->hash == h && ptr->key == key)
-                        {
-                            bool inserted = ptr->v.emplace(value);
-                            if (inserted)
-                                size_.fetch_add(1);
-                            DualWriteIfNeeded(idx, h, key, value, tv.buckets);
-                            return;
-                        }
-                        if (ptr == nullptr)
-                        {
-                            auto* expected = static_cast<BucketData*>(nullptr);
-                            auto* desired  = new BucketData(h, key, value);
-                            if (slot.compare_exchange_strong(expected, desired, std::memory_order_release, std::memory_order_relaxed))
-                            {
-                                size_.fetch_add(1);
-                                DualWriteIfNeeded(idx, h, key, value, tv.buckets);
-                                MaybeStartResize();
-                                HelpResize();
-                                return;
-                            }
-                            delete desired;
-                        }
-                    }
-                }
-                VirtualBucket* next = vb->next.load(std::memory_order_acquire);
-                if (!next)
-                {
-                    auto* new_vb = new VirtualBucket();
-                    if (vb->next.compare_exchange_strong(next, new_vb, std::memory_order_release, std::memory_order_relaxed))
-                        vb = new_vb;
-                    else
-                    {
-                        delete new_vb;
-                        vb = next;
-                    }
-                }
-                else
-                    vb = next;
-            }
+            return Size() == 0;
         }
 
-        // Rvalue overload to avoid unnecessary copy in hot paths.
-        void Insert(const Key& key, Value&& value)
+        void Clear() noexcept
         {
-            NGIN::Memory::EpochReclaimer::Guard epochGuard;
-            const size_t                        h       = hasher(key);
-            auto                                tv      = LoadTable();
-            const size_t                        idx     = h & (tv.len - 1);
-            auto*                               buckets = tv.buckets;
-            VirtualBucket*                      vb      = buckets[idx].load(std::memory_order_acquire);
-            // rvalue path: no pre-snapshot gating
+            DrainMigration();
+            if (!m_table.groups)
+                return;
 
-            if (auto* rs = resizeState.load(std::memory_order_acquire); rs && rs->old_table == tv.buckets && idx < rs->old_len)
+            TableView view = CurrentView();
+            for (size_type index = 0; index < m_capacity; ++index)
             {
-                int migratedState = rs->markers[idx].load(std::memory_order_acquire);
-                if (migratedState == 2)
+                auto& slot  = SlotAt(view, index);
+                auto  state = slot.State(std::memory_order_acquire);
+                if (state == detail::SlotState::Occupied)
                 {
-                    auto*          newRoot = rs->new_table[h & (rs->new_len - 1)].load(std::memory_order_acquire);
-                    VirtualBucket* cur     = newRoot;
-                    // Pass A search
-                    for (VirtualBucket* scan = cur; scan; scan = scan->next.load(std::memory_order_acquire))
-                    {
-                        if constexpr (kUsePairCAS)
-                        {
-                            for (auto& slot: scan->slots)
-                            {
-                                BucketPtr bp = slot.load(std::memory_order_acquire);
-                                if (bp.data && bp.hash == h && bp.data->key == key)
-                                {
-                                    bool inserted = bp.data->v.emplace(value);// cannot move now (value possibly moved later)
-                                    if (inserted)
-                                        size_.fetch_add(1);
-                                    // new table path only
-                                    MaybeStartResize();
-                                    HelpResize();
-                                    return;
-                                }
-                            }
-                        }
-                        else
-                        {
-                            for (auto& slot: scan->slots)
-                            {
-                                BucketData* ptr = slot.load(std::memory_order_acquire);
-                                if (ptr && ptr->hash == h && ptr->key == key)
-                                {
-                                    bool inserted = ptr->v.emplace(value);
-                                    if (inserted)
-                                        size_.fetch_add(1);
-                                    DualWriteIfNeeded(idx, h, key, value, tv.buckets);
-                                    MaybeStartResize();
-                                    HelpResize();
-                                    return;
-                                }
-                            }
-                        }
-                    }
-                    // Pass B insert (moving value when actually inserting/resurrecting)
-                    while (cur)
-                    {
-                        if constexpr (kUsePairCAS)
-                        {
-                            for (auto& slot: cur->slots)
-                            {
-                                BucketPtr bp = slot.load(std::memory_order_acquire);
-                                if (bp.data && bp.hash == h && bp.data->key == key)
-                                {
-                                    bool inserted = bp.data->v.emplace(value);
-                                    if (inserted)
-                                        size_.fetch_add(1);
-                                    // new table path only
-                                    MaybeStartResize();
-                                    HelpResize();
-                                    return;
-                                }
-                                if (bp.data == nullptr)
-                                {
-                                    auto*     bd = new BucketData(h, key, std::move(value));
-                                    BucketPtr expected {0, nullptr};
-                                    BucketPtr desired {h, bd};
-                                    if (slot.compare_exchange_strong(expected, desired, std::memory_order_release, std::memory_order_relaxed))
-                                    {
-                                        size_.fetch_add(1);
-                                        auto guard = desired.data->v.acquire();
-                                        if (guard.is_valid()) { /* new table only */ }
-                                        MaybeStartResize();
-                                        HelpResize();
-                                        return;
-                                    }
-                                    delete bd;
-                                }
-                            }
-                        }
-                        else
-                        {
-                            for (auto& slot: cur->slots)
-                            {
-                                BucketData* ptr = slot.load(std::memory_order_acquire);
-                                if (ptr && ptr->hash == h && ptr->key == key)
-                                {
-                                    bool inserted = ptr->v.emplace(value);
-                                    if (inserted)
-                                        size_.fetch_add(1);
-                                    // new table path only
-                                    MaybeStartResize();
-                                    HelpResize();
-                                    return;
-                                }
-                                if (ptr == nullptr)
-                                {
-                                    auto* expected = static_cast<BucketData*>(nullptr);
-                                    auto* desired  = new BucketData(h, key, std::move(value));
-                                    if (slot.compare_exchange_strong(expected, desired, std::memory_order_release, std::memory_order_relaxed))
-                                    {
-                                        size_.fetch_add(1);
-                                        auto guard = desired->v.acquire();
-                                        if (guard.is_valid()) { /* new table only */ }
-                                        MaybeStartResize();
-                                        HelpResize();
-                                        return;
-                                    }
-                                    delete desired;
-                                }
-                            }
-                        }
-                        VirtualBucket* next = cur->next.load(std::memory_order_acquire);
-                        if (!next)
-                        {
-                            auto* new_vb = new VirtualBucket();
-                            if (cur->next.compare_exchange_strong(next, new_vb, std::memory_order_release, std::memory_order_relaxed))
-                                cur = new_vb;
-                            else
-                            {
-                                delete new_vb;
-                                cur = next;
-                            }
-                        }
-                        else
-                            cur = next;
-                    }
+                    slot.DestroyPayload();
                 }
+                slot.Reset();
             }
-
-            // Pass A: search chain
-            for (VirtualBucket* scan = vb; scan; scan = scan->next.load(std::memory_order_acquire))
-            {
-                if constexpr (kUsePairCAS)
-                {
-                    for (auto& slot: scan->slots)
-                    {
-                        BucketPtr bp = slot.load(std::memory_order_acquire);
-                        if (bp.data && bp.hash == h && bp.data->key == key)
-                        {
-                            bool inserted = bp.data->v.emplace(value);// use copy (can't move yet)
-                            if (inserted)
-                                size_.fetch_add(1);
-                            auto g = bp.data->v.acquire();
-                            if (g.is_valid())
-                                DualWriteIfNeeded(idx, h, key, *g, tv.buckets);
-                            return;
-                        }
-                    }
-                }
-                else
-                {
-                    for (auto& slot: scan->slots)
-                    {
-                        BucketData* ptr = slot.load(std::memory_order_acquire);
-                        if (ptr && ptr->hash == h && ptr->key == key)
-                        {
-                            bool inserted = ptr->v.emplace(value);
-                            if (inserted)
-                                size_.fetch_add(1);
-                            auto g = ptr->v.acquire();
-                            if (g.is_valid())
-                                DualWriteIfNeeded(idx, h, key, *g, tv.buckets);
-                            return;
-                        }
-                    }
-                }
-            }
-            // Pass B: insert (moving value only when we actually claim a slot)
-            while (vb)
-            {
-                if constexpr (kUsePairCAS)
-                {
-                    for (auto& slot: vb->slots)
-                    {
-                        BucketPtr bp = slot.load(std::memory_order_acquire);
-                        if (bp.data && bp.hash == h && bp.data->key == key)
-                        {
-                            bool inserted = bp.data->v.emplace(value);
-                            if (inserted)
-                                size_.fetch_add(1);
-                            auto g = bp.data->v.acquire();
-                            if (g.is_valid())
-                                DualWriteIfNeeded(idx, h, key, *g, tv.buckets);
-                            return;
-                        }
-                        if (bp.data == nullptr)
-                        {
-                            auto*     bd = new BucketData(h, key, std::move(value));
-                            BucketPtr expected {0, nullptr};
-                            BucketPtr desired {h, bd};
-                            if (slot.compare_exchange_strong(expected, desired, std::memory_order_release, std::memory_order_relaxed))
-                            {
-                                size_.fetch_add(1);
-                                auto guard = desired.data->v.acquire();
-                                if (guard.is_valid())
-                                    DualWriteIfNeeded(idx, h, key, *guard, tv.buckets);
-                                MaybeStartResize();
-                                HelpResize();
-                                return;
-                            }
-                            delete bd;
-                        }
-                    }
-                }
-                else
-                {
-                    for (auto& slot: vb->slots)
-                    {
-                        BucketData* ptr = slot.load(std::memory_order_acquire);
-                        if (ptr && ptr->hash == h && ptr->key == key)
-                        {
-                            bool inserted = ptr->v.emplace(value);
-                            if (inserted)
-                                size_.fetch_add(1);
-                            auto g = ptr->v.acquire();
-                            if (g.is_valid())
-                                DualWriteIfNeeded(idx, h, key, *g, tv.buckets);
-                            return;
-                        }
-                        if (ptr == nullptr)
-                        {
-                            auto* expected = static_cast<BucketData*>(nullptr);
-                            auto* desired  = new BucketData(h, key, std::move(value));
-                            if (slot.compare_exchange_strong(expected, desired, std::memory_order_release, std::memory_order_relaxed))
-                            {
-                                size_.fetch_add(1);
-                                auto guard = desired->v.acquire();
-                                if (guard.is_valid())
-                                    DualWriteIfNeeded(idx, h, key, *guard, tv.buckets);
-                                MaybeStartResize();
-                                HelpResize();
-                                return;
-                            }
-                            delete desired;
-                        }
-                    }
-                }
-                VirtualBucket* next = vb->next.load(std::memory_order_acquire);
-                if (!next)
-                {
-                    auto* new_vb = new VirtualBucket();
-                    if (vb->next.compare_exchange_strong(next, new_vb, std::memory_order_release, std::memory_order_relaxed))
-                        vb = new_vb;
-                    else
-                    {
-                        delete new_vb;
-                        vb = next;
-                    }
-                }
-                else
-                    vb = next;
-            }
+            m_size.store(0, std::memory_order_release);
         }
 
-        void Remove(const Key& key)
+        bool Insert(const Key& key, const Value& value)
         {
-            NGIN::Memory::EpochReclaimer::Guard epochGuard;
-            HelpResize();
-            const size_t   h         = hasher(key);
-            auto           tv        = LoadTable();
-            const size_t   idx       = h & (tv.len - 1);
-            auto*          buckets   = tv.buckets;
-            VirtualBucket* oldRoot   = buckets[idx].load(std::memory_order_acquire);
-            ResizeState*   rsLive    = resizeState.load(std::memory_order_acquire);
-            bool           canSeeNew = false;
-            VirtualBucket* newRoot   = nullptr;
-            if (rsLive && rsLive->old_table == tv.buckets && idx < rsLive->old_len)
-            {
-                int marker = rsLive->markers[idx].load(std::memory_order_acquire);
-                canSeeNew  = marker >= 1;
-                if (canSeeNew)
-                    newRoot = rsLive->new_table[h & (rsLive->new_len - 1)].load(std::memory_order_acquire);
-            }
-
-            // Search old table first. If found, drop and (if needed) propagate to new table.
-            for (VirtualBucket* vb = oldRoot; vb; vb = vb->next.load(std::memory_order_acquire))
-            {
-                for (auto& slot: vb->slots)
-                {
-                    if constexpr (kUsePairCAS)
-                    {
-                        BucketPtr bp = slot.load(std::memory_order_acquire);
-                        if (bp.hash == h && bp.data && bp.data->key == key)
-                        {
-                            if (bp.data->v.drop())
-                            {
-                                size_.fetch_sub(1);
-                                DualDropIfNeeded(idx, h, key, tv.buckets);
-                            }
-                            return;
-                        }
-                    }
-                    else
-                    {
-                        BucketData* ptr = slot.load(std::memory_order_acquire);
-                        if (ptr && ptr->hash == h && ptr->key == key)
-                        {
-                            if (ptr->v.drop())
-                            {
-                                size_.fetch_sub(1);
-                                DualDropIfNeeded(idx, h, key, tv.buckets);
-                            }
-                            return;
-                        }
-                    }
-                }
-            }
-            // Not found in old; if resize in progress and bucket at least claimed, search new table directly.
-            if (canSeeNew && newRoot)
-            {
-                for (VirtualBucket* vb = newRoot; vb; vb = vb->next.load(std::memory_order_acquire))
-                {
-                    for (auto& slot: vb->slots)
-                    {
-                        if constexpr (kUsePairCAS)
-                        {
-                            BucketPtr bp = slot.load(std::memory_order_acquire);
-                            if (bp.hash == h && bp.data && bp.data->key == key)
-                            {
-                                if (bp.data->v.drop())
-                                    size_.fetch_sub(1);
-                                return;
-                            }
-                        }
-                        else
-                        {
-                            BucketData* ptr = slot.load(std::memory_order_acquire);
-                            if (ptr && ptr->hash == h && ptr->key == key)
-                            {
-                                if (ptr->v.drop())
-                                    size_.fetch_sub(1);
-                                return;
-                            }
-                        }
-                    }
-                }
-            }
+            return EmplaceOrAssignInternal(key, value);
         }
 
-        bool Contains(const Key& key) const
+        bool Insert(const Key& key, Value&& value)
         {
-            NGIN::Memory::EpochReclaimer::Guard epochGuard;
-            const size_t                        h         = hasher(key);
-            auto                                tv        = LoadTable();
-            const size_t                        idx       = h & (tv.len - 1);
-            auto*                               buckets   = tv.buckets;
-            ResizeState*                        rs        = resizeState.load(std::memory_order_acquire);
-            bool                                preferNew = false;
-            bool                                needDual  = NeedDualLookup(idx, tv, rs, preferNew);
+            return EmplaceOrAssignInternal(key, std::move(value));
+        }
 
-            auto scanChain = [&](VirtualBucket* root) -> int {
-                for (VirtualBucket* vb = root; vb; vb = vb->next.load(std::memory_order_acquire))
+        bool Insert(Key&& key, const Value& value)
+        {
+            return EmplaceOrAssignInternal(std::move(key), value);
+        }
+
+        bool Insert(Key&& key, Value&& value)
+        {
+            return EmplaceOrAssignInternal(std::move(key), std::move(value));
+        }
+
+        template<class Updater>
+        bool Upsert(const Key& key, Value&& value, Updater&& updater)
+        {
+            return UpsertInternal(key, std::move(value), std::forward<Updater>(updater));
+        }
+
+        template<class Updater>
+        bool Upsert(Key&& key, Value&& value, Updater&& updater)
+        {
+            return UpsertInternal(std::move(key), std::move(value), std::forward<Updater>(updater));
+        }
+
+        bool Remove(const Key& key)
+        {
+            const std::size_t hash = ComputeHash(key);
+            TableView         primary = CurrentView();
+
+            if (auto* slot = AcquireForMutation(primary, key, hash))
+            {
+                slot->DestroyPayload();
+                slot->UnlockTo(detail::SlotState::Tombstone);
+                m_size.fetch_sub(1, std::memory_order_acq_rel);
+                if (auto* migration = m_migration.load(std::memory_order_acquire))
                 {
-                    for (auto& slot: vb->slots)
-                    {
-                        if constexpr (kUsePairCAS)
-                        {
-                            BucketPtr bp = slot.load(std::memory_order_acquire);
-                            if (bp.hash == h && bp.data && bp.data->key == key)
-                            {
-                                auto g = bp.data->v.acquire();
-                                return g.is_valid() ? 1 : 0;// 1=live,0=tombstoned
-                            }
-                        }
-                        else
-                        {
-                            BucketData* ptr = slot.load(std::memory_order_acquire);
-                            if (ptr && ptr->hash == h && ptr->key == key)
-                            {
-                                auto g = ptr->v.acquire();
-                                return g.is_valid() ? 1 : 0;
-                            }
-                        }
-                    }
+                    RemoveFromOld(migration, key, hash);
+                    HelpMigration(migration);
                 }
-                return -1;// not found
-            };
-
-            VirtualBucket* oldRoot = buckets[idx].load(std::memory_order_acquire);
-            VirtualBucket* newRoot = nullptr;
-            if (needDual)
-                newRoot = rs->new_table[h & (rs->new_len - 1)].load(std::memory_order_acquire);
-
-            if (!needDual)
-            {
-                return scanChain(oldRoot) == 1;
+                else
+                {
+                    MaybeStartMigration();
+                }
+                return true;
             }
-            // Dual path
-            if (preferNew)
+
+            if (auto* migration = m_migration.load(std::memory_order_acquire))
             {
-                int r = scanChain(newRoot);
-                if (r == 1)
+                TableView oldView {migration->oldGroups, migration->oldMask};
+                if (auto* slot = AcquireForMutation(oldView, key, hash))
+                {
+                    slot->DestroyPayload();
+                    slot->UnlockTo(detail::SlotState::Tombstone);
+                    m_size.fetch_sub(1, std::memory_order_acq_rel);
+                    HelpMigration(migration);
                     return true;
-                if (r == 0)// tombstone in new table; old won't have live copy
-                    return false;
-                // not found new, try old
-                r = scanChain(oldRoot);
-                if (r == 1)
-                    return true;
-                if (r == 0)
-                    return false;
-                return false;
-            }
-            else
-            {
-                int r = scanChain(oldRoot);
-                if (r == 1)
-                    return true;
-                if (r == 0)
-                {
-                    // tombstoned old copy; new might have resurrected value
-                    int rn = scanChain(newRoot);
-                    return rn == 1;
                 }
-                // not found old; check new
-                r = scanChain(newRoot);
-                return r == 1;
             }
+
+            return false;
+        }
+
+        [[nodiscard]] bool Contains(const Key& key) const noexcept
+        {
+            const std::size_t hash = ComputeHash(key);
+            TableView         primary = CurrentView();
+
+            if (ContainsInView(primary, key, hash))
+                return true;
+
+            if (auto* migration = m_migration.load(std::memory_order_acquire))
+            {
+                TableView oldView {migration->oldGroups, migration->oldMask};
+                if (ContainsInView(oldView, key, hash))
+                    return true;
+            }
+            return false;
         }
 
         Value Get(const Key& key) const
         {
-            NGIN::Memory::EpochReclaimer::Guard epochGuard;
-            const size_t                        h         = hasher(key);
-            auto                                tv        = LoadTable();
-            const size_t                        idx       = h & (tv.len - 1);
-            auto*                               buckets   = tv.buckets;
-            ResizeState*                        rs        = resizeState.load(std::memory_order_acquire);
-            bool                                preferNew = false;
-            bool                                needDual  = NeedDualLookup(idx, tv, rs, preferNew);
-            VirtualBucket*                      oldRoot   = buckets[idx].load(std::memory_order_acquire);
-            VirtualBucket*                      newRoot   = needDual ? rs->new_table[h & (rs->new_len - 1)].load(std::memory_order_acquire) : nullptr;
-
-            auto tryGetChain = [&](VirtualBucket* root, Value* out) -> int {
-                for (VirtualBucket* vb = root; vb; vb = vb->next.load(std::memory_order_acquire))
-                {
-                    for (auto& slot: vb->slots)
-                    {
-                        if constexpr (kUsePairCAS)
-                        {
-                            BucketPtr bp = slot.load(std::memory_order_acquire);
-                            if (bp.hash == h && bp.data && bp.data->key == key)
-                            {
-                                auto g = bp.data->v.acquire();
-                                if (g.is_valid())
-                                {
-                                    *out = *g;
-                                    return 1;
-                                }
-                                return 0;// tombstone
-                            }
-                        }
-                        else
-                        {
-                            BucketData* ptr = slot.load(std::memory_order_acquire);
-                            if (ptr && ptr->hash == h && ptr->key == key)
-                            {
-                                auto g = ptr->v.acquire();
-                                if (g.is_valid())
-                                {
-                                    *out = *g;
-                                    return 1;
-                                }
-                                return 0;
-                            }
-                        }
-                    }
-                }
-                return -1;
-            };
-
-            Value out {};
-            if (!needDual)
-            {
-                if (tryGetChain(oldRoot, &out) == 1)
-                    return out;
-                throw std::out_of_range("Key not found");
-            }
-            if (preferNew)
-            {
-                int r = tryGetChain(newRoot, &out);
-                if (r == 1)
-                    return out;
-                if (r == 0)
-                    throw std::out_of_range("Key not found");
-                r = tryGetChain(oldRoot, &out);
-                if (r == 1)
-                    return out;
-                throw std::out_of_range("Key not found");
-            }
-            else
-            {
-                int r = tryGetChain(oldRoot, &out);
-                if (r == 1)
-                    return out;
-                if (r == 0)
-                {
-                    // tombstoned old; maybe resurrected new
-                    r = tryGetChain(newRoot, &out);
-                    if (r == 1)
-                        return out;
-                    throw std::out_of_range("Key not found");
-                }
-                r = tryGetChain(newRoot, &out);
-                if (r == 1)
-                    return out;
-                throw std::out_of_range("Key not found");
-            }
+            Value result {};
+            if (TryGet(key, result))
+                return result;
+            throw std::out_of_range("ConcurrentHashMap::Get - key not found");
         }
 
-        // Non-throwing retrieval; returns true on success, false if absent or tombstoned.
-        bool TryGet(const Key& key, Value& out) const
+        bool TryGet(const Key& key, Value& outValue) const
         {
-            NGIN::Memory::EpochReclaimer::Guard epochGuard;
-            const size_t                        h         = hasher(key);
-            auto                                tv        = LoadTable();
-            const size_t                        idx       = h & (tv.len - 1);
-            auto*                               buckets   = tv.buckets;
-            ResizeState*                        rs        = resizeState.load(std::memory_order_acquire);
-            bool                                preferNew = false;
-            bool                                needDual  = NeedDualLookup(idx, tv, rs, preferNew);
-            VirtualBucket*                      oldRoot   = buckets[idx].load(std::memory_order_acquire);
-            VirtualBucket*                      newRoot   = needDual ? rs->new_table[h & (rs->new_len - 1)].load(std::memory_order_acquire) : nullptr;
+            const std::size_t hash = ComputeHash(key);
+            TableView         primary = CurrentView();
 
-            auto tryGetChain = [&](VirtualBucket* root) -> int {
-                for (VirtualBucket* vb = root; vb; vb = vb->next.load(std::memory_order_acquire))
-                {
-                    for (auto& slot: vb->slots)
-                    {
-                        if constexpr (kUsePairCAS)
-                        {
-                            BucketPtr bp = slot.load(std::memory_order_acquire);
-                            if (bp.hash == h && bp.data && bp.data->key == key)
-                            {
-                                auto g = bp.data->v.acquire();
-                                if (g.is_valid())
-                                {
-                                    out = *g;
-                                    return 1;// success
-                                }
-                                return 0;// tombstone
-                            }
-                        }
-                        else
-                        {
-                            BucketData* ptr = slot.load(std::memory_order_acquire);
-                            if (ptr && ptr->hash == h && ptr->key == key)
-                            {
-                                auto g = ptr->v.acquire();
-                                if (g.is_valid())
-                                {
-                                    out = *g;
-                                    return 1;
-                                }
-                                return 0;
-                            }
-                        }
-                    }
-                }
-                return -1;// not found
-            };
+            if (TryCopyValueInView(primary, key, hash, outValue))
+                return true;
 
-            if (!needDual)
+            if (auto* migration = m_migration.load(std::memory_order_acquire))
             {
-                return tryGetChain(oldRoot) == 1;
-            }
-            if (preferNew)
-            {
-                int r = tryGetChain(newRoot);
-                if (r == 1)
+                TableView oldView {migration->oldGroups, migration->oldMask};
+                if (TryCopyValueInView(oldView, key, hash, outValue))
                     return true;
-                if (r == 0)
-                    return false;
-                r = tryGetChain(oldRoot);
-                return r == 1;
             }
-            else
-            {
-                int r = tryGetChain(oldRoot);
-                if (r == 1)
-                    return true;
-                if (r == 0)
-                {
-                    r = tryGetChain(newRoot);
-                    return r == 1;
-                }
-                r = tryGetChain(newRoot);
-                return r == 1;
-            }
+            return false;
         }
 
-        // Optional-return convenience.
-        std::optional<Value> GetOptional(const Key& key) const
+        [[nodiscard]] std::optional<Value> GetOptional(const Key& key) const
         {
-            Value v;
-            if (TryGet(key, v))
-                return v;
+            Value storage;
+            if (TryGet(key, storage))
+                return storage;
             return std::nullopt;
         }
 
-        void Clear()
+        void Reserve(size_type desiredCapacity)
         {
-            NGIN::Memory::EpochReclaimer::Guard epochGuard;
-            HelpResize();
-            auto* hdr     = tableHeader.load(std::memory_order_acquire);
-            auto* buckets = hdr->buckets;
-            for (std::size_t i = 0; i < hdr->len; ++i)
+            if (desiredCapacity <= m_capacity)
+                return;
+            StartMigration(desiredCapacity);
+            if (auto* migration = m_migration.load(std::memory_order_acquire))
             {
-                VirtualBucket* vb = buckets[i].load(std::memory_order_acquire);
-                while (vb)
+                HelpMigration(migration, migration->oldGroupCount);
+                FinalizeMigration(migration);
+            }
+        }
+
+        [[nodiscard]] size_type Capacity() const noexcept
+        {
+            return m_capacity;
+        }
+
+        [[nodiscard]] double LoadFactor() const noexcept
+        {
+            if (m_capacity == 0)
+                return 0.0;
+            return static_cast<double>(m_size.load(std::memory_order_acquire)) /
+                   static_cast<double>(m_capacity);
+        }
+
+        template<class Callback>
+        void ForEach(Callback&& callback) const
+        {
+            const_cast<ConcurrentHashMap*>(this)->DrainMigration();
+            TableView view = CurrentView();
+            for (size_type index = 0; index < m_capacity; ++index)
+            {
+                const auto& slot = SlotAt(view, index);
+                if (slot.State(std::memory_order_acquire) == detail::SlotState::Occupied)
                 {
-                    for (auto& s: vb->slots)
-                    {
-                        if constexpr (kUsePairCAS)
-                        {
-                            BucketPtr bp = s.load(std::memory_order_acquire);
-                            if (bp.data)
-                            {
-                                bp.data->v.drop();
-                            }
-                        }
-                        else
-                        {
-                            BucketData* ptr = s.load(std::memory_order_acquire);
-                            if (ptr)
-                            {
-                                ptr->v.drop();
-                            }
-                        }
-                    }
-                    vb = vb->next.load(std::memory_order_acquire);
+                    callback(slot.KeyRef(), slot.ValueRef());
                 }
             }
-            // NOTE: Clear currently assumes external quiescence (no concurrent inserts/removes)
-            // for accurate size_ reset; concurrent mutators may skew the count.
-            size_.store(0, std::memory_order_relaxed);
         }
 
-        size_t Size() const
+    private:
+        using Slot  = detail::SlotStorage<Key, Value>;
+        using Group = detail::BucketGroup<Key, Value, GroupSize>;
+
+        struct Table
         {
-            return size_.load();
+            Group*    groups {nullptr};
+            size_type groupCount {0};
+        };
+
+        struct TableView
+        {
+            Group*    groups {nullptr};
+            size_type mask {0};
+        };
+
+        struct MigrationState
+        {
+            Group*                oldGroups {nullptr};
+            size_type             oldGroupCount {0};
+            size_type             oldMask {0};
+            Group*                newGroups {nullptr};
+            size_type             newGroupCount {0};
+            size_type             newMask {0};
+            size_type             newThreshold {0};
+            std::atomic<size_type> nextGroup {0};
+            std::atomic<size_type> migratedGroups {0};
+        };
+
+        Table                         m_table {};
+        size_type                     m_capacity {0};
+        size_type                     m_mask {0};
+        std::atomic<size_type>        m_size {0};
+        size_type                     m_resizeThreshold {0};
+        Hash                          m_hash {};
+        Equal                         m_equal {};
+        Allocator                     m_allocator {};
+        std::atomic<MigrationState*>  m_migration {nullptr};
+
+        static constexpr size_type kGroupMask  = GroupSize - 1;
+        static constexpr size_type kGroupShift = detail::ConstLog2(GroupSize);
+
+        struct InsertProbe
+        {
+            Slot*             slot {nullptr};
+            detail::SlotState previousState {detail::SlotState::Empty};
+            bool              isNew {false};
+        };
+
+        void Initialize(size_type initialCapacity)
+        {
+            DrainMigration();
+            initialCapacity = std::max<size_type>(GroupSize, std::bit_ceil(initialCapacity));
+            size_type groupCount = initialCapacity / GroupSize;
+            Group*    groups     = AllocateGroups(groupCount);
+
+            m_table.groups     = groups;
+            m_table.groupCount = groupCount;
+            m_capacity         = groupCount * GroupSize;
+            m_mask             = m_capacity - 1;
+            m_resizeThreshold  = ComputeThreshold(m_capacity);
+            m_size.store(0, std::memory_order_relaxed);
+        }
+
+        Group* AllocateGroups(size_type groupCount)
+        {
+            if (groupCount == 0)
+                return nullptr;
+            const size_type bytes = sizeof(Group) * groupCount;
+            auto*           raw   = static_cast<Group*>(m_allocator.Allocate(bytes, alignof(Group)));
+            if (!raw)
+                throw std::bad_alloc();
+            for (size_type i = 0; i < groupCount; ++i)
+            {
+                ::new (static_cast<void*>(raw + i)) Group();
+            }
+            return raw;
+        }
+
+        void ReleaseGroups(Group* groups, size_type groupCount) noexcept
+        {
+            if (!groups)
+                return;
+            for (size_type i = 0; i < groupCount; ++i)
+            {
+                groups[i].~Group();
+            }
+            const size_type bytes = sizeof(Group) * groupCount;
+            m_allocator.Deallocate(static_cast<void*>(groups), bytes, alignof(Group));
+        }
+
+        void DestroyTable() noexcept
+        {
+            if (!m_table.groups)
+                return;
+
+            TableView view = CurrentView();
+            for (size_type index = 0; index < m_capacity; ++index)
+            {
+                auto& slot = SlotAt(view, index);
+                if (slot.State(std::memory_order_acquire) == detail::SlotState::Occupied)
+                {
+                    slot.DestroyPayload();
+                    slot.UnlockTo(detail::SlotState::Empty);
+                }
+            }
+
+            ReleaseGroups(m_table.groups, m_table.groupCount);
+            m_table.groups     = nullptr;
+            m_table.groupCount = 0;
+            m_capacity         = 0;
+            m_mask             = 0;
+            m_resizeThreshold  = 0;
+            m_size.store(0, std::memory_order_relaxed);
+        }
+
+        [[nodiscard]] TableView CurrentView() const noexcept
+        {
+            return TableView {m_table.groups, m_mask};
+        }
+
+        static Slot& SlotAt(const TableView& view, size_type index) noexcept
+        {
+            return view.groups[index >> kGroupShift].slots[index & kGroupMask];
+        }
+
+        [[nodiscard]] size_type ComputeThreshold(size_type capacity) const noexcept
+        {
+            if (capacity <= 1)
+                return 1;
+            const double raw       = static_cast<double>(capacity) * kLoadFactor;
+            const auto   threshold = static_cast<size_type>(raw);
+            const size_type capped = threshold >= capacity ? capacity - 1 : threshold;
+            return capped == 0 ? 1 : capped;
+        }
+
+        void MaybeStartMigration(size_type additional = 0)
+        {
+            if (m_migration.load(std::memory_order_acquire))
+                return;
+            const size_type projected = m_size.load(std::memory_order_acquire) + additional;
+            if (projected <= m_resizeThreshold)
+                return;
+            StartMigration(m_capacity ? m_capacity * 2 : GroupSize);
+        }
+
+        void StartMigration(size_type desiredCapacity)
+        {
+            desiredCapacity = std::max<size_type>(GroupSize, std::bit_ceil(desiredCapacity));
+            size_type newGroupCount = desiredCapacity / GroupSize;
+            Group*    newGroups     = AllocateGroups(newGroupCount);
+
+            auto* state            = new MigrationState();
+            state->oldGroups       = m_table.groups;
+            state->oldGroupCount   = m_table.groupCount;
+            state->oldMask         = m_mask;
+            state->newGroups       = newGroups;
+            state->newGroupCount   = newGroupCount;
+            state->newMask         = desiredCapacity - 1;
+            state->newThreshold    = ComputeThreshold(desiredCapacity);
+            state->nextGroup.store(0, std::memory_order_relaxed);
+            state->migratedGroups.store(0, std::memory_order_relaxed);
+
+            MigrationState* expected = nullptr;
+            if (m_migration.compare_exchange_strong(
+                        expected,
+                        state,
+                        std::memory_order_acq_rel,
+                        std::memory_order_relaxed))
+            {
+                m_table.groups     = newGroups;
+                m_table.groupCount = newGroupCount;
+                m_capacity         = desiredCapacity;
+                m_mask             = state->newMask;
+                m_resizeThreshold  = state->newThreshold;
+                HelpMigration(state, 1);
+            }
+            else
+            {
+                ReleaseGroups(newGroups, newGroupCount);
+                delete state;
+            }
+        }
+
+        void DrainMigration() noexcept
+        {
+            while (auto* migration = m_migration.load(std::memory_order_acquire))
+            {
+                HelpMigration(migration, migration->oldGroupCount);
+                FinalizeMigration(migration);
+            }
+        }
+
+        void HelpMigration(MigrationState* state, size_type budget = 1) noexcept
+        {
+            if (!state)
+                return;
+            const size_type totalGroups = state->oldGroupCount;
+            size_type       processed   = 0;
+            while (processed < budget)
+            {
+                const size_type groupIndex = state->nextGroup.fetch_add(1, std::memory_order_acq_rel);
+                if (groupIndex >= totalGroups)
+                    break;
+                MigrateGroup(state, groupIndex);
+                state->migratedGroups.fetch_add(1, std::memory_order_acq_rel);
+                ++processed;
+            }
+            if (state->migratedGroups.load(std::memory_order_acquire) >= totalGroups)
+            {
+                FinalizeMigration(state);
+            }
+        }
+
+        void FinalizeMigration(MigrationState* state) noexcept
+        {
+            if (!state)
+                return;
+            if (state->migratedGroups.load(std::memory_order_acquire) < state->oldGroupCount)
+                return;
+
+            MigrationState* expected = state;
+            if (m_migration.compare_exchange_strong(
+                        expected,
+                        nullptr,
+                        std::memory_order_acq_rel,
+                        std::memory_order_relaxed))
+            {
+                ReleaseGroups(state->oldGroups, state->oldGroupCount);
+                delete state;
+            }
+        }
+
+        void MigrateGroup(MigrationState* state, size_type groupIndex) noexcept
+        {
+            if (!state)
+                return;
+            TableView oldView {state->oldGroups, state->oldMask};
+            const size_type base = groupIndex << kGroupShift;
+            for (size_type offset = 0; offset < GroupSize; ++offset)
+            {
+                const size_type index = (base + offset) & state->oldMask;
+                auto&           slot  = SlotAt(oldView, index);
+
+                while (true)
+                {
+                    const auto slotState = slot.State(std::memory_order_acquire);
+                    if (slotState == detail::SlotState::Empty)
+                    {
+                        break;
+                    }
+                    if (slotState == detail::SlotState::Tombstone)
+                    {
+                        if (slot.TryLockFrom(detail::SlotState::Tombstone))
+                        {
+                            slot.hash = 0;
+                            slot.UnlockTo(detail::SlotState::Empty);
+                        }
+                        break;
+                    }
+                    if (slotState == detail::SlotState::PendingInsert)
+                    {
+                        std::this_thread::yield();
+                        continue;
+                    }
+                    if (slotState == detail::SlotState::Occupied)
+                    {
+                        if (!slot.TryLockFrom(detail::SlotState::Occupied))
+                        {
+                            std::this_thread::yield();
+                            continue;
+                        }
+
+                        Key   keyCopy   = std::move(slot.KeyRef());
+                        Value valueCopy = std::move(slot.ValueRef());
+                        const std::size_t hash = slot.hash;
+                        slot.DestroyPayload();
+                        slot.UnlockTo(detail::SlotState::Tombstone);
+
+                        InsertMigrated(state, hash, std::move(keyCopy), std::move(valueCopy));
+                        break;
+                    }
+                }
+            }
+        }
+
+        void InsertMigrated(MigrationState* state, std::size_t hash, Key&& key, Value&& value)
+        {
+            TableView newView {state->newGroups, state->newMask};
+            while (true)
+            {
+                InsertProbe probe = LocateForInsert(newView, key, hash);
+                if (!probe.slot)
+                {
+                    // Table unexpectedly full; trigger a follow-up growth.
+                    StartMigration(m_capacity ? m_capacity * 2 : GroupSize);
+                    continue;
+                }
+
+                if (!probe.isNew)
+                {
+                    try
+                    {
+                        probe.slot->AssignValue(value);
+                    }
+                    catch (...)
+                    {
+                        probe.slot->UnlockTo(detail::SlotState::Occupied);
+                        throw;
+                    }
+                    probe.slot->UnlockTo(detail::SlotState::Occupied);
+                    return;
+                }
+
+                try
+                {
+                    probe.slot->ConstructPayload(hash, std::move(key), std::move(value));
+                    probe.slot->UnlockTo(detail::SlotState::Occupied);
+                    return;
+                }
+                catch (...)
+                {
+                    probe.slot->hash = 0;
+                    probe.slot->UnlockTo(probe.previousState);
+                    throw;
+                }
+            }
+        }
+
+        void UpdateOldValue(MigrationState* migration, const Key& key, std::size_t hash, const Value& value)
+        {
+            if (!migration)
+                return;
+            TableView oldView {migration->oldGroups, migration->oldMask};
+            size_type index = hash & oldView.mask;
+            for (size_type probe = 0; probe <= oldView.mask; ++probe)
+            {
+                auto& slot  = SlotAt(oldView, index);
+                auto  state = slot.State(std::memory_order_acquire);
+                if (state == detail::SlotState::Empty)
+                    return;
+                if (state == detail::SlotState::PendingInsert)
+                {
+                    std::this_thread::yield();
+                }
+                else if (state == detail::SlotState::Occupied && slot.hash == hash && m_equal(slot.KeyRef(), key))
+                {
+                    if (slot.TryLockFrom(detail::SlotState::Occupied))
+                    {
+                        try
+                        {
+                            slot.AssignValue(value);
+                        }
+                        catch (...)
+                        {
+                            slot.UnlockTo(detail::SlotState::Occupied);
+                            throw;
+                        }
+                        slot.UnlockTo(detail::SlotState::Occupied);
+                    }
+                    return;
+                }
+                index = (index + 1) & oldView.mask;
+            }
+        }
+
+        void RemoveFromOld(MigrationState* migration, const Key& key, std::size_t hash)
+        {
+            if (!migration)
+                return;
+            TableView oldView {migration->oldGroups, migration->oldMask};
+            if (auto* slot = AcquireForMutation(oldView, key, hash))
+            {
+                slot->DestroyPayload();
+                slot->UnlockTo(detail::SlotState::Tombstone);
+            }
+        }
+
+        template<class K>
+        InsertProbe LocateForInsert(const TableView& view, const K& key, std::size_t hash)
+        {
+            size_type index = hash & view.mask;
+            for (size_type probe = 0; probe <= view.mask; ++probe)
+            {
+                auto& slot  = SlotAt(view, index);
+                auto  state = slot.State(std::memory_order_acquire);
+                switch (state)
+                {
+                case detail::SlotState::Empty:
+                    if (slot.TryLockFrom(detail::SlotState::Empty))
+                        return {&slot, detail::SlotState::Empty, true};
+                    break;
+                case detail::SlotState::Tombstone:
+                    if (slot.TryLockFrom(detail::SlotState::Tombstone))
+                        return {&slot, detail::SlotState::Tombstone, true};
+                    break;
+                case detail::SlotState::Occupied:
+                    if (slot.hash == hash && m_equal(slot.KeyRef(), key))
+                    {
+                        if (slot.TryLockFrom(detail::SlotState::Occupied))
+                            return {&slot, detail::SlotState::Occupied, false};
+                    }
+                    break;
+                case detail::SlotState::PendingInsert:
+                    std::this_thread::yield();
+                    break;
+                }
+                index = (index + 1) & view.mask;
+            }
+            return {};
+        }
+
+        template<class K>
+        Slot* AcquireForMutation(const TableView& view, const K& key, std::size_t hash) noexcept
+        {
+            size_type index = hash & view.mask;
+            for (size_type probe = 0; probe <= view.mask; ++probe)
+            {
+                auto& slot  = SlotAt(view, index);
+                auto  state = slot.State(std::memory_order_acquire);
+                if (state == detail::SlotState::Empty)
+                    return nullptr;
+                if (state == detail::SlotState::PendingInsert)
+                {
+                    std::this_thread::yield();
+                }
+                else if (state == detail::SlotState::Occupied && slot.hash == hash && m_equal(slot.KeyRef(), key))
+                {
+                    if (slot.TryLockFrom(detail::SlotState::Occupied))
+                        return &slot;
+                }
+                index = (index + 1) & view.mask;
+            }
+            return nullptr;
+        }
+
+        template<class K>
+        bool ContainsInView(const TableView& view, const K& key, std::size_t hash) const noexcept
+        {
+            size_type index = hash & view.mask;
+            for (size_type probe = 0; probe <= view.mask; ++probe)
+            {
+                const auto& slot  = SlotAt(view, index);
+                const auto  state = slot.State(std::memory_order_acquire);
+                if (state == detail::SlotState::Empty)
+                    return false;
+                if (state == detail::SlotState::PendingInsert)
+                {
+                    std::this_thread::yield();
+                }
+                else if (state == detail::SlotState::Occupied && slot.hash == hash && m_equal(slot.KeyRef(), key))
+                {
+                    const auto verify = slot.State(std::memory_order_acquire);
+                    if (verify == detail::SlotState::Occupied)
+                        return true;
+                }
+                index = (index + 1) & view.mask;
+            }
+            return false;
+        }
+
+        template<class K>
+        bool TryCopyValueInView(const TableView& view, const K& key, std::size_t hash, Value& outValue) const
+        {
+            size_type index = hash & view.mask;
+            for (size_type probe = 0; probe <= view.mask; ++probe)
+            {
+                const auto& slot  = SlotAt(view, index);
+                const auto  state = slot.State(std::memory_order_acquire);
+                if (state == detail::SlotState::Empty)
+                    return false;
+                if (state == detail::SlotState::PendingInsert)
+                {
+                    std::this_thread::yield();
+                }
+                else if (state == detail::SlotState::Occupied && slot.hash == hash && m_equal(slot.KeyRef(), key))
+                {
+                    Value snapshot = slot.ValueRef();
+                    const auto verify = slot.State(std::memory_order_acquire);
+                    if (verify == detail::SlotState::Occupied)
+                    {
+                        outValue = std::move(snapshot);
+                        return true;
+                    }
+                }
+                index = (index + 1) & view.mask;
+            }
+            return false;
+        }
+
+        template<class K, class V>
+        bool EmplaceOrAssignInternal(K&& key, V&& value)
+        {
+            const std::size_t hash = ComputeHash(key);
+            while (true)
+            {
+                TableView         primary   = CurrentView();
+                MigrationState*   migration = m_migration.load(std::memory_order_acquire);
+                InsertProbe       probe     = LocateForInsert(primary, key, hash);
+                if (!probe.slot)
+                {
+                    MaybeStartMigration();
+                    continue;
+                }
+
+                if (!probe.isNew)
+                {
+                    try
+                    {
+                        probe.slot->AssignValue(std::forward<V>(value));
+                    }
+                    catch (...)
+                    {
+                        probe.slot->UnlockTo(detail::SlotState::Occupied);
+                        throw;
+                    }
+                    probe.slot->UnlockTo(detail::SlotState::Occupied);
+                    if (migration)
+                    {
+                        UpdateOldValue(migration, probe.slot->KeyRef(), hash, probe.slot->ValueRef());
+                        HelpMigration(migration);
+                    }
+                    else
+                    {
+                        MaybeStartMigration();
+                    }
+                    return false;
+                }
+
+                try
+                {
+                    probe.slot->ConstructPayload(hash, std::forward<K>(key), std::forward<V>(value));
+                    probe.slot->UnlockTo(detail::SlotState::Occupied);
+                }
+                catch (...)
+                {
+                    probe.slot->hash = 0;
+                    probe.slot->UnlockTo(probe.previousState);
+                    throw;
+                }
+
+                m_size.fetch_add(1, std::memory_order_acq_rel);
+
+                if (migration)
+                {
+                    UpdateOldValue(migration, probe.slot->KeyRef(), hash, probe.slot->ValueRef());
+                    HelpMigration(migration);
+                }
+                else
+                {
+                    MaybeStartMigration();
+                }
+                return true;
+            }
+        }
+
+        template<class K, class V, class Updater>
+        bool UpsertInternal(K&& key, V&& value, Updater&& updater)
+        {
+            const std::size_t hash = ComputeHash(key);
+            while (true)
+            {
+                TableView         primary   = CurrentView();
+                MigrationState*   migration = m_migration.load(std::memory_order_acquire);
+                InsertProbe       probe     = LocateForInsert(primary, key, hash);
+                if (!probe.slot)
+                {
+                    MaybeStartMigration();
+                    continue;
+                }
+
+                if (!probe.isNew)
+                {
+                    try
+                    {
+                        std::invoke(std::forward<Updater>(updater), probe.slot->ValueRef(), std::forward<V>(value));
+                    }
+                    catch (...)
+                    {
+                        probe.slot->UnlockTo(detail::SlotState::Occupied);
+                        throw;
+                    }
+                    probe.slot->UnlockTo(detail::SlotState::Occupied);
+                    if (migration)
+                    {
+                        UpdateOldValue(migration, probe.slot->KeyRef(), hash, probe.slot->ValueRef());
+                        HelpMigration(migration);
+                    }
+                    else
+                    {
+                        MaybeStartMigration();
+                    }
+                    return false;
+                }
+
+                try
+                {
+                    probe.slot->ConstructPayload(hash, std::forward<K>(key), std::forward<V>(value));
+                    probe.slot->UnlockTo(detail::SlotState::Occupied);
+                }
+                catch (...)
+                {
+                    probe.slot->hash = 0;
+                    probe.slot->UnlockTo(probe.previousState);
+                    throw;
+                }
+
+                m_size.fetch_add(1, std::memory_order_acq_rel);
+
+                if (migration)
+                {
+                    UpdateOldValue(migration, probe.slot->KeyRef(), hash, probe.slot->ValueRef());
+                    HelpMigration(migration);
+                }
+                else
+                {
+                    MaybeStartMigration();
+                }
+                return true;
+            }
+        }
+
+        template<class K>
+        [[nodiscard]] std::size_t ComputeHash(const K& key) const
+        {
+            return static_cast<std::size_t>(std::invoke(m_hash, key));
         }
     };
-
 }// namespace NGIN::Containers
