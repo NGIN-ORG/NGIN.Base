@@ -204,9 +204,9 @@ namespace NGIN::Containers
             m_mask     = other.m_mask;
             m_size.store(other.m_size.load(std::memory_order_relaxed), std::memory_order_relaxed);
             m_resizeThreshold = other.m_resizeThreshold;
-            m_pubMask.store(m_mask, std::memory_order_relaxed);
+            m_pubGroups.store(m_table.groups, std::memory_order_relaxed);
             std::atomic_thread_fence(std::memory_order_release);
-            m_pubGroups.store(m_table.groups, std::memory_order_release);
+            m_pubMask.store(m_mask, std::memory_order_release);
             other.m_table           = {};
             other.m_capacity        = 0;
             other.m_mask            = 0;
@@ -231,9 +231,9 @@ namespace NGIN::Containers
                 m_mask     = other.m_mask;
                 m_size.store(other.m_size.load(std::memory_order_relaxed), std::memory_order_relaxed);
                 m_resizeThreshold = other.m_resizeThreshold;
-                m_pubMask.store(m_mask, std::memory_order_relaxed);
+                m_pubGroups.store(m_table.groups, std::memory_order_relaxed);
                 std::atomic_thread_fence(std::memory_order_release);
-                m_pubGroups.store(m_table.groups, std::memory_order_release);
+                m_pubMask.store(m_mask, std::memory_order_release);
 
                 other.m_table           = {};
                 other.m_capacity        = 0;
@@ -512,6 +512,11 @@ namespace NGIN::Containers
         std::atomic<MigrationState*>   m_migration {nullptr};
         std::atomic<MigrationState*>   m_retired {nullptr};// list of finalized states awaiting reader drain
 
+        // Instrumentation / diagnostics: counts of yields during LocateForInsert and times we abandoned due to budget.
+        std::atomic<size_type> m_statLocateInsertYields {0};
+        std::atomic<size_type> m_statLocateInsertBudgetAbandon {0};
+        std::atomic<size_type> m_statLocateInsertPressureAbort {0};
+
         static constexpr size_type kGroupMask  = GroupSize - 1;
         static constexpr size_type kGroupShift = detail::ConstLog2(GroupSize);
 
@@ -535,10 +540,12 @@ namespace NGIN::Containers
             m_mask             = m_capacity - 1;
             m_resizeThreshold  = ComputeThreshold(m_capacity);
             m_size.store(0, std::memory_order_relaxed);
-            // Publish initial table view (mask then pointer with release).
-            m_pubMask.store(m_mask, std::memory_order_relaxed);
+            // Publish initial table view: groups first, then mask.
+            // Rationale: reader will load mask (acquire) then groups; seeing the new mask implies
+            // visibility of the preceding groups store (via release on mask) preventing torn snapshot.
+            m_pubGroups.store(m_table.groups, std::memory_order_relaxed);
             std::atomic_thread_fence(std::memory_order_release);
-            m_pubGroups.store(m_table.groups, std::memory_order_release);
+            m_pubMask.store(m_mask, std::memory_order_release);
         }
 
         [[nodiscard]] bool ViewValid(const TableView& v) const noexcept
@@ -600,16 +607,18 @@ namespace NGIN::Containers
             m_mask             = 0;
             m_resizeThreshold  = 0;
             m_size.store(0, std::memory_order_relaxed);
-            // Publish empty view.
-            m_pubMask.store(0, std::memory_order_relaxed);
+            // Publish empty view (groups=null then mask=0) preserving ordering invariant.
+            m_pubGroups.store(nullptr, std::memory_order_relaxed);
             std::atomic_thread_fence(std::memory_order_release);
-            m_pubGroups.store(nullptr, std::memory_order_release);
+            m_pubMask.store(0, std::memory_order_release);
         }
 
         [[nodiscard]] TableView CurrentView() const noexcept
         {
-            Group*    g = m_pubGroups.load(std::memory_order_acquire);
+            // Load mask first (acquire) then groups. If we observe a new mask value we are guaranteed
+            // (by release store on mask) to also observe the earlier groups pointer store.
             size_type m = m_pubMask.load(std::memory_order_acquire);
+            Group*    g = m_pubGroups.load(std::memory_order_acquire);
             // Invariant: either empty (g==nullptr, m==0) or both valid.
 #if defined(NGIN_DEBUG) || !defined(NDEBUG)
             if ((g == nullptr) != (m == 0))
@@ -743,14 +752,9 @@ namespace NGIN::Containers
         {
             if (!state)
                 return;
-            // Wait for all activeUsers (threads that pinned migration) to drain. This count should be small/short-lived.
-            while (state->activeUsers.load(std::memory_order_acquire) != 0)
-            {
-                std::this_thread::yield();
-            }
-            // If passive readers remain, defer full reclamation; they hold only published snapshots that may still
-            // reference oldGroups until they drop (they don't touch MigrationState itself).
-            if (m_readers.load(std::memory_order_acquire) != 0)
+            // Defer if either active users or passive readers still present.
+            if (state->activeUsers.load(std::memory_order_acquire) != 0 ||
+                m_readers.load(std::memory_order_acquire) != 0)
             {
                 MigrationState* head = m_retired.load(std::memory_order_relaxed);
                 do
@@ -771,17 +775,43 @@ namespace NGIN::Containers
 
         void ReclaimRetired() noexcept
         {
-            if (m_readers.load(std::memory_order_acquire) != 0)
-                return;// still readers present
-            MigrationState* list = m_retired.exchange(nullptr, std::memory_order_acq_rel);
+            MigrationState* list     = m_retired.exchange(nullptr, std::memory_order_acq_rel);
+            MigrationState* deferred = nullptr;
             while (list)
             {
                 MigrationState* next = list->nextRetired;
-                ReleaseGroups(list->oldGroups, list->oldGroupCount);
-                list->oldGroups     = nullptr;
-                list->oldGroupCount = 0;
-                delete list;
+                // Reclaim only when no active users AND no readers remain.
+                if (list->activeUsers.load(std::memory_order_acquire) == 0 &&
+                    m_readers.load(std::memory_order_acquire) == 0)
+                {
+                    ReleaseGroups(list->oldGroups, list->oldGroupCount);
+                    list->oldGroups     = nullptr;
+                    list->oldGroupCount = 0;
+                    delete list;
+                }
+                else
+                {
+                    list->nextRetired = deferred;
+                    deferred          = list;
+                }
                 list = next;
+            }
+            if (deferred)
+            {
+                // Push remaining back onto retired list head.
+                MigrationState* head = m_retired.load(std::memory_order_relaxed);
+                do
+                {
+                    // Append existing head to end of deferred chain.
+                    MigrationState* tail = deferred;
+                    while (tail->nextRetired)
+                        tail = tail->nextRetired;
+                    tail->nextRetired = head;
+                } while (!m_retired.compare_exchange_weak(
+                        head,
+                        deferred,
+                        std::memory_order_release,
+                        std::memory_order_relaxed));
             }
         }
 
@@ -886,10 +916,10 @@ namespace NGIN::Containers
                 m_capacity         = targetCapacity;
                 m_mask             = state->newMask;
                 m_resizeThreshold  = state->newThreshold;
-                // Publish new table view (mask then pointer with release fence).
-                m_pubMask.store(m_mask, std::memory_order_relaxed);
+                // Publish new table view (groups then mask) with release ordering.
+                m_pubGroups.store(m_table.groups, std::memory_order_relaxed);
                 std::atomic_thread_fence(std::memory_order_release);
-                m_pubGroups.store(m_table.groups, std::memory_order_release);
+                m_pubMask.store(m_mask, std::memory_order_release);
                 HelpMigration(state, 1);
                 const bool finalized = FinalizeMigration(state);
                 ReleaseMigration(state);
@@ -1160,6 +1190,11 @@ namespace NGIN::Containers
         InsertProbe LocateForInsert(const TableView& view, const K& key, std::size_t hash)
         {
             size_type index = hash & view.mask;
+            // Yield budget: defensive upper bound on consecutive yields without progress to avoid pathological livelock.
+            // The theoretical maximum probes is capacity (mask+1). We allow additional yields before abandoning.
+            static constexpr size_type kExtraYieldBudget = 2 * 1024;// tunable
+            const size_type            capacity          = view.mask + 1;
+            size_type                  yields            = 0;
             for (size_type probe = 0; probe <= view.mask; ++probe)
             {
                 auto& slot  = SlotAt(view, index);
@@ -1189,17 +1224,27 @@ namespace NGIN::Containers
                             else
                             {
                                 std::this_thread::yield();
+                                ++yields;
+                                m_statLocateInsertYields.fetch_add(1, std::memory_order_relaxed);
                             }
                         }
                         break;
                     }
                     case detail::SlotState::PendingInsert:
                         std::this_thread::yield();
+                        ++yields;
+                        m_statLocateInsertYields.fetch_add(1, std::memory_order_relaxed);
                         break;
+                }
+                if (yields > capacity + kExtraYieldBudget)
+                {
+                    m_statLocateInsertBudgetAbandon.fetch_add(1, std::memory_order_relaxed);
+                    m_statLocateInsertPressureAbort.fetch_add(1, std::memory_order_relaxed);
+                    return {};// Abandon to let higher level potentially trigger migration/backoff.
                 }
                 index = (index + 1) & view.mask;
             }
-            return {};
+            return {};// Table appears saturated or heavy contention.
         }
 
         template<class K>
@@ -1321,7 +1366,8 @@ namespace NGIN::Containers
         template<class K, class V>
         bool EmplaceOrAssignInternal(K&& key, V&& value)
         {
-            const std::size_t hash = ComputeHash(key);
+            const std::size_t hash         = ComputeHash(key);
+            size_type         attemptCount = 0;// counts LocateForInsert failures (returned empty probe)
             while (true)
             {
                 ViewToken   token     = AcquireGuardedView();
@@ -1330,8 +1376,35 @@ namespace NGIN::Containers
                 InsertProbe probe     = LocateForInsert(primary, key, hash);
                 if (!probe.slot)
                 {
+                    // If in migration, help advance it before backing off.
+                    if (token.mig)
+                    {
+                        HelpMigration(token.mig, 8);
+                        finalized = FinalizeMigration(token.mig);
+                    }
                     ReleaseGuard(token, finalized);
-                    MaybeStartMigration();
+                    ++attemptCount;
+                    // Escalate: if we repeatedly fail to find a slot, forcibly start a migration to grow capacity.
+                    if ((attemptCount & (attemptCount - 1)) == 0)// on powers of two attempts: 1,2,4,8,...
+                    {
+                        size_type desired = m_capacity ? m_capacity * 2 : (GroupSize * 2);
+                        StartMigration(desired);
+                    }
+                    else
+                    {
+                        MaybeStartMigration();
+                    }
+                    // Exponential backoff after several failures to reduce contention.
+                    if (attemptCount > 4)
+                    {
+                        const size_type shift = (attemptCount > 16 ? 16 : attemptCount);
+                        const auto      nanos = (1u << shift);// grows up to ~65K ns (~65 microseconds)
+                        std::this_thread::sleep_for(std::chrono::nanoseconds(nanos));
+                    }
+                    else
+                    {
+                        std::this_thread::yield();
+                    }
                     continue;
                 }
 
@@ -1391,7 +1464,8 @@ namespace NGIN::Containers
         template<class K, class V, class Updater>
         bool UpsertInternal(K&& key, V&& value, Updater&& updater)
         {
-            const std::size_t hash = ComputeHash(key);
+            const std::size_t hash         = ComputeHash(key);
+            size_type         attemptCount = 0;
             while (true)
             {
                 ViewToken   token     = AcquireGuardedView();
@@ -1400,8 +1474,32 @@ namespace NGIN::Containers
                 InsertProbe probe     = LocateForInsert(primary, key, hash);
                 if (!probe.slot)
                 {
+                    if (token.mig)
+                    {
+                        HelpMigration(token.mig, 8);
+                        finalized = FinalizeMigration(token.mig);
+                    }
                     ReleaseGuard(token, finalized);
-                    MaybeStartMigration();
+                    ++attemptCount;
+                    if ((attemptCount & (attemptCount - 1)) == 0)
+                    {
+                        size_type desired = m_capacity ? m_capacity * 2 : (GroupSize * 2);
+                        StartMigration(desired);
+                    }
+                    else
+                    {
+                        MaybeStartMigration();
+                    }
+                    if (attemptCount > 4)
+                    {
+                        const size_type shift = (attemptCount > 16 ? 16 : attemptCount);
+                        const auto      nanos = (1u << shift);
+                        std::this_thread::sleep_for(std::chrono::nanoseconds(nanos));
+                    }
+                    else
+                    {
+                        std::this_thread::yield();
+                    }
                     continue;
                 }
 
