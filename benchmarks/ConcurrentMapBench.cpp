@@ -5,6 +5,8 @@
 #include <thread>
 #include <string>
 #include <iostream>
+#include <unordered_map>
+#include <mutex>
 
 #ifdef NGIN_HAVE_TBB
 #include <tbb/concurrent_unordered_map.h>
@@ -74,6 +76,44 @@ int main()
             ctx.stop();
         },
                             "NGIN.ConcurrentHashMap MixedNoErase t=" + std::to_string(cfg.threads));
+    }
+
+    // Baseline: std::unordered_map protected by a single mutex (coarse grained lock)
+    for (auto cfg: configs)
+    {
+        Benchmark::Register([cfg](BenchmarkContext& ctx) {
+            std::unordered_map<int, int> map;
+            map.reserve(static_cast<size_t>(cfg.keyCount * 2));
+            std::mutex mtx;
+            ctx.start();
+            std::vector<std::thread> ts;
+            for (int t = 0; t < cfg.threads; ++t)
+            {
+                ts.emplace_back([&] {
+                    std::mt19937                       rng(2222u + t);
+                    std::uniform_int_distribution<int> dist(0, cfg.keyCount - 1);
+                    for (int i = 0; i < cfg.opsPerThread; ++i)
+                    {
+                        int k = dist(rng);
+                        if ((i & 3) == 0)
+                        {
+                            std::lock_guard<std::mutex> lg(mtx);
+                            map[k] = k;// insert or assign
+                        }
+                        else
+                        {
+                            std::lock_guard<std::mutex> lg(mtx);
+                            auto                        it = map.find(k);
+                            (void) it;
+                        }
+                    }
+                });
+            }
+            for (auto& th: ts)
+                th.join();
+            ctx.stop();
+        },
+                            "Std.UnorderedMapMutex MixedNoErase t=" + std::to_string(cfg.threads));
     }
 
 
