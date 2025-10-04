@@ -203,7 +203,10 @@ namespace NGIN::Containers
             m_capacity = other.m_capacity;
             m_mask     = other.m_mask;
             m_size.store(other.m_size.load(std::memory_order_relaxed), std::memory_order_relaxed);
-            m_resizeThreshold       = other.m_resizeThreshold;
+            m_resizeThreshold = other.m_resizeThreshold;
+            m_pubMask.store(m_mask, std::memory_order_relaxed);
+            std::atomic_thread_fence(std::memory_order_release);
+            m_pubGroups.store(m_table.groups, std::memory_order_release);
             other.m_table           = {};
             other.m_capacity        = 0;
             other.m_mask            = 0;
@@ -228,6 +231,9 @@ namespace NGIN::Containers
                 m_mask     = other.m_mask;
                 m_size.store(other.m_size.load(std::memory_order_relaxed), std::memory_order_relaxed);
                 m_resizeThreshold = other.m_resizeThreshold;
+                m_pubMask.store(m_mask, std::memory_order_relaxed);
+                std::atomic_thread_fence(std::memory_order_release);
+                m_pubGroups.store(m_table.groups, std::memory_order_release);
 
                 other.m_table           = {};
                 other.m_capacity        = 0;
@@ -254,24 +260,35 @@ namespace NGIN::Containers
             return Size() == 0;
         }
 
-        void Clear() noexcept
+        // Quiesce: drain all in-flight migrations so subsequent queries observe a stable table.
+        // Safe to call concurrently; may increase latency under contention.
+        void Quiesce() noexcept
         {
             DrainMigration();
-            if (!m_table.groups)
-                return;
+            // If last readers just dropped during DrainMigration, a second reclaim may be needed.
+            ReclaimRetired();
+        }
 
-            TableView view = CurrentView();
-            for (size_type index = 0; index < m_capacity; ++index)
+        void Clear() noexcept
+        {
+            // Acquire a guarded view so groups memory stays alive while clearing.
+            ViewToken tok = AcquireGuardedView();
+            if (!tok.view.groups)
             {
-                auto& slot  = SlotAt(view, index);
+                ReleaseGuard(tok, false);
+                return;
+            }
+            const size_type cap = tok.view.mask + 1;
+            for (size_type i = 0; i < cap; ++i)
+            {
+                auto& slot  = SlotAt(tok.view, i);
                 auto  state = slot.State(std::memory_order_acquire);
                 if (state == detail::SlotState::Occupied)
-                {
                     slot.DestroyPayload();
-                }
                 slot.Reset();
             }
             m_size.store(0, std::memory_order_release);
+            ReleaseGuard(tok, false);
         }
 
         bool Insert(const Key& key, const Value& value)
@@ -309,62 +326,63 @@ namespace NGIN::Containers
         bool Remove(const Key& key)
         {
             const std::size_t hash      = ComputeHash(key);
-            TableView         primary   = CurrentView();
-            MigrationState*   migration = AcquireMigration();
+            ViewToken         token     = AcquireGuardedView();
+            TableView         primary   = token.view;
             bool              finalized = false;
 
             bool removed = false;
 
-            if (auto* slot = AcquireForMutation(primary, key, hash))
+            // Attempt in primary (current published) table first
+            if (auto* primarySlot = AcquireForMutation(primary, key, hash))
             {
-                slot->DestroyPayload();
-                slot->UnlockTo(detail::SlotState::Tombstone);
+                primarySlot->DestroyPayload();
+                primarySlot->UnlockTo(detail::SlotState::Tombstone);
                 m_size.fetch_sub(1, std::memory_order_acq_rel);
                 removed = true;
-                if (migration)
+                if (token.mig)
                 {
-                    RemoveFromOld(migration, key, hash);
-                    HelpMigration(migration);
-                    finalized = FinalizeMigration(migration);
+                    RemoveFromOld(token.mig, key, hash);
+                    HelpMigration(token.mig);
+                    finalized = FinalizeMigration(token.mig);
                 }
                 else
                 {
                     MaybeStartMigration();
                 }
             }
-            else if (migration)
+            else if (token.mig)
             {
-                TableView oldView {migration->oldGroups, migration->oldMask};
-                if (auto* slot = AcquireForMutation(oldView, key, hash))
+                TableView oldView {token.mig->oldGroups, token.mig->oldMask};
+                if (auto* secondarySlot = AcquireForMutation(oldView, key, hash))
                 {
-                    slot->DestroyPayload();
-                    slot->UnlockTo(detail::SlotState::Tombstone);
+                    secondarySlot->DestroyPayload();
+                    secondarySlot->UnlockTo(detail::SlotState::Tombstone);
                     m_size.fetch_sub(1, std::memory_order_acq_rel);
                     removed = true;
-                    HelpMigration(migration);
-                    finalized = FinalizeMigration(migration);
+                    HelpMigration(token.mig);
+                    finalized = FinalizeMigration(token.mig);
                 }
             }
-
-            ReleaseAndMaybeDestroy(migration, finalized);
+            ReleaseGuard(token, finalized);
             return removed;
         }
 
         [[nodiscard]] bool Contains(const Key& key) const noexcept
         {
-            const std::size_t hash    = ComputeHash(key);
-            TableView         primary = CurrentView();
-            if (ContainsInView(primary, key, hash))
-                return true;
-
-            MigrationState* migration = AcquireMigration();
-            bool            found     = false;
-            if (migration)
+            const std::size_t hash  = ComputeHash(key);
+            ViewToken         token = const_cast<ConcurrentHashMap*>(this)->AcquireGuardedView();
+            if (ContainsInView(token.view, key, hash))
             {
-                TableView oldView {migration->oldGroups, migration->oldMask};
+                const_cast<ConcurrentHashMap*>(this)->ReleaseGuard(token, false);
+                return true;
+            }
+            bool found = false;
+            if (token.mig)
+            {
+                TableView oldView {token.mig->oldGroups, token.mig->oldMask};
                 found = ContainsInView(oldView, key, hash);
             }
-            ReleaseMigration(migration);
+            const_cast<ConcurrentHashMap*>(this)->ReleaseGuard(token, false);
             return found;
         }
 
@@ -378,20 +396,20 @@ namespace NGIN::Containers
 
         bool TryGet(const Key& key, Value& outValue) const
         {
-            const std::size_t hash    = ComputeHash(key);
-            TableView         primary = CurrentView();
-
-            if (TryCopyValueInView(primary, key, hash, outValue))
-                return true;
-
-            MigrationState* migration = AcquireMigration();
-            bool            result    = false;
-            if (migration)
+            const std::size_t hash  = ComputeHash(key);
+            ViewToken         token = const_cast<ConcurrentHashMap*>(this)->AcquireGuardedView();
+            if (TryCopyValueInView(token.view, key, hash, outValue))
             {
-                TableView oldView {migration->oldGroups, migration->oldMask};
+                const_cast<ConcurrentHashMap*>(this)->ReleaseGuard(token, false);
+                return true;
+            }
+            bool result = false;
+            if (token.mig)
+            {
+                TableView oldView {token.mig->oldGroups, token.mig->oldMask};
                 result = TryCopyValueInView(oldView, key, hash, outValue);
             }
-            ReleaseMigration(migration);
+            const_cast<ConcurrentHashMap*>(this)->ReleaseGuard(token, false);
             return result;
         }
 
@@ -433,16 +451,17 @@ namespace NGIN::Containers
         template<class Callback>
         void ForEach(Callback&& callback) const
         {
-            const_cast<ConcurrentHashMap*>(this)->DrainMigration();
-            TableView view = CurrentView();
-            for (size_type index = 0; index < m_capacity; ++index)
+            // Use guarded view; iteration sees a stable table (may miss concurrent inserts to a new resize in progress).
+            auto&           self = *const_cast<ConcurrentHashMap*>(this);
+            ViewToken       tok  = self.AcquireGuardedView();
+            const size_type cap  = tok.view.mask ? (tok.view.mask + 1) : 0;
+            for (size_type i = 0; i < cap; ++i)
             {
-                const auto& slot = SlotAt(view, index);
+                const auto& slot = SlotAt(tok.view, i);
                 if (slot.State(std::memory_order_acquire) == detail::SlotState::Occupied)
-                {
                     callback(slot.KeyRef(), slot.ValueRef());
-                }
             }
+            self.ReleaseGuard(tok, false);
         }
 
     private:
@@ -475,17 +494,23 @@ namespace NGIN::Containers
             std::atomic<size_type> activeUsers {0};
             std::atomic<bool>      finalized {false};
             std::atomic<bool>      destroyed {false};
+            MigrationState*        nextRetired {nullptr};// intrusive singly-linked list for deferred reclamation
         };
 
-        Table                        m_table {};
-        size_type                    m_capacity {0};
-        size_type                    m_mask {0};
-        std::atomic<size_type>       m_size {0};
-        size_type                    m_resizeThreshold {0};
-        Hash                         m_hash {};
-        Equal                        m_equal {};
-        Allocator                    m_allocator {};
-        std::atomic<MigrationState*> m_migration {nullptr};
+        Table                  m_table {};
+        size_type              m_capacity {0};
+        size_type              m_mask {0};
+        std::atomic<size_type> m_size {0};
+        size_type              m_resizeThreshold {0};
+        Hash                   m_hash {};
+        Equal                  m_equal {};
+        Allocator              m_allocator {};
+        // Atomically published groups pointer and mask for readers to obtain a stable snapshot.
+        std::atomic<Group*>            m_pubGroups {nullptr};
+        std::atomic<size_type>         m_pubMask {0};
+        mutable std::atomic<size_type> m_readers {0};
+        std::atomic<MigrationState*>   m_migration {nullptr};
+        std::atomic<MigrationState*>   m_retired {nullptr};// list of finalized states awaiting reader drain
 
         static constexpr size_type kGroupMask  = GroupSize - 1;
         static constexpr size_type kGroupShift = detail::ConstLog2(GroupSize);
@@ -510,6 +535,19 @@ namespace NGIN::Containers
             m_mask             = m_capacity - 1;
             m_resizeThreshold  = ComputeThreshold(m_capacity);
             m_size.store(0, std::memory_order_relaxed);
+            // Publish initial table view (mask then pointer with release).
+            m_pubMask.store(m_mask, std::memory_order_relaxed);
+            std::atomic_thread_fence(std::memory_order_release);
+            m_pubGroups.store(m_table.groups, std::memory_order_release);
+        }
+
+        [[nodiscard]] bool ViewValid(const TableView& v) const noexcept
+        {
+            if (!v.groups)
+                return v.mask == 0;// empty table case
+            // (mask + 1) must be multiple of GroupSize.
+            const size_type span = v.mask + 1;
+            return (span & (GroupSize - 1)) == 0;// power-of-two capacity aligned to group size
         }
 
         Group* AllocateGroups(size_type groupCount)
@@ -562,15 +600,98 @@ namespace NGIN::Containers
             m_mask             = 0;
             m_resizeThreshold  = 0;
             m_size.store(0, std::memory_order_relaxed);
+            // Publish empty view.
+            m_pubMask.store(0, std::memory_order_relaxed);
+            std::atomic_thread_fence(std::memory_order_release);
+            m_pubGroups.store(nullptr, std::memory_order_release);
         }
 
         [[nodiscard]] TableView CurrentView() const noexcept
         {
-            return TableView {m_table.groups, m_mask};
+            Group*    g = m_pubGroups.load(std::memory_order_acquire);
+            size_type m = m_pubMask.load(std::memory_order_acquire);
+            // Invariant: either empty (g==nullptr, m==0) or both valid.
+#if defined(NGIN_DEBUG) || !defined(NDEBUG)
+            if ((g == nullptr) != (m == 0))
+            {
+                // Mask/groups publication invariant violated; force fail fast in debug.
+                std::terminate();
+            }
+#endif
+            return TableView {g, m};
+        }
+        struct ViewToken
+        {
+            TableView       view {};
+            MigrationState* mig {nullptr};
+            bool            usesReaderGuard {false};
+        };
+
+        ViewToken AcquireGuardedView() noexcept
+        {
+            // Register as passive reader first.
+            m_readers.fetch_add(1, std::memory_order_acquire);
+            for (;;)
+            {
+                // Fast path: try to pin an active migration; if successful, build view from migration state.
+                if (MigrationState* s = AcquireMigration())
+                {
+                    // Avoid using potentially torn published (groups, mask) pair.
+                    m_readers.fetch_sub(1, std::memory_order_release);
+#if defined(NGIN_DEBUG) || !defined(NDEBUG)
+                    if ((s->newGroups == nullptr) || (s->newMask == 0))
+                    {
+                        std::terminate();// new table must be non-empty when migration exists
+                    }
+#endif
+                    return ViewToken {TableView {s->newGroups, s->newMask}, s, false};
+                }
+                // No migration active. Snapshot published view.
+                TableView snap = CurrentView();
+                // Re-check that migration did not start after snapshot.
+                if (m_migration.load(std::memory_order_acquire) == nullptr)
+                {
+#if defined(NGIN_DEBUG) || !defined(NDEBUG)
+                    if ((snap.groups == nullptr) != (snap.mask == 0))
+                    {
+                        std::terminate();
+                    }
+#endif
+                    return ViewToken {snap, nullptr, true};
+                }
+                // Migration raced on: convert passive guard into active attempt by restarting.
+                m_readers.fetch_sub(1, std::memory_order_release);
+                m_readers.fetch_add(1, std::memory_order_acquire);
+            }
+        }
+
+        void ReleaseGuard(ViewToken& tok, bool finalized = false) noexcept
+        {
+            if (tok.usesReaderGuard)
+            {
+                const size_type prev = m_readers.fetch_sub(1, std::memory_order_acq_rel);
+                // If we were the last passive reader, attempt to reclaim any retired states.
+                if (prev == 1)
+                {
+                    ReclaimRetired();
+                }
+            }
+            else if (tok.mig)
+            {
+                ReleaseAndMaybeDestroy(tok.mig, finalized);
+            }
+            tok.mig             = nullptr;
+            tok.usesReaderGuard = false;
         }
 
         static Slot& SlotAt(const TableView& view, size_type index) noexcept
         {
+#if defined(NGIN_DEBUG) || !defined(NDEBUG)
+            if (!view.groups)
+            {
+                std::terminate();
+            }
+#endif
             return view.groups[index >> kGroupShift].slots[index & kGroupMask];
         }
 
@@ -622,12 +743,46 @@ namespace NGIN::Containers
         {
             if (!state)
                 return;
+            // Wait for all activeUsers (threads that pinned migration) to drain. This count should be small/short-lived.
             while (state->activeUsers.load(std::memory_order_acquire) != 0)
             {
                 std::this_thread::yield();
             }
+            // If passive readers remain, defer full reclamation; they hold only published snapshots that may still
+            // reference oldGroups until they drop (they don't touch MigrationState itself).
+            if (m_readers.load(std::memory_order_acquire) != 0)
+            {
+                MigrationState* head = m_retired.load(std::memory_order_relaxed);
+                do
+                {
+                    state->nextRetired = head;
+                } while (!m_retired.compare_exchange_weak(
+                        head,
+                        state,
+                        std::memory_order_release,
+                        std::memory_order_relaxed));
+                return;
+            }
             ReleaseGroups(state->oldGroups, state->oldGroupCount);
+            state->oldGroups     = nullptr;
+            state->oldGroupCount = 0;
             delete state;
+        }
+
+        void ReclaimRetired() noexcept
+        {
+            if (m_readers.load(std::memory_order_acquire) != 0)
+                return;// still readers present
+            MigrationState* list = m_retired.exchange(nullptr, std::memory_order_acq_rel);
+            while (list)
+            {
+                MigrationState* next = list->nextRetired;
+                ReleaseGroups(list->oldGroups, list->oldGroupCount);
+                list->oldGroups     = nullptr;
+                list->oldGroupCount = 0;
+                delete list;
+                list = next;
+            }
         }
 
         void ReleaseAndMaybeDestroy(MigrationState* state, bool finalized) noexcept
@@ -639,13 +794,20 @@ namespace NGIN::Containers
             if (finalized)
             {
                 if (!state->destroyed.exchange(true, std::memory_order_acq_rel))
+                {
+                    // Poison immediately; either immediate destruction or queued.
+                    state->oldMask = 0;
                     DestroyMigrationState(state);
+                }
                 return;
             }
             if (alreadyFinalized)
             {
                 if (!state->destroyed.exchange(true, std::memory_order_acq_rel))
+                {
+                    state->oldMask = 0;
                     DestroyMigrationState(state);
+                }
             }
         }
 
@@ -724,6 +886,10 @@ namespace NGIN::Containers
                 m_capacity         = targetCapacity;
                 m_mask             = state->newMask;
                 m_resizeThreshold  = state->newThreshold;
+                // Publish new table view (mask then pointer with release fence).
+                m_pubMask.store(m_mask, std::memory_order_relaxed);
+                std::atomic_thread_fence(std::memory_order_release);
+                m_pubGroups.store(m_table.groups, std::memory_order_release);
                 HelpMigration(state, 1);
                 const bool finalized = FinalizeMigration(state);
                 ReleaseMigration(state);
@@ -898,7 +1064,8 @@ namespace NGIN::Containers
                         size_type targetCapacity = m_capacity ? m_capacity * 2 : GroupSize;
                         targetCapacity           = std::max(targetCapacity, m_capacity + GroupSize);
                         StartMigration(targetCapacity);
-                        TableView primary = CurrentView();
+                        ViewToken tok2    = AcquireGuardedView();
+                        TableView primary = tok2.view;
                         while (true)
                         {
                             InsertProbe retryProbe = LocateForInsert(primary, migrationKey, hash);
@@ -907,7 +1074,9 @@ namespace NGIN::Containers
                                 size_type nextTarget = m_capacity ? m_capacity * 2 : GroupSize;
                                 nextTarget           = std::max(nextTarget, m_capacity + GroupSize);
                                 StartMigration(nextTarget);
-                                primary = CurrentView();
+                                ReleaseGuard(tok2, false);
+                                tok2    = AcquireGuardedView();
+                                primary = tok2.view;
                                 continue;
                             }
 
@@ -919,9 +1088,11 @@ namespace NGIN::Containers
                                 } catch (...)
                                 {
                                     retryProbe.slot->UnlockTo(detail::SlotState::Occupied);
+                                    ReleaseGuard(tok2, false);
                                     throw;
                                 }
                                 retryProbe.slot->UnlockTo(detail::SlotState::Occupied);
+                                ReleaseGuard(tok2, false);
                                 return;
                             }
 
@@ -929,11 +1100,13 @@ namespace NGIN::Containers
                             {
                                 retryProbe.slot->ConstructPayload(hash, std::move(migrationKey), std::move(migrationValue));
                                 retryProbe.slot->UnlockTo(detail::SlotState::Occupied);
+                                ReleaseGuard(tok2, false);
                                 return;
                             } catch (...)
                             {
                                 retryProbe.slot->hash = 0;
                                 retryProbe.slot->UnlockTo(retryProbe.previousState);
+                                ReleaseGuard(tok2, false);
                                 throw;
                             }
                         }
@@ -976,10 +1149,10 @@ namespace NGIN::Containers
             if (!migration)
                 return;
             TableView oldView {migration->oldGroups, migration->oldMask};
-            if (auto* slot = AcquireForMutation(oldView, key, hash))
+            if (auto* secondarySlot = AcquireForMutation(oldView, key, hash))
             {
-                slot->DestroyPayload();
-                slot->UnlockTo(detail::SlotState::Tombstone);
+                secondarySlot->DestroyPayload();
+                secondarySlot->UnlockTo(detail::SlotState::Tombstone);
             }
         }
 
@@ -1032,6 +1205,10 @@ namespace NGIN::Containers
         template<class K>
         Slot* AcquireForMutation(const TableView& view, const K& key, std::size_t hash) noexcept
         {
+            if (!ViewValid(view))
+                return nullptr;
+            if (!view.groups)
+                return nullptr;
             size_type index = hash & view.mask;
             for (size_type probe = 0; probe <= view.mask; ++probe)
             {
@@ -1064,6 +1241,8 @@ namespace NGIN::Containers
         template<class K>
         bool ContainsInView(const TableView& view, const K& key, std::size_t hash) const noexcept
         {
+            if (!ViewValid(view) || !view.groups)
+                return false;
             size_type index = hash & view.mask;
             for (size_type probe = 0; probe <= view.mask;)
             {
@@ -1101,6 +1280,8 @@ namespace NGIN::Containers
         template<class K>
         bool TryCopyValueInView(const TableView& view, const K& key, std::size_t hash, Value& outValue) const
         {
+            if (!ViewValid(view) || !view.groups)
+                return false;
             size_type index = hash & view.mask;
             for (size_type probe = 0; probe <= view.mask;)
             {
@@ -1143,13 +1324,13 @@ namespace NGIN::Containers
             const std::size_t hash = ComputeHash(key);
             while (true)
             {
-                TableView       primary   = CurrentView();
-                MigrationState* migration = AcquireMigration();
-                bool            finalized = false;
-                InsertProbe     probe     = LocateForInsert(primary, key, hash);
+                ViewToken   token     = AcquireGuardedView();
+                TableView   primary   = token.view;
+                bool        finalized = false;
+                InsertProbe probe     = LocateForInsert(primary, key, hash);
                 if (!probe.slot)
                 {
-                    ReleaseAndMaybeDestroy(migration, finalized);
+                    ReleaseGuard(token, finalized);
                     MaybeStartMigration();
                     continue;
                 }
@@ -1162,20 +1343,20 @@ namespace NGIN::Containers
                     } catch (...)
                     {
                         probe.slot->UnlockTo(detail::SlotState::Occupied);
-                        ReleaseAndMaybeDestroy(migration, finalized);
+                        ReleaseGuard(token, finalized);
                         throw;
                     }
                     probe.slot->UnlockTo(detail::SlotState::Occupied);
-                    if (migration)
+                    if (token.mig)
                     {
-                        HelpMigration(migration);
-                        finalized = FinalizeMigration(migration);
+                        HelpMigration(token.mig);
+                        finalized = FinalizeMigration(token.mig);
                     }
                     else
                     {
                         MaybeStartMigration();
                     }
-                    ReleaseAndMaybeDestroy(migration, finalized);
+                    ReleaseGuard(token, finalized);
                     return false;
                 }
 
@@ -1187,23 +1368,22 @@ namespace NGIN::Containers
                 {
                     probe.slot->hash = 0;
                     probe.slot->UnlockTo(probe.previousState);
-                    ReleaseAndMaybeDestroy(migration, finalized);
+                    ReleaseGuard(token, finalized);
                     throw;
                 }
 
                 m_size.fetch_add(1, std::memory_order_acq_rel);
 
-                if (migration)
+                if (token.mig)
                 {
-                    HelpMigration(migration);
-                    finalized = FinalizeMigration(migration);
+                    HelpMigration(token.mig);
+                    finalized = FinalizeMigration(token.mig);
                 }
                 else
                 {
                     MaybeStartMigration(1);
                 }
-
-                ReleaseAndMaybeDestroy(migration, finalized);
+                ReleaseGuard(token, finalized);
                 return true;
             }
         }
@@ -1214,13 +1394,13 @@ namespace NGIN::Containers
             const std::size_t hash = ComputeHash(key);
             while (true)
             {
-                TableView       primary   = CurrentView();
-                MigrationState* migration = AcquireMigration();
-                bool            finalized = false;
-                InsertProbe     probe     = LocateForInsert(primary, key, hash);
+                ViewToken   token     = AcquireGuardedView();
+                TableView   primary   = token.view;
+                bool        finalized = false;
+                InsertProbe probe     = LocateForInsert(primary, key, hash);
                 if (!probe.slot)
                 {
-                    ReleaseAndMaybeDestroy(migration, finalized);
+                    ReleaseGuard(token, finalized);
                     MaybeStartMigration();
                     continue;
                 }
@@ -1233,20 +1413,20 @@ namespace NGIN::Containers
                     } catch (...)
                     {
                         probe.slot->UnlockTo(detail::SlotState::Occupied);
-                        ReleaseAndMaybeDestroy(migration, finalized);
+                        ReleaseGuard(token, finalized);
                         throw;
                     }
                     probe.slot->UnlockTo(detail::SlotState::Occupied);
-                    if (migration)
+                    if (token.mig)
                     {
-                        HelpMigration(migration);
-                        finalized = FinalizeMigration(migration);
+                        HelpMigration(token.mig);
+                        finalized = FinalizeMigration(token.mig);
                     }
                     else
                     {
                         MaybeStartMigration();
                     }
-                    ReleaseAndMaybeDestroy(migration, finalized);
+                    ReleaseGuard(token, finalized);
                     return false;
                 }
 
@@ -1258,23 +1438,22 @@ namespace NGIN::Containers
                 {
                     probe.slot->hash = 0;
                     probe.slot->UnlockTo(probe.previousState);
-                    ReleaseAndMaybeDestroy(migration, finalized);
+                    ReleaseGuard(token, finalized);
                     throw;
                 }
 
                 m_size.fetch_add(1, std::memory_order_acq_rel);
 
-                if (migration)
+                if (token.mig)
                 {
-                    HelpMigration(migration);
-                    finalized = FinalizeMigration(migration);
+                    HelpMigration(token.mig);
+                    finalized = FinalizeMigration(token.mig);
                 }
                 else
                 {
                     MaybeStartMigration(1);
                 }
-
-                ReleaseAndMaybeDestroy(migration, finalized);
+                ReleaseGuard(token, finalized);
                 return true;
             }
         }

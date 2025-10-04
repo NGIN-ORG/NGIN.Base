@@ -121,8 +121,8 @@ TEST_CASE("ConcurrentHashMap mixed read/write stress", "[Containers][ConcurrentH
 TEST_CASE("ConcurrentHashMap coordinates reserve during contention", "[Containers][ConcurrentHashMap][Stress]")
 {
     ConcurrentHashMap<int, int> map(4);
-    constexpr int               inserterThreads     = 6;
-    constexpr int               insertsPerThread    = 2000;
+    constexpr int               inserterThreads  = 6;
+    constexpr int               insertsPerThread = 2000;
     std::atomic<bool>           start {false};
     std::vector<std::thread>    workers;
 
@@ -161,6 +161,8 @@ TEST_CASE("ConcurrentHashMap coordinates reserve during contention", "[Container
     resizer.join();
 
     const auto expected = static_cast<std::size_t>(inserterThreads * insertsPerThread);
+    // Ensure all migrations are finalized before validating edge keys.
+    map.Quiesce();
     CHECK(map.Size() == expected);
     CHECK(map.Contains(0));
     CHECK(map.Contains(expected - 1));
@@ -169,10 +171,10 @@ TEST_CASE("ConcurrentHashMap coordinates reserve during contention", "[Container
 TEST_CASE("ConcurrentHashMap handles insert/remove churn", "[Containers][ConcurrentHashMap][Stress]")
 {
     ConcurrentHashMap<int, int> map(8);
-    constexpr int               producerThreads  = 4;
-    constexpr int               consumerThreads  = 4;
-    constexpr int               opsPerProducer   = 4000;
-    constexpr int               keySpace         = producerThreads * opsPerProducer;
+    constexpr int               producerThreads = 4;
+    constexpr int               consumerThreads = 4;
+    constexpr int               opsPerProducer  = 4000;
+    constexpr int               keySpace        = producerThreads * opsPerProducer;
 
     std::atomic<bool> start {false};
     std::atomic<int>  removedCount {0};
