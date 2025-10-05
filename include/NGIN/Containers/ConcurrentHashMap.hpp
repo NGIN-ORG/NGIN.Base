@@ -19,9 +19,7 @@
 #include <type_traits>
 #include <utility>
 
-#define NGIN_CHM_OPTIMISTIC_READS 1
-#define NGIN_CHM_BACKOFF_SPIN 1
-#define NGIN_CHM_ADAPTIVE_THRESHOLD 1
+// Optimizations (optimistic reads, spin backoff, adaptive threshold) are always enabled.
 
 namespace NGIN::Containers
 {
@@ -401,7 +399,6 @@ namespace NGIN::Containers
         bool TryGet(const Key& key, Value& outValue) const
         {
             const std::size_t hash = ComputeHash(key);
-#if defined(NGIN_CHM_OPTIMISTIC_READS)
             // Fast optimistic path: snapshot epoch; if even and no migration pointer, read without guard.
             const size_type startEpoch = m_epoch.load(std::memory_order_acquire);
             if ((startEpoch & 1u) == 0)
@@ -423,7 +420,6 @@ namespace NGIN::Containers
                     }
                 }
             }
-#endif
             ViewToken token = const_cast<ConcurrentHashMap*>(this)->AcquireGuardedView();
             if (TryCopyValueInView(token.view, key, hash, outValue))
             {
@@ -538,21 +534,10 @@ namespace NGIN::Containers
         mutable std::atomic<size_type> m_readers {0};
         std::atomic<MigrationState*>   m_migration {nullptr};
         std::atomic<MigrationState*>   m_retired {nullptr};// list of finalized states awaiting reader drain
-        // Phase 1 epoch (even=stable, odd=migration) for optimistic reads (guarded by NGIN_CHM_OPTIMISTIC_READS)
+                                                           // Epoch (even=stable, odd=migration) for optimistic reads.
         std::atomic<size_type> m_epoch {0};
 
-        // Instrumentation / diagnostics: counts of yields during LocateForInsert and times we abandoned due to budget.
-        std::atomic<size_type> m_statLocateInsertYields {0};
-        std::atomic<size_type> m_statLocateInsertBudgetAbandon {0};
-        std::atomic<size_type> m_statLocateInsertPressureAbort {0};
-        // Phase 0 extended instrumentation
-        std::atomic<size_type> m_statInsertCalls {0};
-        std::atomic<size_type> m_statInsertSuccessNew {0};
-        std::atomic<size_type> m_statInsertSuccessUpdate {0};
-        std::atomic<size_type> m_statInsertProbeSteps {0};
-        std::atomic<size_type> m_statInsertMaxProbe {0};
-        std::atomic<size_type> m_statInsertAbandon {0};
-        std::atomic<uint32_t>  m_loadFactorPermille {750};
+        // Fixed load factor (adaptive logic removed): threshold uses kLoadFactor.
 
         static constexpr size_type kGroupMask  = GroupSize - 1;
         static constexpr size_type kGroupShift = detail::ConstLog2(GroupSize);
@@ -745,11 +730,7 @@ namespace NGIN::Containers
         {
             if (capacity <= 1)
                 return 1;
-            double factor = kLoadFactor;
-#if defined(NGIN_CHM_ADAPTIVE_THRESHOLD)
-            factor = static_cast<double>(m_loadFactorPermille.load(std::memory_order_relaxed)) / 1000.0;
-#endif
-            const double    raw       = static_cast<double>(capacity) * factor;
+            const double    raw       = static_cast<double>(capacity) * kLoadFactor;
             const auto      threshold = static_cast<size_type>(raw);
             const size_type capped    = threshold >= capacity ? capacity - 1 : threshold;
             return capped == 0 ? 1 : capped;
@@ -952,11 +933,9 @@ namespace NGIN::Containers
                         std::memory_order_acq_rel,
                         std::memory_order_relaxed))
             {
-#if defined(NGIN_CHM_OPTIMISTIC_READS)
                 // Flip epoch to odd to signal migration in progress (only if currently even)
                 size_type e = m_epoch.load(std::memory_order_relaxed);
                 while ((e & 1u) == 0 && !m_epoch.compare_exchange_weak(e, e | 1u, std::memory_order_acq_rel)) {}
-#endif
                 m_table.groups     = newGroups;
                 m_table.groupCount = newGroupCount;
                 m_capacity         = targetCapacity;
@@ -1027,12 +1006,10 @@ namespace NGIN::Containers
                 return false;
             }
             state->finalized.store(true, std::memory_order_release);
-#if defined(NGIN_CHM_OPTIMISTIC_READS)
             // Return epoch to even if currently odd.
             size_type cur = m_epoch.load(std::memory_order_relaxed);
             if (cur & 1u)
                 m_epoch.store(cur + 1, std::memory_order_release);
-#endif
             return true;
         }
 
@@ -1257,22 +1234,14 @@ namespace NGIN::Containers
                     case detail::SlotState::Empty:
                         if (slot.TryLockFrom(detail::SlotState::Empty))
                         {
-                            m_statInsertProbeSteps.fetch_add(steps + 1, std::memory_order_relaxed);
-                            auto prev = m_statInsertMaxProbe.load(std::memory_order_relaxed);
-                            while (prev < (steps + 1) &&
-                                   !m_statInsertMaxProbe.compare_exchange_weak(prev, steps + 1, std::memory_order_relaxed))
-                                ;
+                            // instrumentation removed
                             return {&slot, detail::SlotState::Empty, true};
                         }
                         break;
                     case detail::SlotState::Tombstone:
                         if (slot.TryLockFrom(detail::SlotState::Tombstone))
                         {
-                            m_statInsertProbeSteps.fetch_add(steps + 1, std::memory_order_relaxed);
-                            auto prev = m_statInsertMaxProbe.load(std::memory_order_relaxed);
-                            while (prev < (steps + 1) &&
-                                   !m_statInsertMaxProbe.compare_exchange_weak(prev, steps + 1, std::memory_order_relaxed))
-                                ;
+                            // instrumentation removed
                             return {&slot, detail::SlotState::Tombstone, true};
                         }
                         break;
@@ -1284,11 +1253,7 @@ namespace NGIN::Containers
                                 const bool match = m_equal(slot.KeyRef(), key);
                                 if (match)
                                 {
-                                    m_statInsertProbeSteps.fetch_add(steps + 1, std::memory_order_relaxed);
-                                    auto prev = m_statInsertMaxProbe.load(std::memory_order_relaxed);
-                                    while (prev < (steps + 1) &&
-                                           !m_statInsertMaxProbe.compare_exchange_weak(prev, steps + 1, std::memory_order_relaxed))
-                                        ;
+                                    // instrumentation removed
                                     return {&slot, detail::SlotState::Occupied, false};
                                 }
                                 slot.UnlockTo(detail::SlotState::Occupied);
@@ -1297,7 +1262,7 @@ namespace NGIN::Containers
                             {
                                 std::this_thread::yield();
                                 ++yields;
-                                m_statLocateInsertYields.fetch_add(1, std::memory_order_relaxed);
+                                // instrumentation removed
                             }
                         }
                         break;
@@ -1305,20 +1270,18 @@ namespace NGIN::Containers
                     case detail::SlotState::PendingInsert:
                         std::this_thread::yield();
                         ++yields;
-                        m_statLocateInsertYields.fetch_add(1, std::memory_order_relaxed);
+                        // instrumentation removed
                         break;
                 }
                 if (yields > capacity + kExtraYieldBudget)
                 {
-                    m_statLocateInsertBudgetAbandon.fetch_add(1, std::memory_order_relaxed);
-                    m_statLocateInsertPressureAbort.fetch_add(1, std::memory_order_relaxed);
-                    m_statInsertAbandon.fetch_add(1, std::memory_order_relaxed);
+                    // instrumentation removed
                     return {};// Abandon to let higher level potentially trigger migration/backoff.
                 }
                 index = (index + 1) & view.mask;
                 ++steps;
             }
-            m_statInsertAbandon.fetch_add(1, std::memory_order_relaxed);
+            // instrumentation removed
             return {};// Table appears saturated or heavy contention.
         }
 
@@ -1443,7 +1406,7 @@ namespace NGIN::Containers
         {
             const std::size_t hash         = ComputeHash(key);
             size_type         attemptCount = 0;// counts LocateForInsert failures (returned empty probe)
-            m_statInsertCalls.fetch_add(1, std::memory_order_relaxed);
+            // stats removed
             while (true)
             {
                 ViewToken   token     = AcquireGuardedView();
@@ -1470,8 +1433,7 @@ namespace NGIN::Containers
                     {
                         MaybeStartMigration();
                     }
-                    // Phase 2: spin + jitter backoff (optional macro), else yield
-#if defined(NGIN_CHM_BACKOFF_SPIN)
+                    // Spin + jitter backoff
                     {
                         static thread_local uint32_t seed     = 0x9E3779B9u ^ static_cast<uint32_t>(reinterpret_cast<uintptr_t>(this));
                         auto                         nextRand = [&]() noexcept { uint32_t x = seed; x ^= x << 13; x ^= x >> 17; x ^= x << 5; seed = x; return x; };
@@ -1490,9 +1452,6 @@ namespace NGIN::Containers
                         if (attemptCount > 8)
                             std::this_thread::yield();
                     }
-#else
-                    std::this_thread::yield();
-#endif
                     continue;
                 }
 
@@ -1508,7 +1467,7 @@ namespace NGIN::Containers
                         throw;
                     }
                     probe.slot->UnlockTo(detail::SlotState::Occupied);
-                    m_statInsertSuccessUpdate.fetch_add(1, std::memory_order_relaxed);
+                    // stats removed
                     if (token.mig)
                     {
                         HelpMigration(token.mig);
@@ -1535,24 +1494,7 @@ namespace NGIN::Containers
                 }
 
                 m_size.fetch_add(1, std::memory_order_acq_rel);
-                m_statInsertSuccessNew.fetch_add(1, std::memory_order_relaxed);
-                // Adaptive threshold tuning (Phase 2) based on average probe length.
-#if defined(NGIN_CHM_ADAPTIVE_THRESHOLD)
-                if ((m_statInsertCalls.load(std::memory_order_relaxed) & 0x3FFu) == 0)// every 1024
-                {
-                    const size_type calls = m_statInsertCalls.load(std::memory_order_relaxed);
-                    if (calls > 2000)
-                    {
-                        const double avgProbe = static_cast<double>(m_statInsertProbeSteps.load(std::memory_order_relaxed)) /
-                                                static_cast<double>(calls);
-                        uint32_t current = m_loadFactorPermille.load(std::memory_order_relaxed);
-                        if (avgProbe > 4.0 && current > 600)
-                            m_loadFactorPermille.store(600, std::memory_order_release);
-                        else if (avgProbe < 3.0 && current < 750)
-                            m_loadFactorPermille.store(750, std::memory_order_release);
-                    }
-                }
-#endif
+                // adaptive logic removed (relied on removed stats)
 
                 if (token.mig)
                 {
@@ -1573,7 +1515,7 @@ namespace NGIN::Containers
         {
             const std::size_t hash         = ComputeHash(key);
             size_type         attemptCount = 0;
-            m_statInsertCalls.fetch_add(1, std::memory_order_relaxed);
+            // stats removed
             while (true)
             {
                 ViewToken   token     = AcquireGuardedView();
@@ -1598,8 +1540,7 @@ namespace NGIN::Containers
                     {
                         MaybeStartMigration();
                     }
-                    // Phase 2: spin + jitter backoff or yield
-#if defined(NGIN_CHM_BACKOFF_SPIN)
+                    // Spin + jitter backoff
                     {
                         static thread_local uint32_t seed     = 0x85EBCA77u ^ static_cast<uint32_t>(reinterpret_cast<uintptr_t>(this));
                         auto                         nextRand = [&]() noexcept { uint32_t x = seed; x ^= x << 13; x ^= x >> 17; x ^= x << 5; seed = x; return x; };
@@ -1618,9 +1559,6 @@ namespace NGIN::Containers
                         if (attemptCount > 8)
                             std::this_thread::yield();
                     }
-#else
-                    std::this_thread::yield();
-#endif
                     continue;
                 }
 
@@ -1636,7 +1574,7 @@ namespace NGIN::Containers
                         throw;
                     }
                     probe.slot->UnlockTo(detail::SlotState::Occupied);
-                    m_statInsertSuccessUpdate.fetch_add(1, std::memory_order_relaxed);
+                    // stats removed
                     if (token.mig)
                     {
                         HelpMigration(token.mig);
@@ -1663,23 +1601,7 @@ namespace NGIN::Containers
                 }
 
                 m_size.fetch_add(1, std::memory_order_acq_rel);
-                m_statInsertSuccessNew.fetch_add(1, std::memory_order_relaxed);
-#if defined(NGIN_CHM_ADAPTIVE_THRESHOLD)
-                if ((m_statInsertCalls.load(std::memory_order_relaxed) & 0x3FFu) == 0)
-                {
-                    const size_type calls = m_statInsertCalls.load(std::memory_order_relaxed);
-                    if (calls > 2000)
-                    {
-                        const double avgProbe = static_cast<double>(m_statInsertProbeSteps.load(std::memory_order_relaxed)) /
-                                                static_cast<double>(calls);
-                        uint32_t current = m_loadFactorPermille.load(std::memory_order_relaxed);
-                        if (avgProbe > 4.0 && current > 600)
-                            m_loadFactorPermille.store(600, std::memory_order_release);
-                        else if (avgProbe < 3.0 && current < 750)
-                            m_loadFactorPermille.store(750, std::memory_order_release);
-                    }
-                }
-#endif
+                // adaptive logic removed (relied on removed stats)
 
                 if (token.mig)
                 {
@@ -1702,45 +1624,6 @@ namespace NGIN::Containers
         }
 
     public:
-        struct Diagnostics
-        {
-            size_type locateInsertYields;
-            size_type locateInsertBudgetAbandon;
-            size_type locateInsertPressureAbort;
-            size_type insertCalls;
-            size_type insertSuccessNew;
-            size_type insertSuccessUpdate;
-            size_type insertProbeSteps;
-            size_type insertMaxProbe;
-            size_type insertAbandon;
-        };
-
-        [[nodiscard]] Diagnostics GetDiagnostics() const noexcept
-        {
-            return Diagnostics {
-                    m_statLocateInsertYields.load(std::memory_order_relaxed),
-                    m_statLocateInsertBudgetAbandon.load(std::memory_order_relaxed),
-                    m_statLocateInsertPressureAbort.load(std::memory_order_relaxed),
-                    m_statInsertCalls.load(std::memory_order_relaxed),
-                    m_statInsertSuccessNew.load(std::memory_order_relaxed),
-                    m_statInsertSuccessUpdate.load(std::memory_order_relaxed),
-                    m_statInsertProbeSteps.load(std::memory_order_relaxed),
-                    m_statInsertMaxProbe.load(std::memory_order_relaxed),
-                    m_statInsertAbandon.load(std::memory_order_relaxed),
-            };
-        }
-
-        void ResetDiagnostics() noexcept
-        {
-            m_statLocateInsertYields.store(0, std::memory_order_relaxed);
-            m_statLocateInsertBudgetAbandon.store(0, std::memory_order_relaxed);
-            m_statLocateInsertPressureAbort.store(0, std::memory_order_relaxed);
-            m_statInsertCalls.store(0, std::memory_order_relaxed);
-            m_statInsertSuccessNew.store(0, std::memory_order_relaxed);
-            m_statInsertSuccessUpdate.store(0, std::memory_order_relaxed);
-            m_statInsertProbeSteps.store(0, std::memory_order_relaxed);
-            m_statInsertMaxProbe.store(0, std::memory_order_relaxed);
-            m_statInsertAbandon.store(0, std::memory_order_relaxed);
-        }
+        // Diagnostics API removed.
     };
 }// namespace NGIN::Containers

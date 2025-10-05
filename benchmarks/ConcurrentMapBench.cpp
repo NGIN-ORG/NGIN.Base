@@ -12,10 +12,7 @@
 #include <atomic>
 #include <NGIN/Units.hpp>
 
-// Compile-time diagnostics toggle. Set to 1 to enable instrumentation output without runtime getenv.
-#ifndef NGIN_MAP_DIAGNOSTICS
-#define NGIN_MAP_DIAGNOSTICS 1
-#endif
+// Diagnostics instrumentation removed.
 
 #ifdef NGIN_HAVE_TBB
 #include <tbb/concurrent_unordered_map.h>
@@ -53,22 +50,7 @@ int main() noexcept
             {64, 10000, 5000},
     };
 
-    // Aggregated diagnostics across all NGIN map benchmark executions (Phase 0 baseline capture helper)
-#if NGIN_MAP_DIAGNOSTICS
-    struct AggDiag
-    {
-        std::atomic<unsigned long long> calls {0};
-        std::atomic<unsigned long long> newInserts {0};
-        std::atomic<unsigned long long> updates {0};
-        std::atomic<unsigned long long> probeSteps {0};
-        std::atomic<unsigned long long> maxProbe {0};
-        std::atomic<unsigned long long> abandon {0};
-        std::atomic<unsigned long long> locateYields {0};
-        std::atomic<unsigned long long> locateBudgetAbandon {0};
-        std::atomic<unsigned long long> locatePressureAbort {0};
-    };
-    static AggDiag gAgg;
-#endif
+    // Diagnostics aggregation removed.
 
     // Variant A: Mixed workload WITHOUT erase (portable to maps lacking safe concurrent erase)
     for (auto cfg: configs)
@@ -103,33 +85,7 @@ int main() noexcept
             for (auto& th: ts)
                 th.join();
             ctx.stop();
-#if NGIN_MAP_DIAGNOSTICS
-            {
-                auto d = map.GetDiagnostics();
-                std::cout << "Diagnostics t=" << cfg.threads
-                          << " calls=" << d.insertCalls
-                          << " new=" << d.insertSuccessNew
-                          << " upd=" << d.insertSuccessUpdate
-                          << " probeSteps=" << d.insertProbeSteps
-                          << " maxProbe=" << d.insertMaxProbe
-                          << " abandon=" << d.insertAbandon
-                          << " locateYields=" << d.locateInsertYields
-                          << " locateBudgetAbandon=" << d.locateInsertBudgetAbandon
-                          << " locatePressureAbort=" << d.locateInsertPressureAbort
-                          << '\n';
-                gAgg.calls.fetch_add(d.insertCalls, std::memory_order_relaxed);
-                gAgg.newInserts.fetch_add(d.insertSuccessNew, std::memory_order_relaxed);
-                gAgg.updates.fetch_add(d.insertSuccessUpdate, std::memory_order_relaxed);
-                gAgg.probeSteps.fetch_add(d.insertProbeSteps, std::memory_order_relaxed);
-                unsigned long long observed = gAgg.maxProbe.load(std::memory_order_relaxed);
-                while (observed < d.insertMaxProbe &&
-                       !gAgg.maxProbe.compare_exchange_weak(observed, d.insertMaxProbe, std::memory_order_relaxed)) {}
-                gAgg.abandon.fetch_add(d.insertAbandon, std::memory_order_relaxed);
-                gAgg.locateYields.fetch_add(d.locateInsertYields, std::memory_order_relaxed);
-                gAgg.locateBudgetAbandon.fetch_add(d.locateInsertBudgetAbandon, std::memory_order_relaxed);
-                gAgg.locatePressureAbort.fetch_add(d.locateInsertPressureAbort, std::memory_order_relaxed);
-            }
-#endif
+            // Diagnostics printing removed.
         },
                             "NGIN.ConcurrentHashMap MixedNoErase t=" + std::to_string(cfg.threads));
     }
@@ -253,13 +209,6 @@ int main() noexcept
     Benchmark::defaultConfig.warmupIterations = 2;
     auto results                              = Benchmark::RunAll<Units::Milliseconds>();
     Benchmark::PrintSummaryTable(std::cout, results);
-#if NGIN_MAP_DIAGNOSTICS
-    std::cout << "AggregatedDiagnostics calls=" << gAgg.calls.load() << " new=" << gAgg.newInserts.load()
-              << " upd=" << gAgg.updates.load() << " probeSteps=" << gAgg.probeSteps.load()
-              << " maxProbe=" << gAgg.maxProbe.load() << " abandon=" << gAgg.abandon.load()
-              << " locateYields=" << gAgg.locateYields.load()
-              << " locateBudgetAbandon=" << gAgg.locateBudgetAbandon.load()
-              << " locatePressureAbort=" << gAgg.locatePressureAbort.load() << '\n';
-#endif
+    // Aggregated diagnostics output removed.
     return 0;
 }
