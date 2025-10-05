@@ -19,7 +19,9 @@
 #include <type_traits>
 #include <utility>
 
-#define NGIN_CHM_OPTIMISTIC_READS = 1
+#define NGIN_CHM_OPTIMISTIC_READS 1
+#define NGIN_CHM_BACKOFF_SPIN 1
+#define NGIN_CHM_ADAPTIVE_THRESHOLD 1
 
 namespace NGIN::Containers
 {
@@ -550,6 +552,7 @@ namespace NGIN::Containers
         std::atomic<size_type> m_statInsertProbeSteps {0};
         std::atomic<size_type> m_statInsertMaxProbe {0};
         std::atomic<size_type> m_statInsertAbandon {0};
+        std::atomic<uint32_t>  m_loadFactorPermille {750};
 
         static constexpr size_type kGroupMask  = GroupSize - 1;
         static constexpr size_type kGroupShift = detail::ConstLog2(GroupSize);
@@ -742,7 +745,11 @@ namespace NGIN::Containers
         {
             if (capacity <= 1)
                 return 1;
-            const double    raw       = static_cast<double>(capacity) * kLoadFactor;
+            double factor = kLoadFactor;
+#if defined(NGIN_CHM_ADAPTIVE_THRESHOLD)
+            factor = static_cast<double>(m_loadFactorPermille.load(std::memory_order_relaxed)) / 1000.0;
+#endif
+            const double    raw       = static_cast<double>(capacity) * factor;
             const auto      threshold = static_cast<size_type>(raw);
             const size_type capped    = threshold >= capacity ? capacity - 1 : threshold;
             return capped == 0 ? 1 : capped;
@@ -1463,17 +1470,29 @@ namespace NGIN::Containers
                     {
                         MaybeStartMigration();
                     }
-                    // Exponential backoff after several failures to reduce contention.
-                    if (attemptCount > 4)
+                    // Phase 2: spin + jitter backoff (optional macro), else yield
+#if defined(NGIN_CHM_BACKOFF_SPIN)
                     {
-                        const size_type shift = (attemptCount > 16 ? 16 : attemptCount);
-                        const auto      nanos = (1u << shift);// grows up to ~65K ns (~65 microseconds)
-                        std::this_thread::sleep_for(std::chrono::nanoseconds(nanos));
+                        static thread_local uint32_t seed     = 0x9E3779B9u ^ static_cast<uint32_t>(reinterpret_cast<uintptr_t>(this));
+                        auto                         nextRand = [&]() noexcept { uint32_t x = seed; x ^= x << 13; x ^= x >> 17; x ^= x << 5; seed = x; return x; };
+                        const int                    power    = attemptCount < 12 ? static_cast<int>(attemptCount) : 12;
+                        int                          spins    = (32 << power) + static_cast<int>(nextRand() & 31u);
+                        if (attemptCount > 20)
+                            spins = 256;
+                        for (int i = 0; i < spins; ++i)
+                        {
+#if (defined(__x86_64__) || defined(_M_X64) || defined(__i386) || defined(_M_IX86))
+                            _mm_pause();
+#else
+                            asm volatile("");
+#endif
+                        }
+                        if (attemptCount > 8)
+                            std::this_thread::yield();
                     }
-                    else
-                    {
-                        std::this_thread::yield();
-                    }
+#else
+                    std::this_thread::yield();
+#endif
                     continue;
                 }
 
@@ -1517,6 +1536,23 @@ namespace NGIN::Containers
 
                 m_size.fetch_add(1, std::memory_order_acq_rel);
                 m_statInsertSuccessNew.fetch_add(1, std::memory_order_relaxed);
+                // Adaptive threshold tuning (Phase 2) based on average probe length.
+#if defined(NGIN_CHM_ADAPTIVE_THRESHOLD)
+                if ((m_statInsertCalls.load(std::memory_order_relaxed) & 0x3FFu) == 0)// every 1024
+                {
+                    const size_type calls = m_statInsertCalls.load(std::memory_order_relaxed);
+                    if (calls > 2000)
+                    {
+                        const double avgProbe = static_cast<double>(m_statInsertProbeSteps.load(std::memory_order_relaxed)) /
+                                                static_cast<double>(calls);
+                        uint32_t current = m_loadFactorPermille.load(std::memory_order_relaxed);
+                        if (avgProbe > 4.0 && current > 600)
+                            m_loadFactorPermille.store(600, std::memory_order_release);
+                        else if (avgProbe < 3.0 && current < 750)
+                            m_loadFactorPermille.store(750, std::memory_order_release);
+                    }
+                }
+#endif
 
                 if (token.mig)
                 {
@@ -1562,16 +1598,29 @@ namespace NGIN::Containers
                     {
                         MaybeStartMigration();
                     }
-                    if (attemptCount > 4)
+                    // Phase 2: spin + jitter backoff or yield
+#if defined(NGIN_CHM_BACKOFF_SPIN)
                     {
-                        const size_type shift = (attemptCount > 16 ? 16 : attemptCount);
-                        const auto      nanos = (1u << shift);
-                        std::this_thread::sleep_for(std::chrono::nanoseconds(nanos));
+                        static thread_local uint32_t seed     = 0x85EBCA77u ^ static_cast<uint32_t>(reinterpret_cast<uintptr_t>(this));
+                        auto                         nextRand = [&]() noexcept { uint32_t x = seed; x ^= x << 13; x ^= x >> 17; x ^= x << 5; seed = x; return x; };
+                        const int                    power    = attemptCount < 12 ? static_cast<int>(attemptCount) : 12;
+                        int                          spins    = (32 << power) + static_cast<int>(nextRand() & 31u);
+                        if (attemptCount > 20)
+                            spins = 256;
+                        for (int i = 0; i < spins; ++i)
+                        {
+#if (defined(__x86_64__) || defined(_M_X64) || defined(__i386) || defined(_M_IX86))
+                            _mm_pause();
+#else
+                            asm volatile("");
+#endif
+                        }
+                        if (attemptCount > 8)
+                            std::this_thread::yield();
                     }
-                    else
-                    {
-                        std::this_thread::yield();
-                    }
+#else
+                    std::this_thread::yield();
+#endif
                     continue;
                 }
 
@@ -1615,6 +1664,22 @@ namespace NGIN::Containers
 
                 m_size.fetch_add(1, std::memory_order_acq_rel);
                 m_statInsertSuccessNew.fetch_add(1, std::memory_order_relaxed);
+#if defined(NGIN_CHM_ADAPTIVE_THRESHOLD)
+                if ((m_statInsertCalls.load(std::memory_order_relaxed) & 0x3FFu) == 0)
+                {
+                    const size_type calls = m_statInsertCalls.load(std::memory_order_relaxed);
+                    if (calls > 2000)
+                    {
+                        const double avgProbe = static_cast<double>(m_statInsertProbeSteps.load(std::memory_order_relaxed)) /
+                                                static_cast<double>(calls);
+                        uint32_t current = m_loadFactorPermille.load(std::memory_order_relaxed);
+                        if (avgProbe > 4.0 && current > 600)
+                            m_loadFactorPermille.store(600, std::memory_order_release);
+                        else if (avgProbe < 3.0 && current < 750)
+                            m_loadFactorPermille.store(750, std::memory_order_release);
+                    }
+                }
+#endif
 
                 if (token.mig)
                 {
