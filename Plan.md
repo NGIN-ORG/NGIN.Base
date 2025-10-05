@@ -176,6 +176,8 @@ Changes:
 - Remove: uses `DecrementSizeShard()`.
 - `Size()` & `LoadFactor()` derive approximate size via `ApproxSize()`; migration paths call `FlushAllShards()` before growth decisions.
 - Move/Clear/Destroy/Initialize flush or reset shards to maintain invariants.
+- Refinement: Migration now performs shard flush only after CAS success (winner-only) to eliminate redundant global scans.
+- Added runtime configurable flush threshold (`SetFlushThreshold`) replacing fixed constant; default remains 32.
 
 Correctness Notes:
 
@@ -187,6 +189,7 @@ Next Steps:
 1. Benchmark Phase 3 vs Phase 2 to quantify contention reduction.
 2. Consider dynamic shard count or per-core mapping if further scalability needed.
 3. Proceed to Phase 4 (SIMD control scanning) after benchmark review.
+4. Tune flush threshold (e.g., 32 → 64/128) and measure impact on high-thread scaling.
 
 ---
 

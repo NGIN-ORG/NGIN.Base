@@ -536,8 +536,10 @@ namespace NGIN::Containers
         {
             std::atomic<std::intptr_t> delta {0};
         };
-        static constexpr size_type kSizeShardCount      = 64;// power of two, tune if needed
-        static constexpr size_type kLocalFlushThreshold = 32;// amortize global atomic update cost
+        static constexpr size_type kSizeShardCount = 64;// power of two, tune if needed
+        // Default flush threshold (can be tuned at runtime via SetFlushThreshold).
+        static constexpr size_type kDefaultFlushThreshold = 32;
+        std::atomic<size_type>     m_flushThreshold {kDefaultFlushThreshold};
         alignas(64) SizeShard m_sizeShards[kSizeShardCount] {};
         size_type m_resizeThreshold {0};
         Hash      m_hash {};
@@ -602,7 +604,8 @@ namespace NGIN::Containers
             const size_type shardIndex = GetShardIndex();
             auto&           shard      = m_sizeShards[shardIndex];
             auto            newDelta   = shard.delta.fetch_add(1, std::memory_order_relaxed) + 1;
-            if (newDelta >= static_cast<std::intptr_t>(kLocalFlushThreshold))
+            const auto      limit      = static_cast<std::intptr_t>(m_flushThreshold.load(std::memory_order_relaxed));
+            if (newDelta >= limit)
             {
                 FlushShard(shardIndex);
             }
@@ -613,10 +616,18 @@ namespace NGIN::Containers
             const size_type shardIndex = GetShardIndex();
             auto&           shard      = m_sizeShards[shardIndex];
             auto            newDelta   = shard.delta.fetch_sub(1, std::memory_order_relaxed) - 1;
-            if (newDelta <= -static_cast<std::intptr_t>(kLocalFlushThreshold))
+            const auto      limit      = static_cast<std::intptr_t>(m_flushThreshold.load(std::memory_order_relaxed));
+            if (newDelta <= -limit)
             {
                 FlushShard(shardIndex);
             }
+        }
+
+        void SetFlushThreshold(size_type newThreshold) noexcept
+        {
+            if (newThreshold == 0)
+                newThreshold = 1;// avoid zero which would cause constant flushing
+            m_flushThreshold.store(newThreshold, std::memory_order_release);
         }
 
         [[nodiscard]] size_type ApproxSize() const noexcept
@@ -952,9 +963,11 @@ namespace NGIN::Containers
 
         void StartMigration(size_type desiredCapacity)
         {
-            // Flush shard deltas for more accurate growth decision.
-            FlushAllShards();
-            const size_type currentSize = m_size.load(std::memory_order_acquire);
+            // Use approximate size first (no full flush) to decide if a migration attempt is worthwhile.
+            const size_type approxSize = ApproxSize();
+
+            // Compute provisional target capacity using approx size; may grow again after precise flush.
+            const size_type currentSize = approxSize;
 
             const size_type surgeBase = std::max<size_type>(GroupSize, currentSize / 2 + GroupSize);
             size_type       demand    = currentSize + surgeBase;
@@ -1022,6 +1035,8 @@ namespace NGIN::Containers
                         std::memory_order_acq_rel,
                         std::memory_order_relaxed))
             {
+                // Winner: flush shards now to capture precise size for potential future growth heuristics.
+                FlushAllShards();
                 // Flip epoch to odd to signal migration in progress (only if currently even)
                 size_type e = m_epoch.load(std::memory_order_relaxed);
                 while ((e & 1u) == 0 && !m_epoch.compare_exchange_weak(e, e | 1u, std::memory_order_acq_rel)) {}
