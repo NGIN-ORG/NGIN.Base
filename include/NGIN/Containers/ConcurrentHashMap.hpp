@@ -201,6 +201,7 @@ namespace NGIN::Containers
               m_allocator(std::move(other.m_allocator))
         {
             other.DrainMigration();
+            other.FlushAllShards();
             m_table    = other.m_table;
             m_capacity = other.m_capacity;
             m_mask     = other.m_mask;
@@ -214,6 +215,8 @@ namespace NGIN::Containers
             other.m_mask            = 0;
             other.m_resizeThreshold = 0;
             other.m_size.store(0, std::memory_order_relaxed);
+            for (auto& shard: other.m_sizeShards)
+                shard.delta.store(0, std::memory_order_relaxed);
         }
 
         ConcurrentHashMap& operator=(ConcurrentHashMap&& other) noexcept
@@ -228,6 +231,7 @@ namespace NGIN::Containers
                 m_allocator = std::move(other.m_allocator);
 
                 other.DrainMigration();
+                other.FlushAllShards();
                 m_table    = other.m_table;
                 m_capacity = other.m_capacity;
                 m_mask     = other.m_mask;
@@ -242,6 +246,8 @@ namespace NGIN::Containers
                 other.m_mask            = 0;
                 other.m_resizeThreshold = 0;
                 other.m_size.store(0, std::memory_order_relaxed);
+                for (auto& shard: other.m_sizeShards)
+                    shard.delta.store(0, std::memory_order_relaxed);
             }
             return *this;
         }
@@ -254,7 +260,7 @@ namespace NGIN::Containers
 
         [[nodiscard]] size_type Size() const noexcept
         {
-            return m_size.load(std::memory_order_acquire);
+            return ApproxSize();
         }
 
         [[nodiscard]] bool Empty() const noexcept
@@ -290,6 +296,8 @@ namespace NGIN::Containers
                 slot.Reset();
             }
             m_size.store(0, std::memory_order_release);
+            for (auto& shard: m_sizeShards)
+                shard.delta.store(0, std::memory_order_release);
             ReleaseGuard(tok, false);
         }
 
@@ -339,7 +347,7 @@ namespace NGIN::Containers
             {
                 primarySlot->DestroyPayload();
                 primarySlot->UnlockTo(detail::SlotState::Tombstone);
-                m_size.fetch_sub(1, std::memory_order_acq_rel);
+                DecrementSizeShard();
                 removed = true;
                 if (token.mig)
                 {
@@ -359,7 +367,7 @@ namespace NGIN::Containers
                 {
                     secondarySlot->DestroyPayload();
                     secondarySlot->UnlockTo(detail::SlotState::Tombstone);
-                    m_size.fetch_sub(1, std::memory_order_acq_rel);
+                    DecrementSizeShard();
                     removed = true;
                     HelpMigration(token.mig);
                     finalized = FinalizeMigration(token.mig);
@@ -467,8 +475,7 @@ namespace NGIN::Containers
         {
             if (m_capacity == 0)
                 return 0.0;
-            return static_cast<double>(m_size.load(std::memory_order_acquire)) /
-                   static_cast<double>(m_capacity);
+            return static_cast<double>(Size()) / static_cast<double>(m_capacity);
         }
 
         template<class Callback>
@@ -520,14 +527,22 @@ namespace NGIN::Containers
             MigrationState*        nextRetired {nullptr};// intrusive singly-linked list for deferred reclamation
         };
 
-        Table                  m_table {};
-        size_type              m_capacity {0};
-        size_type              m_mask {0};
+        Table     m_table {};
+        size_type m_capacity {0};
+        size_type m_mask {0};
+        // Global committed size (flushed deltas only). Sharded deltas amortize contention.
         std::atomic<size_type> m_size {0};
-        size_type              m_resizeThreshold {0};
-        Hash                   m_hash {};
-        Equal                  m_equal {};
-        Allocator              m_allocator {};
+        struct SizeShard
+        {
+            std::atomic<std::intptr_t> delta {0};
+        };
+        static constexpr size_type kSizeShardCount      = 64;// power of two, tune if needed
+        static constexpr size_type kLocalFlushThreshold = 32;// amortize global atomic update cost
+        alignas(64) SizeShard m_sizeShards[kSizeShardCount] {};
+        size_type m_resizeThreshold {0};
+        Hash      m_hash {};
+        Equal     m_equal {};
+        Allocator m_allocator {};
         // Atomically published groups pointer and mask for readers to obtain a stable snapshot.
         std::atomic<Group*>            m_pubGroups {nullptr};
         std::atomic<size_type>         m_pubMask {0};
@@ -549,6 +564,74 @@ namespace NGIN::Containers
             bool              isNew {false};
         };
 
+        // --- Phase 3: Sharded size accounting helpers ---
+        [[nodiscard]] size_type GetShardIndex() const noexcept
+        {
+            // Thread-local cached index; lazily initialize.
+            static thread_local size_type shardIndex = kSizeShardCount;// sentinel
+            if (shardIndex >= kSizeShardCount)
+            {
+                // Derive pseudo-random stable index from thread id pointer hash.
+                auto tid   = std::hash<std::thread::id>()(std::this_thread::get_id());
+                shardIndex = static_cast<size_type>(tid) & (kSizeShardCount - 1);
+            }
+            return shardIndex;
+        }
+
+        void FlushShard(size_type shardIndex) noexcept
+        {
+            auto&         shard = m_sizeShards[shardIndex];
+            std::intptr_t delta = shard.delta.exchange(0, std::memory_order_acq_rel);
+            if (delta != 0)
+            {
+                if (delta > 0)
+                    m_size.fetch_add(static_cast<size_type>(delta), std::memory_order_acq_rel);
+                else
+                    m_size.fetch_sub(static_cast<size_type>(-delta), std::memory_order_acq_rel);
+            }
+        }
+
+        void FlushAllShards() noexcept
+        {
+            for (size_type i = 0; i < kSizeShardCount; ++i)
+                FlushShard(i);
+        }
+
+        void IncrementSizeShard() noexcept
+        {
+            const size_type shardIndex = GetShardIndex();
+            auto&           shard      = m_sizeShards[shardIndex];
+            auto            newDelta   = shard.delta.fetch_add(1, std::memory_order_relaxed) + 1;
+            if (newDelta >= static_cast<std::intptr_t>(kLocalFlushThreshold))
+            {
+                FlushShard(shardIndex);
+            }
+        }
+
+        void DecrementSizeShard() noexcept
+        {
+            const size_type shardIndex = GetShardIndex();
+            auto&           shard      = m_sizeShards[shardIndex];
+            auto            newDelta   = shard.delta.fetch_sub(1, std::memory_order_relaxed) - 1;
+            if (newDelta <= -static_cast<std::intptr_t>(kLocalFlushThreshold))
+            {
+                FlushShard(shardIndex);
+            }
+        }
+
+        [[nodiscard]] size_type ApproxSize() const noexcept
+        {
+            // Signed accumulation to avoid temporary underflow when negative shard deltas exceed committed base.
+            std::int64_t total = static_cast<std::int64_t>(m_size.load(std::memory_order_acquire));
+            for (size_type i = 0; i < kSizeShardCount; ++i)
+            {
+                total += m_sizeShards[i].delta.load(std::memory_order_acquire);
+            }
+            if (total < 0)
+                total = 0;
+            return static_cast<size_type>(total);
+        }
+
         void Initialize(size_type initialCapacity)
         {
             DrainMigration();
@@ -562,6 +645,8 @@ namespace NGIN::Containers
             m_mask             = m_capacity - 1;
             m_resizeThreshold  = ComputeThreshold(m_capacity);
             m_size.store(0, std::memory_order_relaxed);
+            for (auto& shard: m_sizeShards)
+                shard.delta.store(0, std::memory_order_relaxed);
             // Publish initial table view: groups first, then mask.
             // Rationale: reader will load mask (acquire) then groups; seeing the new mask implies
             // visibility of the preceding groups store (via release on mask) preventing torn snapshot.
@@ -629,6 +714,8 @@ namespace NGIN::Containers
             m_mask             = 0;
             m_resizeThreshold  = 0;
             m_size.store(0, std::memory_order_relaxed);
+            for (auto& shard: m_sizeShards)
+                shard.delta.store(0, std::memory_order_relaxed);
             // Publish empty view (groups=null then mask=0) preserving ordering invariant.
             m_pubGroups.store(nullptr, std::memory_order_relaxed);
             std::atomic_thread_fence(std::memory_order_release);
@@ -740,7 +827,7 @@ namespace NGIN::Containers
         {
             if (m_migration.load(std::memory_order_acquire))
                 return;
-            const size_type projected = m_size.load(std::memory_order_acquire) + additional;
+            const size_type projected = ApproxSize() + additional;
             if (projected <= m_resizeThreshold)
                 return;
             size_type       target     = m_capacity ? m_capacity * 2 : GroupSize;
@@ -865,6 +952,8 @@ namespace NGIN::Containers
 
         void StartMigration(size_type desiredCapacity)
         {
+            // Flush shard deltas for more accurate growth decision.
+            FlushAllShards();
             const size_type currentSize = m_size.load(std::memory_order_acquire);
 
             const size_type surgeBase = std::max<size_type>(GroupSize, currentSize / 2 + GroupSize);
@@ -1493,7 +1582,7 @@ namespace NGIN::Containers
                     throw;
                 }
 
-                m_size.fetch_add(1, std::memory_order_acq_rel);
+                IncrementSizeShard();
                 // adaptive logic removed (relied on removed stats)
 
                 if (token.mig)
@@ -1600,7 +1689,7 @@ namespace NGIN::Containers
                     throw;
                 }
 
-                m_size.fetch_add(1, std::memory_order_acq_rel);
+                IncrementSizeShard();
                 // adaptive logic removed (relied on removed stats)
 
                 if (token.mig)
