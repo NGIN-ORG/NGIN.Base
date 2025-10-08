@@ -6,9 +6,14 @@
   },
   "configurePresets": [
     {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja Multi-Config"
+    },
+    {
       "name": "coverage",
       "description": "Debug + tests + coverage flags",
-      "generator": "Ninja Multi-Config",
+      "inherits": "base",
       "binaryDir": "${sourceDir}/build/coverage",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
@@ -19,7 +24,7 @@
     {
       "name": "development",
       "description": "Development mode (dummy source, no examples/tests)",
-      "generator": "Ninja Multi-Config",
+      "inherits": "base",
       "binaryDir": "${sourceDir}/build/development",
       "cacheVariables": {
         "NGIN_BASE_DEVELOPMENT_MODE": "ON",
@@ -32,7 +37,7 @@
       "name": "install",
       "hidden": false,
       "description": "Configure for packaging & install",
-      "generator": "Ninja Multi-Config",
+      "inherits": "base",
       "binaryDir": "${sourceDir}/build/install",
       "cacheVariables": {
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install",
@@ -42,7 +47,7 @@
     {
       "name": "tests",
       "description": "Build tests",
-      "generator": "Ninja Multi-Config",
+      "inherits": "base",
       "binaryDir": "${sourceDir}/build/tests",
       "cacheVariables": {
         "NGIN_BASE_BUILD_TESTS": "ON",
@@ -54,7 +59,7 @@
     {
       "name": "benchmarks",
       "description": "Build benchmarks",
-      "generator": "Ninja Multi-Config",
+      "inherits": "base",
       "binaryDir": "${sourceDir}/build/benchmarks",
       "cacheVariables": {
         "NGIN_BASE_BUILD_BENCHMARKS": "ON",
@@ -66,7 +71,7 @@
     {
       "name": "examples",
       "description": "Build examples",
-      "generator": "Ninja Multi-Config",
+      "inherits": "base",
       "binaryDir": "${sourceDir}/build/examples",
       "cacheVariables": {
         "NGIN_BASE_BUILD_BENCHMARKS": "OFF",

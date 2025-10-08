@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <NGIN/Defines.hpp>
 #include <NGIN/Memory/AllocatorConcept.hpp>
 #include <NGIN/Memory/SystemAllocator.hpp>
 
@@ -1654,11 +1655,7 @@ namespace NGIN::Containers
                             spins = 256;
                         for (int i = 0; i < spins; ++i)
                         {
-#if (defined(__x86_64__) || defined(_M_X64) || defined(__i386) || defined(_M_IX86))
-                            _mm_pause();
-#else
-                            asm volatile("");
-#endif
+                            NGIN_CPU_RELAX();
                         }
                         if (attemptCount > 8)
                             std::this_thread::yield();
