@@ -49,6 +49,32 @@ namespace NGIN::Containers
             return shift;
         }
 
+        struct Backoff
+        {
+            static constexpr std::size_t SPIN_BEFORE_YIELD = 32;
+
+            bool Pause() noexcept
+            {
+                if (m_spins < SPIN_BEFORE_YIELD)
+                {
+                    ++m_spins;
+                    NGIN_CPU_RELAX();
+                    return false;
+                }
+                m_spins = 0;
+                std::this_thread::yield();
+                return true;
+            }
+
+            void Reset() noexcept
+            {
+                m_spins = 0;
+            }
+
+        private:
+            std::size_t m_spins {0};
+        };
+
         template<class Key, class Value>
         struct SlotStorage
         {
@@ -110,8 +136,16 @@ namespace NGIN::Containers
 
             void DestroyPayload() noexcept
             {
-                ValueRef().~Value();
-                KeyRef().~Key();
+                if constexpr (!std::is_trivially_destructible_v<Value>)
+                {
+                    auto* valuePtr = std::launder(reinterpret_cast<Value*>(valueStorage));
+                    valuePtr->~Value();
+                }
+                if constexpr (!std::is_trivially_destructible_v<Key>)
+                {
+                    auto* keyPtr = std::launder(reinterpret_cast<Key*>(keyStorage));
+                    keyPtr->~Key();
+                }
                 hash = 0;
             }
 
@@ -839,6 +873,12 @@ namespace NGIN::Containers
         {
             if (m_migration.load(std::memory_order_acquire))
                 return;
+            const size_type committed = m_size.load(std::memory_order_relaxed);
+            const size_type baseline  = (additional > (std::numeric_limits<size_type>::max() - committed))
+                                                ? std::numeric_limits<size_type>::max()
+                                                : committed + additional;
+            if (baseline <= m_resizeThreshold)
+                return;
             const size_type projected = ApproxSize() + additional;
             if (projected <= m_resizeThreshold)
                 return;
@@ -1125,6 +1165,8 @@ namespace NGIN::Containers
             TableView       oldView {state->oldGroups, state->oldMask};
             const size_type base = groupIndex << kGroupShift;
             bool            pendingWork;
+            detail::Backoff slotBackoff;
+            detail::Backoff pendingBackoff;
             do
             {
                 pendingWork = false;
@@ -1138,6 +1180,7 @@ namespace NGIN::Containers
                         const auto slotState = slot.State(std::memory_order_acquire);
                         if (slotState == detail::SlotState::Empty)
                         {
+                            slotBackoff.Reset();
                             break;
                         }
                         if (slotState == detail::SlotState::Tombstone)
@@ -1147,12 +1190,13 @@ namespace NGIN::Containers
                                 slot.hash = 0;
                                 slot.UnlockTo(detail::SlotState::Empty);
                             }
+                            slotBackoff.Reset();
                             break;
                         }
                         if (slotState == detail::SlotState::PendingInsert)
                         {
                             pendingWork = true;
-                            std::this_thread::yield();
+                            slotBackoff.Pause();
                             break;
                         }
                         if (slotState == detail::SlotState::Occupied)
@@ -1160,7 +1204,7 @@ namespace NGIN::Containers
                             if (!slot.TryLockFrom(detail::SlotState::Occupied))
                             {
                                 pendingWork = true;
-                                std::this_thread::yield();
+                                slotBackoff.Pause();
                                 break;
                             }
 
@@ -1169,6 +1213,7 @@ namespace NGIN::Containers
                             const std::size_t hash      = slot.hash;
                             slot.DestroyPayload();
                             slot.UnlockTo(detail::SlotState::Tombstone);
+                            slotBackoff.Reset();
 
                             InsertMigrated(state, hash, std::move(keyCopy), std::move(valueCopy));
                             break;
@@ -1176,14 +1221,17 @@ namespace NGIN::Containers
                     }
                 }
                 if (pendingWork)
-                    std::this_thread::yield();
+                    pendingBackoff.Pause();
+                else
+                    pendingBackoff.Reset();
             } while (pendingWork);
         }
 
         void InsertMigrated(MigrationState* state, std::size_t hash, Key&& key, Value&& value)
         {
-            Key   migrationKey   = std::move(key);
-            Value migrationValue = std::move(value);
+            Key             migrationKey   = std::move(key);
+            Value           migrationValue = std::move(value);
+            detail::Backoff backoff;
             while (true)
             {
                 TableView   newView = TableView {state->newGroups, state->newMask};
@@ -1276,7 +1324,7 @@ namespace NGIN::Containers
                         }
                     }
 
-                    std::this_thread::yield();
+                    backoff.Pause();
                     continue;
                 }
 
@@ -1330,6 +1378,7 @@ namespace NGIN::Containers
             const size_type            capacity          = view.mask + 1;
             size_type                  yields            = 0;
             size_type                  steps             = 0;// number of examined slots
+            detail::Backoff            backoff;
             for (size_type probe = 0; probe <= view.mask; ++probe)
             {
                 auto& slot  = SlotAt(view, index);
@@ -1365,16 +1414,16 @@ namespace NGIN::Containers
                             }
                             else
                             {
-                                std::this_thread::yield();
-                                ++yields;
+                                if (backoff.Pause())
+                                    ++yields;
                                 // instrumentation removed
                             }
                         }
                         break;
                     }
                     case detail::SlotState::PendingInsert:
-                        std::this_thread::yield();
-                        ++yields;
+                        if (backoff.Pause())
+                            ++yields;
                         // instrumentation removed
                         break;
                 }
@@ -1397,7 +1446,8 @@ namespace NGIN::Containers
                 return nullptr;
             if (!view.groups)
                 return nullptr;
-            size_type index = hash & view.mask;
+            size_type       index = hash & view.mask;
+            detail::Backoff backoff;
             for (size_type probe = 0; probe <= view.mask; ++probe)
             {
                 auto& slot  = SlotAt(view, index);
@@ -1406,7 +1456,7 @@ namespace NGIN::Containers
                     return nullptr;
                 if (state == detail::SlotState::PendingInsert)
                 {
-                    std::this_thread::yield();
+                    backoff.Pause();
                 }
                 else if (state == detail::SlotState::Occupied && slot.hash == hash)
                 {
@@ -1418,7 +1468,7 @@ namespace NGIN::Containers
                     }
                     else
                     {
-                        std::this_thread::yield();
+                        backoff.Pause();
                     }
                 }
                 index = (index + 1) & view.mask;
@@ -1431,7 +1481,8 @@ namespace NGIN::Containers
         {
             if (!ViewValid(view) || !view.groups)
                 return false;
-            size_type index = hash & view.mask;
+            size_type       index = hash & view.mask;
+            detail::Backoff backoff;
             for (size_type probe = 0; probe <= view.mask;)
             {
                 auto&      slot  = SlotAt(view, index);
@@ -1440,7 +1491,7 @@ namespace NGIN::Containers
                     return false;
                 if (state == detail::SlotState::PendingInsert)
                 {
-                    std::this_thread::yield();
+                    backoff.Pause();
                     ++probe;
                     index = (index + 1) & view.mask;
                     continue;
@@ -1470,7 +1521,8 @@ namespace NGIN::Containers
         {
             if (!ViewValid(view) || !view.groups)
                 return false;
-            size_type index = hash & view.mask;
+            size_type       index = hash & view.mask;
+            detail::Backoff backoff;
             for (size_type probe = 0; probe <= view.mask;)
             {
                 auto&      slot  = SlotAt(view, index);
@@ -1479,7 +1531,7 @@ namespace NGIN::Containers
                     return false;
                 if (state == detail::SlotState::PendingInsert)
                 {
-                    std::this_thread::yield();
+                    backoff.Pause();
                     ++probe;
                     index = (index + 1) & view.mask;
                     continue;
