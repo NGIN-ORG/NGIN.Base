@@ -12,7 +12,6 @@ using namespace NGIN::Math;
 
 TEST_CASE("NGIN::Math::BigInt", "[Math][BigInt]")
 {
-    /*
     SECTION("DefaultConstruction") {
         BigInt a;
         CHECK(a == BigInt("0"));
@@ -44,7 +43,7 @@ TEST_CASE("NGIN::Math::BigInt", "[Math][BigInt]")
         CHECK((BigInt("-1000") - BigInt("-1")) == BigInt("-999"));
         CHECK((BigInt("1000") - BigInt("-1")) == BigInt("1001"));
     };
-*/
+    
     SECTION("Multiplication")
     {
         BigInt a("123");

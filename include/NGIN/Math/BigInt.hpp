@@ -42,7 +42,7 @@ namespace NGIN::Math
             m_negative = false;
             if (value == 0)
             {
-                m_digits = {0};
+                m_digits = std::vector<UInt32>{0};
             }
             else
             {

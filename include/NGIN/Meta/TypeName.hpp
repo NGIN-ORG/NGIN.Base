@@ -11,6 +11,40 @@
 
 namespace NGIN::Meta
 {
+    // GCC 14 libstdc++ still has some internal guards in std::string_view::find that
+    // are not constexpr-friendly in deeply nested constant evaluation contexts (shows
+    // up when building large template type names). To preserve full constexpr support
+    // we provide lightweight manual find helpers used only inside constexpr code paths.
+    constexpr std::size_t SVFind(std::string_view haystack, std::string_view needle, std::size_t pos = 0) noexcept
+    {
+        if (needle.empty())
+            return pos <= haystack.size() ? pos : std::string_view::npos;
+        if (needle.size() > haystack.size())
+            return std::string_view::npos;
+        for (std::size_t i = pos; i + needle.size() <= haystack.size(); ++i)
+        {
+            bool match = true;
+            for (std::size_t j = 0; j < needle.size(); ++j)
+            {
+                if (haystack[i + j] != needle[j])
+                {
+                    match = false;
+                    break;
+                }
+            }
+            if (match)
+                return i;
+        }
+        return std::string_view::npos;
+    }
+
+    constexpr std::size_t SVFindChar(std::string_view haystack, char c, std::size_t pos = 0) noexcept
+    {
+        for (std::size_t i = pos; i < haystack.size(); ++i)
+            if (haystack[i] == c)
+                return i;
+        return std::string_view::npos;
+    }
     /// <summary>Maximum buffer size for type name extraction.</summary>
     inline constexpr std::size_t MAX_NAME_BUFFER = 512;
 
@@ -99,11 +133,11 @@ namespace NGIN::Meta
             constexpr std::string_view suffix    = "";
 #endif
 
-            auto start = signature.find(prefix);
+            auto start = SVFind(signature, prefix);
             if (start == std::string_view::npos)
                 return buf;
             auto contentPos = start + prefix.size();
-            auto end        = signature.find(suffix, contentPos);
+            auto end        = SVFind(signature, suffix, contentPos);
             if (end == std::string_view::npos || end <= contentPos)
                 return buf;
 
@@ -168,7 +202,7 @@ namespace NGIN::Meta
             std::array<char, MAX_NAME_BUFFER> buf {};
             std::size_t                       p       = 0;
             constexpr auto                    raw     = RawTypeNameBuilder<ThisT>::name;
-            auto                              baseEnd = raw.find('<');
+            auto                              baseEnd = SVFindChar(raw, '<');
             std::string_view                  base    = (baseEnd == std::string_view::npos) ? raw : raw.substr(0, baseEnd);
             std::string_view                  qbase   = base;
             if constexpr (!Qualified)
