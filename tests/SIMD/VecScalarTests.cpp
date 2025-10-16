@@ -479,6 +479,23 @@ TEST_CASE("Vec NEON smoke")
     gathered.Scatter(data, indices);
     SUCCEED();
 }
+
+TEST_CASE("Vec NEON int operations")
+{
+    using VecNeonInt = Vec<std::int32_t, NeonTag>;
+    const auto base  = VecNeonInt::Iota(0, 1);
+    const auto other = VecNeonInt::Iota(10, -1);
+
+    const auto sum = base + other;
+    CHECK(sum.GetLane(0) == 10);
+
+    const auto diff = other - base;
+    CHECK(diff.GetLane(0) == 10);
+
+    const auto mask = (other > base);
+    CHECK(Any(mask));
+    CHECK_FALSE(None(mask));
+}
 #endif
 
 #if defined(__SSE2__)

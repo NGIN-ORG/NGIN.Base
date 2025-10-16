@@ -2582,6 +2582,226 @@ namespace NGIN::SIMD::detail
     struct BackendTraits<NeonTag, bool> : BackendTraits<NeonTag, float>
     {
     };
+
+    template<>
+    struct BackendTraits<NeonTag, std::int32_t> : BackendTraits<ScalarTag, std::int32_t>
+    {
+        using Base = BackendTraits<ScalarTag, std::int32_t>;
+
+        static constexpr int native_lanes = 4;
+
+        template<int Lanes>
+        using Storage = typename Base::template Storage<Lanes>;
+
+        template<int Lanes>
+        using MaskStorage = typename BackendTraits<NeonTag, bool>::template MaskStorage<Lanes>;
+
+        template<int Lanes>
+        struct Ops : Base::template Ops<Lanes>
+        {
+        };
+    };
+
+    template<>
+    struct BackendTraits<NeonTag, std::int32_t>::Ops<BackendTraits<NeonTag, std::int32_t>::native_lanes>
+        : BackendTraits<NeonTag, std::int32_t>::Base::template Ops<BackendTraits<NeonTag, std::int32_t>::native_lanes>
+    {
+        using BaseOps  = BackendTraits<NeonTag, std::int32_t>::Base::template Ops<BackendTraits<NeonTag, std::int32_t>::native_lanes>;
+        using Storage  = BackendTraits<NeonTag, std::int32_t>::template Storage<BackendTraits<NeonTag, std::int32_t>::native_lanes>;
+        using MaskType = BackendTraits<NeonTag, bool>::template MaskStorage<BackendTraits<NeonTag, std::int32_t>::native_lanes>;
+
+        static inline auto MaskFromRegister(uint32x4_t reg) noexcept -> MaskType
+        {
+            alignas(16) uint32_t bits[BackendTraits<NeonTag, std::int32_t>::native_lanes];
+            vst1q_u32(bits, reg);
+            MaskType mask {};
+            for (int lane = 0; lane < BackendTraits<NeonTag, std::int32_t>::native_lanes; ++lane)
+            {
+                mask.Set(lane, bits[lane] != 0);
+            }
+            return mask;
+        }
+
+        static inline auto MakeMask(const MaskType& mask) noexcept -> uint32x4_t
+        {
+            alignas(16) uint32_t bits[BackendTraits<NeonTag, std::int32_t>::native_lanes];
+            for (int lane = 0; lane < BackendTraits<NeonTag, std::int32_t>::native_lanes; ++lane)
+            {
+                bits[lane] = mask.Get(lane) ? 0xFFFFFFFFu : 0u;
+            }
+            return vld1q_u32(bits);
+        }
+
+        static constexpr auto Load(const std::int32_t* pointer) noexcept -> Storage
+        {
+            Storage result;
+            vst1q_s32(result.Data(), vld1q_s32(pointer));
+            return result;
+        }
+
+        static constexpr auto LoadAligned(const std::int32_t* pointer) noexcept -> Storage
+        {
+            Storage result;
+            vst1q_s32(result.Data(), vld1q_s32(pointer));
+            return result;
+        }
+
+        static constexpr void Store(const Storage& storage, std::int32_t* pointer) noexcept
+        {
+            vst1q_s32(pointer, vld1q_s32(storage.Data()));
+        }
+
+        static constexpr void StoreAligned(const Storage& storage, std::int32_t* pointer) noexcept
+        {
+            vst1q_s32(pointer, vld1q_s32(storage.Data()));
+        }
+
+        static auto LoadMasked(const std::int32_t* pointer, const MaskType& mask, std::int32_t fill) noexcept -> Storage
+        {
+            const uint32x4_t maskVec = MakeMask(mask);
+            const int32x4_t  loadVec = vld1q_s32(pointer);
+            const int32x4_t  fillVec = vdupq_n_s32(fill);
+            const uint32x4_t blended = vorrq_u32(vandq_u32(maskVec, vreinterpretq_u32_s32(loadVec)),
+                                                 vandq_u32(vmvnq_u32(maskVec), vreinterpretq_u32_s32(fillVec)));
+            Storage          result;
+            vst1q_s32(result.Data(), vreinterpretq_s32_u32(blended));
+            return result;
+        }
+
+        static void StoreMasked(const Storage& storage, std::int32_t* pointer, const MaskType& mask) noexcept
+        {
+            const uint32x4_t maskVec  = MakeMask(mask);
+            const uint32x4_t srcBits  = vreinterpretq_u32_s32(vld1q_s32(storage.Data()));
+            const uint32x4_t destBits = vreinterpretq_u32_s32(vld1q_s32(pointer));
+            const uint32x4_t blended  = vorrq_u32(vandq_u32(maskVec, srcBits), vandq_u32(vmvnq_u32(maskVec), destBits));
+            vst1q_s32(pointer, vreinterpretq_s32_u32(blended));
+        }
+
+        static constexpr auto Add(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        {
+            Storage result;
+            vst1q_s32(result.Data(), vaddq_s32(vld1q_s32(lhs.Data()), vld1q_s32(rhs.Data())));
+            return result;
+        }
+
+        static constexpr auto Sub(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        {
+            Storage result;
+            vst1q_s32(result.Data(), vsubq_s32(vld1q_s32(lhs.Data()), vld1q_s32(rhs.Data())));
+            return result;
+        }
+
+        static constexpr auto Mul(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        {
+            Storage result;
+#if defined(__aarch64__)
+            vst1q_s32(result.Data(), vmulq_s32(vld1q_s32(lhs.Data()), vld1q_s32(rhs.Data())));
+#else
+            return BaseOps::Mul(lhs, rhs);
+#endif
+            return result;
+        }
+
+        static constexpr auto Div(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        {
+            return BaseOps::Div(lhs, rhs);
+        }
+
+        static constexpr auto BitwiseAnd(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        {
+            Storage          result;
+            const uint32x4_t blended = vandq_u32(vreinterpretq_u32_s32(vld1q_s32(lhs.Data())),
+                                                 vreinterpretq_u32_s32(vld1q_s32(rhs.Data())));
+            vst1q_s32(result.Data(), vreinterpretq_s32_u32(blended));
+            return result;
+        }
+
+        static constexpr auto BitwiseOr(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        {
+            Storage          result;
+            const uint32x4_t blended = vorrq_u32(vreinterpretq_u32_s32(vld1q_s32(lhs.Data())),
+                                                 vreinterpretq_u32_s32(vld1q_s32(rhs.Data())));
+            vst1q_s32(result.Data(), vreinterpretq_s32_u32(blended));
+            return result;
+        }
+
+        static auto CompareEq(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
+        {
+            return MaskFromRegister(vreinterpretq_u32_s32(vceqq_s32(vld1q_s32(lhs.Data()), vld1q_s32(rhs.Data()))));
+        }
+
+        static auto CompareLt(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
+        {
+            return MaskFromRegister(vreinterpretq_u32_s32(vcltq_s32(vld1q_s32(lhs.Data()), vld1q_s32(rhs.Data()))));
+        }
+
+        static auto CompareLe(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
+        {
+            const uint32x4_t lt = vreinterpretq_u32_s32(vcltq_s32(vld1q_s32(lhs.Data()), vld1q_s32(rhs.Data())));
+            const uint32x4_t eq = vreinterpretq_u32_s32(vceqq_s32(vld1q_s32(lhs.Data()), vld1q_s32(rhs.Data())));
+            return MaskFromRegister(vorrq_u32(lt, eq));
+        }
+
+        static auto CompareGt(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
+        {
+            return MaskFromRegister(vreinterpretq_u32_s32(vcgtq_s32(vld1q_s32(lhs.Data()), vld1q_s32(rhs.Data()))));
+        }
+
+        static auto CompareGe(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
+        {
+            const uint32x4_t gt = vreinterpretq_u32_s32(vcgtq_s32(vld1q_s32(lhs.Data()), vld1q_s32(rhs.Data())));
+            const uint32x4_t eq = vreinterpretq_u32_s32(vceqq_s32(vld1q_s32(lhs.Data()), vld1q_s32(rhs.Data())));
+            return MaskFromRegister(vorrq_u32(gt, eq));
+        }
+
+        static auto MaskNot(const MaskType& mask) noexcept -> MaskType
+        {
+            return MaskFromRegister(vmvnq_u32(MakeMask(mask)));
+        }
+
+        static auto MaskAnd(const MaskType& lhs, const MaskType& rhs) noexcept -> MaskType
+        {
+            return MaskFromRegister(vandq_u32(MakeMask(lhs), MakeMask(rhs)));
+        }
+
+        static auto MaskOr(const MaskType& lhs, const MaskType& rhs) noexcept -> MaskType
+        {
+            return MaskFromRegister(vorrq_u32(MakeMask(lhs), MakeMask(rhs)));
+        }
+
+        static auto MaskXor(const MaskType& lhs, const MaskType& rhs) noexcept -> MaskType
+        {
+            return MaskFromRegister(veorq_u32(MakeMask(lhs), MakeMask(rhs)));
+        }
+
+        static auto MaskAny(const MaskType& mask) noexcept -> bool
+        {
+            alignas(16) uint32_t bits[BackendTraits<NeonTag, std::int32_t>::native_lanes];
+            vst1q_u32(bits, MakeMask(mask));
+            for (uint32_t bit: bits)
+            {
+                if (bit != 0)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        static auto MaskAll(const MaskType& mask) noexcept -> bool
+        {
+            alignas(16) uint32_t bits[BackendTraits<NeonTag, std::int32_t>::native_lanes];
+            vst1q_u32(bits, MakeMask(mask));
+            for (uint32_t bit: bits)
+            {
+                if (bit == 0)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+    };
 #endif// defined(__ARM_NEON)
 
 }// namespace NGIN::SIMD::detail
