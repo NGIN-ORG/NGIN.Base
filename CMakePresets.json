@@ -16,7 +16,6 @@
       "inherits": "base",
       "binaryDir": "${sourceDir}/build/coverage",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
         "CODE_COVERAGE": "ON",
         "NGIN_BASE_BUILD_STATIC": "ON"
       }
@@ -80,6 +79,33 @@
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "NGIN_BASE_BUILD_STATIC": "ON"
       }
+    },
+      {
+      "name": "tests-asan",
+      "description": "Tests with ASAN/UBSAN (RelWithDebInfo)",
+      "inherits": "tests",
+      "binaryDir": "${sourceDir}/build/tests-asan",
+      "cacheVariables": {
+        "NGIN_BASE_ENABLE_ASAN": "ON"
+      }
+    },
+    {
+      "name": "tests-tsan",
+      "description": "Tests with ThreadSanitizer (RelWithDebInfo)",
+      "inherits": "tests",
+      "binaryDir": "${sourceDir}/build/tests-tsan",
+      "cacheVariables": {
+        "NGIN_BASE_ENABLE_TSAN": "ON"
+      }
+    },
+    {
+      "name": "tests-lto",
+      "description": "Tests with LTO enabled (Release)",
+      "inherits": "tests",
+      "binaryDir": "${sourceDir}/build/tests-lto",
+      "cacheVariables": {
+        "NGIN_BASE_ENABLE_LTO": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -142,6 +168,30 @@
       "targets": [
         "all"
       ]
+    },
+    {
+      "name": "tests-asan-build",
+      "configurePreset": "tests-asan",
+      "description": "Build tests with ASAN/UBSAN instrumentation",
+      "configuration": "RelWithDebInfo",
+      "jobs": 4,
+      "targets": ["all"]
+    },
+    {
+      "name": "tests-tsan-build",
+      "configurePreset": "tests-tsan",
+      "description": "Build tests with ThreadSanitizer instrumentation",
+      "configuration": "RelWithDebInfo",
+      "jobs": 4,
+      "targets": ["all"]
+    },
+    {
+      "name": "tests-lto-build",
+      "configurePreset": "tests-lto",
+      "description": "Build tests with LTO (Release)",
+      "configuration": "Release",
+      "jobs": 4,
+      "targets": ["all"]
     }
   ]
 }
