@@ -39,6 +39,14 @@
 // supplies their own override, we respect it verbatim.
 #ifndef NGIN_SIMD_DEFAULT_BACKEND
 
+#if !NGIN_SIMD_DISABLE_AVX2 && defined(__AVX2__)
+#define NGIN_SIMD_DEFAULT_BACKEND ::NGIN::SIMD::AVX2Tag
+#elif !NGIN_SIMD_DISABLE_SSE2 && defined(__SSE2__)
+#define NGIN_SIMD_DEFAULT_BACKEND ::NGIN::SIMD::SSE2Tag
+#elif !NGIN_SIMD_DISABLE_NEON && defined(__ARM_NEON)
+#define NGIN_SIMD_DEFAULT_BACKEND ::NGIN::SIMD::NeonTag
+#else
 #define NGIN_SIMD_DEFAULT_BACKEND ::NGIN::SIMD::ScalarTag
+#endif
 
 #endif // NGIN_SIMD_DEFAULT_BACKEND

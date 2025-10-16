@@ -32,12 +32,12 @@ template<int Lanes, class Backend = NGIN_SIMD_DEFAULT_BACKEND>
 struct Mask;
 
 template<class To, class From>
-auto BitCast(const From& from) noexcept -> To;
+[[nodiscard]] constexpr auto BitCast(const From& from) noexcept -> To;
 
 template<int Lanes, class Backend, class T>
-auto Select(const Mask<Lanes, Backend>& mask,
-            const Vec<T, Backend, Lanes>& ifTrue,
-            const Vec<T, Backend, Lanes>& ifFalse) noexcept -> Vec<T, Backend, Lanes>;
+[[nodiscard]] constexpr auto Select(const Mask<Lanes, Backend>& mask,
+                                    const Vec<T, Backend, Lanes>& ifTrue,
+                                    const Vec<T, Backend, Lanes>& ifFalse) noexcept -> Vec<T, Backend, Lanes>;
 
 // Concepts --------------------------------------------------------------------
 template<class V>

@@ -200,3 +200,32 @@ Each extension should ship with tests, benchmarks, and documentation updates.
 2. Implement Phase 0 files with stubbed structures to unblock dependent components.
 3. Schedule design review before embarking on Phase 1 implementation to confirm API surface aligns with NGIN expectations.
 
+```cpp
+#include <NGIN/SIMD/Vec.hpp>
+#include <NGIN/SIMD/Mask.hpp>
+#include <array>
+
+namespace NGIN::SIMD {
+
+void Saxpy(float alpha, const float* x, const float* y, float* out, std::size_t count) noexcept {
+    using Vec = Vec<float>;                // chooses DefaultBackend + native lanes
+    constexpr auto lanes = Vec::NativeLanes;
+    const Vec alphaVec{alpha};
+
+    std::size_t index = 0;
+    for (; index + lanes <= count; index += lanes) {
+        const Vec xVec = Vec::LoadUnaligned(x + index);
+        const Vec yVec = Vec::LoadUnaligned(y + index);
+        Vec::StoreUnaligned(out + index, alphaVec * xVec + yVec);
+    }
+
+    if (index < count) {
+        const auto tailMask = Mask<lanes>::FirstN(count - index);
+        const Vec xVec = Vec::MaskedLoad(x + index, tailMask, Vec{});
+        const Vec yVec = Vec::MaskedLoad(y + index, tailMask, Vec{});
+        Vec::MaskedStore(out + index, tailMask, alphaVec * xVec + yVec);
+    }
+}
+
+} // namespace NGIN::SIMD
+```
