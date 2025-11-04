@@ -8,6 +8,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <numeric>
 #include <type_traits>
 
@@ -206,6 +207,62 @@ TEST_CASE("Vec bitwise helpers")
     const auto shiftedRight = Shr(lhs, 4);
     CHECK(shiftedLeft.GetLane(0) == lhs.GetLane(0) << 4);
     CHECK(shiftedRight.GetLane(0) == lhs.GetLane(0) >> 4);
+}
+
+TEST_CASE("Vec scalar conversions")
+{
+    using FloatVec = Vec<float, ScalarTag, 4>;
+    using IntVec   = Vec<int, ScalarTag, FloatVec::lanes>;
+
+    const auto integerFloats = FloatVec::Iota(0.0F, 1.0F);
+    const auto exactInts     = Convert<int>(integerFloats);
+
+    for (int lane = 0; lane < IntVec::lanes; ++lane)
+    {
+        CHECK(exactInts.GetLane(lane) == lane);
+    }
+
+    const auto integers = IntVec::Iota(0, 2);
+    const auto floats   = Convert<float>(integers);
+    for (int lane = 0; lane < IntVec::lanes; ++lane)
+    {
+        CHECK(floats.GetLane(lane) == Catch::Approx(static_cast<float>(lane * 2)));
+    }
+
+    const std::array<float, FloatVec::lanes> fractionalValues {0.5F, 1.2F, -5.8F, 260.0F};
+    const auto                               fractional = FloatVec::Load(fractionalValues.data());
+
+    const auto saturated = Convert<int, SaturateConversion>(fractional);
+    const auto truncated = Convert<int, TruncateConversion>(fractional);
+
+    CHECK(saturated.GetLane(0) == 0);
+    CHECK(saturated.GetLane(1) == 1);
+    CHECK(saturated.GetLane(2) == -6);
+    CHECK(saturated.GetLane(3) == 260);
+
+    CHECK(truncated.GetLane(0) == 0);
+    CHECK(truncated.GetLane(1) == 1);
+    CHECK(truncated.GetLane(2) == -5);
+    CHECK(truncated.GetLane(3) == 260);
+
+    const std::array<float, FloatVec::lanes> extremeValues {
+            -500.0F,
+            500.0F,
+            static_cast<float>(std::numeric_limits<int>::max()) + 1000.0F,
+            std::numeric_limits<float>::infinity()};
+    const auto extremes = FloatVec::Load(extremeValues.data());
+
+    const auto saturatedExtremes = Convert<int, SaturateConversion>(extremes);
+    CHECK(saturatedExtremes.GetLane(0) == -500);
+    CHECK(saturatedExtremes.GetLane(1) == 500);
+    CHECK(saturatedExtremes.GetLane(2) == std::numeric_limits<int>::max());
+    CHECK(saturatedExtremes.GetLane(3) == std::numeric_limits<int>::max());
+
+    const auto truncatedExtremes = Convert<int, TruncateConversion>(extremes);
+    CHECK(truncatedExtremes.GetLane(0) == -500);
+    CHECK(truncatedExtremes.GetLane(1) == 500);
+    CHECK(truncatedExtremes.GetLane(2) == std::numeric_limits<int>::max());
+    CHECK(truncatedExtremes.GetLane(3) == std::numeric_limits<int>::max());
 }
 
 TEST_CASE("ForEachSimd processes tails")

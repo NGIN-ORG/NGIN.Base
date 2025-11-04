@@ -39,6 +39,17 @@ namespace NGIN::SIMD
     {
     };
 
+    // Conversion mode tags -------------------------------------------------------
+    struct ExactConversion final
+    {
+    };
+    struct SaturateConversion final
+    {
+    };
+    struct TruncateConversion final
+    {
+    };
+
     // Forward declarations --------------------------------------------------------
     template<class T, class Backend = NGIN_SIMD_DEFAULT_BACKEND, int Lanes = -1>
     struct Vec;

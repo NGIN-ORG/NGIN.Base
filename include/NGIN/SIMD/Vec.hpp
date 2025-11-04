@@ -7,6 +7,8 @@
 
 #include <algorithm>
 #include <bit>
+#include <cassert>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -29,13 +31,210 @@ namespace NGIN::SIMD
             {
                 return requested;
             }
-            if constexpr (std::same_as<Backend, ScalarTag>)
+            return BackendTraits<Backend, T>::native_lanes;
+        }
+
+        template<class Mode>
+        inline constexpr bool IsSupportedConversionMode = std::is_same_v<Mode, ExactConversion> ||
+                                                          std::is_same_v<Mode, SaturateConversion> ||
+                                                          std::is_same_v<Mode, TruncateConversion>;
+
+        template<class To, class From>
+        [[nodiscard]] constexpr auto ClampIntegral(From value) noexcept -> To
+        {
+            using Common                          = std::common_type_t<From, To>;
+            const auto                  promoted  = static_cast<Common>(value);
+            const auto                  minValue  = static_cast<Common>(std::numeric_limits<To>::lowest());
+            const auto                  maxValue  = static_cast<Common>(std::numeric_limits<To>::max());
+            const auto                  clamped   = std::clamp(promoted, minValue, maxValue);
+            [[maybe_unused]] const auto roundTrip = static_cast<Common>(static_cast<To>(clamped));
+            return static_cast<To>(clamped);
+        }
+
+        template<class To, class From>
+        [[nodiscard]] constexpr auto ExactConvertLane(From value) noexcept -> To
+        {
+            if constexpr (std::is_same_v<To, From>)
             {
-                return BackendTraits<Backend, T>::native_lanes;
+                return value;
+            }
+            else if constexpr (std::is_integral_v<From> && std::is_integral_v<To>)
+            {
+                using Common        = std::common_type_t<From, To>;
+                const auto promoted = static_cast<Common>(value);
+                const auto minValue = static_cast<Common>(std::numeric_limits<To>::lowest());
+                const auto maxValue = static_cast<Common>(std::numeric_limits<To>::max());
+                if (!(promoted >= minValue && promoted <= maxValue))
+                {
+                    assert(!"Exact conversion out of range for integral types.");
+                    const auto fallback = std::clamp(promoted, minValue, maxValue);
+                    return static_cast<To>(fallback);
+                }
+                const auto converted = static_cast<To>(value);
+                if (static_cast<Common>(converted) != promoted)
+                {
+                    assert(!"Exact conversion lost integral precision.");
+                }
+                return converted;
+            }
+            else if constexpr (std::is_floating_point_v<From> && std::is_integral_v<To>)
+            {
+                using Limits = std::numeric_limits<To>;
+                if (!std::isfinite(value))
+                {
+                    assert(!"Exact conversion requires finite floating-point input.");
+                    return std::signbit(value) ? Limits::lowest() : Limits::max();
+                }
+                if (std::trunc(value) != value)
+                {
+                    assert(!"Exact conversion requires integer-valued floating-point input.");
+                }
+                const auto minBound  = static_cast<long double>(Limits::lowest());
+                const auto maxBound  = static_cast<long double>(Limits::max());
+                const auto wideValue = static_cast<long double>(value);
+                if (wideValue < minBound || wideValue > maxBound)
+                {
+                    assert(!"Exact conversion out of range for floating-to-integral conversion.");
+                    return wideValue < minBound ? Limits::lowest() : Limits::max();
+                }
+                const auto converted = static_cast<To>(wideValue);
+                if (static_cast<long double>(converted) != wideValue)
+                {
+                    assert(!"Exact conversion lost floating-to-integral precision.");
+                    return wideValue < minBound ? Limits::lowest() : Limits::max();
+                }
+                return converted;
+            }
+            else if constexpr (std::is_integral_v<From> && std::is_floating_point_v<To>)
+            {
+                const auto converted = static_cast<To>(value);
+                if (!std::isfinite(converted) || static_cast<From>(converted) != value)
+                {
+                    assert(!"Exact conversion lost integral-to-floating precision.");
+                }
+                return converted;
+            }
+            else if constexpr (std::is_floating_point_v<From> && std::is_floating_point_v<To>)
+            {
+                if (!std::isfinite(value))
+                {
+                    return static_cast<To>(value);
+                }
+                const auto converted = static_cast<To>(value);
+                if (static_cast<From>(converted) != value)
+                {
+                    assert(!"Exact conversion lost floating-point precision.");
+                }
+                return converted;
             }
             else
             {
-                return BackendTraits<Backend, T>::native_lanes;
+                static_assert(std::is_arithmetic_v<From> && std::is_arithmetic_v<To>,
+                              "Convert requires arithmetic lane types.");
+                return static_cast<To>(value);
+            }
+        }
+
+        template<class To, class From>
+        [[nodiscard]] constexpr auto SaturateConvertLane(From value) noexcept -> To
+        {
+            if constexpr (std::is_same_v<To, From>)
+            {
+                return value;
+            }
+            else if constexpr (std::is_integral_v<From> && std::is_integral_v<To>)
+            {
+                return ClampIntegral<To>(value);
+            }
+            else if constexpr (std::is_floating_point_v<From> && std::is_integral_v<To>)
+            {
+                if (std::isnan(value))
+                {
+                    return static_cast<To>(0);
+                }
+                if (!std::isfinite(value))
+                {
+                    return std::signbit(value) ? std::numeric_limits<To>::lowest() : std::numeric_limits<To>::max();
+                }
+                using Limits        = std::numeric_limits<To>;
+                const auto minBound = static_cast<long double>(Limits::lowest());
+                const auto maxBound = static_cast<long double>(Limits::max());
+                auto       rounded  = std::nearbyint(static_cast<long double>(value));
+                if (!std::isfinite(rounded))
+                {
+                    rounded = static_cast<long double>(value);
+                }
+                rounded = std::clamp(rounded, minBound, maxBound);
+                return static_cast<To>(rounded);
+            }
+            else if constexpr (std::is_integral_v<From> && std::is_floating_point_v<To>)
+            {
+                return static_cast<To>(value);
+            }
+            else if constexpr (std::is_floating_point_v<From> && std::is_floating_point_v<To>)
+            {
+                if (!std::isfinite(value))
+                {
+                    return static_cast<To>(value);
+                }
+                const auto minValue = static_cast<From>(std::numeric_limits<To>::lowest());
+                const auto maxValue = static_cast<From>(std::numeric_limits<To>::max());
+                const auto clamped  = std::clamp(value, minValue, maxValue);
+                return static_cast<To>(clamped);
+            }
+            else
+            {
+                return static_cast<To>(value);
+            }
+        }
+
+        template<class To, class From>
+        [[nodiscard]] constexpr auto TruncateConvertLane(From value) noexcept -> To
+        {
+            if constexpr (std::is_same_v<To, From>)
+            {
+                return value;
+            }
+            else if constexpr (std::is_integral_v<From> && std::is_integral_v<To>)
+            {
+                return ClampIntegral<To>(value);
+            }
+            else if constexpr (std::is_floating_point_v<From> && std::is_integral_v<To>)
+            {
+                if (std::isnan(value))
+                {
+                    return static_cast<To>(0);
+                }
+                if (!std::isfinite(value))
+                {
+                    return std::signbit(value) ? std::numeric_limits<To>::lowest() : std::numeric_limits<To>::max();
+                }
+                using Limits         = std::numeric_limits<To>;
+                const auto minBound  = static_cast<long double>(Limits::lowest());
+                const auto maxBound  = static_cast<long double>(Limits::max());
+                auto       truncated = std::trunc(static_cast<long double>(value));
+                truncated            = std::clamp(truncated, minBound, maxBound);
+                return static_cast<To>(truncated);
+            }
+            else if constexpr (std::is_integral_v<From> && std::is_floating_point_v<To>)
+            {
+                return static_cast<To>(value);
+            }
+            else if constexpr (std::is_floating_point_v<From> && std::is_floating_point_v<To>)
+            {
+                if (!std::isfinite(value))
+                {
+                    return static_cast<To>(value);
+                }
+                const auto truncated = std::trunc(value);
+                const auto minValue  = static_cast<From>(std::numeric_limits<To>::lowest());
+                const auto maxValue  = static_cast<From>(std::numeric_limits<To>::max());
+                const auto clamped   = std::clamp(truncated, minValue, maxValue);
+                return static_cast<To>(clamped);
+            }
+            else
+            {
+                return static_cast<To>(value);
             }
         }
 
@@ -188,6 +387,41 @@ namespace NGIN::SIMD
 
         storage_type storage {};
     };
+
+    template<class To,
+             class Mode = ExactConversion,
+             class FromT,
+             class Backend,
+             int Lanes>
+        requires std::is_arithmetic_v<To> && std::is_arithmetic_v<FromT>
+    [[nodiscard]] constexpr auto Convert(const Vec<FromT, Backend, Lanes>& value) noexcept
+            -> Vec<To, Backend, Vec<FromT, Backend, Lanes>::lanes>
+    {
+        static_assert(detail::IsSupportedConversionMode<Mode>,
+                      "Unsupported conversion mode; use ExactConversion, SaturateConversion, or TruncateConversion.");
+
+        using SourceVec = Vec<FromT, Backend, Lanes>;
+        using ResultVec = Vec<To, Backend, SourceVec::lanes>;
+
+        ResultVec result;
+        for (int lane = 0; lane < ResultVec::lanes; ++lane)
+        {
+            const auto laneValue = value.GetLane(lane);
+            if constexpr (std::is_same_v<Mode, ExactConversion>)
+            {
+                result.storage.Set(lane, detail::ExactConvertLane<To>(laneValue));
+            }
+            else if constexpr (std::is_same_v<Mode, SaturateConversion>)
+            {
+                result.storage.Set(lane, detail::SaturateConvertLane<To>(laneValue));
+            }
+            else
+            {
+                result.storage.Set(lane, detail::TruncateConvertLane<To>(laneValue));
+            }
+        }
+        return result;
+    }
 
     template<class T, class Backend, int Lanes>
     [[nodiscard]] constexpr auto operator+(Vec<T, Backend, Lanes>        lhs,
