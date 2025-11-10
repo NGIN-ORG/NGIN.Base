@@ -36,6 +36,150 @@ namespace
         return mask;
     }
 
+    [[nodiscard]] constexpr auto RelativeError(float approx, float reference, float floor = 1e-6F) noexcept -> float
+    {
+        const auto denom = std::max(std::abs(reference), floor);
+        return std::abs((approx - reference) / denom);
+    }
+
+    template<class Backend, std::size_t Count>
+    [[nodiscard]] auto MakeInputVector(const std::array<float, Count>& source) noexcept -> std::array<float, Vec<float, Backend>::lanes>
+    {
+        using VecType = Vec<float, Backend>;
+        std::array<float, VecType::lanes> values {};
+        for (int lane = 0; lane < VecType::lanes; ++lane)
+        {
+            values[static_cast<std::size_t>(lane)] = source[static_cast<std::size_t>(lane % source.size())];
+        }
+        return values;
+    }
+
+    template<class Backend>
+    void ValidateFastMathApproximation() noexcept
+    {
+        using Vecf = Vec<float, Backend>;
+        using VecRef = Vec<float, ScalarTag, Vecf::lanes>;
+        static_assert(VecRef::lanes == Vecf::lanes);
+
+        constexpr std::array<float, 8> expSamples {-5.0F, -1.0F, -0.5F, 0.0F, 0.5F, 1.0F, 2.0F, 3.5F};
+        constexpr std::array<float, 8> logSamples {0.125F, 0.5F, 0.75F, 1.0F, 1.5F, 2.0F, 4.0F, 10.0F};
+        constexpr std::array<float, 8> trigSamples {-6.0F, -3.14159F, -1.0F, -0.5F, 0.25F, 1.0F, 2.5F, 6.0F};
+        constexpr std::array<float, 8> sqrtSamples {0.0F, 0.25F, 0.5F, 1.0F, 2.0F, 4.0F, 9.0F, 16.0F};
+
+        const auto expInputData  = MakeInputVector<Backend>(expSamples);
+        const auto logInputData  = MakeInputVector<Backend>(logSamples);
+        const auto trigInputData = MakeInputVector<Backend>(trigSamples);
+        const auto sqrtInputData = MakeInputVector<Backend>(sqrtSamples);
+
+        const auto expInput  = Vecf::Load(expInputData.data());
+        const auto logInput  = Vecf::Load(logInputData.data());
+        const auto trigInput = Vecf::Load(trigInputData.data());
+        const auto sqrtInput = Vecf::Load(sqrtInputData.data());
+
+        const auto expRefInput  = VecRef::Load(expInputData.data());
+        const auto logRefInput  = VecRef::Load(logInputData.data());
+        const auto trigRefInput = VecRef::Load(trigInputData.data());
+        const auto sqrtRefInput = VecRef::Load(sqrtInputData.data());
+
+        const auto fastExp    = Exp<FastMathPolicy>(expInput);
+        const auto fastLog    = Log<FastMathPolicy>(logInput);
+        const auto fastSin    = Sin<FastMathPolicy>(trigInput);
+        const auto fastCos    = Cos<FastMathPolicy>(trigInput);
+        const auto fastSqrt   = Sqrt<FastMathPolicy>(sqrtInput);
+
+        const auto referenceExp  = Exp<StrictMathPolicy>(expRefInput);
+        const auto referenceLog  = Log<StrictMathPolicy>(logRefInput);
+        const auto referenceSin  = Sin<StrictMathPolicy>(trigRefInput);
+        const auto referenceCos  = Cos<StrictMathPolicy>(trigRefInput);
+        const auto referenceSqrt = Sqrt<StrictMathPolicy>(sqrtRefInput);
+
+        constexpr float expTolerance  = 1e-3F;
+        constexpr float logTolerance  = 1e-2F;
+        constexpr float trigTolerance = 2e-3F;
+        constexpr float sqrtTolerance = 5e-4F;
+
+        for (int lane = 0; lane < Vecf::lanes; ++lane)
+        {
+            CHECK(RelativeError(fastExp.GetLane(lane), referenceExp.GetLane(lane)) <= expTolerance);
+            CHECK(RelativeError(fastLog.GetLane(lane), referenceLog.GetLane(lane)) <= logTolerance);
+            CHECK(RelativeError(fastSin.GetLane(lane), referenceSin.GetLane(lane)) <= trigTolerance);
+            CHECK(RelativeError(fastCos.GetLane(lane), referenceCos.GetLane(lane)) <= trigTolerance);
+            CHECK(RelativeError(fastSqrt.GetLane(lane), referenceSqrt.GetLane(lane)) <= sqrtTolerance);
+        }
+    }
+
+    template<class Backend>
+    void ValidateFastMathSpecialValues()
+    {
+        using Vecf = Vec<float, Backend>;
+
+        Vecf expInput {};
+        const auto positiveInf = std::numeric_limits<float>::infinity();
+        const auto negativeInf = -std::numeric_limits<float>::infinity();
+        const auto quietNan    = std::numeric_limits<float>::quiet_NaN();
+
+        for (int lane = 0; lane < Vecf::lanes; ++lane)
+        {
+            if (lane == 0)
+            {
+                expInput.SetLane(lane, positiveInf);
+            }
+            else if (lane == 1)
+            {
+                expInput.SetLane(lane, negativeInf);
+            }
+            else if (lane == 2)
+            {
+                expInput.SetLane(lane, quietNan);
+            }
+            else
+            {
+                expInput.SetLane(lane, 0.0F);
+            }
+        }
+
+        const auto fastExp = Exp<FastMathPolicy>(expInput);
+        CHECK(std::isinf(fastExp.GetLane(0)));
+        CHECK(fastExp.GetLane(1) == Catch::Approx(0.0F));
+        CHECK(std::isnan(fastExp.GetLane(2)));
+
+        Vecf logInput {};
+        logInput.SetLane(0, -1.0F);
+        logInput.SetLane(1, 0.0F);
+        logInput.SetLane(2, positiveInf);
+        logInput.SetLane(3, quietNan);
+        const auto fastLog = Log<FastMathPolicy>(logInput);
+        CHECK(std::isnan(fastLog.GetLane(0)));
+        CHECK(std::isinf(fastLog.GetLane(1)));
+        CHECK(fastLog.GetLane(1) < 0.0F);
+        CHECK(std::isinf(fastLog.GetLane(2)));
+        CHECK(std::isnan(fastLog.GetLane(3)));
+
+        Vecf trigInput {};
+        trigInput.SetLane(0, positiveInf);
+        trigInput.SetLane(1, quietNan);
+        trigInput.SetLane(2, 0.0F);
+        const auto fastSin = Sin<FastMathPolicy>(trigInput);
+        const auto fastCos = Cos<FastMathPolicy>(trigInput);
+        CHECK(std::isnan(fastSin.GetLane(0)));
+        CHECK(std::isnan(fastSin.GetLane(1)));
+        CHECK(std::isnan(fastCos.GetLane(0)));
+        CHECK(std::isnan(fastCos.GetLane(1)));
+        CHECK(fastSin.GetLane(2) == Catch::Approx(0.0F));
+        CHECK(fastCos.GetLane(2) == Catch::Approx(1.0F));
+
+        Vecf sqrtInput {};
+        sqrtInput.SetLane(0, -1.0F);
+        sqrtInput.SetLane(1, 0.0F);
+        sqrtInput.SetLane(2, positiveInf);
+        sqrtInput.SetLane(3, 4.0F);
+        const auto fastSqrt = Sqrt<FastMathPolicy>(sqrtInput);
+        CHECK(std::isnan(fastSqrt.GetLane(0)));
+        CHECK(fastSqrt.GetLane(1) == Catch::Approx(0.0F));
+        CHECK(std::isinf(fastSqrt.GetLane(2)));
+        CHECK(fastSqrt.GetLane(3) == Catch::Approx(2.0F));
+    }
+
 }// namespace
 
 static_assert(detail::BackendTraits<ScalarTag, float>::native_lanes == 1);
@@ -366,6 +510,18 @@ TEST_CASE("Vec SSE2 default lane resolution")
 }
 #endif
 
+#if defined(__SSE2__)
+TEST_CASE("Fast math policy SSE2 accuracy")
+{
+    ValidateFastMathApproximation<SSE2Tag>();
+}
+
+TEST_CASE("Fast math policy SSE2 special cases")
+{
+    ValidateFastMathSpecialValues<SSE2Tag>();
+}
+#endif
+
 #if defined(__AVX2__)
 TEST_CASE("Vec AVX2 default lane resolution")
 {
@@ -380,6 +536,18 @@ TEST_CASE("Vec AVX2 default lane resolution")
     {
         CHECK(doubled.GetLane(lane) == Catch::Approx(expected.GetLane(lane)));
     }
+}
+#endif
+
+#if defined(__AVX2__)
+TEST_CASE("Fast math policy AVX2 accuracy")
+{
+    ValidateFastMathApproximation<AVX2Tag>();
+}
+
+TEST_CASE("Fast math policy AVX2 special cases")
+{
+    ValidateFastMathSpecialValues<AVX2Tag>();
 }
 #endif
 
@@ -639,19 +807,71 @@ TEST_CASE("Vec SSE2 comparisons")
 }
 #endif
 
+#if defined(__SSE2__)
+TEST_CASE("Vec SSE2 strict math matches scalar reference")
+{
+    using VecSse    = Vec<float, SSE2Tag>;
+    using VecScalar = Vec<float, ScalarTag, VecSse::lanes>;
+
+    const std::array<float, VecSse::lanes> expValues {-0.5F, -0.1F, 0.25F, 0.75F};
+    const auto                            simdExp    = VecSse::Load(expValues.data());
+    const auto                            scalarExp  = VecScalar::Load(expValues.data());
+
+    const auto compareApprox = [](const auto& simdVec, const auto& scalarVec, float epsilon) {
+        for (int lane = 0; lane < simdVec.lanes; ++lane)
+        {
+            const auto simdValue   = simdVec.GetLane(lane);
+            const auto scalarValue = scalarVec.GetLane(lane);
+            if (std::isnan(scalarValue))
+            {
+                CHECK(std::isnan(simdValue));
+                continue;
+            }
+            if (std::isinf(scalarValue))
+            {
+                CHECK(std::isinf(simdValue));
+                CHECK(std::signbit(simdValue) == std::signbit(scalarValue));
+                continue;
+            }
+            CHECK(simdValue == Catch::Approx(scalarValue).epsilon(epsilon));
+        }
+    };
+
+    compareApprox(Exp<StrictMathPolicy>(simdExp), Exp<StrictMathPolicy>(scalarExp), 1e-5F);
+
+    const std::array<float, VecSse::lanes> logValues {0.125F, 0.5F, 1.5F, 4.0F};
+    const auto                             simdLog    = VecSse::Load(logValues.data());
+    const auto                             scalarLog  = VecScalar::Load(logValues.data());
+    compareApprox(Log<StrictMathPolicy>(simdLog), Log<StrictMathPolicy>(scalarLog), 1e-5F);
+
+    const std::array<float, VecSse::lanes> trigValues {-3.0F, -1.0F, 0.5F, 2.5F};
+    const auto                             simdTrig    = VecSse::Load(trigValues.data());
+    const auto                             scalarTrig  = VecScalar::Load(trigValues.data());
+    compareApprox(Sin<StrictMathPolicy>(simdTrig), Sin<StrictMathPolicy>(scalarTrig), 1e-5F);
+    compareApprox(Cos<StrictMathPolicy>(simdTrig), Cos<StrictMathPolicy>(scalarTrig), 1e-5F);
+
+    const std::array<float, VecSse::lanes> sqrtValues {0.0F, 0.25F, 1.0F, 9.0F};
+    const auto                             simdSqrt    = VecSse::Load(sqrtValues.data());
+    const auto                             scalarSqrt  = VecScalar::Load(sqrtValues.data());
+    compareApprox(Sqrt<StrictMathPolicy>(simdSqrt), Sqrt<StrictMathPolicy>(scalarSqrt), 1e-5F);
+}
+#endif
+
 #if defined(__AVX2__)
 TEST_CASE("Vec AVX2 comparisons")
 {
     using VecAvx = Vec<float, AVX2Tag>;
 
-    const auto base  = VecAvx::Iota(0.0F, 1.0F);
-    const auto other = VecAvx::Iota(0.5F, 1.0F);
-
-    const auto neMask = (base != base + VecAvx {1.0F});
-    for (int lane = 0; lane < VecAvx::lanes; ++lane)
+    const auto base = VecAvx::Iota(0.0F, 1.0F);
+    auto       other = base;
+    for (int lane = VecAvx::lanes / 2; lane < VecAvx::lanes; ++lane)
     {
-        CHECK(neMask.GetLane(lane));
+        other.SetLane(lane, other.GetLane(lane) - 1.0F);
     }
+
+    const auto neMask = (base != other);
+    CHECK_FALSE(neMask.GetLane(0));
+    CHECK(neMask.GetLane(VecAvx::lanes - 1));
 
     const auto leMask = (base <= other);
     CHECK(leMask.GetLane(0));
@@ -662,5 +882,72 @@ TEST_CASE("Vec AVX2 comparisons")
     const auto xorMask = leMask ^ neMask;
     CHECK(Any(xorMask));
     CHECK_FALSE(None(xorMask));
+}
+#endif
+
+#if defined(__AVX2__)
+TEST_CASE("Vec AVX2 strict math matches scalar reference")
+{
+    using VecAvx    = Vec<float, AVX2Tag>;
+    using VecScalar = Vec<float, ScalarTag, VecAvx::lanes>;
+
+    std::array<float, VecAvx::lanes> baseValues {};
+    for (int lane = 0; lane < VecAvx::lanes; ++lane)
+    {
+        baseValues[static_cast<std::size_t>(lane)] = -1.0F + 0.2F * static_cast<float>(lane);
+    }
+
+    const auto simdBase   = VecAvx::Load(baseValues.data());
+    const auto scalarBase = VecScalar::Load(baseValues.data());
+
+    const auto compareApprox = [](const auto& simdVec, const auto& scalarVec, float epsilon) {
+        for (int lane = 0; lane < simdVec.lanes; ++lane)
+        {
+            const auto simdValue   = simdVec.GetLane(lane);
+            const auto scalarValue = scalarVec.GetLane(lane);
+            if (std::isnan(scalarValue))
+            {
+                CHECK(std::isnan(simdValue));
+                continue;
+            }
+            if (std::isinf(scalarValue))
+            {
+                CHECK(std::isinf(simdValue));
+                CHECK(std::signbit(simdValue) == std::signbit(scalarValue));
+                continue;
+            }
+            CHECK(simdValue == Catch::Approx(scalarValue).epsilon(epsilon));
+        }
+    };
+
+    compareApprox(Exp<StrictMathPolicy>(simdBase), Exp<StrictMathPolicy>(scalarBase), 1e-5F);
+
+    std::array<float, VecAvx::lanes> logValues {};
+    for (int lane = 0; lane < VecAvx::lanes; ++lane)
+    {
+        logValues[static_cast<std::size_t>(lane)] = 0.25F + 0.3F * static_cast<float>(lane);
+    }
+    const auto simdLog   = VecAvx::Load(logValues.data());
+    const auto scalarLog = VecScalar::Load(logValues.data());
+    compareApprox(Log<StrictMathPolicy>(simdLog), Log<StrictMathPolicy>(scalarLog), 1e-5F);
+
+    std::array<float, VecAvx::lanes> trigValues {};
+    for (int lane = 0; lane < VecAvx::lanes; ++lane)
+    {
+        trigValues[static_cast<std::size_t>(lane)] = -3.0F + 0.4F * static_cast<float>(lane);
+    }
+    const auto simdTrig   = VecAvx::Load(trigValues.data());
+    const auto scalarTrig = VecScalar::Load(trigValues.data());
+    compareApprox(Sin<StrictMathPolicy>(simdTrig), Sin<StrictMathPolicy>(scalarTrig), 1e-5F);
+    compareApprox(Cos<StrictMathPolicy>(simdTrig), Cos<StrictMathPolicy>(scalarTrig), 1e-5F);
+
+    std::array<float, VecAvx::lanes> sqrtValues {};
+    for (int lane = 0; lane < VecAvx::lanes; ++lane)
+    {
+        sqrtValues[static_cast<std::size_t>(lane)] = 0.5F * static_cast<float>(lane);
+    }
+    const auto simdSqrt   = VecAvx::Load(sqrtValues.data());
+    const auto scalarSqrt = VecScalar::Load(sqrtValues.data());
+    compareApprox(Sqrt<StrictMathPolicy>(simdSqrt), Sqrt<StrictMathPolicy>(scalarSqrt), 1e-5F);
 }
 #endif

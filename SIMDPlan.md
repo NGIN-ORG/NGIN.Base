@@ -196,10 +196,10 @@ Each extension should ship with tests, benchmarks, and documentation updates.
 
 ## Next Immediate Steps
 
-1. Prototype backend-aware `FastMathPolicy` implementations for SSE2/AVX2 floats (polynomial + intrinsic blend) using the new `MathPolicyLane<FastMathPolicy, Backend, T>` hook.
-2. Extend the unit test matrix with targeted fast-math verification (relative error tolerances per function, NaN/inf propagation checks).
-3. Document math policy usage in `include/NGIN/SIMD/README.md`, including guidance on selecting `NGIN_SIMD_MATH_POLICY` and expected accuracy/throughput trade-offs.
-3. Schedule design review before embarking on Phase 1 implementation to confirm API surface aligns with NGIN expectations.
+1. Document math policy usage in `include/NGIN/SIMD/README.md`, covering configuration macros, expected accuracy envelopes, and backend coverage.
+2. Add fast-math microbenchmarks (scalar vs SSE2 vs AVX2) to quantify throughput/accuracy trade-offs and surface results in the README/CHANGELOG.
+3. Plan NEON fast math parity: determine feasible polynomial/intrinsic substitutes, outline fallback behavior, and capture it in the roadmap/design notes before implementation kicks off.
+4. Schedule a focused design review to validate the Phase 2/3 backlog now that fast-math prototypes and tests landed; ensure downstream teams agree on priorities.
 
 ```cpp
 #include <NGIN/SIMD/Vec.hpp>
