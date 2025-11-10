@@ -238,6 +238,120 @@ namespace NGIN::SIMD
             }
         }
 
+        template<class Policy>
+        inline constexpr bool IsSupportedMathPolicy = std::is_same_v<Policy, StrictMathPolicy> ||
+                                                      std::is_same_v<Policy, FastMathPolicy>;
+
+        template<class Policy, class Backend, class T>
+        struct MathPolicyLane;
+
+        template<class Backend, class T>
+        struct MathPolicyLane<StrictMathPolicy, Backend, T>
+        {
+            static_assert(std::is_floating_point_v<T>, "StrictMathPolicy requires floating-point lane types.");
+
+            [[nodiscard]] static auto Exp(T value) noexcept -> T
+            {
+                const auto promoted = static_cast<long double>(value);
+                const auto result   = std::exp(promoted);
+                return static_cast<T>(result);
+            }
+
+            [[nodiscard]] static auto Log(T value) noexcept -> T
+            {
+                const auto promoted = static_cast<long double>(value);
+                const auto result   = std::log(promoted);
+                return static_cast<T>(result);
+            }
+
+            [[nodiscard]] static auto Sin(T value) noexcept -> T
+            {
+                const auto promoted = static_cast<long double>(value);
+                const auto result   = std::sin(promoted);
+                return static_cast<T>(result);
+            }
+
+            [[nodiscard]] static auto Cos(T value) noexcept -> T
+            {
+                const auto promoted = static_cast<long double>(value);
+                const auto result   = std::cos(promoted);
+                return static_cast<T>(result);
+            }
+
+            [[nodiscard]] static auto Sqrt(T value) noexcept -> T
+            {
+                const auto promoted = static_cast<long double>(value);
+                const auto result   = std::sqrt(promoted);
+                return static_cast<T>(result);
+            }
+        };
+
+        template<class Backend, class T>
+        struct MathPolicyLane<FastMathPolicy, Backend, T> : MathPolicyLane<StrictMathPolicy, Backend, T>
+        {
+            static_assert(std::is_floating_point_v<T>, "FastMathPolicy requires floating-point lane types.");
+
+            [[nodiscard]] static auto Exp(T value) noexcept -> T
+            {
+                if constexpr (std::is_same_v<T, float>)
+                {
+                    return std::expf(value);
+                }
+                else
+                {
+                    return std::exp(value);
+                }
+            }
+
+            [[nodiscard]] static auto Log(T value) noexcept -> T
+            {
+                if constexpr (std::is_same_v<T, float>)
+                {
+                    return std::logf(value);
+                }
+                else
+                {
+                    return std::log(value);
+                }
+            }
+
+            [[nodiscard]] static auto Sin(T value) noexcept -> T
+            {
+                if constexpr (std::is_same_v<T, float>)
+                {
+                    return std::sinf(value);
+                }
+                else
+                {
+                    return std::sin(value);
+                }
+            }
+
+            [[nodiscard]] static auto Cos(T value) noexcept -> T
+            {
+                if constexpr (std::is_same_v<T, float>)
+                {
+                    return std::cosf(value);
+                }
+                else
+                {
+                    return std::cos(value);
+                }
+            }
+
+            [[nodiscard]] static auto Sqrt(T value) noexcept -> T
+            {
+                if constexpr (std::is_same_v<T, float>)
+                {
+                    return std::sqrtf(value);
+                }
+                else
+                {
+                    return std::sqrt(value);
+                }
+            }
+        };
+
     }// namespace detail
 
     template<int Lanes, class Backend>
@@ -421,6 +535,108 @@ namespace NGIN::SIMD
             }
         }
         return result;
+    }
+
+    namespace detail
+    {
+
+        template<class Policy, class T, class Backend, int Lanes>
+        struct MathPolicyAdapter
+        {
+            using VecType = Vec<T, Backend, Lanes>;
+            using LaneOps = MathPolicyLane<Policy, Backend, T>;
+
+            [[nodiscard]] static auto Exp(const VecType& value) noexcept -> VecType
+            {
+                VecType result;
+                for (int lane = 0; lane < VecType::lanes; ++lane)
+                {
+                    result.storage.Set(lane, LaneOps::Exp(value.GetLane(lane)));
+                }
+                return result;
+            }
+
+            [[nodiscard]] static auto Log(const VecType& value) noexcept -> VecType
+            {
+                VecType result;
+                for (int lane = 0; lane < VecType::lanes; ++lane)
+                {
+                    result.storage.Set(lane, LaneOps::Log(value.GetLane(lane)));
+                }
+                return result;
+            }
+
+            [[nodiscard]] static auto Sin(const VecType& value) noexcept -> VecType
+            {
+                VecType result;
+                for (int lane = 0; lane < VecType::lanes; ++lane)
+                {
+                    result.storage.Set(lane, LaneOps::Sin(value.GetLane(lane)));
+                }
+                return result;
+            }
+
+            [[nodiscard]] static auto Cos(const VecType& value) noexcept -> VecType
+            {
+                VecType result;
+                for (int lane = 0; lane < VecType::lanes; ++lane)
+                {
+                    result.storage.Set(lane, LaneOps::Cos(value.GetLane(lane)));
+                }
+                return result;
+            }
+
+            [[nodiscard]] static auto Sqrt(const VecType& value) noexcept -> VecType
+            {
+                VecType result;
+                for (int lane = 0; lane < VecType::lanes; ++lane)
+                {
+                    result.storage.Set(lane, LaneOps::Sqrt(value.GetLane(lane)));
+                }
+                return result;
+            }
+        };
+
+    }// namespace detail
+
+    template<class Policy = MathPolicy, class T, class Backend, int Lanes>
+        requires detail::IsSupportedMathPolicy<Policy>
+    [[nodiscard]] inline auto Exp(const Vec<T, Backend, Lanes>& value) noexcept -> Vec<T, Backend, Lanes>
+    {
+        using VecType = Vec<T, Backend, Lanes>;
+        return detail::MathPolicyAdapter<Policy, T, Backend, VecType::lanes>::Exp(value);
+    }
+
+    template<class Policy = MathPolicy, class T, class Backend, int Lanes>
+        requires detail::IsSupportedMathPolicy<Policy>
+    [[nodiscard]] inline auto Log(const Vec<T, Backend, Lanes>& value) noexcept -> Vec<T, Backend, Lanes>
+    {
+        using VecType = Vec<T, Backend, Lanes>;
+        return detail::MathPolicyAdapter<Policy, T, Backend, VecType::lanes>::Log(value);
+    }
+
+    template<class Policy = MathPolicy, class T, class Backend, int Lanes>
+        requires detail::IsSupportedMathPolicy<Policy>
+    [[nodiscard]] inline auto Sin(const Vec<T, Backend, Lanes>& value) noexcept -> Vec<T, Backend, Lanes>
+    {
+        using VecType = Vec<T, Backend, Lanes>;
+        return detail::MathPolicyAdapter<Policy, T, Backend, VecType::lanes>::Sin(value);
+    }
+
+    template<class Policy = MathPolicy, class T, class Backend, int Lanes>
+        requires detail::IsSupportedMathPolicy<Policy>
+    [[nodiscard]] inline auto Cos(const Vec<T, Backend, Lanes>& value) noexcept -> Vec<T, Backend, Lanes>
+    {
+        using VecType = Vec<T, Backend, Lanes>;
+        return detail::MathPolicyAdapter<Policy, T, Backend, VecType::lanes>::Cos(value);
+    }
+
+    template<class Policy = MathPolicy, class T, class Backend, int Lanes>
+        requires detail::IsSupportedMathPolicy<Policy>
+    [[nodiscard]] inline auto Sqrt(const Vec<T, Backend, Lanes>& value) noexcept -> Vec<T, Backend, Lanes>
+    {
+        using VecType = Vec<T, Backend, Lanes>;
+        return detail::MathPolicyAdapter<Policy, T, Backend, VecType::lanes>::Sqrt(value);
     }
 
     template<class T, class Backend, int Lanes>

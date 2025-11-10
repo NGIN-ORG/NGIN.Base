@@ -6,9 +6,11 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <numbers>
 #include <numeric>
 #include <type_traits>
 
@@ -263,6 +265,57 @@ TEST_CASE("Vec scalar conversions")
     CHECK(truncatedExtremes.GetLane(1) == 500);
     CHECK(truncatedExtremes.GetLane(2) == std::numeric_limits<int>::max());
     CHECK(truncatedExtremes.GetLane(3) == std::numeric_limits<int>::max());
+}
+
+TEST_CASE("Vec math policy functions")
+{
+    using Vec4f = Vec<float, ScalarTag, 4>;
+
+    const auto expInput = Vec4f::Iota(0.0F, 0.5F);
+    const auto expVec   = Exp(expInput);
+    for (int lane = 0; lane < Vec4f::lanes; ++lane)
+    {
+        const auto laneValue = expInput.GetLane(lane);
+        CHECK(expVec.GetLane(lane) == Catch::Approx(static_cast<float>(std::exp(static_cast<double>(laneValue)))));
+    }
+
+    const std::array<float, Vec4f::lanes> logValues {1.0F, 2.0F, 4.0F, 8.0F};
+    const auto                            logInput = Vec4f::Load(logValues.data());
+    const auto                            logVec   = Log(logInput);
+    for (int lane = 0; lane < Vec4f::lanes; ++lane)
+    {
+        CHECK(logVec.GetLane(lane) == Catch::Approx(static_cast<float>(std::log(static_cast<double>(logValues[lane])))));
+    }
+
+    const auto                            pi = std::numbers::pi_v<float>;
+    const std::array<float, Vec4f::lanes> angleValues {0.0F, pi / 2.0F, pi, 3.0F * pi / 2.0F};
+    const auto                            angles = Vec4f::Load(angleValues.data());
+
+    const auto sinVec = Sin(angles);
+    CHECK(sinVec.GetLane(0) == Catch::Approx(0.0F).margin(1e-6F));
+    CHECK(sinVec.GetLane(1) == Catch::Approx(1.0F));
+    CHECK(sinVec.GetLane(2) == Catch::Approx(0.0F).margin(1e-6F));
+    CHECK(sinVec.GetLane(3) == Catch::Approx(-1.0F));
+
+    const auto cosVec = Cos(angles);
+    CHECK(cosVec.GetLane(0) == Catch::Approx(1.0F));
+    CHECK(cosVec.GetLane(1) == Catch::Approx(0.0F).margin(1e-6F));
+    CHECK(cosVec.GetLane(2) == Catch::Approx(-1.0F));
+    CHECK(cosVec.GetLane(3) == Catch::Approx(0.0F).margin(1e-6F));
+
+    const std::array<float, Vec4f::lanes> sqrtValues {1.0F, 4.0F, 9.0F, 16.0F};
+    const auto                            sqrtInput = Vec4f::Load(sqrtValues.data());
+    const auto                            sqrtVec   = Sqrt(sqrtInput);
+    for (int lane = 0; lane < Vec4f::lanes; ++lane)
+    {
+        CHECK(sqrtVec.GetLane(lane) == Catch::Approx(static_cast<float>(std::sqrt(static_cast<double>(sqrtValues[lane])))));
+    }
+
+    const auto fastExp = Exp<FastMathPolicy>(expInput);
+    for (int lane = 0; lane < Vec4f::lanes; ++lane)
+    {
+        CHECK(fastExp.GetLane(lane) == Catch::Approx(expVec.GetLane(lane)).epsilon(1e-4F));
+    }
 }
 
 TEST_CASE("ForEachSimd processes tails")

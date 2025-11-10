@@ -196,8 +196,9 @@ Each extension should ship with tests, benchmarks, and documentation updates.
 
 ## Next Immediate Steps
 
-1. Approve Phase 0 scaffolding structure and naming conventions (`Vec`, `Mask`, tag types).
-2. Implement Phase 0 files with stubbed structures to unblock dependent components.
+1. Prototype backend-aware `FastMathPolicy` implementations for SSE2/AVX2 floats (polynomial + intrinsic blend) using the new `MathPolicyLane<FastMathPolicy, Backend, T>` hook.
+2. Extend the unit test matrix with targeted fast-math verification (relative error tolerances per function, NaN/inf propagation checks).
+3. Document math policy usage in `include/NGIN/SIMD/README.md`, including guidance on selecting `NGIN_SIMD_MATH_POLICY` and expected accuracy/throughput trade-offs.
 3. Schedule design review before embarking on Phase 1 implementation to confirm API surface aligns with NGIN expectations.
 
 ```cpp
