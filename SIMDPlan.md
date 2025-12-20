@@ -196,9 +196,10 @@ Each extension should ship with tests, benchmarks, and documentation updates.
 
 ## Next Immediate Steps
 
-1. Approve Phase 0 scaffolding structure and naming conventions (`Vec`, `Mask`, tag types).
-2. Implement Phase 0 files with stubbed structures to unblock dependent components.
-3. Schedule design review before embarking on Phase 1 implementation to confirm API surface aligns with NGIN expectations.
+1. Document math policy usage in `include/NGIN/SIMD/README.md`, covering configuration macros, expected accuracy envelopes, and backend coverage.
+2. Add fast-math microbenchmarks (scalar vs SSE2 vs AVX2) to quantify throughput/accuracy trade-offs and surface results in the README/CHANGELOG.
+3. Plan NEON fast math parity: determine feasible polynomial/intrinsic substitutes, outline fallback behavior, and capture it in the roadmap/design notes before implementation kicks off.
+4. Schedule a focused design review to validate the Phase 2/3 backlog now that fast-math prototypes and tests landed; ensure downstream teams agree on priorities.
 
 ```cpp
 #include <NGIN/SIMD/Vec.hpp>

@@ -18,7 +18,7 @@ namespace NGIN::Async
         void Lock() noexcept override
         {
             // Fetch a ticket (the order in which threads will be served)
-            unsigned int ticket = m_nextTicket.fetch_add(1u, std::memory_order_relaxed);
+            const UInt32 ticket = m_nextTicket.fetch_add(1u, std::memory_order_relaxed);
             // Spin until our ticket is now being served
             while (m_nowServing.load(std::memory_order_acquire) != ticket)
             {

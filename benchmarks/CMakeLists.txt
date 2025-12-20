@@ -22,6 +22,10 @@ target_link_libraries(StringBenchmarks PRIVATE NGIN::Base)
 add_executable(VectorBenchmarks VectorBenchmarks.cpp)
 target_link_libraries(VectorBenchmarks PRIVATE NGIN::Base)
 
+add_executable(SIMDFastMathBench SIMDFastMathBench.cpp)
+target_link_libraries(SIMDFastMathBench PRIVATE NGIN::Base)
+target_compile_options(SIMDFastMathBench PRIVATE -mavx2)
+
 # Optional: concurrent map comparison benchmarks (TBB via system or CPM)
 option(NGIN_TBB_STATIC "Prefer static TBB build via CPM" ON)
 set(_have_tbb OFF)
@@ -72,5 +76,4 @@ if(_have_tbb)
 else()
 	message(STATUS "TBB not available; ConcurrentMapBench disabled")
 endif()
-
 
