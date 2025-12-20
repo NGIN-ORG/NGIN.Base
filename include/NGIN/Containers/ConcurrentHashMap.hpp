@@ -442,27 +442,6 @@ namespace NGIN::Containers
         bool TryGet(const Key& key, Value& outValue) const
         {
             const std::size_t hash = ComputeHash(key);
-            // Fast optimistic path: snapshot epoch; if even and no migration pointer, read without guard.
-            const size_type startEpoch = m_epoch.load(std::memory_order_acquire);
-            if ((startEpoch & 1u) == 0)
-            {
-                TableView snap = CurrentView();
-                if (snap.groups && m_migration.load(std::memory_order_acquire) == nullptr)
-                {
-                    if (TryCopyValueInView(snap, key, hash, outValue))
-                    {
-                        const size_type endEpoch = m_epoch.load(std::memory_order_acquire);
-                        if (endEpoch == startEpoch && (endEpoch & 1u) == 0)
-                            return true;
-                    }
-                    else
-                    {
-                        const size_type endEpoch = m_epoch.load(std::memory_order_acquire);
-                        if (endEpoch == startEpoch && (endEpoch & 1u) == 0)
-                            return false;
-                    }
-                }
-            }
             ViewToken token = const_cast<ConcurrentHashMap*>(this)->AcquireGuardedView();
             if (TryCopyValueInView(token.view, key, hash, outValue))
             {
@@ -929,6 +908,8 @@ namespace NGIN::Containers
                 return;
             }
             ReleaseGroups(state->oldGroups, state->oldGroupCount);
+            // Now poison mask after actual release to prevent further indexing attempts.
+            state->oldMask       = 0;
             state->oldGroups     = nullptr;
             state->oldGroupCount = 0;
             delete state;
@@ -946,6 +927,7 @@ namespace NGIN::Containers
                     m_readers.load(std::memory_order_acquire) == 0)
                 {
                     ReleaseGroups(list->oldGroups, list->oldGroupCount);
+                    list->oldMask       = 0;
                     list->oldGroups     = nullptr;
                     list->oldGroupCount = 0;
                     delete list;
@@ -986,8 +968,6 @@ namespace NGIN::Containers
             {
                 if (!state->destroyed.exchange(true, std::memory_order_acq_rel))
                 {
-                    // Poison immediately; either immediate destruction or queued.
-                    state->oldMask = 0;
                     DestroyMigrationState(state);
                 }
                 return;
@@ -996,7 +976,6 @@ namespace NGIN::Containers
             {
                 if (!state->destroyed.exchange(true, std::memory_order_acq_rel))
                 {
-                    state->oldMask = 0;
                     DestroyMigrationState(state);
                 }
             }
@@ -1121,6 +1100,9 @@ namespace NGIN::Containers
         {
             if (!state)
                 return;
+            // If migration already finalized we should not continue touching old groups.
+            if (state->finalized.load(std::memory_order_acquire))
+                return;
             const size_type totalGroups = state->oldGroupCount;
             size_type       processed   = 0;
             while (processed < budget)
@@ -1161,6 +1143,9 @@ namespace NGIN::Containers
         void MigrateGroup(MigrationState* state, size_type groupIndex) noexcept
         {
             if (!state)
+                return;
+            // Avoid migrating after finalization (oldGroups may be retired/reclaimed soon).
+            if (state->finalized.load(std::memory_order_acquire))
                 return;
             TableView       oldView {state->oldGroups, state->oldMask};
             const size_type base = groupIndex << kGroupShift;
@@ -1238,94 +1223,10 @@ namespace NGIN::Containers
                 InsertProbe probe   = LocateForInsert(newView, migrationKey, hash);
                 if (!probe.slot)
                 {
-                    TableView   oldView {state->oldGroups, state->oldMask};
-                    InsertProbe oldProbe = LocateForInsert(oldView, migrationKey, hash);
-                    if (oldProbe.slot)
-                    {
-                        if (!oldProbe.isNew)
-                        {
-                            try
-                            {
-                                oldProbe.slot->AssignValue(migrationValue);
-                            } catch (...)
-                            {
-                                oldProbe.slot->UnlockTo(detail::SlotState::Occupied);
-                                throw;
-                            }
-                            oldProbe.slot->UnlockTo(detail::SlotState::Occupied);
-                            return;
-                        }
-
-                        try
-                        {
-                            oldProbe.slot->ConstructPayload(hash, std::move(migrationKey), std::move(migrationValue));
-                            oldProbe.slot->UnlockTo(detail::SlotState::Occupied);
-                            return;
-                        } catch (...)
-                        {
-                            oldProbe.slot->hash = 0;
-                            oldProbe.slot->UnlockTo(oldProbe.previousState);
-                            throw;
-                        }
-                    }
-
-                    HelpMigration(state, state->oldGroupCount);
-                    const bool finalized = FinalizeMigration(state);
-                    if (finalized)
-                    {
-                        size_type targetCapacity = m_capacity ? m_capacity * 2 : GroupSize;
-                        targetCapacity           = std::max(targetCapacity, m_capacity + GroupSize);
-                        StartMigration(targetCapacity);
-                        ViewToken tok2    = AcquireGuardedView();
-                        TableView primary = tok2.view;
-                        while (true)
-                        {
-                            InsertProbe retryProbe = LocateForInsert(primary, migrationKey, hash);
-                            if (!retryProbe.slot)
-                            {
-                                size_type nextTarget = m_capacity ? m_capacity * 2 : GroupSize;
-                                nextTarget           = std::max(nextTarget, m_capacity + GroupSize);
-                                StartMigration(nextTarget);
-                                ReleaseGuard(tok2, false);
-                                tok2    = AcquireGuardedView();
-                                primary = tok2.view;
-                                continue;
-                            }
-
-                            if (!retryProbe.isNew)
-                            {
-                                try
-                                {
-                                    retryProbe.slot->AssignValue(migrationValue);
-                                } catch (...)
-                                {
-                                    retryProbe.slot->UnlockTo(detail::SlotState::Occupied);
-                                    ReleaseGuard(tok2, false);
-                                    throw;
-                                }
-                                retryProbe.slot->UnlockTo(detail::SlotState::Occupied);
-                                ReleaseGuard(tok2, false);
-                                return;
-                            }
-
-                            try
-                            {
-                                retryProbe.slot->ConstructPayload(hash, std::move(migrationKey), std::move(migrationValue));
-                                retryProbe.slot->UnlockTo(detail::SlotState::Occupied);
-                                ReleaseGuard(tok2, false);
-                                return;
-                            } catch (...)
-                            {
-                                retryProbe.slot->hash = 0;
-                                retryProbe.slot->UnlockTo(retryProbe.previousState);
-                                ReleaseGuard(tok2, false);
-                                throw;
-                            }
-                        }
-                    }
-
+                    // No slot found under current probe budget; assist remaining migration work then retry.
+                    HelpMigration(state, 1);
                     backoff.Pause();
-                    continue;
+                    continue; // Retry until slot acquired (capacity chosen at migration start should have space)
                 }
 
                 if (!probe.isNew)
@@ -1359,6 +1260,9 @@ namespace NGIN::Containers
         void RemoveFromOld(MigrationState* migration, const Key& key, std::size_t hash)
         {
             if (!migration)
+                return;
+            // Skip removal from old table if finalized (old table retiring).
+            if (migration->finalized.load(std::memory_order_acquire))
                 return;
             TableView oldView {migration->oldGroups, migration->oldMask};
             if (auto* secondarySlot = AcquireForMutation(oldView, key, hash))

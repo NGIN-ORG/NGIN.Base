@@ -48,7 +48,7 @@ target_link_libraries(ngin_base_test_config INTERFACE NGIN::Base)
 target_compile_features(ngin_base_test_config INTERFACE cxx_std_23)
 
 option(NGIN_BASE_TESTS_ONE_EXE_PER_FILE "Split each test source into its own executable" ON)
-option(NGIN_BASE_ENABLE_ASAN "Enable Address/Undefined sanitizers for tests" OFF)
+option(NGIN_BASE_ENABLE_ASAN "Enable Address/Undefined sanitizers for tests" ON)
 
 # Gather every test source so we can either create per-file binaries or a single aggregator.
 file(GLOB ROOT_TEST_SRCS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
