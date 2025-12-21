@@ -24,7 +24,20 @@ namespace NGIN::Async
             std::atomic<NGIN::UIntSize> index {static_cast<NGIN::UIntSize>(-1)};
             NGIN::Execution::ExecutorRef exec {};
             std::coroutine_handle<>      awaiting {};
+            CancellationRegistration     cancellationRegistration {};
         };
+
+        [[nodiscard]] inline bool CancelWhenAny(void* ctx) noexcept
+        {
+            auto* state = static_cast<WhenAnySharedState*>(ctx);
+            bool expected = false;
+            if (!state->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
+            {
+                return false;
+            }
+            state->index.store(static_cast<NGIN::UIntSize>(-1), std::memory_order_release);
+            return true;
+        }
 
         struct Detached final
         {
@@ -118,6 +131,7 @@ namespace NGIN::Async
                 }
 
                 state->awaiting = awaiting;
+                ctx.GetCancellationToken().Register(state->cancellationRegistration, state->exec, awaiting, &CancelWhenAny, state.get());
 
                 first.Start(ctx);
                 std::apply([&](auto&... t) { (t.Start(ctx), ...); }, rest);

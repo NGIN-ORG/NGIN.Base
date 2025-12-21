@@ -7,6 +7,7 @@
 #include <NGIN/Async/Task.hpp>
 #include <NGIN/Async/WhenAll.hpp>
 #include <NGIN/Async/WhenAny.hpp>
+#include <NGIN/Units.hpp>
 
 namespace
 {
@@ -70,6 +71,47 @@ namespace
         co_await ctx.Yield();
         co_return value;
     }
+
+    class ManualTimerExecutor
+    {
+    public:
+        void Execute(NGIN::Execution::WorkItem item) noexcept
+        {
+            m_ready.push_back(std::move(item));
+        }
+
+        void ExecuteAt(NGIN::Execution::WorkItem item, NGIN::Time::TimePoint)
+        {
+            m_delayed.push_back(std::move(item));
+        }
+
+        [[nodiscard]] bool RunOne() noexcept
+        {
+            if (m_ready.empty())
+            {
+                return false;
+            }
+            auto item = std::move(m_ready.back());
+            m_ready.pop_back();
+            item.Invoke();
+            return true;
+        }
+
+        void RunUntilIdle() noexcept
+        {
+            while (RunOne()) {}
+        }
+
+    private:
+        std::vector<NGIN::Execution::WorkItem> m_ready;
+        std::vector<NGIN::Execution::WorkItem> m_delayed;
+    };
+
+    NGIN::Async::Task<void> NeverCompletes(NGIN::Async::TaskContext& ctx)
+    {
+        co_await ctx.Delay(NGIN::Units::Seconds(60.0));
+        co_return;
+    }
 }// namespace
 
 TEST_CASE("WhenAll returns tuple of results")
@@ -122,6 +164,29 @@ TEST_CASE("WhenAny throws TaskCanceled when context is already cancelled")
     auto any = NGIN::Async::WhenAny(ctx, a, b);
     any.Start(ctx);
 
+    exec.RunUntilIdle();
+
+    REQUIRE(any.IsCompleted());
+    REQUIRE(any.IsCanceled());
+    REQUIRE_THROWS_AS(any.Get(), NGIN::Async::TaskCanceled);
+}
+
+TEST_CASE("WhenAny wakes and throws TaskCanceled on cancellation")
+{
+    ManualTimerExecutor            exec;
+    NGIN::Async::CancellationSource source;
+    NGIN::Async::TaskContext        ctx(exec, source.GetToken());
+
+    auto a = NeverCompletes(ctx);
+    auto b = NeverCompletes(ctx);
+
+    auto any = NGIN::Async::WhenAny(ctx, a, b);
+    any.Start(ctx);
+
+    exec.RunUntilIdle();
+    REQUIRE_FALSE(any.IsCompleted());
+
+    source.Cancel();
     exec.RunUntilIdle();
 
     REQUIRE(any.IsCompleted());

@@ -110,6 +110,7 @@ namespace NGIN::Async
             {
                 NGIN::Execution::ExecutorRef           exec;
                 CancellationToken                      cancellation;
+                mutable CancellationRegistration        cancellationRegistration {};
                 TUnit                                  dur;
                 NGIN::Time::TimePoint                  until;
 
@@ -141,6 +142,7 @@ namespace NGIN::Async
                 }
                 void await_suspend(std::coroutine_handle<> handle) const
                 {
+                    cancellation.Register(cancellationRegistration, exec, handle);
                     exec.ScheduleAt(handle, until);
                 }
                 void await_resume() const
