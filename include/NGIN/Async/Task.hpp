@@ -5,14 +5,12 @@
 
 #include <coroutine>
 #include <exception>
-#include <mutex>
-#include <condition_variable>
 #include <utility>
 #include <atomic>
 #include <cassert>
-#include <thread>
 
 #include <NGIN/Async/TaskContext.hpp>
+#include <NGIN/Sync/AtomicCondition.hpp>
 #include <NGIN/Units.hpp>
 
 namespace NGIN::Async
@@ -44,10 +42,10 @@ namespace NGIN::Async
         {
             T                       m_value;
             std::exception_ptr      m_error;
-            std::mutex              m_mutex;
-            std::condition_variable m_cv;
-            bool                    m_finished {false};
+            std::atomic<bool>       m_finished {false};
+            NGIN::Sync::AtomicCondition m_finishedCondition {};
             std::coroutine_handle<> m_continuation {};
+            NGIN::Execution::ExecutorRef m_executor {};
 
             promise_type() = default;
 
@@ -70,13 +68,15 @@ namespace NGIN::Async
                 void await_suspend(std::coroutine_handle<promise_type> h) noexcept
                 {
                     auto& p = h.promise();
-                    {
-                        std::lock_guard lk(p.m_mutex);
-                        p.m_finished = true;
-                    }
-                    p.m_cv.notify_all();
+                    p.m_finished.store(true, std::memory_order_release);
+                    p.m_finishedCondition.NotifyAll();
                     if (p.m_continuation)
-                        p.m_continuation.resume();
+                    {
+                        if (p.m_executor.IsValid())
+                            p.m_executor.Execute(p.m_continuation);
+                        else
+                            p.m_continuation.resume();
+                    }
                 }
                 void await_resume() noexcept {}
             };
@@ -143,6 +143,7 @@ namespace NGIN::Async
         {
             auto& prom          = m_handle.promise();
             prom.m_continuation = awaiting;
+            prom.m_executor     = m_executor;
             // Schedule only if not already started (atomic for thread safety)
             bool expected = false;
             if (m_started.compare_exchange_strong(expected, true))
@@ -168,6 +169,7 @@ namespace NGIN::Async
             if (!m_started.exchange(true))
             {
                 m_executor      = ctx.GetExecutor();
+                m_handle.promise().m_executor = m_executor;
                 m_scheduler_ctx = &ctx;
                 m_executor.Schedule(m_handle);
             }
@@ -176,8 +178,15 @@ namespace NGIN::Async
         void Wait()
         {
             auto&            p = m_handle.promise();
-            std::unique_lock lk(p.m_mutex);
-            p.m_cv.wait(lk, [&p] { return p.m_finished; });
+            while (!p.m_finished.load(std::memory_order_acquire))
+            {
+                const auto gen = p.m_finishedCondition.Load();
+                if (p.m_finished.load(std::memory_order_acquire))
+                {
+                    break;
+                }
+                p.m_finishedCondition.Wait(gen);
+            }
         }
 
         T Get()
@@ -192,21 +201,18 @@ namespace NGIN::Async
         [[nodiscard]] bool IsCompleted() const noexcept
         {
             auto&           p = m_handle.promise();
-            std::lock_guard lk(p.m_mutex);
-            return p.m_finished;
+            return p.m_finished.load(std::memory_order_acquire);
         }
 
         [[nodiscard]] bool IsRunning() const noexcept
         {
             auto&           p = m_handle.promise();
-            std::lock_guard lk(p.m_mutex);
-            return !p.m_finished && m_handle && !m_handle.done();
+            return !p.m_finished.load(std::memory_order_acquire) && m_handle && !m_handle.done();
         }
 
         [[nodiscard]] bool IsFaulted() const noexcept
         {
             auto&           p = m_handle.promise();
-            std::lock_guard lk(p.m_mutex);
             return p.m_error != nullptr;
         }
 
@@ -225,33 +231,73 @@ namespace NGIN::Async
         template<typename F>
         auto Then(F&& func)
         {
-            using RetTask = decltype(func(std::declval<T>()));
             struct Awaiter
             {
                 Task& parent;
                 F     func;
-                bool  await_ready() const noexcept { return parent.IsCompleted(); }
-                auto  await_suspend(std::coroutine_handle<> h)
+                bool  await_ready() const noexcept { return false; }
+                void  await_suspend(std::coroutine_handle<> awaiting)
                 {
-                    struct Cont
+                    auto* ctx = parent.m_scheduler_ctx;
+                    assert(ctx != nullptr && "Task::Then requires the parent task to have been started with a TaskContext");
+
+                    struct Detached
                     {
-                        std::coroutine_handle<> h;
-                        Task*                   parent;
-                        F                       func;
-                        void                    operator()()
+                        struct promise_type
                         {
-                            try
+                            Detached get_return_object() noexcept
                             {
-                                auto result   = parent->Get();
-                                auto nextTask = func(std::move(result));
-                                nextTask.Start(*parent->m_scheduler_ctx);
-                                nextTask.Wait();
-                            } catch (...)
-                            {}
-                            h.resume();
+                                return Detached {std::coroutine_handle<promise_type>::from_promise(*this)};
+                            }
+                            std::suspend_always initial_suspend() noexcept { return {}; }
+                            struct Final
+                            {
+                                bool await_ready() noexcept { return false; }
+                                void await_suspend(std::coroutine_handle<promise_type> h) noexcept { h.destroy(); }
+                                void await_resume() noexcept {}
+                            };
+                            Final final_suspend() noexcept { return {}; }
+                            void return_void() noexcept {}
+                            void unhandled_exception() noexcept {}
+                        };
+
+                        using handle_type = std::coroutine_handle<promise_type>;
+                        handle_type handle {};
+
+                        explicit Detached(handle_type h) noexcept
+                            : handle(h)
+                        {
                         }
+
+                        Detached(Detached&& other) noexcept
+                            : handle(other.handle)
+                        {
+                            other.handle = nullptr;
+                        }
+
+                        Detached(const Detached&)            = delete;
+                        Detached& operator=(const Detached&) = delete;
+                        Detached& operator=(Detached&&)      = delete;
+
+                        ~Detached() = default;
                     };
-                    std::thread(Cont {h, &parent, std::move(func)}).detach();
+
+                    auto chain =
+                            [](Task& parent, TaskContext& ctx, F func, std::coroutine_handle<> awaiting) -> Detached {
+                        try
+                        {
+                            parent.Start(ctx);
+                            auto value    = co_await parent;
+                            auto nextTask = func(std::move(value));
+                            nextTask.Start(ctx);
+                            co_await nextTask;
+                        } catch (...)
+                        {
+                        }
+                        ctx.GetExecutor().Execute(awaiting);
+                    }(parent, *ctx, std::move(func), awaiting);
+
+                    ctx->GetExecutor().Execute(std::coroutine_handle<>::from_address(chain.handle.address()));
                 }
                 auto await_resume() {}
             };
@@ -284,10 +330,10 @@ namespace NGIN::Async
         struct promise_type
         {
             std::exception_ptr      m_error;
-            std::mutex              m_mutex;
-            std::condition_variable m_cv;
-            bool                    m_finished {false};
+            std::atomic<bool>       m_finished {false};
+            NGIN::Sync::AtomicCondition m_finishedCondition {};
             std::coroutine_handle<> m_continuation {};
+            NGIN::Execution::ExecutorRef m_executor {};
 
             promise_type() = default;
 
@@ -310,13 +356,15 @@ namespace NGIN::Async
                 void await_suspend(std::coroutine_handle<promise_type> h) noexcept
                 {
                     auto& p = h.promise();
-                    {
-                        std::lock_guard lk(p.m_mutex);
-                        p.m_finished = true;
-                    }
-                    p.m_cv.notify_all();
+                    p.m_finished.store(true, std::memory_order_release);
+                    p.m_finishedCondition.NotifyAll();
                     if (p.m_continuation)
-                        p.m_continuation.resume();
+                    {
+                        if (p.m_executor.IsValid())
+                            p.m_executor.Execute(p.m_continuation);
+                        else
+                            p.m_continuation.resume();
+                    }
                 }
                 void await_resume() noexcept {}
             };
@@ -380,6 +428,7 @@ namespace NGIN::Async
         {
             auto& prom          = m_handle.promise();
             prom.m_continuation = awaiting;
+            prom.m_executor     = m_executor;
             // Schedule only if not already started (atomic for thread safety)
             bool expected = false;
             if (m_started.compare_exchange_strong(expected, true))
@@ -400,6 +449,7 @@ namespace NGIN::Async
             if (!m_started.exchange(true))
             {
                 m_executor      = ctx.GetExecutor();
+                m_handle.promise().m_executor = m_executor;
                 m_scheduler_ctx = &ctx;
                 m_executor.Schedule(m_handle);
             }
@@ -408,8 +458,15 @@ namespace NGIN::Async
         void Wait()
         {
             auto&            p = m_handle.promise();
-            std::unique_lock lk(p.m_mutex);
-            p.m_cv.wait(lk, [&p] { return p.m_finished; });
+            while (!p.m_finished.load(std::memory_order_acquire))
+            {
+                const auto gen = p.m_finishedCondition.Load();
+                if (p.m_finished.load(std::memory_order_acquire))
+                {
+                    break;
+                }
+                p.m_finishedCondition.Wait(gen);
+            }
         }
 
         void Get()
@@ -423,21 +480,18 @@ namespace NGIN::Async
         bool IsCompleted() const noexcept
         {
             auto&           p = m_handle.promise();
-            std::lock_guard lk(p.m_mutex);
-            return p.m_finished;
+            return p.m_finished.load(std::memory_order_acquire);
         }
 
         bool IsRunning() const noexcept
         {
             auto&           p = m_handle.promise();
-            std::lock_guard lk(p.m_mutex);
-            return !p.m_finished && m_handle && !m_handle.done();
+            return !p.m_finished.load(std::memory_order_acquire) && m_handle && !m_handle.done();
         }
 
         bool IsFaulted() const noexcept
         {
             auto&           p = m_handle.promise();
-            std::lock_guard lk(p.m_mutex);
             return p.m_error != nullptr;
         }
 
@@ -456,33 +510,73 @@ namespace NGIN::Async
         template<typename F>
         auto Then(F&& func)
         {
-            using RetTask = decltype(func());
             struct Awaiter
             {
                 Task& parent;
                 F     func;
-                bool  await_ready() const noexcept { return parent.IsCompleted(); }
-                auto  await_suspend(std::coroutine_handle<> h)
+                bool  await_ready() const noexcept { return false; }
+                void  await_suspend(std::coroutine_handle<> awaiting)
                 {
-                    struct Cont
+                    auto* ctx = parent.m_scheduler_ctx;
+                    assert(ctx != nullptr && "Task::Then requires the parent task to have been started with a TaskContext");
+
+                    struct Detached
                     {
-                        std::coroutine_handle<> h;
-                        Task*                   parent;
-                        F                       func;
-                        void                    operator()()
+                        struct promise_type
                         {
-                            try
+                            Detached get_return_object() noexcept
                             {
-                                parent->Get();
-                                auto nextTask = func();
-                                nextTask.Start(*parent->m_scheduler_ctx);
-                                nextTask.Wait();
-                            } catch (...)
-                            {}
-                            h.resume();
+                                return Detached {std::coroutine_handle<promise_type>::from_promise(*this)};
+                            }
+                            std::suspend_always initial_suspend() noexcept { return {}; }
+                            struct Final
+                            {
+                                bool await_ready() noexcept { return false; }
+                                void await_suspend(std::coroutine_handle<promise_type> h) noexcept { h.destroy(); }
+                                void await_resume() noexcept {}
+                            };
+                            Final final_suspend() noexcept { return {}; }
+                            void return_void() noexcept {}
+                            void unhandled_exception() noexcept {}
+                        };
+
+                        using handle_type = std::coroutine_handle<promise_type>;
+                        handle_type handle {};
+
+                        explicit Detached(handle_type h) noexcept
+                            : handle(h)
+                        {
                         }
+
+                        Detached(Detached&& other) noexcept
+                            : handle(other.handle)
+                        {
+                            other.handle = nullptr;
+                        }
+
+                        Detached(const Detached&)            = delete;
+                        Detached& operator=(const Detached&) = delete;
+                        Detached& operator=(Detached&&)      = delete;
+
+                        ~Detached() = default;
                     };
-                    std::thread(Cont {h, &parent, std::move(func)}).detach();
+
+                    auto chain =
+                            [](Task& parent, TaskContext& ctx, F func, std::coroutine_handle<> awaiting) -> Detached {
+                        try
+                        {
+                            parent.Start(ctx);
+                            co_await parent;
+                            auto nextTask = func();
+                            nextTask.Start(ctx);
+                            co_await nextTask;
+                        } catch (...)
+                        {
+                        }
+                        ctx.GetExecutor().Execute(awaiting);
+                    }(parent, *ctx, std::move(func), awaiting);
+
+                    ctx->GetExecutor().Execute(std::coroutine_handle<>::from_address(chain.handle.address()));
                 }
                 auto await_resume() {}
             };

@@ -20,8 +20,10 @@ Second priority is ergonomics (a .NET-like async experience) built on top of the
 - [x] **ExecutorRef (coroutine path)**: introduced `NGIN::Execution::ExecutorRef` and migrated `TaskContext`/`Task` to use it.
 - [x] **WorkItem execution**: added `NGIN::Execution::WorkItem` (coroutine or job) and extended `ExecutorRef` + schedulers to execute jobs without coroutines.
 - [ ] **Executor layer (full)**: add job scheduling + `WorkItem` and decouple scheduling from coroutines.
-- [ ] **Thread pool rewrite**: per-worker queues + work stealing + NGIN::Sync-based wakeups.
-- [ ] **Task cleanup**: coroutine-native continuations (`Then`) + cancellation propagation.
+- [x] **Thread pool rewrite**: per-worker queues + work stealing + `NGIN::Sync::AtomicCondition` wakeups (spinlock-based queues; can be upgraded to lock-free later).
+- [x] **Task continuation cleanup (partial)**: removed detached threads from `Task::Then` and scheduled task continuations via `ExecutorRef` instead of resuming inline.
+- [x] **Task completion cleanup (partial)**: replaced `std::condition_variable` waits with `NGIN::Sync::AtomicCondition` + atomic completion flag.
+- [ ] **Task cleanup**: implement cancellation propagation, and add `WhenAll/WhenAny` after perf baseline.
 
 ## Goals
 

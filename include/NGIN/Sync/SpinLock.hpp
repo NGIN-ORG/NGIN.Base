@@ -18,8 +18,8 @@ namespace NGIN::Sync
             int backoff = 1;
             while (true)
             {
-                bool wasLocked = lock.load(std::memory_order_relaxed);
-                if (!wasLocked && lock.compare_exchange_weak(wasLocked, true, std::memory_order_acquire))
+                bool wasLocked = m_locked.load(std::memory_order_relaxed);
+                if (!wasLocked && m_locked.compare_exchange_weak(wasLocked, true, std::memory_order_acquire))
                     break;
 
                 for (int i = 0; i < backoff; ++i)
@@ -33,13 +33,13 @@ namespace NGIN::Sync
 
         void Unlock() noexcept
         {
-            lock.store(false, std::memory_order_release);
+            m_locked.store(false, std::memory_order_release);
         }
 
         [[nodiscard]] bool TryLock() noexcept
         {
             bool expected = false;
-            return lock.compare_exchange_strong(expected, true, std::memory_order_acquire);
+            return m_locked.compare_exchange_strong(expected, true, std::memory_order_acquire);
         }
 
         void lock() noexcept
@@ -58,6 +58,6 @@ namespace NGIN::Sync
         }
 
     private:
-        std::atomic<bool> lock {false};
+        std::atomic<bool> m_locked {false};
     };
 }// namespace NGIN::Sync
