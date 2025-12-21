@@ -1,15 +1,16 @@
 // main.cpp
 #include <iostream>
 #include <thread>
-#include <chrono>
 
 #include <NGIN/Async/Task.hpp>
 #include <NGIN/Execution/FiberScheduler.hpp>
 #include <NGIN/Execution/ThreadPoolScheduler.hpp>
+#include <NGIN/Time/Sleep.hpp>
+#include <NGIN/Units.hpp>
 
 using namespace NGIN::Async;
 using namespace NGIN::Execution;
-using namespace std::chrono_literals;
+using namespace NGIN::Units;
 #undef Yield
 // Simple coroutine that yields once and then prints a message
 Task<void> SimpleTask(TaskContext& ctx, int id)
@@ -20,9 +21,9 @@ Task<void> SimpleTask(TaskContext& ctx, int id)
 }
 
 // Returns `value` after the specified delay
-Task<int> DelayedValue(TaskContext& ctx, int value, std::chrono::milliseconds delay)
+Task<int> DelayedValue(TaskContext& ctx, int value, Milliseconds delay)
 {
-    std::cout << "[DelayedValue] waiting " << delay.count() << "ms for value " << value << "\n";
+    std::cout << "[DelayedValue] waiting " << delay.GetValue() << "ms for value " << value << "\n";
     co_await ctx.Delay(delay);
     std::cout << "[DelayedValue] done: " << value << "\n";
     co_return value;
@@ -32,9 +33,9 @@ Task<int> DelayedValue(TaskContext& ctx, int value, std::chrono::milliseconds de
 Task<void> WhenAllCombinator(TaskContext& ctx)
 {
     std::cout << "[WhenAllCombinator] scheduling parallel tasks...\n";
-    auto t1 = ctx.Run(&DelayedValue, 1, 500ms);
-    auto t2 = ctx.Run(&DelayedValue, 2, 1000ms);
-    auto t3 = ctx.Run(&DelayedValue, 3, 1500ms);
+    auto t1 = ctx.Run(&DelayedValue, 1, Milliseconds {500.0});
+    auto t2 = ctx.Run(&DelayedValue, 2, Milliseconds {1000.0});
+    auto t3 = ctx.Run(&DelayedValue, 3, Milliseconds {1500.0});
 
     int r1 = co_await t1;
     int r2 = co_await t2;
@@ -50,7 +51,7 @@ void RunAllSchedulerTests(const char* schedulerName, int numThreadsOrFibers = 2)
 {
     std::cout << "=== Scheduler Test (" << schedulerName << ") Start ===\n\n";
     SchedulerT scheduler(numThreadsOrFibers);
-    TaskContext ctx {&scheduler};
+    TaskContext ctx {scheduler};
 
     // --- Test: SimpleTask ---
     std::cout << "-- Test: SimpleTask --\n";
@@ -65,7 +66,7 @@ void RunAllSchedulerTests(const char* schedulerName, int numThreadsOrFibers = 2)
     s2.Start(ctx);
     auto cont = s2.Then([&ctx]() -> Task<void> {
         std::cout << "[Continuation] SimpleTask finished, running continuation!\n";
-        co_await ctx.Delay(500ms);
+        co_await ctx.Delay(Milliseconds {500.0});
         std::cout << "[Continuation] Done after delay.\n";
         co_return;
     });
@@ -75,16 +76,16 @@ void RunAllSchedulerTests(const char* schedulerName, int numThreadsOrFibers = 2)
 
     // --- Test: DelayedValue ---
     std::cout << "-- Test: DelayedValue --\n";
-    auto d  = ctx.Run(DelayedValue(ctx, 123, 1500ms));
+    auto d  = ctx.Run(DelayedValue(ctx, 123, Milliseconds {1500.0}));
     int val = d.Get();
     std::cout << "-- DelayedValue Result: " << val << "\n\n";
 
     // --- Test: Task<int>::Then() ---
     std::cout << "-- Test: DelayedValue with Then() --\n";
-    auto d2    = ctx.Run(DelayedValue(ctx, 456, 1000ms));
+    auto d2    = ctx.Run(DelayedValue(ctx, 456, Milliseconds {1000.0}));
     auto cont2 = d2.Then([&ctx](int result) -> Task<void> {
         std::cout << "[Continuation] DelayedValue result: " << result << ", running continuation!\n";
-        co_await ctx.Delay(300ms);
+        co_await ctx.Delay(Milliseconds {300.0});
         std::cout << "[Continuation] Done after delay.\n";
         co_return;
     });
@@ -99,7 +100,7 @@ void RunAllSchedulerTests(const char* schedulerName, int numThreadsOrFibers = 2)
     while (!allTask.IsCompleted())
     {
         std::cout << "[Main] waiting for tasks to complete...\n";
-        std::this_thread::sleep_for(100ms);
+        NGIN::Time::SleepFor(Milliseconds {100.0});
     }
 
     std::cout << "\n=== Scheduler Test (" << schedulerName << ") End ===\n\n";

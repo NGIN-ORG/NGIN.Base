@@ -4,8 +4,9 @@
 #pragma once
 
 #include <coroutine>
-#include <chrono>
 #include <cstdint>
+
+#include <NGIN/Time/TimePoint.hpp>
 
 namespace NGIN::Execution
 {
@@ -20,7 +21,7 @@ namespace NGIN::Execution
         /// </summary>
         virtual void Schedule(std::coroutine_handle<> coro) noexcept = 0;
 
-        virtual void ScheduleDelay(std::coroutine_handle<> coro, std::chrono::steady_clock::time_point resumeAt) = 0;
+        virtual void ScheduleAt(std::coroutine_handle<> coro, NGIN::Time::TimePoint resumeAt) = 0;
 
         /// <summary>
         /// Attempt to run one unit of work. Returns true if work was performed.

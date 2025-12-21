@@ -5,7 +5,6 @@
 
 #include <coroutine>
 #include <exception>
-#include <chrono>
 #include <mutex>
 #include <condition_variable>
 #include <utility>
@@ -14,6 +13,7 @@
 #include <thread>
 
 #include <NGIN/Async/TaskContext.hpp>
+#include <NGIN/Units.hpp>
 
 namespace NGIN::Async
 {
@@ -98,14 +98,15 @@ namespace NGIN::Async
         using handle_type = std::coroutine_handle<promise_type>;
 
         explicit Task(handle_type h) noexcept
-            : m_handle(h), m_scheduler(nullptr), m_started(false) {}
+            : m_handle(h), m_executor(), m_started(false) {}
 
         Task(Task&& o) noexcept
-            : m_handle(o.m_handle), m_scheduler(o.m_scheduler), m_started(o.m_started.load())
+            : m_handle(o.m_handle), m_executor(o.m_executor), m_started(o.m_started.load()), m_scheduler_ctx(o.m_scheduler_ctx)
         {
             o.m_handle    = nullptr;
-            o.m_scheduler = nullptr;
+            o.m_executor  = {};
             o.m_started   = false;
+            o.m_scheduler_ctx = nullptr;
         }
         Task& operator=(Task&& o) noexcept
         {
@@ -114,11 +115,13 @@ namespace NGIN::Async
                 if (m_handle)
                     m_handle.destroy();
                 m_handle      = o.m_handle;
-                m_scheduler   = o.m_scheduler;
+                m_executor    = o.m_executor;
                 m_started     = o.m_started.load();
                 o.m_handle    = nullptr;
-                o.m_scheduler = nullptr;
+                o.m_executor  = {};
                 o.m_started   = false;
+                m_scheduler_ctx = o.m_scheduler_ctx;
+                o.m_scheduler_ctx = nullptr;
             }
             return *this;
         }
@@ -145,8 +148,8 @@ namespace NGIN::Async
             if (m_started.compare_exchange_strong(expected, true))
             {
                 // If a scheduler is not yet set, this is a bug!
-                assert(m_scheduler && "Task must have a scheduler before being awaited!");
-                m_scheduler->Schedule(m_handle);
+                assert(m_executor.IsValid() && "Task must have an executor before being awaited!");
+                m_executor.Schedule(m_handle);
             }
             // else: already scheduled, just attach continuation
         }
@@ -164,8 +167,9 @@ namespace NGIN::Async
         {
             if (!m_started.exchange(true))
             {
-                m_scheduler = ctx.GetScheduler();
-                m_scheduler->Schedule(m_handle);
+                m_executor      = ctx.GetExecutor();
+                m_scheduler_ctx = &ctx;
+                m_executor.Schedule(m_handle);
             }
         }
 
@@ -262,7 +266,7 @@ namespace NGIN::Async
 
     private:
         handle_type      m_handle;
-        NGIN::Execution::IScheduler* m_scheduler;
+        NGIN::Execution::ExecutorRef m_executor;
         std::atomic_bool m_started;
 
         // For continuation support
@@ -331,14 +335,15 @@ namespace NGIN::Async
         using handle_type = std::coroutine_handle<promise_type>;
 
         explicit Task(handle_type h) noexcept
-            : m_handle(h), m_scheduler(nullptr), m_started(false) {}
+            : m_handle(h), m_executor(), m_started(false) {}
 
         Task(Task&& o) noexcept
-            : m_handle(o.m_handle), m_scheduler(o.m_scheduler), m_started(o.m_started.load())
+            : m_handle(o.m_handle), m_executor(o.m_executor), m_started(o.m_started.load()), m_scheduler_ctx(o.m_scheduler_ctx)
         {
             o.m_handle    = nullptr;
-            o.m_scheduler = nullptr;
+            o.m_executor  = {};
             o.m_started   = false;
+            o.m_scheduler_ctx = nullptr;
         }
         Task& operator=(Task&& o) noexcept
         {
@@ -347,11 +352,13 @@ namespace NGIN::Async
                 if (m_handle)
                     m_handle.destroy();
                 m_handle      = o.m_handle;
-                m_scheduler   = o.m_scheduler;
+                m_executor    = o.m_executor;
                 m_started     = o.m_started.load();
                 o.m_handle    = nullptr;
-                o.m_scheduler = nullptr;
+                o.m_executor  = {};
                 o.m_started   = false;
+                m_scheduler_ctx = o.m_scheduler_ctx;
+                o.m_scheduler_ctx = nullptr;
             }
             return *this;
         }
@@ -377,8 +384,8 @@ namespace NGIN::Async
             bool expected = false;
             if (m_started.compare_exchange_strong(expected, true))
             {
-                assert(m_scheduler && "Task must have a scheduler before being awaited!");
-                m_scheduler->Schedule(m_handle);
+                assert(m_executor.IsValid() && "Task must have an executor before being awaited!");
+                m_executor.Schedule(m_handle);
             }
         }
 
@@ -392,8 +399,9 @@ namespace NGIN::Async
         {
             if (!m_started.exchange(true))
             {
-                m_scheduler = ctx.GetScheduler();
-                m_scheduler->Schedule(m_handle);
+                m_executor      = ctx.GetExecutor();
+                m_scheduler_ctx = &ctx;
+                m_executor.Schedule(m_handle);
             }
         }
 
@@ -489,7 +497,7 @@ namespace NGIN::Async
 
     private:
         handle_type      m_handle;
-        NGIN::Execution::IScheduler* m_scheduler;
+        NGIN::Execution::ExecutorRef m_executor;
         std::atomic_bool m_started;
 
         // For continuation support
@@ -498,26 +506,11 @@ namespace NGIN::Async
 
     public:
         /// Static delay: returns a Task<void> that completes after duration.
-        static Task<void> Delay(TaskContext& ctx, std::chrono::milliseconds duration)
+        template<typename TUnit>
+            requires NGIN::Units::QuantityOf<NGIN::Units::TIME, TUnit>
+        static Task<void> Delay(TaskContext& ctx, const TUnit& duration)
         {
-            struct Awaiter
-            {
-                NGIN::Execution::IScheduler* sched;
-                std::chrono::milliseconds dur;
-                bool                      await_ready() const noexcept
-                {
-                    return dur.count() == 0;
-                }
-                void await_suspend(std::coroutine_handle<> h) const
-                {
-                    std::thread([sched = sched, h, d = dur]() mutable {
-                        std::this_thread::sleep_for(d);
-                        sched->Schedule(h);
-                    }).detach();
-                }
-                void await_resume() const noexcept {}
-            };
-            co_await Awaiter {ctx.GetScheduler(), duration};
+            co_await ctx.Delay(duration);
         }
     };
 

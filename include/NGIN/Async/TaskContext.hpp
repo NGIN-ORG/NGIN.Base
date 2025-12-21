@@ -3,76 +3,106 @@
 /// </summary>
 #pragma once
 
-#include <chrono>
 #include <coroutine>
 #include <utility>
 
-#include <NGIN/Execution/IScheduler.hpp>
+#include <NGIN/Execution/ExecutorRef.hpp>
+#include <NGIN/Time/MonotonicClock.hpp>
+#include <NGIN/Units.hpp>
 
 namespace NGIN::Async
 {
     class TaskContext
     {
     public:
-        explicit TaskContext(NGIN::Execution::IScheduler* scheduler = nullptr) noexcept
-            : m_scheduler(scheduler)
+        constexpr TaskContext() noexcept = default;
+
+        explicit TaskContext(NGIN::Execution::ExecutorRef executor) noexcept
+            : m_executor(executor)
         {
         }
 
-        void Bind(NGIN::Execution::IScheduler* scheduler) noexcept
+        template<typename TScheduler>
+        explicit TaskContext(TScheduler& scheduler) noexcept
+            : m_executor(NGIN::Execution::ExecutorRef::From(scheduler))
         {
-            m_scheduler = scheduler;
         }
 
-        [[nodiscard]] NGIN::Execution::IScheduler* GetScheduler() const noexcept
+        void Bind(NGIN::Execution::ExecutorRef executor) noexcept
         {
-            return m_scheduler;
+            m_executor = executor;
+        }
+
+        template<typename TScheduler>
+        void Bind(TScheduler& scheduler) noexcept
+        {
+            m_executor = NGIN::Execution::ExecutorRef::From(scheduler);
+        }
+
+        [[nodiscard]] NGIN::Execution::ExecutorRef GetExecutor() const noexcept
+        {
+            return m_executor;
         }
 
         auto Yield() const noexcept
         {
             struct Awaiter
             {
-                NGIN::Execution::IScheduler* sched;
+                NGIN::Execution::ExecutorRef exec;
                 bool                         await_ready() const noexcept
                 {
                     return false;
                 }
                 void await_suspend(std::coroutine_handle<> h) const noexcept
                 {
-                    sched->Schedule(h);
+                    exec.Schedule(h);
                 }
                 void await_resume() const noexcept {}
             };
-            return Awaiter {m_scheduler};
+            return Awaiter {m_executor};
         }
 
-        auto Delay(std::chrono::milliseconds dur) const noexcept
+        template<typename TUnit>
+            requires NGIN::Units::QuantityOf<NGIN::Units::TIME, TUnit>
+        auto Delay(const TUnit& dur) const noexcept
         {
             struct DelayAwaiter
             {
-                NGIN::Execution::IScheduler*           sched;
-                std::chrono::milliseconds             dur;
-                std::chrono::steady_clock::time_point until;
+                NGIN::Execution::ExecutorRef           exec;
+                TUnit                                  dur;
+                NGIN::Time::TimePoint                  until;
 
-                DelayAwaiter(NGIN::Execution::IScheduler* s, std::chrono::milliseconds d)
-                    : sched(s)
+                DelayAwaiter(NGIN::Execution::ExecutorRef e, const TUnit& d)
+                    : exec(e)
                     , dur(d)
-                    , until(std::chrono::steady_clock::now() + d)
+                    , until([&] {
+                        const auto now = NGIN::Time::MonotonicClock::Now();
+                        const auto ns  = NGIN::Units::UnitCast<NGIN::Units::Nanoseconds>(d).GetValue();
+                        if (ns <= 0.0)
+                        {
+                            return now;
+                        }
+                        auto add = static_cast<NGIN::UInt64>(ns);
+                        if (static_cast<double>(add) < ns)
+                        {
+                            ++add;
+                        }
+                        return NGIN::Time::TimePoint::FromNanoseconds(now.ToNanoseconds() + add);
+                    }())
                 {
                 }
 
                 bool await_ready() const noexcept
                 {
-                    return dur.count() == 0;
+                    return NGIN::Units::UnitCast<NGIN::Units::Nanoseconds>(dur).GetValue() <= 0.0;
                 }
                 void await_suspend(std::coroutine_handle<> handle) const
                 {
-                    sched->ScheduleDelay(handle, until);
+                    exec.ScheduleAt(handle, until);
                 }
                 void await_resume() const noexcept {}
             };
-            return DelayAwaiter {m_scheduler, dur};
+            return DelayAwaiter {m_executor, dur};
         }
 
         template<typename TaskT>
@@ -91,6 +121,6 @@ namespace NGIN::Async
         }
 
     private:
-        NGIN::Execution::IScheduler* m_scheduler {nullptr};
+        NGIN::Execution::ExecutorRef m_executor {};
     };
 }// namespace NGIN::Async

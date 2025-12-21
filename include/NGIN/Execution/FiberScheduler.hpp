@@ -11,11 +11,13 @@
 #include <thread>
 #include <condition_variable>
 #include <coroutine>
-#include <chrono>
 #include <cassert>
 #include <functional>
 #include <iostream>// For logging, can remove if not desired
 #include <NGIN/Primitives.hpp>
+#include <NGIN/Time/MonotonicClock.hpp>
+#include <NGIN/Time/Sleep.hpp>
+#include <NGIN/Units.hpp>
 #include "IScheduler.hpp"
 #include "Fiber.hpp"
 
@@ -28,8 +30,7 @@ namespace NGIN::Execution
         constexpr static UIntSize DEFAULT_NUM_THREADS = 4;
 
     public:
-        using clock      = std::chrono::steady_clock;
-        using time_point = clock::time_point;
+        using time_point = NGIN::Time::TimePoint;
 
         FiberScheduler(size_t numThreads = DEFAULT_NUM_THREADS, size_t numFibers = DEFAULT_NUM_FIBERS)
             : m_stop(false)
@@ -85,7 +86,7 @@ namespace NGIN::Execution
             m_readyCv.notify_one();
         }
 
-        void ScheduleDelay(std::coroutine_handle<> coro, std::chrono::steady_clock::time_point resumeAt) override
+        void ScheduleAt(std::coroutine_handle<> coro, NGIN::Time::TimePoint resumeAt) override
         {
             {
                 std::lock_guard lock(m_timersMutex);
@@ -166,7 +167,7 @@ namespace NGIN::Execution
         // Timer management
         void CheckSleepingTasks()
         {
-            auto now = clock::now();
+            auto now = NGIN::Time::MonotonicClock::Now();
             std::lock_guard lock(m_timersMutex);
             while (!m_sleepingTasks.empty() && m_sleepingTasks.top().first <= now)
             {
@@ -181,7 +182,7 @@ namespace NGIN::Execution
         {
             while (!m_stop)
             {
-                std::chrono::milliseconds nextSleep = std::chrono::milliseconds(5);
+                NGIN::Units::Milliseconds nextSleep {5.0};
                 bool hasSleeping                    = false;
 
                 {
@@ -189,12 +190,15 @@ namespace NGIN::Execution
                     if (!m_sleepingTasks.empty())
                     {
                         hasSleeping   = true;
-                        auto now      = clock::now();
+                        auto now      = NGIN::Time::MonotonicClock::Now();
                         auto resumeAt = m_sleepingTasks.top().first;
                         if (resumeAt > now)
-                            nextSleep = std::chrono::duration_cast<std::chrono::milliseconds>(resumeAt - now);
+                        {
+                            const auto deltaNs = resumeAt.ToNanoseconds() - now.ToNanoseconds();
+                            nextSleep          = NGIN::Units::Milliseconds(static_cast<double>(deltaNs) / 1'000'000.0);
+                        }
                         else
-                            nextSleep = std::chrono::milliseconds(0);
+                            nextSleep = NGIN::Units::Milliseconds {0.0};
                     }
                 }
 
@@ -203,10 +207,10 @@ namespace NGIN::Execution
                 m_readyCv.notify_all();
 
                 // Yield if no sleeping tasks, or if nextSleep is zero; otherwise sleep
-                if (!hasSleeping || nextSleep.count() == 0)
+                if (!hasSleeping || nextSleep.GetValue() == 0.0)
                     std::this_thread::yield();
                 else
-                    std::this_thread::sleep_for(nextSleep);
+                    NGIN::Time::SleepFor(nextSleep);
             }
         }
 

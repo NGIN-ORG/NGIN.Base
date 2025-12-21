@@ -1,8 +1,8 @@
 #pragma once
-#include <chrono>
 
 #include <NGIN/Units.hpp>
 #include <NGIN/Primitives.hpp>
+#include <NGIN/Time/MonotonicClock.hpp>
 
 using namespace NGIN::Units;
 
@@ -15,21 +15,21 @@ namespace NGIN
         /// @brief Start the timer
         inline void Start() noexcept
         {
-            start     = Clock::now();
+            start     = NGIN::Time::MonotonicClock::Now();
             isRunning = true;
         }
 
         /// @brief Stop the timer
         inline void Stop() noexcept
         {
-            end       = Clock::now();
+            end       = NGIN::Time::MonotonicClock::Now();
             isRunning = false;
         }
 
         /// @brief Reset the timer
         inline void Reset() noexcept
         {
-            start = Clock::now();
+            start = NGIN::Time::MonotonicClock::Now();
         }
 
         /// @brief Get the elapsed time in the specified time unit (defaults to Seconds)
@@ -40,24 +40,18 @@ namespace NGIN
         inline TUnit GetElapsed() const noexcept
         {
             using ValueT = typename TUnit::ValueType;
-            // Determine current or stored end time
-            const auto now = isRunning ? Clock::now() : end;
-            // Compute duration since start
-            auto diff = now - start;
-            // Convert to seconds
-            ValueT secs = std::chrono::duration<ValueT>(diff).count();
-            // Convert to desired unit
+            const auto nowNanos = (isRunning ? NGIN::Time::MonotonicClock::Now() : end).ToNanoseconds();
+            const auto diffNanos = nowNanos - start.ToNanoseconds();
+            const auto secs = static_cast<ValueT>(diffNanos) / static_cast<ValueT>(1'000'000'000.0);
             return UnitCast<TUnit>(Seconds(secs));
         }
 
 
     private:
-        /// Clock type for timing
-        using Clock = std::chrono::steady_clock;
         /// @brief The start time
-        std::chrono::time_point<Clock> start = {};
+        NGIN::Time::TimePoint start = {};
         /// @brief The end time
-        std::chrono::time_point<Clock> end = {};
+        NGIN::Time::TimePoint end = {};
         /// @brief Is the timer running
         bool isRunning = false;
     };

@@ -10,7 +10,9 @@
 #include <mutex>
 #include <condition_variable>
 #include <atomic>
-#include <chrono>
+#include <NGIN/Time/MonotonicClock.hpp>
+#include <NGIN/Time/Sleep.hpp>
+#include <NGIN/Units.hpp>
 
 namespace NGIN::Execution
 {
@@ -63,12 +65,18 @@ namespace NGIN::Execution
             m_cv.notify_one();
         }
 
-        void ScheduleDelay(std::coroutine_handle<> coro, std::chrono::steady_clock::time_point resumeAt) override
+        void ScheduleAt(std::coroutine_handle<> coro, NGIN::Time::TimePoint resumeAt) override
         {
-            auto now = std::chrono::steady_clock::now();
-            auto dur = (resumeAt > now) ? (resumeAt - now) : std::chrono::milliseconds(0);
-            std::thread([this, coro, dur]() {
-                std::this_thread::sleep_for(dur);
+            const auto now = NGIN::Time::MonotonicClock::Now();
+            if (resumeAt <= now)
+            {
+                Schedule(coro);
+                return;
+            }
+
+            const auto delayNs = resumeAt.ToNanoseconds() - now.ToNanoseconds();
+            std::thread([this, coro, delayNs]() {
+                NGIN::Time::SleepFor(NGIN::Units::Nanoseconds(static_cast<double>(delayNs)));
                 Schedule(coro);
             }).detach();
         }

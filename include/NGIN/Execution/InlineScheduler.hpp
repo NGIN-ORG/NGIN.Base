@@ -4,10 +4,11 @@
 
 #include <NGIN/Execution/IScheduler.hpp>
 
-#include <chrono>
 #include <coroutine>
 #include <cstdint>
-#include <thread>
+#include <NGIN/Time/MonotonicClock.hpp>
+#include <NGIN/Time/Sleep.hpp>
+#include <NGIN/Units.hpp>
 
 namespace NGIN::Execution
 {
@@ -25,12 +26,13 @@ namespace NGIN::Execution
             }
         }
 
-        void ScheduleDelay(std::coroutine_handle<> coro, std::chrono::steady_clock::time_point resumeAt) override
+        void ScheduleAt(std::coroutine_handle<> coro, NGIN::Time::TimePoint resumeAt) override
         {
-            auto now = std::chrono::steady_clock::now();
+            const auto now = NGIN::Time::MonotonicClock::Now();
             if (resumeAt > now)
             {
-                std::this_thread::sleep_for(resumeAt - now);
+                const auto delayNs = resumeAt.ToNanoseconds() - now.ToNanoseconds();
+                NGIN::Time::SleepFor(NGIN::Units::Nanoseconds(static_cast<double>(delayNs)));
             }
             Schedule(coro);
         }

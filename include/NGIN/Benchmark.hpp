@@ -18,6 +18,10 @@
 #include <NGIN/Units.hpp>
 #include <NGIN/Utilities/Callable.hpp>// SBO‐optimized Callable
 
+//include iomanip for non windows
+#ifndef _WIN32
+#include <iomanip>
+#endif
 namespace NGIN
 {
     /// \brief  Passed to your benchmarked function so it can bracket

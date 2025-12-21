@@ -2,12 +2,15 @@
 /// @brief Cross-platform thread wrapper.
 #pragma once
 
-#include <chrono>
 #include <functional>
 #include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
+
+#include <NGIN/Time/MonotonicClock.hpp>
+#include <NGIN/Time/Sleep.hpp>
+#include <NGIN/Units.hpp>
 
 #if defined(_WIN32)
 #include <Windows.h>
@@ -100,16 +103,22 @@ namespace NGIN::Execution
             return m_thread.get_id();
         }
 
-        template<typename Rep, typename Period>
-        static void SleepFor(const std::chrono::duration<Rep, Period>& d)
+        template<typename TUnit>
+            requires NGIN::Units::QuantityOf<NGIN::Units::TIME, TUnit>
+        static void SleepFor(const TUnit& duration) noexcept
         {
-            std::this_thread::sleep_for(d);
+            NGIN::Time::SleepFor(duration);
         }
 
-        template<typename Clock, typename Duration>
-        static void SleepUntil(const std::chrono::time_point<Clock, Duration>& tp)
+        static void SleepUntil(NGIN::Time::TimePoint timePoint) noexcept
         {
-            std::this_thread::sleep_until(tp);
+            const auto now = NGIN::Time::MonotonicClock::Now();
+            if (timePoint <= now)
+            {
+                return;
+            }
+            const auto deltaNs = timePoint.ToNanoseconds() - now.ToNanoseconds();
+            NGIN::Time::SleepFor(NGIN::Units::Nanoseconds(static_cast<double>(deltaNs)));
         }
 
     private:
