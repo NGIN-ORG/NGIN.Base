@@ -8,6 +8,8 @@
 #include <memory>
 #include <stdexcept>
 #include <utility>
+#include <cstdint>
+#include <climits>
 
 #include <ucontext.h>
 
@@ -29,8 +31,21 @@ namespace NGIN::Execution::detail
         thread_local ucontext_t  mainContext;
         thread_local bool        mainContextInitialized = false;
 
-        void Trampoline(FiberState* state)
+        std::uintptr_t CombinePointerParts(int low, int high) noexcept
         {
+            const auto lowU  = static_cast<std::uint32_t>(low);
+            const auto highU = static_cast<std::uint32_t>(high);
+#if INTPTR_MAX > INT32_MAX
+            return (static_cast<std::uintptr_t>(highU) << 32) | static_cast<std::uintptr_t>(lowU);
+#else
+            (void)highU;
+            return static_cast<std::uintptr_t>(lowU);
+#endif
+        }
+
+        void Trampoline(int low, int high)
+        {
+            auto* state = reinterpret_cast<FiberState*>(CombinePointerParts(low, high));
             currentFiber = state;
             for (;;)
             {
@@ -77,7 +92,15 @@ namespace NGIN::Execution::detail
         state->context.uc_stack.ss_sp   = state->stack.get();
         state->context.uc_stack.ss_size = state->stackSize;
         state->context.uc_link          = nullptr;
-        makecontext(&state->context, (void (*)()) &Trampoline, 1, state);
+
+        const auto ptr = reinterpret_cast<std::uintptr_t>(state);
+        const auto low = static_cast<int>(static_cast<std::uint32_t>(ptr));
+#if INTPTR_MAX > INT32_MAX
+        const auto high = static_cast<int>(static_cast<std::uint32_t>(ptr >> 32));
+#else
+        const auto high = 0;
+#endif
+        makecontext(&state->context, reinterpret_cast<void (*)()>(&Trampoline), 2, low, high);
         return state;
     }
 

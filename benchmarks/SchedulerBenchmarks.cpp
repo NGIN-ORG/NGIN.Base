@@ -18,9 +18,9 @@ int main()
     {
         struct promise_type
         {
-            BenchTask get_return_object()
+            BenchTask get_return_object() noexcept
             {
-                return BenchTask {std::coroutine_handle<promise_type>::from_promise(*this)};
+                return {};
             }
             std::suspend_never initial_suspend() noexcept
             {
@@ -36,19 +36,6 @@ int main()
                 std::terminate();
             }
         };
-        std::coroutine_handle<promise_type> handle;
-        explicit BenchTask(std::coroutine_handle<promise_type> h) : handle(h) {}
-        BenchTask(BenchTask&& other) noexcept : handle(other.handle)
-        {
-            other.handle = nullptr;
-        }
-        ~BenchTask()
-        {
-            if (handle)
-                handle.destroy();
-        }
-        BenchTask(const BenchTask&)            = delete;
-        BenchTask& operator=(const BenchTask&) = delete;
     };
 
     // FiberScheduler benchmark
@@ -70,26 +57,20 @@ int main()
             }
             void await_resume() const noexcept
             {
-                ++completed;
             }
         };
         auto bench_coro = [](NGIN::Execution::FiberScheduler& sched, std::atomic<int>& completed) -> BenchTask {
             co_await Awaitable {sched, completed};
+            ++completed;
         };
-        std::vector<BenchTask> tasks;
-        tasks.reserve(numCoroutines);
         for (int i = 0; i < numCoroutines; ++i)
         {
-            tasks.emplace_back(bench_coro(scheduler, completed));
+            bench_coro(scheduler, completed);
         }
         while (completed.load() < numCoroutines)
         {
         }
         ctx.stop();
-
-        // Prevent double-destroy: clear all handles before vector destruction
-        for (auto& t: tasks)
-            t.handle = nullptr;
     },
                         "FiberScheduler schedule+complete 10k coroutines");
 
@@ -112,26 +93,20 @@ int main()
             }
             void await_resume() const noexcept
             {
-                ++completed;
             }
         };
         auto bench_coro = [](NGIN::Execution::ThreadPoolScheduler& sched, std::atomic<int>& completed) -> BenchTask {
             co_await Awaitable {sched, completed};
+            ++completed;
         };
-        std::vector<BenchTask> tasks;
-        tasks.reserve(numCoroutines);
         for (int i = 0; i < numCoroutines; ++i)
         {
-            tasks.emplace_back(bench_coro(scheduler, completed));
+            bench_coro(scheduler, completed);
         }
         while (completed.load() < numCoroutines)
         {
         }
         ctx.stop();
-
-        // Prevent double-destroy: clear all handles before vector destruction
-        for (auto& t: tasks)
-            t.handle = nullptr;
     },
                         "ThreadPoolScheduler schedule+complete 10k coroutines");
 

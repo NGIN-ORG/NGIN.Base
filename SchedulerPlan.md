@@ -15,6 +15,7 @@ Second priority is ergonomics (a .NET-like async experience) built on top of the
 - [x] **Time module**: added `NGIN::Time::TimePoint` + `NGIN::Time::MonotonicClock` + `NGIN::Time::SleepFor` (no public `std::chrono`).
 - [x] **Timer refactor**: updated `NGIN::Timer` to use `NGIN::Time` internally (no `<chrono>` include).
 - [x] **Scheduler/Async API time migration**: replaced `ScheduleDelay(std::chrono::...)` with `ScheduleAt(NGIN::Time::TimePoint)` and updated `TaskContext::Delay` / `Task::Delay` to take `NGIN::Units` time units.
+- [x] **Benchmark stability**: fixed Release `SchedulerBenchmarks` crashes by correcting coroutine lifetime in the benchmark harness and making POSIX `FiberScheduler` fibers thread-affine (no cross-thread `ucontext` reuse) + safe `makecontext` argument passing.
 - [ ] **Timer subsystem**: remove per-delay detached threads in `ThreadPoolScheduler` (still present via `ScheduleAt`).
 - [x] **ExecutorRef (coroutine path)**: introduced `NGIN::Execution::ExecutorRef` and migrated `TaskContext`/`Task` to use it (still coroutine-only).
 - [ ] **Executor layer (full)**: add job scheduling + `WorkItem` and decouple scheduling from coroutines.

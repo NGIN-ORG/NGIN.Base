@@ -35,18 +35,17 @@ namespace NGIN::Execution
         FiberScheduler(size_t numThreads = DEFAULT_NUM_THREADS, size_t numFibers = DEFAULT_NUM_FIBERS)
             : m_stop(false)
         {
-            // Preallocate fibers (named for easier debugging)
-            m_allFibers.reserve(numFibers);
-            for (size_t i = 0; i < numFibers; ++i)
+            const auto effectiveThreads = numThreads == 0 ? static_cast<size_t>(DEFAULT_NUM_THREADS) : numThreads;
+            const auto effectiveFibers  = numFibers == 0 ? static_cast<size_t>(DEFAULT_NUM_FIBERS) : numFibers;
+            m_fibersPerThread           = (effectiveFibers + effectiveThreads - 1) / effectiveThreads;
+            if (m_fibersPerThread == 0)
             {
-                auto fiber = std::make_unique<Fiber>();
-                m_fiberPool.push(fiber.get());
-                m_allFibers.push_back(std::move(fiber));
+                m_fibersPerThread = 1;
             }
 
             // Launch worker threads
-            for (size_t i = 0; i < numThreads; ++i)
-                m_threads.emplace_back([this, i] { WorkerLoop(i); });
+            for (size_t i = 0; i < effectiveThreads; ++i)
+                m_threads.emplace_back([this] { WorkerLoop(); });
 
             // Launch driver thread (for time-based scheduling)
             m_driverThread = std::thread([this] { DriverLoop(); });
@@ -137,10 +136,7 @@ namespace NGIN::Execution
         int m_priority {0};
         uint64_t m_affinityMask {0};
 
-        // Fibers
-        std::vector<std::unique_ptr<Fiber>> m_allFibers;
-        std::queue<Fiber*> m_fiberPool;
-        std::mutex m_fiberMutex;
+        size_t m_fibersPerThread {1};
 
         // Worker threads
         std::vector<std::thread> m_threads;
@@ -168,12 +164,18 @@ namespace NGIN::Execution
         void CheckSleepingTasks()
         {
             auto now = NGIN::Time::MonotonicClock::Now();
-            std::lock_guard lock(m_timersMutex);
-            while (!m_sleepingTasks.empty() && m_sleepingTasks.top().first <= now)
+            std::vector<std::coroutine_handle<>> expired;
             {
-                // Move expired task to ready queue
-                Schedule(m_sleepingTasks.top().second);
-                m_sleepingTasks.pop();
+                std::lock_guard lock(m_timersMutex);
+                while (!m_sleepingTasks.empty() && m_sleepingTasks.top().first <= now)
+                {
+                    expired.push_back(m_sleepingTasks.top().second);
+                    m_sleepingTasks.pop();
+                }
+            }
+            for (auto h: expired)
+            {
+                Schedule(h);
             }
         }
 
@@ -215,10 +217,21 @@ namespace NGIN::Execution
         }
 
         // Worker threads: each pulls a ready coroutine, runs it on a fiber, returns fiber to pool
-        void WorkerLoop(size_t threadIdx)
+        void WorkerLoop()
         {
             // Convert this thread to a fiber (for cooperative scheduling)
             Fiber::EnsureMainFiber();
+
+            std::vector<std::unique_ptr<Fiber>> fibers;
+            fibers.reserve(m_fibersPerThread);
+            std::vector<Fiber*> fiberPool;
+            fiberPool.reserve(m_fibersPerThread);
+            for (size_t i = 0; i < m_fibersPerThread; ++i)
+            {
+                auto fiber = std::make_unique<Fiber>();
+                fiberPool.push_back(fiber.get());
+                fibers.push_back(std::move(fiber));
+            }
 
             while (!m_stop.load())
             {
@@ -243,32 +256,28 @@ namespace NGIN::Execution
                     continue;
 
                 Fiber* fiber = nullptr;
+                if (fiberPool.empty())
                 {
-                    std::lock_guard lock(m_fiberMutex);
-                    if (m_fiberPool.empty())
-                    {
-                        // No fiber available, put back and yield
-                        std::lock_guard lock2(m_readyMutex);
-                        m_readyQueue.push(coro);
-                        std::this_thread::yield();
-                        continue;
-                    }
-                    fiber = m_fiberPool.front();
-                    m_fiberPool.pop();
+                    // Defensive fallback: should not happen; run directly rather than deadlocking.
+                    if (coro && !coro.done())
+                        coro.resume();
+                    continue;
                 }
+                fiber = fiberPool.back();
+                fiberPool.pop_back();
 
                 // Defensive: must be assignable (not running)
                 try
                 {
-                    fiber->Assign([coro]() { coro.resume(); });
+                    fiber->Assign([coro]() {
+                        if (coro && !coro.done())
+                            coro.resume();
+                    });
                 } catch (const std::exception& ex)
                 {
                     // Should never happen unless fiber is misused, but handle gracefully
                     std::cerr << "[FiberScheduler] Fiber assign failed: " << ex.what() << std::endl;
-                    {
-                        std::lock_guard lock2(m_fiberMutex);
-                        m_fiberPool.push(fiber);
-                    }
+                    fiberPool.push_back(fiber);
                     continue;
                 }
 
@@ -280,10 +289,7 @@ namespace NGIN::Execution
                     std::cerr << "[FiberScheduler] Exception in fiber: " << ex.what() << std::endl;
                 }
                 // Return fiber to pool
-                {
-                    std::lock_guard lock(m_fiberMutex);
-                    m_fiberPool.push(fiber);
-                }
+                fiberPool.push_back(fiber);
             }
         }
 
