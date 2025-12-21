@@ -23,6 +23,7 @@ Second priority is ergonomics (a .NET-like async experience) built on top of the
 - [x] **Thread pool rewrite**: per-worker queues + work stealing + `NGIN::Sync::AtomicCondition` wakeups (spinlock-based queues; can be upgraded to lock-free later).
 - [x] **Task continuation cleanup (partial)**: removed detached threads from `Task::Then` and scheduled task continuations via `ExecutorRef` instead of resuming inline.
 - [x] **Task completion cleanup (partial)**: replaced `std::condition_variable` waits with `NGIN::Sync::AtomicCondition` + atomic completion flag.
+- [x] **SchedulerBenchmarks coverage**: added job enqueue+run baselines for both `FiberScheduler` and `ThreadPoolScheduler`.
 - [ ] **Task cleanup**: implement cancellation propagation, and add `WhenAll/WhenAny` after perf baseline.
 
 ## Goals

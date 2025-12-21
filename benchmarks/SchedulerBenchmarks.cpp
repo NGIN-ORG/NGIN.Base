@@ -81,6 +81,31 @@ int main()
             ctx.stop();
         },
                             "FiberScheduler schedule+complete 10k coroutines");
+
+        Benchmark::Register([](BenchmarkContext& ctx) {
+            ctx.start();
+            NGIN::Execution::FiberScheduler scheduler(numThreads, numFibers);
+            std::atomic<int> completed {0};
+
+            auto job = [&completed]() noexcept {
+                completed.fetch_add(1, std::memory_order_release);
+                completed.notify_one();
+            };
+
+            for (int i = 0; i < numCoroutines; ++i)
+            {
+                scheduler.Execute(NGIN::Execution::WorkItem(NGIN::Utilities::Callable<void()>(job)));
+            }
+
+            auto value = completed.load(std::memory_order_acquire);
+            while (value < numCoroutines)
+            {
+                completed.wait(value);
+                value = completed.load(std::memory_order_acquire);
+            }
+            ctx.stop();
+        },
+                            "FiberScheduler enqueue+run 10k jobs");
     }
 
     // ThreadPoolScheduler benchmark
@@ -124,6 +149,31 @@ int main()
             ctx.stop();
         },
                             "ThreadPoolScheduler schedule+complete 10k coroutines");
+
+        Benchmark::Register([](BenchmarkContext& ctx) {
+            ctx.start();
+            NGIN::Execution::ThreadPoolScheduler scheduler(numThreads);
+            std::atomic<int> completed {0};
+
+            auto job = [&completed]() noexcept {
+                completed.fetch_add(1, std::memory_order_release);
+                completed.notify_one();
+            };
+
+            for (int i = 0; i < numCoroutines; ++i)
+            {
+                scheduler.Execute(NGIN::Execution::WorkItem(NGIN::Utilities::Callable<void()>(job)));
+            }
+
+            auto value = completed.load(std::memory_order_acquire);
+            while (value < numCoroutines)
+            {
+                completed.wait(value);
+                value = completed.load(std::memory_order_acquire);
+            }
+            ctx.stop();
+        },
+                            "ThreadPoolScheduler enqueue+run 10k jobs");
     }
 
     // Run all benchmarks and print results
