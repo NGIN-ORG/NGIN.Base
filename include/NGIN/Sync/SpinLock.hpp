@@ -1,20 +1,19 @@
 #pragma once
 
-#include <NGIN/Sync/ILockable.hpp>
 #include <atomic>
 #include <thread>
 
 namespace NGIN::Sync
 {
     /// @brief A simple spin lock implementation
-    class SpinLock : public ILockable
+    class SpinLock
     {
     public:
         SpinLock()                           = default;
         SpinLock(const SpinLock&)            = delete;
         SpinLock& operator=(const SpinLock&) = delete;
 
-        void Lock() noexcept override
+        void Lock() noexcept
         {
             int backoff = 1;
             while (true)
@@ -32,15 +31,30 @@ namespace NGIN::Sync
         }
 
 
-        void Unlock() noexcept override
+        void Unlock() noexcept
         {
             lock.store(false, std::memory_order_release);
         }
 
-        [[nodiscard]] bool TryLock() noexcept override
+        [[nodiscard]] bool TryLock() noexcept
         {
             bool expected = false;
             return lock.compare_exchange_strong(expected, true, std::memory_order_acquire);
+        }
+
+        void lock() noexcept
+        {
+            Lock();
+        }
+
+        void unlock() noexcept
+        {
+            Unlock();
+        }
+
+        [[nodiscard]] bool try_lock() noexcept
+        {
+            return TryLock();
         }
 
     private:

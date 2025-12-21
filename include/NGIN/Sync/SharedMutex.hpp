@@ -1,12 +1,11 @@
 #pragma once
 
 #include <shared_mutex>
-#include <NGIN/Sync/ILockable.hpp>
 
 namespace NGIN::Sync
 {
 
-    class SharedMutex : public ILockable
+    class SharedMutex
     {
     public:
         SharedMutex()                              = default;
@@ -14,15 +13,15 @@ namespace NGIN::Sync
         SharedMutex& operator=(const SharedMutex&) = delete;
 
         // Exclusive locking
-        void Lock() noexcept override
+        void Lock() noexcept
         {
             mutex.lock();
         }
-        bool TryLock() noexcept override
+        bool TryLock() noexcept
         {
             return mutex.try_lock();
         }
-        void Unlock() noexcept override
+        void Unlock() noexcept
         {
             mutex.unlock();
         }
@@ -39,6 +38,36 @@ namespace NGIN::Sync
         void UnlockShared() noexcept
         {
             mutex.unlock_shared();
+        }
+
+        void lock() noexcept
+        {
+            Lock();
+        }
+
+        void unlock() noexcept
+        {
+            Unlock();
+        }
+
+        [[nodiscard]] bool try_lock() noexcept
+        {
+            return TryLock();
+        }
+
+        void lock_shared() noexcept
+        {
+            LockShared();
+        }
+
+        void unlock_shared() noexcept
+        {
+            UnlockShared();
+        }
+
+        [[nodiscard]] bool try_lock_shared() noexcept
+        {
+            return TryLockShared();
         }
 
     private:

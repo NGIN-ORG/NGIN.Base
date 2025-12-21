@@ -56,5 +56,35 @@ namespace NGIN::Sync
         {
             TryLock();
         }
+
+        void lock() noexcept
+        {
+            StartWrite();
+        }
+
+        void unlock() noexcept
+        {
+            EndWrite();
+        }
+
+        void lock_shared() noexcept
+        {
+            StartRead();
+        }
+
+        void unlock_shared() noexcept
+        {
+            EndRead();
+        }
+
+        [[nodiscard]] bool try_lock() noexcept
+        {
+            return TryLock();
+        }
+
+        [[nodiscard]] bool try_lock_shared() noexcept
+        {
+            return TryLockShared();
+        }
     };
 }// namespace NGIN::Sync

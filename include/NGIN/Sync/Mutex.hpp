@@ -1,12 +1,11 @@
 #pragma once
 
 #include <mutex>
-#include <NGIN/Sync/ILockable.hpp>
 
 namespace NGIN::Sync
 {
     /// @brief A simple mutex wrapper.
-    class Mutex : public ILockable
+    class Mutex
     {
     public:
         Mutex()                        = default;
@@ -14,19 +13,34 @@ namespace NGIN::Sync
         Mutex& operator=(const Mutex&) = delete;
         ~Mutex()                       = default;
 
-        void Lock() override
+        void Lock()
         {
             m_mutex.lock();
         }
 
-        void Unlock() override
+        void Unlock()
         {
             m_mutex.unlock();
         }
 
-        [[nodiscard]] bool TryLock() noexcept override
+        [[nodiscard]] bool TryLock() noexcept
         {
             return m_mutex.try_lock();
+        }
+
+        void lock()
+        {
+            Lock();
+        }
+
+        void unlock()
+        {
+            Unlock();
+        }
+
+        [[nodiscard]] bool try_lock() noexcept
+        {
+            return TryLock();
         }
 
     private:

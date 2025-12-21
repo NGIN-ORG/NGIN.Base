@@ -1,12 +1,11 @@
 #pragma once
 
 #include <mutex>
-#include <NGIN/Sync/ILockable.hpp>
 
 namespace NGIN::Sync
 {
     /// @brief A simple recursive mutex wrapper.
-    class RecursiveMutex : public ILockable
+    class RecursiveMutex
     {
     public:
         RecursiveMutex()                                 = default;
@@ -14,19 +13,34 @@ namespace NGIN::Sync
         RecursiveMutex& operator=(const RecursiveMutex&) = delete;
         ~RecursiveMutex()                                = default;
 
-        void Lock() noexcept override
+        void Lock() noexcept
         {
             m_recursiveMutex.lock();
         }
 
-        void Unlock() noexcept override
+        void Unlock() noexcept
         {
             m_recursiveMutex.unlock();
         }
 
-        [[nodiscard]] bool TryLock() noexcept override
+        [[nodiscard]] bool TryLock() noexcept
         {
             return m_recursiveMutex.try_lock();
+        }
+
+        void lock() noexcept
+        {
+            Lock();
+        }
+
+        void unlock() noexcept
+        {
+            Unlock();
+        }
+
+        [[nodiscard]] bool try_lock() noexcept
+        {
+            return TryLock();
         }
 
     private:

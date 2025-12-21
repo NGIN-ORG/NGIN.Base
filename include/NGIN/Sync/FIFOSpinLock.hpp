@@ -3,19 +3,18 @@
 #include <atomic>
 #include <thread>
 #include <NGIN/Primitives.hpp>
-#include <NGIN/Sync/ILockable.hpp>
 
 namespace NGIN::Sync
 {
 
-    class TicketLock : public ILockable
+    class TicketLock
     {
     public:
         TicketLock()                             = default;
         TicketLock(const TicketLock&)            = delete;
         TicketLock& operator=(const TicketLock&) = delete;
 
-        void Lock() noexcept override
+        void Lock() noexcept
         {
             // Fetch a ticket (the order in which threads will be served)
             const UInt32 ticket = m_nextTicket.fetch_add(1u, std::memory_order_relaxed);
@@ -27,7 +26,7 @@ namespace NGIN::Sync
         }
 
         [[nodiscard]]
-        bool TryLock() noexcept override
+        bool TryLock() noexcept
         {
             // If the lock is free, m_nextTicket and m_nowServing are equal.
             UInt32 current = m_nowServing.load(std::memory_order_acquire);
@@ -42,10 +41,25 @@ namespace NGIN::Sync
             return false;
         }
 
-        void Unlock() noexcept override
+        void Unlock() noexcept
         {
             // Release the lock by allowing the next ticket to be served.
             m_nowServing.fetch_add(1u, std::memory_order_release);
+        }
+
+        void lock() noexcept
+        {
+            Lock();
+        }
+
+        void unlock() noexcept
+        {
+            Unlock();
+        }
+
+        [[nodiscard]] bool try_lock() noexcept
+        {
+            return TryLock();
         }
 
     private:
