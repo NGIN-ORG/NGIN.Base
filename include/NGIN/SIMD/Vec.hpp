@@ -758,71 +758,36 @@ namespace NGIN::SIMD
             }
         };
 
-        template<class Backend, class T>
-        struct MathPolicyLane<FastMathPolicy, Backend, T> : MathPolicyLane<StrictMathPolicy, Backend, T>
-        {
-            static_assert(std::is_floating_point_v<T>, "FastMathPolicy requires floating-point lane types.");
+	        template<class Backend, class T>
+	        struct MathPolicyLane<FastMathPolicy, Backend, T> : MathPolicyLane<StrictMathPolicy, Backend, T>
+	        {
+	            static_assert(std::is_floating_point_v<T>, "FastMathPolicy requires floating-point lane types.");
 
-            [[nodiscard]] static auto Exp(T value) noexcept -> T
-            {
-                if constexpr (std::is_same_v<T, float>)
-                {
-                    return std::expf(value);
-                }
-                else
-                {
-                    return std::exp(value);
-                }
-            }
+	            [[nodiscard]] static auto Exp(T value) noexcept -> T
+	            {
+	                return std::exp(value);
+	            }
 
-            [[nodiscard]] static auto Log(T value) noexcept -> T
-            {
-                if constexpr (std::is_same_v<T, float>)
-                {
-                    return std::logf(value);
-                }
-                else
-                {
-                    return std::log(value);
-                }
-            }
+	            [[nodiscard]] static auto Log(T value) noexcept -> T
+	            {
+	                return std::log(value);
+	            }
 
-            [[nodiscard]] static auto Sin(T value) noexcept -> T
-            {
-                if constexpr (std::is_same_v<T, float>)
-                {
-                    return std::sinf(value);
-                }
-                else
-                {
-                    return std::sin(value);
-                }
-            }
+	            [[nodiscard]] static auto Sin(T value) noexcept -> T
+	            {
+	                return std::sin(value);
+	            }
 
-            [[nodiscard]] static auto Cos(T value) noexcept -> T
-            {
-                if constexpr (std::is_same_v<T, float>)
-                {
-                    return std::cosf(value);
-                }
-                else
-                {
-                    return std::cos(value);
-                }
-            }
+	            [[nodiscard]] static auto Cos(T value) noexcept -> T
+	            {
+	                return std::cos(value);
+	            }
 
-            [[nodiscard]] static auto Sqrt(T value) noexcept -> T
-            {
-                if constexpr (std::is_same_v<T, float>)
-                {
-                    return std::sqrtf(value);
-                }
-                else
-                {
-                    return std::sqrt(value);
-                }
-            }
-        };
+	            [[nodiscard]] static auto Sqrt(T value) noexcept -> T
+	            {
+	                return std::sqrt(value);
+	            }
+	        };
 
         template<class Policy, class VecType>
         struct VectorizedMath
