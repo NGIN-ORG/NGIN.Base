@@ -7,6 +7,7 @@
 #include <new>        // operator new, operator delete
 #include <stdexcept>  // std::bad_function_call, std::runtime_error
 #include <cstring>    // std::memcpy
+#include <exception>  // std::terminate
 #include <functional>
 
 namespace NGIN::Utilities
@@ -70,15 +71,15 @@ namespace NGIN::Utilities
 
         /// \brief Copy-assigns from another Callable.
         ///
-        /// Destroys any existing callable, then copies from the source.
+        /// Provides the strong exception guarantee: if copying throws, this Callable is unchanged.
         /// Throws std::runtime_error if the target is not copyable.
         /// @param other Callable to copy from
         Callable& operator=(const Callable& other)
         {
             if (this != &other)
             {
-                Reset();
-                CopyFrom(other);
+                Callable copy(other);
+                Swap(copy);
             }
             return *this;
         }
@@ -135,53 +136,53 @@ namespace NGIN::Utilities
         /// @return Result of invoking the callable
         auto operator()(Args... args) const -> R
         {
-            if (!m_invoke)
+            if (!m_vtable)
             {
                 throw std::bad_function_call();
             }
-            return m_invoke(const_cast<void*>(GetPtr()), std::forward<Args>(args)...);
+            return m_vtable->invoke(const_cast<void*>(GetPtr()), std::forward<Args>(args)...);
         }
 
         /// \brief Checks if the Callable is non-empty.
         /// @return True if a callable is stored, false otherwise
         explicit operator bool() const noexcept
         {
-            return m_invoke != nullptr;
+            return m_vtable != nullptr;
         }
 
         /// \brief Destroys any stored callable and makes this empty.
         void Reset() noexcept
         {
-            if (m_destroy)
+            if (m_vtable)
             {
-                m_destroy(GetPtr());
+                m_vtable->destroy(GetPtr());
             }
-            m_invoke    = nullptr;
-            m_copy      = nullptr;
-            m_move      = nullptr;
-            m_destroy   = nullptr;
-            m_size      = 0;
+            m_vtable    = nullptr;
             m_usingHeap = false;
         }
 
-        /// \brief Swaps the contents of two Callables in O(1) time.
+        /// \brief Swaps the contents of two Callables.
         ///
         /// Both inline and heap-stored cases are handled.
         /// @param other Callable to swap with
         void Swap(Callable& other) noexcept
         {
-            using std::swap;
-            if (!m_invoke && !other.m_invoke)
+            if (this == &other)
             {
                 return;
             }
-            swap(m_storage, other.m_storage);
-            swap(m_size, other.m_size);
-            swap(m_usingHeap, other.m_usingHeap);
-            swap(m_invoke, other.m_invoke);
-            swap(m_copy, other.m_copy);
-            swap(m_move, other.m_move);
-            swap(m_destroy, other.m_destroy);
+
+            if (m_usingHeap && other.m_usingHeap)
+            {
+                using std::swap;
+                swap(m_storage.heapPtr, other.m_storage.heapPtr);
+                swap(m_vtable, other.m_vtable);
+                return;
+            }
+
+            Callable temp(std::move(other));
+            other = std::move(*this);
+            *this = std::move(temp);
         }
 
     private:
@@ -209,7 +210,88 @@ namespace NGIN::Utilities
         /// \brief Type-erased function pointer for destruction.
         ///
         /// Destroys the stored object and, if heap-allocated, deallocates memory.
-        using DestroyFn = void (*)(void* storagePtr);
+        using DestroyFn = void (*)(void* storagePtr) noexcept;
+
+        struct VTable
+        {
+            InvokeFn invoke;
+            CopyFn copy;
+            MoveFn move;
+            DestroyFn destroy;
+            std::size_t size;
+            std::size_t alignment;
+        };
+
+        template<typename T, bool IsHeap>
+        struct VTableFor
+        {
+            static auto Invoke(void* ptr, Args&&... args) -> R
+            {
+                auto* obj = static_cast<T*>(ptr);
+                return (*obj)(std::forward<Args>(args)...);
+            }
+
+            static void Copy(void* dest, const void* src)
+            {
+                if constexpr (std::is_trivially_copyable_v<T>)
+                {
+                    std::memcpy(dest, src, sizeof(T));
+                }
+                else if constexpr (std::is_copy_constructible_v<T>)
+                {
+                    new (dest) T(*static_cast<const T*>(src));
+                }
+                else
+                {
+                    std::terminate();
+                }
+            }
+
+            static void Move(void* dest, void* src)
+            {
+                if constexpr (std::is_trivially_copyable_v<T>)
+                {
+                    std::memcpy(dest, src, sizeof(T));
+                }
+                else if constexpr (std::is_move_constructible_v<T>)
+                {
+                    new (dest) T(std::move(*static_cast<T*>(src)));
+                }
+                else
+                {
+                    std::terminate();
+                }
+            }
+
+            static void Destroy(void* ptr) noexcept
+            {
+                auto* obj = static_cast<T*>(ptr);
+                if constexpr (IsHeap)
+                {
+                    if constexpr (!std::is_trivially_destructible_v<T>)
+                    {
+                        obj->~T();
+                    }
+                    ::operator delete(obj, sizeof(T), std::align_val_t {alignof(T)});
+                }
+                else
+                {
+                    if constexpr (!std::is_trivially_destructible_v<T>)
+                    {
+                        obj->~T();
+                    }
+                }
+            }
+
+            static constexpr VTable value = {
+                    .invoke = &Invoke,
+                    .copy = (std::is_copy_constructible_v<T> || std::is_trivially_copyable_v<T>) ? &Copy : nullptr,
+                    .move = (std::is_move_constructible_v<T> || std::is_trivially_copyable_v<T>) ? &Move : nullptr,
+                    .destroy = &Destroy,
+                    .size = sizeof(T),
+                    .alignment = alignof(T),
+            };
+        };
 
         /// \brief Storage for the callable: either inline buffer or heap pointer.
         alignas(ALIGNMENT) union Storage
@@ -218,17 +300,10 @@ namespace NGIN::Utilities
             void* heapPtr;                ///< Heap pointer for large objects
         } m_storage {};
 
-        /// \brief Size in bytes of the stored object (0 if empty).
-        std::size_t m_size = 0;
-
         /// \brief True if the callable is stored on the heap, false if inline.
         bool m_usingHeap = false;
 
-        /// \brief Type-erased function pointers for operations.
-        InvokeFn m_invoke   = nullptr;
-        CopyFn m_copy       = nullptr;
-        MoveFn m_move       = nullptr;
-        DestroyFn m_destroy = nullptr;
+        const VTable* m_vtable = nullptr;
 
         /// \brief Returns a pointer to the stored object (inline or heap).
         /// @return Pointer to the stored callable object
@@ -259,95 +334,11 @@ namespace NGIN::Utilities
                     (alignof(DecayedF) <= ALIGNMENT) &&
                     std::is_nothrow_move_constructible_v<DecayedF>;
 
-            // Record the exact size of the object we’re storing:
-            m_size = sizeof(DecayedF);
-
             if constexpr (fitsInline)
             {
-                /// Inline (SBO) storage path
-                // Fast path for function pointers
-                if constexpr (std::is_pointer_v<DecayedF> && std::is_function_v<std::remove_pointer_t<DecayedF>>)
-                {
-                    new (m_storage.buffer) DecayedF(f);
-                    m_usingHeap = false;
-                    m_size      = sizeof(DecayedF);
-                    m_invoke    = [](void* ptr, Args&&... args) -> R {
-                        auto fn = *static_cast<DecayedF*>(ptr);
-                        return fn(std::forward<Args>(args)...);
-                    };
-                    m_copy = [](void* dest, const void* src) {
-                        std::memcpy(dest, src, sizeof(DecayedF));
-                    };
-                    m_move = [](void* dest, void* src) {
-                        std::memcpy(dest, src, sizeof(DecayedF));
-                    };
-                    m_destroy = nullptr;
-                    return;
-                }
-
-                // Fast path for stateless lambdas (no captures)
-                if constexpr (std::is_empty_v<DecayedF> && std::is_trivially_copyable_v<DecayedF>)
-                {
-                    new (m_storage.buffer) DecayedF(std::forward<F>(f));
-                    m_usingHeap = false;
-                    m_size      = sizeof(DecayedF);
-                    m_invoke    = [](void* ptr, Args&&... args) -> R {
-                        auto& obj = *static_cast<DecayedF*>(ptr);
-                        return obj(std::forward<Args>(args)...);
-                    };
-                    m_copy = [](void* dest, const void* src) {
-                        std::memcpy(dest, src, sizeof(DecayedF));
-                    };
-                    m_move = [](void* dest, void* src) {
-                        std::memcpy(dest, src, sizeof(DecayedF));
-                    };
-                    m_destroy = nullptr;
-                    return;
-                }
-                void* dest = static_cast<void*>(m_storage.buffer);
-                new (dest) DecayedF(std::forward<F>(f));
+                new (m_storage.buffer) DecayedF(std::forward<F>(f));
                 m_usingHeap = false;
-
-                // Destroy only calls the destructor; no delete
-                if constexpr (std::is_destructible_v<DecayedF>)
-                {
-                    m_destroy = [](void* ptr) {
-                        auto* obj = static_cast<DecayedF*>(ptr);
-                        obj->~DecayedF();
-                    };
-                }
-                else
-                {
-                    m_destroy = nullptr;
-                }
-
-                m_invoke = [](void* ptr, Args&&... args) -> R {
-                    auto* obj = static_cast<DecayedF*>(ptr);
-                    return (*obj)(std::forward<Args>(args)...);
-                };
-
-                if constexpr (std::is_copy_constructible_v<DecayedF>)
-                {
-                    m_copy = [](void* dest, const void* src) {
-                        new (dest) DecayedF(*static_cast<const DecayedF*>(src));
-                    };
-                }
-                else
-                {
-                    m_copy = nullptr;
-                }
-
-                if constexpr (std::is_move_constructible_v<DecayedF>)
-                {
-                    m_move = [](void* dest, void* src) {
-                        new (dest) DecayedF(std::move(*static_cast<DecayedF*>(src)));
-                    };
-                }
-                else
-                {
-                    m_move = nullptr;
-                }
-                return;
+                m_vtable    = &VTableFor<DecayedF, false>::value;
             }
             else
             {
@@ -364,54 +355,7 @@ namespace NGIN::Utilities
                 }
                 m_storage.heapPtr = heapObj;
                 m_usingHeap       = true;
-
-                m_invoke = [](void* ptr, Args&&... args) -> R {
-                    auto* obj = static_cast<DecayedF*>(ptr);
-                    return (*obj)(std::forward<Args>(args)...);
-                };
-
-                if constexpr (std::is_copy_constructible_v<DecayedF>)
-                {
-                    m_copy = [](void* dest, const void* src) {
-                        new (dest) DecayedF(*static_cast<const DecayedF*>(src));
-                    };
-                }
-                else
-                {
-                    m_copy = nullptr;
-                }
-
-                if constexpr (std::is_move_constructible_v<DecayedF>)
-                {
-                    m_move = [](void* dest, void* src) {
-                        new (dest) DecayedF(std::move(*static_cast<DecayedF*>(src)));
-                    };
-                }
-                else
-                {
-                    m_move = nullptr;
-                }
-
-                if constexpr (std::is_trivially_destructible_v<DecayedF>)
-                {
-                    m_destroy = [](void* ptr) {
-                        ::operator delete(ptr, sizeof(DecayedF), std::align_val_t {alignof(DecayedF)});
-                    };
-                }
-                else if constexpr (std::is_destructible_v<DecayedF>)
-                {
-                    m_destroy = [](void* ptr) {
-                        auto* obj = static_cast<DecayedF*>(ptr);
-                        obj->~DecayedF();
-                        ::operator delete(obj, sizeof(DecayedF), std::align_val_t {alignof(DecayedF)});
-                    };
-                }
-                else
-                {
-                    m_destroy = [](void* ptr) {
-                        ::operator delete(ptr, std::align_val_t {alignof(DecayedF)});
-                    };
-                }
+                m_vtable          = &VTableFor<DecayedF, true>::value;
             }
         }
 
@@ -422,32 +366,31 @@ namespace NGIN::Utilities
         /// @param other Callable to copy from
         void CopyFrom(const Callable& other)
         {
-            if (!other.m_invoke)
+            if (!other.m_vtable)
             {
                 // Other is empty → remain empty.
                 return;
             }
 
-            if (!other.m_copy)
+            if (!other.m_vtable->copy)
             {
                 throw std::runtime_error("Callable: copy attempted on non-copyable target");
             }
 
-            const auto otherSize     = other.m_size;
             const bool otherUsesHeap = other.m_usingHeap;
 
             if (otherUsesHeap)
             {
-                // Allocate exactly otherSize bytes with max alignment ALIGNMENT.
-                void* raw = ::operator new(otherSize, std::align_val_t {ALIGNMENT});
+                // Allocate exactly the target size and alignment (must match the deleter in the vtable).
+                void* raw = ::operator new(other.m_vtable->size, std::align_val_t {other.m_vtable->alignment});
                 try
                 {
-                    other.m_copy(raw, other.GetPtr());
+                    other.m_vtable->copy(raw, other.GetPtr());
                     m_storage.heapPtr = raw;
                     m_usingHeap       = true;
                 } catch (...)
                 {
-                    ::operator delete(raw, otherSize, std::align_val_t {ALIGNMENT});
+                    ::operator delete(raw, other.m_vtable->size, std::align_val_t {other.m_vtable->alignment});
                     m_storage.heapPtr = nullptr;
                     m_usingHeap       = false;
                     throw;
@@ -456,17 +399,11 @@ namespace NGIN::Utilities
             else
             {
                 // Inline copy
-                other.m_copy(static_cast<void*>(m_storage.buffer), other.GetPtr());
+                other.m_vtable->copy(static_cast<void*>(m_storage.buffer), other.GetPtr());
                 m_usingHeap = false;
             }
 
-            m_size = otherSize;
-
-            // Copy all function-pointers:
-            m_invoke  = other.m_invoke;
-            m_copy    = other.m_copy;
-            m_move    = other.m_move;
-            m_destroy = other.m_destroy;
+            m_vtable = other.m_vtable;
         }
 
         /// \brief Moves the contents of another Callable.
@@ -476,14 +413,14 @@ namespace NGIN::Utilities
         /// @param other Callable to move from
         void MoveFrom(Callable&& other) noexcept
         {
-            if (!other.m_invoke)
+            if (!other.m_vtable)
             {
                 // Other is empty → remain empty.
                 return;
             }
 
-            m_size      = other.m_size;
             m_usingHeap = other.m_usingHeap;
+            m_vtable    = other.m_vtable;
 
             if (other.m_usingHeap)
             {
@@ -494,35 +431,17 @@ namespace NGIN::Utilities
             else
             {
                 // Inline-buffer move:
-                if (other.m_move)
+                if (!other.m_vtable->move)
                 {
-                    other.m_move(static_cast<void*>(m_storage.buffer), other.GetPtr());
-                    // Destroy the “source” inline so it isn’t double-destroyed:
-                    if (other.m_destroy)
-                    {
-                        other.m_destroy(other.GetPtr());
-                        std::memset(other.m_storage.buffer, 0, BUFFER_SIZE);
-                    }
+                    std::terminate();
                 }
-                else
-                {
-                    std::memcpy(m_storage.buffer, other.m_storage.buffer, BUFFER_SIZE);
-                    std::memset(other.m_storage.buffer, 0, BUFFER_SIZE);
-                }
+                other.m_vtable->move(static_cast<void*>(m_storage.buffer), other.GetPtr());
+                // Destroy the “source” inline so it isn’t double-destroyed:
+                other.m_vtable->destroy(other.GetPtr());
             }
 
-            // Move function-pointers:
-            m_invoke  = other.m_invoke;
-            m_copy    = other.m_copy;
-            m_move    = other.m_move;
-            m_destroy = other.m_destroy;
-
             // Zero-out “other” so it becomes empty:
-            other.m_invoke    = nullptr;
-            other.m_copy      = nullptr;
-            other.m_move      = nullptr;
-            other.m_destroy   = nullptr;
-            other.m_size      = 0;
+            other.m_vtable    = nullptr;
             other.m_usingHeap = false;
         }
     };

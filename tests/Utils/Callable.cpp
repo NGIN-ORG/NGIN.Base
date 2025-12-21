@@ -11,6 +11,7 @@
 #pragma clang diagnostic pop
 #include <memory>// For std::unique_ptr
 #include <stdexcept>
+#include <utility>
 
 namespace
 {
@@ -491,5 +492,66 @@ TEST_CASE("NGIN::Utilities::Callable", "[Utilities][Callable]")
         NGIN::Utilities::Callable<int()> c(AlignedFunctor {});
         CHECK(c);
         CHECK(c() == 123);
+
+        // Exercises heap-copy path with over-aligned callable.
+        auto copy = c;
+        CHECK(copy);
+        CHECK(copy() == 123);
+
+        NGIN::Utilities::Callable<int()> assigned;
+        assigned = c;
+        CHECK(assigned);
+        CHECK(assigned() == 123);
+    }
+
+    SECTION("SwapInlineNonTrivialMoveOnly")
+    {
+        struct SmallDtorMoveOnly
+        {
+            int* m_dtorCount = nullptr;
+            int  m_base      = 0;
+
+            explicit SmallDtorMoveOnly(int base, int& dtorCount) noexcept
+                : m_dtorCount(&dtorCount), m_base(base) {}
+
+            SmallDtorMoveOnly(SmallDtorMoveOnly&& other) noexcept
+                : m_dtorCount(std::exchange(other.m_dtorCount, nullptr)), m_base(other.m_base) {}
+
+            SmallDtorMoveOnly(const SmallDtorMoveOnly&)            = delete;
+            SmallDtorMoveOnly& operator=(const SmallDtorMoveOnly&) = delete;
+            SmallDtorMoveOnly& operator=(SmallDtorMoveOnly&&)      = delete;
+
+            ~SmallDtorMoveOnly()
+            {
+                if (m_dtorCount)
+                {
+                    ++(*m_dtorCount);
+                }
+            }
+
+            int operator()(int x) const
+            {
+                return x + m_base;
+            }
+        };
+
+        int dtorCountA = 0;
+        int dtorCountB = 0;
+
+        {
+            NGIN::Utilities::Callable<int(int)> a(SmallDtorMoveOnly(1, dtorCountA));
+            NGIN::Utilities::Callable<int(int)> b(SmallDtorMoveOnly(2, dtorCountB));
+
+            CHECK(a(10) == 11);
+            CHECK(b(10) == 12);
+
+            a.Swap(b);
+
+            CHECK(a(10) == 12);
+            CHECK(b(10) == 11);
+        }
+
+        CHECK(dtorCountA == 1);
+        CHECK(dtorCountB == 1);
     }
 }

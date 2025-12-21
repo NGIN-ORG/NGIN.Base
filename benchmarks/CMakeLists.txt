@@ -22,6 +22,9 @@ target_link_libraries(StringBenchmarks PRIVATE NGIN::Base)
 add_executable(VectorBenchmarks VectorBenchmarks.cpp)
 target_link_libraries(VectorBenchmarks PRIVATE NGIN::Base)
 
+add_executable(CallableBenchmarks CallableBenchmarks.cpp)
+target_link_libraries(CallableBenchmarks PRIVATE NGIN::Base)
+
 add_executable(SIMDFastMathBench SIMDFastMathBench.cpp)
 target_link_libraries(SIMDFastMathBench PRIVATE NGIN::Base)
 target_compile_options(SIMDFastMathBench PRIVATE -mavx2)
@@ -76,4 +79,3 @@ if(_have_tbb)
 else()
 	message(STATUS "TBB not available; ConcurrentMapBench disabled")
 endif()
-
