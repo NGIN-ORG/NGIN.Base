@@ -72,6 +72,13 @@ namespace
         co_return value;
     }
 
+    NGIN::Async::Task<void> SuspendForever(NGIN::Async::TaskContext& ctx)
+    {
+        co_await ctx.Yield();
+        co_await std::suspend_always {};
+        co_return;
+    }
+
     class ManualTimerExecutor
     {
     public:
@@ -192,4 +199,27 @@ TEST_CASE("WhenAny wakes and throws TaskCanceled on cancellation")
     REQUIRE(any.IsCompleted());
     REQUIRE(any.IsCanceled());
     REQUIRE_THROWS_AS(any.Get(), NGIN::Async::TaskCanceled);
+}
+
+TEST_CASE("WhenAll wakes and throws TaskCanceled even if children do not observe cancellation")
+{
+    ManualExecutor                 exec;
+    NGIN::Async::CancellationSource source;
+    NGIN::Async::TaskContext        ctx(exec, source.GetToken());
+
+    auto a = SuspendForever(ctx);
+    auto b = SuspendForever(ctx);
+
+    auto all = NGIN::Async::WhenAll(ctx, a, b);
+    all.Start(ctx);
+
+    exec.RunUntilIdle();
+    REQUIRE_FALSE(all.IsCompleted());
+
+    source.Cancel();
+    exec.RunUntilIdle();
+
+    REQUIRE(all.IsCompleted());
+    REQUIRE(all.IsCanceled());
+    REQUIRE_THROWS_AS(all.Get(), NGIN::Async::TaskCanceled);
 }

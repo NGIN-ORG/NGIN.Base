@@ -2,22 +2,202 @@
 /// @brief Task combinator that completes when all tasks complete.
 #pragma once
 
+#include <atomic>
+#include <coroutine>
+#include <exception>
+#include <memory>
 #include <tuple>
 #include <type_traits>
 #include <utility>
 
+#include <NGIN/Async/Cancellation.hpp>
 #include <NGIN/Async/Task.hpp>
+#include <NGIN/Primitives.hpp>
+#include <NGIN/Sync/SpinLock.hpp>
 
 namespace NGIN::Async
 {
+    namespace detail::when_all
+    {
+        struct WhenAllSharedState final
+        {
+            std::atomic<bool>               done {false};
+            std::atomic<NGIN::UIntSize>     remaining {0};
+            NGIN::Execution::ExecutorRef    exec {};
+            std::coroutine_handle<>         awaiting {};
+            CancellationRegistration        cancellationRegistration {};
+
+            NGIN::Sync::SpinLock            errorLock {};
+            std::exception_ptr              firstError {};
+        };
+
+        [[nodiscard]] inline bool CancelWhenAll(void* ctx) noexcept
+        {
+            auto* state = static_cast<WhenAllSharedState*>(ctx);
+            bool expected = false;
+            if (!state->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
+            {
+                return false;
+            }
+            return true;
+        }
+
+        struct Detached final
+        {
+            struct promise_type
+            {
+                Detached get_return_object() noexcept
+                {
+                    return Detached {std::coroutine_handle<promise_type>::from_promise(*this)};
+                }
+                std::suspend_always initial_suspend() noexcept { return {}; }
+                struct Final
+                {
+                    bool await_ready() noexcept { return false; }
+                    void await_suspend(std::coroutine_handle<promise_type> h) noexcept { h.destroy(); }
+                    void await_resume() noexcept {}
+                };
+                Final final_suspend() noexcept { return {}; }
+                void  return_void() noexcept {}
+                void  unhandled_exception() noexcept {}
+            };
+
+            using handle_type = std::coroutine_handle<promise_type>;
+            handle_type handle {};
+
+            explicit Detached(handle_type h) noexcept
+                : handle(h)
+            {
+            }
+
+            Detached(Detached&& other) noexcept
+                : handle(other.handle)
+            {
+                other.handle = nullptr;
+            }
+
+            Detached(const Detached&)            = delete;
+            Detached& operator=(const Detached&) = delete;
+            Detached& operator=(Detached&&)      = delete;
+
+            ~Detached() = default;
+        };
+
+        template<typename TTask>
+        [[nodiscard]] inline Detached WatchTask(std::weak_ptr<WhenAllSharedState> weakState, TTask& task)
+        {
+            try
+            {
+                co_await task;
+            } catch (...)
+            {
+                if (auto state = weakState.lock())
+                {
+                    std::lock_guard guard(state->errorLock);
+                    if (!state->firstError)
+                    {
+                        state->firstError = std::current_exception();
+                    }
+                }
+            }
+
+            if (auto state = weakState.lock())
+            {
+                const auto left = state->remaining.fetch_sub(1, std::memory_order_acq_rel) - 1;
+                if (left == 0)
+                {
+                    bool expected = false;
+                    if (state->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
+                    {
+                        if (state->awaiting)
+                        {
+                            state->exec.Execute(state->awaiting);
+                        }
+                    }
+                }
+            }
+
+            co_return;
+        }
+
+        template<typename... TTasks>
+        struct WhenAllAwaiter final
+        {
+            TaskContext&                       ctx;
+            std::shared_ptr<WhenAllSharedState> state;
+            std::tuple<TTasks&...>             tasks;
+
+            bool await_ready() const noexcept
+            {
+                if (ctx.IsCancellationRequested())
+                {
+                    return true;
+                }
+                return std::apply([](auto&... t) { return (t.IsCompleted() && ...); }, tasks);
+            }
+
+            bool await_suspend(std::coroutine_handle<> awaiting) const
+            {
+                std::apply([&](auto&... t) { (t.Start(ctx), ...); }, tasks);
+
+                if (ctx.IsCancellationRequested())
+                {
+                    return false;
+                }
+
+                if (std::apply([](auto&... t) { return (t.IsCompleted() && ...); }, tasks))
+                {
+                    return false;
+                }
+
+                state->exec      = ctx.GetExecutor();
+                state->awaiting  = awaiting;
+                state->remaining.store(static_cast<NGIN::UIntSize>(sizeof...(TTasks)), std::memory_order_release);
+
+                ctx.GetCancellationToken().Register(
+                        state->cancellationRegistration, state->exec, awaiting, &CancelWhenAll, state.get());
+
+                std::weak_ptr<WhenAllSharedState> weakState = state;
+                auto& exec                                  = state->exec;
+
+                std::apply(
+                        [&](auto&... t) {
+                            (([&] {
+                                 auto watch = WatchTask(weakState, t);
+                                 exec.Execute(std::coroutine_handle<>::from_address(watch.handle.address()));
+                             }()),
+                             ...);
+                        },
+                        tasks);
+
+                return true;
+            }
+
+            void await_resume() const
+            {
+                if (ctx.IsCancellationRequested())
+                {
+                    throw TaskCanceled();
+                }
+                if (state->firstError)
+                {
+                    std::rethrow_exception(state->firstError);
+                }
+            }
+        };
+    }// namespace detail::when_all
+
     /// @brief Await multiple `Task<void>` and complete when all are finished.
     template<typename... TTasks>
         requires(sizeof...(TTasks) > 0) && (std::is_same_v<std::remove_reference_t<TTasks>, Task<void>> && ...)
     [[nodiscard]] inline Task<void> WhenAll(TaskContext& ctx, TTasks&... tasks)
     {
         ctx.ThrowIfCancellationRequested();
-        (tasks.Start(ctx), ...);
-        (co_await tasks, ...);
+        auto state = std::make_shared<detail::when_all::WhenAllSharedState>();
+        co_await detail::when_all::WhenAllAwaiter<TTasks...> {ctx, state, std::tuple<TTasks&...>(tasks...)};
+
+        // Surface faults from individual tasks (first error wins, .NET-like aggregation can be added later).
+        (tasks.Get(), ...);
         co_return;
     }
 
@@ -27,8 +207,9 @@ namespace NGIN::Async
     [[nodiscard]] inline Task<std::tuple<T...>> WhenAll(TaskContext& ctx, Task<T>&... tasks)
     {
         ctx.ThrowIfCancellationRequested();
-        (tasks.Start(ctx), ...);
-        co_return std::tuple<T...> {co_await tasks...};
+        auto state = std::make_shared<detail::when_all::WhenAllSharedState>();
+        co_await detail::when_all::WhenAllAwaiter<Task<T>...> {ctx, state, std::tuple<Task<T>&...>(tasks...)};
+
+        co_return std::tuple<T...> {tasks.Get()...};
     }
 }// namespace NGIN::Async
-

@@ -31,7 +31,8 @@ Second priority is ergonomics (a .NET-like async experience) built on top of the
 - [x] **Task combinators (baseline)**: added `WhenAll` and `WhenAny` built on `ExecutorRef` for composing lazy tasks.
 - [x] **CancelAfter/CancelAt (baseline)**: added `CancellationSource::CancelAfter(exec, duration)` and `CancelAt(exec, timepoint)` for cancellation-aware timeouts.
 - [x] **Token linking**: added `CreateLinkedTokenSource` / `LinkedCancellationSource` to cancel when any input token cancels.
-- [ ] **Task cleanup**: implement cancellation propagation rules across composed tasks (beyond pre-cancel checks) and consider `TaskContext`-level token linking for child tasks.
+- [x] **Combinator cancellation**: `WhenAll`/`WhenAny` wake on cancellation even when children don't observe it.
+- [ ] **Task cleanup**: implement cancellation propagation rules for `Then` (do not swallow cancellations/errors) and consider `TaskContext`-level token linking for child tasks.
 
 ## Goals
 
