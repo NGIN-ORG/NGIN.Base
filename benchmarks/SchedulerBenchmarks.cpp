@@ -5,6 +5,7 @@
 #include <coroutine>
 #include <atomic>
 #include <thread>
+#include <vector>
 
 int main()
 {
@@ -12,6 +13,7 @@ int main()
     constexpr int numCoroutines = 10000;
     constexpr int numThreads    = 4;
     constexpr int numFibers     = 128;
+    constexpr int numProducers  = 4;
     constexpr bool runFiberScheduler      = true;
     constexpr bool runThreadPoolScheduler = true;
 
@@ -44,7 +46,6 @@ int main()
     if constexpr (runFiberScheduler)
     {
         Benchmark::Register([](BenchmarkContext& ctx) {
-            ctx.start();
             NGIN::Execution::FiberScheduler scheduler(numThreads, numFibers);
             std::atomic<int> completed {0};
             struct Awaitable
@@ -68,6 +69,8 @@ int main()
                 ++completed;
                 completed.notify_one();
             };
+
+            ctx.start();
             for (int i = 0; i < numCoroutines; ++i)
             {
                 bench_coro(scheduler, completed);
@@ -83,7 +86,6 @@ int main()
                             "FiberScheduler schedule+complete 10k coroutines");
 
         Benchmark::Register([](BenchmarkContext& ctx) {
-            ctx.start();
             NGIN::Execution::FiberScheduler scheduler(numThreads, numFibers);
             std::atomic<int> completed {0};
 
@@ -92,6 +94,7 @@ int main()
                 completed.notify_one();
             };
 
+            ctx.start();
             for (int i = 0; i < numCoroutines; ++i)
             {
                 scheduler.Execute(NGIN::Execution::WorkItem(NGIN::Utilities::Callable<void()>(job)));
@@ -106,13 +109,86 @@ int main()
             ctx.stop();
         },
                             "FiberScheduler enqueue+run 10k jobs");
+
+        Benchmark::Register([](BenchmarkContext& ctx) {
+            NGIN::Execution::FiberScheduler scheduler(numThreads, numFibers);
+            std::atomic<int> completed {0};
+            std::atomic<int> ready {0};
+            std::atomic<bool> go {false};
+
+            auto job = [&completed]() noexcept {
+                completed.fetch_add(1, std::memory_order_release);
+                completed.notify_one();
+            };
+
+            std::vector<std::thread> producers;
+            producers.reserve(numProducers);
+            for (int p = 0; p < numProducers; ++p)
+            {
+                producers.emplace_back([&, p] {
+                    ready.fetch_add(1, std::memory_order_release);
+                    ready.notify_one();
+
+                    while (!go.load(std::memory_order_acquire))
+                    {
+                        go.wait(false);
+                    }
+
+                    const int startIndex = (numCoroutines * p) / numProducers;
+                    const int endIndex   = (numCoroutines * (p + 1)) / numProducers;
+                    for (int i = startIndex; i < endIndex; ++i)
+                    {
+                        scheduler.Execute(NGIN::Execution::WorkItem(NGIN::Utilities::Callable<void()>(job)));
+                    }
+                });
+            }
+
+            auto readyValue = ready.load(std::memory_order_acquire);
+            while (readyValue < numProducers)
+            {
+                ready.wait(readyValue);
+                readyValue = ready.load(std::memory_order_acquire);
+            }
+
+            ctx.start();
+            go.store(true, std::memory_order_release);
+            go.notify_all();
+
+            auto value = completed.load(std::memory_order_acquire);
+            while (value < numCoroutines)
+            {
+                completed.wait(value);
+                value = completed.load(std::memory_order_acquire);
+            }
+            ctx.stop();
+
+            for (auto& t: producers)
+            {
+                t.join();
+            }
+        },
+                            "FiberScheduler contended enqueue+run 10k jobs (4 producers)");
+
+        Benchmark::Register([](BenchmarkContext& ctx) {
+            NGIN::Execution::FiberScheduler scheduler(numThreads, numFibers);
+            const auto nowNanos  = NGIN::Time::MonotonicClock::Now().ToNanoseconds();
+            const auto farFuture = NGIN::Time::TimePoint::FromNanoseconds(nowNanos + 60ull * 1'000'000'000ull);
+
+            ctx.start();
+            for (int i = 0; i < numCoroutines; ++i)
+            {
+                const auto resumeAt = NGIN::Time::TimePoint::FromNanoseconds(farFuture.ToNanoseconds() + static_cast<UInt64>(i));
+                scheduler.ExecuteAt(NGIN::Execution::WorkItem(NGIN::Utilities::Callable<void()>([]() noexcept {})), resumeAt);
+            }
+            ctx.stop();
+        },
+                            "FiberScheduler ExecuteAt enqueue 10k timers");
     }
 
     // ThreadPoolScheduler benchmark
     if constexpr (runThreadPoolScheduler)
     {
         Benchmark::Register([](BenchmarkContext& ctx) {
-            ctx.start();
             NGIN::Execution::ThreadPoolScheduler scheduler(numThreads);
             std::atomic<int> completed {0};
             struct Awaitable
@@ -136,6 +212,8 @@ int main()
                 ++completed;
                 completed.notify_one();
             };
+
+            ctx.start();
             for (int i = 0; i < numCoroutines; ++i)
             {
                 bench_coro(scheduler, completed);
@@ -151,7 +229,6 @@ int main()
                             "ThreadPoolScheduler schedule+complete 10k coroutines");
 
         Benchmark::Register([](BenchmarkContext& ctx) {
-            ctx.start();
             NGIN::Execution::ThreadPoolScheduler scheduler(numThreads);
             std::atomic<int> completed {0};
 
@@ -160,6 +237,7 @@ int main()
                 completed.notify_one();
             };
 
+            ctx.start();
             for (int i = 0; i < numCoroutines; ++i)
             {
                 scheduler.Execute(NGIN::Execution::WorkItem(NGIN::Utilities::Callable<void()>(job)));
@@ -174,6 +252,80 @@ int main()
             ctx.stop();
         },
                             "ThreadPoolScheduler enqueue+run 10k jobs");
+
+        Benchmark::Register([](BenchmarkContext& ctx) {
+            NGIN::Execution::ThreadPoolScheduler scheduler(numThreads);
+            std::atomic<int> completed {0};
+            std::atomic<int> ready {0};
+            std::atomic<bool> go {false};
+
+            auto job = [&completed]() noexcept {
+                completed.fetch_add(1, std::memory_order_release);
+                completed.notify_one();
+            };
+
+            std::vector<std::thread> producers;
+            producers.reserve(numProducers);
+            for (int p = 0; p < numProducers; ++p)
+            {
+                producers.emplace_back([&, p] {
+                    ready.fetch_add(1, std::memory_order_release);
+                    ready.notify_one();
+
+                    while (!go.load(std::memory_order_acquire))
+                    {
+                        go.wait(false);
+                    }
+
+                    const int startIndex = (numCoroutines * p) / numProducers;
+                    const int endIndex   = (numCoroutines * (p + 1)) / numProducers;
+                    for (int i = startIndex; i < endIndex; ++i)
+                    {
+                        scheduler.Execute(NGIN::Execution::WorkItem(NGIN::Utilities::Callable<void()>(job)));
+                    }
+                });
+            }
+
+            auto readyValue = ready.load(std::memory_order_acquire);
+            while (readyValue < numProducers)
+            {
+                ready.wait(readyValue);
+                readyValue = ready.load(std::memory_order_acquire);
+            }
+
+            ctx.start();
+            go.store(true, std::memory_order_release);
+            go.notify_all();
+
+            auto value = completed.load(std::memory_order_acquire);
+            while (value < numCoroutines)
+            {
+                completed.wait(value);
+                value = completed.load(std::memory_order_acquire);
+            }
+            ctx.stop();
+
+            for (auto& t: producers)
+            {
+                t.join();
+            }
+        },
+                            "ThreadPoolScheduler contended enqueue+run 10k jobs (4 producers)");
+
+        Benchmark::Register([](BenchmarkContext& ctx) {
+            NGIN::Execution::ThreadPoolScheduler scheduler(numThreads);
+            const auto nowNanos  = NGIN::Time::MonotonicClock::Now().ToNanoseconds();
+            const auto farFuture = NGIN::Time::TimePoint::FromNanoseconds(nowNanos + 60ull * 1'000'000'000ull);
+
+            ctx.start();
+            for (int i = 0; i < numCoroutines; ++i)
+            {
+                const auto resumeAt = NGIN::Time::TimePoint::FromNanoseconds(farFuture.ToNanoseconds() + static_cast<UInt64>(i));
+                scheduler.ExecuteAt(NGIN::Execution::WorkItem(NGIN::Utilities::Callable<void()>([]() noexcept {})), resumeAt);
+            }
+            ctx.stop();
+        },
+                            "ThreadPoolScheduler ExecuteAt enqueue 10k timers");
     }
 
     // Run all benchmarks and print results

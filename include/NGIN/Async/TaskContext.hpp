@@ -6,6 +6,7 @@
 #include <coroutine>
 #include <utility>
 
+#include <NGIN/Async/Cancellation.hpp>
 #include <NGIN/Execution/ExecutorRef.hpp>
 #include <NGIN/Time/MonotonicClock.hpp>
 #include <NGIN/Units.hpp>
@@ -17,14 +18,16 @@ namespace NGIN::Async
     public:
         constexpr TaskContext() noexcept = default;
 
-        explicit TaskContext(NGIN::Execution::ExecutorRef executor) noexcept
+        explicit TaskContext(NGIN::Execution::ExecutorRef executor, CancellationToken cancellation = {}) noexcept
             : m_executor(executor)
+            , m_cancellation(std::move(cancellation))
         {
         }
 
         template<typename TScheduler>
-        explicit TaskContext(TScheduler& scheduler) noexcept
+        explicit TaskContext(TScheduler& scheduler, CancellationToken cancellation = {}) noexcept
             : m_executor(NGIN::Execution::ExecutorRef::From(scheduler))
+            , m_cancellation(std::move(cancellation))
         {
         }
 
@@ -39,9 +42,39 @@ namespace NGIN::Async
             m_executor = NGIN::Execution::ExecutorRef::From(scheduler);
         }
 
+        void BindCancellation(CancellationToken cancellation) noexcept
+        {
+            m_cancellation = std::move(cancellation);
+        }
+
+        [[nodiscard]] TaskContext WithCancellation(CancellationToken cancellation) const noexcept
+        {
+            TaskContext copy = *this;
+            copy.BindCancellation(std::move(cancellation));
+            return copy;
+        }
+
         [[nodiscard]] NGIN::Execution::ExecutorRef GetExecutor() const noexcept
         {
             return m_executor;
+        }
+
+        [[nodiscard]] CancellationToken GetCancellationToken() const noexcept
+        {
+            return m_cancellation;
+        }
+
+        [[nodiscard]] bool IsCancellationRequested() const noexcept
+        {
+            return m_cancellation.IsCancellationRequested();
+        }
+
+        void ThrowIfCancellationRequested() const
+        {
+            if (m_cancellation.IsCancellationRequested())
+            {
+                throw TaskCanceled();
+            }
         }
 
         auto Yield() const noexcept
@@ -49,17 +82,24 @@ namespace NGIN::Async
             struct Awaiter
             {
                 NGIN::Execution::ExecutorRef exec;
+                CancellationToken            cancellation;
                 bool                         await_ready() const noexcept
                 {
-                    return false;
+                    return cancellation.IsCancellationRequested();
                 }
                 void await_suspend(std::coroutine_handle<> h) const noexcept
                 {
                     exec.Schedule(h);
                 }
-                void await_resume() const noexcept {}
+                void await_resume() const
+                {
+                    if (cancellation.IsCancellationRequested())
+                    {
+                        throw TaskCanceled();
+                    }
+                }
             };
-            return Awaiter {m_executor};
+            return Awaiter {m_executor, m_cancellation};
         }
 
         template<typename TUnit>
@@ -69,11 +109,13 @@ namespace NGIN::Async
             struct DelayAwaiter
             {
                 NGIN::Execution::ExecutorRef           exec;
+                CancellationToken                      cancellation;
                 TUnit                                  dur;
                 NGIN::Time::TimePoint                  until;
 
-                DelayAwaiter(NGIN::Execution::ExecutorRef e, const TUnit& d)
+                DelayAwaiter(NGIN::Execution::ExecutorRef e, CancellationToken c, const TUnit& d)
                     : exec(e)
+                    , cancellation(std::move(c))
                     , dur(d)
                     , until([&] {
                         const auto now = NGIN::Time::MonotonicClock::Now();
@@ -94,15 +136,22 @@ namespace NGIN::Async
 
                 bool await_ready() const noexcept
                 {
-                    return NGIN::Units::UnitCast<NGIN::Units::Nanoseconds>(dur).GetValue() <= 0.0;
+                    return cancellation.IsCancellationRequested() ||
+                           NGIN::Units::UnitCast<NGIN::Units::Nanoseconds>(dur).GetValue() <= 0.0;
                 }
                 void await_suspend(std::coroutine_handle<> handle) const
                 {
                     exec.ScheduleAt(handle, until);
                 }
-                void await_resume() const noexcept {}
+                void await_resume() const
+                {
+                    if (cancellation.IsCancellationRequested())
+                    {
+                        throw TaskCanceled();
+                    }
+                }
             };
-            return DelayAwaiter {m_executor, dur};
+            return DelayAwaiter {m_executor, m_cancellation, dur};
         }
 
         template<typename TaskT>
@@ -122,5 +171,6 @@ namespace NGIN::Async
 
     private:
         NGIN::Execution::ExecutorRef m_executor {};
+        CancellationToken            m_cancellation {};
     };
 }// namespace NGIN::Async

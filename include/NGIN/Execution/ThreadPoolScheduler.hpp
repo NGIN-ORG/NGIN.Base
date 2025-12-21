@@ -3,7 +3,6 @@
 /// </summary>
 #pragma once
 
-#include "IScheduler.hpp"
 #include "WorkItem.hpp"
 #include <algorithm>
 #include <cstddef>
@@ -23,7 +22,7 @@ namespace NGIN::Execution
     /// <summary>
     /// Scheduler that dispatches coroutines onto a pool of worker threads.
     /// </summary>
-    class ThreadPoolScheduler : public IScheduler
+    class ThreadPoolScheduler
     {
     public:
         /// <summary>
@@ -48,7 +47,7 @@ namespace NGIN::Execution
         /// <summary>
         /// Destructor - stops all workers and cleans up.
         /// </summary>
-        ~ThreadPoolScheduler() override
+        ~ThreadPoolScheduler()
         {
             m_stop.store(true, std::memory_order_release);
             m_workWake.NotifyAll();
@@ -96,18 +95,18 @@ namespace NGIN::Execution
             m_timerWake.NotifyOne();
         }
 
-        void Schedule(std::coroutine_handle<> coro) noexcept override
+        void Schedule(std::coroutine_handle<> coro) noexcept
         {
             Execute(WorkItem(coro));
         }
 
-        void ScheduleAt(std::coroutine_handle<> coro, NGIN::Time::TimePoint resumeAt) override
+        void ScheduleAt(std::coroutine_handle<> coro, NGIN::Time::TimePoint resumeAt)
         {
             ExecuteAt(WorkItem(coro), resumeAt);
         }
 
 
-        bool RunOne() noexcept override
+        bool RunOne() noexcept
         {
             WorkItem work = TryDequeueAny();
             if (work.IsEmpty())
@@ -118,12 +117,12 @@ namespace NGIN::Execution
             return true;
         }
 
-        void RunUntilIdle() noexcept override
+        void RunUntilIdle() noexcept
         {
             while (RunOne()) {}
         }
 
-        void CancelAll() noexcept override
+        void CancelAll() noexcept
         {
             ClearAllWork();
             {
@@ -134,21 +133,21 @@ namespace NGIN::Execution
             m_timerWake.NotifyAll();
         }
 
-        void SetPriority(int priority) noexcept override
+        void SetPriority(int priority) noexcept
         {
             m_priority = priority;
         }
 
-        void SetAffinity(uint64_t affinityMask) noexcept override
+        void SetAffinity(uint64_t affinityMask) noexcept
         {
             m_affinityMask = affinityMask;
             // Optionally: apply affinity to worker threads
         }
 
-        void OnTaskStart(uint64_t, const char*) noexcept override {}
-        void OnTaskSuspend(uint64_t) noexcept override {}
-        void OnTaskResume(uint64_t) noexcept override {}
-        void OnTaskComplete(uint64_t) noexcept override {}
+        void OnTaskStart(uint64_t, const char*) noexcept {}
+        void OnTaskSuspend(uint64_t) noexcept {}
+        void OnTaskResume(uint64_t) noexcept {}
+        void OnTaskComplete(uint64_t) noexcept {}
 
 
     private:

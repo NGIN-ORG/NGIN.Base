@@ -9,23 +9,33 @@
 #include <atomic>
 #include <cassert>
 
+#include <NGIN/Async/Cancellation.hpp>
 #include <NGIN/Async/TaskContext.hpp>
 #include <NGIN/Sync/AtomicCondition.hpp>
 #include <NGIN/Units.hpp>
 
 namespace NGIN::Async
 {
-    /// <summary>
-    /// Exception thrown when a Task is canceled.
-    /// </summary>
-    class TaskCanceled : public std::exception
+    namespace detail
     {
-    public:
-        const char* what() const noexcept override
+        [[nodiscard]] inline bool IsTaskCanceled(const std::exception_ptr& error) noexcept
         {
-            return "Task was canceled";
+            if (!error)
+            {
+                return false;
+            }
+            try
+            {
+                std::rethrow_exception(error);
+            } catch (const TaskCanceled&)
+            {
+                return true;
+            } catch (...)
+            {
+                return false;
+            }
         }
-    };
+    }// namespace detail
 
     class BaseTask
     {
@@ -42,6 +52,7 @@ namespace NGIN::Async
         {
             T                       m_value;
             std::exception_ptr      m_error;
+            bool                    m_canceled {false};
             std::atomic<bool>       m_finished {false};
             NGIN::Sync::AtomicCondition m_finishedCondition {};
             std::coroutine_handle<> m_continuation {};
@@ -92,6 +103,7 @@ namespace NGIN::Async
             void unhandled_exception() noexcept
             {
                 m_error = std::current_exception();
+                m_canceled = detail::IsTaskCanceled(m_error);
             }
         };
 
@@ -218,8 +230,11 @@ namespace NGIN::Async
 
         [[nodiscard]] bool IsCanceled() const noexcept
         {
-            // No cancellation support yet, always false
-            return false;
+            if (!m_handle)
+            {
+                return false;
+            }
+            return m_handle.promise().m_canceled;
         }
 
         handle_type Handle() const noexcept
@@ -330,6 +345,7 @@ namespace NGIN::Async
         struct promise_type
         {
             std::exception_ptr      m_error;
+            bool                    m_canceled {false};
             std::atomic<bool>       m_finished {false};
             NGIN::Sync::AtomicCondition m_finishedCondition {};
             std::coroutine_handle<> m_continuation {};
@@ -377,6 +393,7 @@ namespace NGIN::Async
             void unhandled_exception() noexcept
             {
                 m_error = std::current_exception();
+                m_canceled = detail::IsTaskCanceled(m_error);
             }
         };
 
@@ -497,8 +514,11 @@ namespace NGIN::Async
 
         bool IsCanceled() const noexcept
         {
-            // No cancellation support yet, always false
-            return false;
+            if (!m_handle)
+            {
+                return false;
+            }
+            return m_handle.promise().m_canceled;
         }
 
         handle_type Handle() const noexcept

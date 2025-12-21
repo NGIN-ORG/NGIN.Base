@@ -18,14 +18,14 @@
 #include <NGIN/Primitives.hpp>
 #include <NGIN/Time/MonotonicClock.hpp>
 #include <NGIN/Time/Sleep.hpp>
+#include <NGIN/Sync/AtomicCondition.hpp>
 #include <NGIN/Units.hpp>
-#include "IScheduler.hpp"
 #include "Fiber.hpp"
 #include "WorkItem.hpp"
 
 namespace NGIN::Execution
 {
-    class FiberScheduler : public IScheduler
+    class FiberScheduler
     {
     private:
         constexpr static UIntSize DEFAULT_NUM_FIBERS  = 128;
@@ -53,11 +53,12 @@ namespace NGIN::Execution
             m_driverThread = std::thread([this] { DriverLoop(); });
         }
 
-        ~FiberScheduler() override
+        ~FiberScheduler()
         {
             m_stop.store(true);
             CancelAll();
             m_readyCv.notify_all();// Wake up all threads exactly once
+            m_timerWake.NotifyAll();
 
 
             // Join worker threads
@@ -92,31 +93,32 @@ namespace NGIN::Execution
                 m_timerHeap.emplace_back(resumeAt, std::move(item));
                 std::push_heap(m_timerHeap.begin(), m_timerHeap.end(), SleepEntryCompare {});
             }
+            m_timerWake.NotifyOne();
         }
 
 
-        void Schedule(std::coroutine_handle<> coro) noexcept override
+        void Schedule(std::coroutine_handle<> coro) noexcept
         {
             Execute(WorkItem(coro));
         }
 
-        void ScheduleAt(std::coroutine_handle<> coro, NGIN::Time::TimePoint resumeAt) override
+        void ScheduleAt(std::coroutine_handle<> coro, NGIN::Time::TimePoint resumeAt)
         {
             ExecuteAt(WorkItem(coro), resumeAt);
         }
 
-        bool RunOne() override
+        bool RunOne() noexcept
         {
             // Not needed: scheduler runs automatically.
             return false;
         }
 
-        void RunUntilIdle() noexcept override
+        void RunUntilIdle() noexcept
         {
             // Not needed: scheduler runs automatically.
         }
 
-        void CancelAll() noexcept override
+        void CancelAll() noexcept
         {
             {
                 std::lock_guard lock(m_readyMutex);
@@ -127,20 +129,22 @@ namespace NGIN::Execution
                 std::lock_guard lock(m_timersMutex);
                 m_timerHeap.clear();
             }
+            m_readyCv.notify_all();
+            m_timerWake.NotifyAll();
         }
 
-        void SetPriority(int priority) noexcept override
+        void SetPriority(int priority) noexcept
         {
             m_priority = priority;
         }
-        void SetAffinity(uint64_t affinityMask) noexcept override
+        void SetAffinity(uint64_t affinityMask) noexcept
         {
             m_affinityMask = affinityMask;
         }
-        void OnTaskStart(uint64_t, const char*) noexcept override {}
-        void OnTaskSuspend(uint64_t) noexcept override {}
-        void OnTaskResume(uint64_t) noexcept override {}
-        void OnTaskComplete(uint64_t) noexcept override {}
+        void OnTaskStart(uint64_t, const char*) noexcept {}
+        void OnTaskSuspend(uint64_t) noexcept {}
+        void OnTaskResume(uint64_t) noexcept {}
+        void OnTaskComplete(uint64_t) noexcept {}
 
     private:
         std::atomic<bool> m_stop {false};
@@ -170,6 +174,7 @@ namespace NGIN::Execution
         };
         std::vector<SleepEntry> m_timerHeap;
         std::mutex m_timersMutex;
+        NGIN::Sync::AtomicCondition m_timerWake;
 
         // Timer management
         void CheckSleepingTasks()
@@ -194,10 +199,11 @@ namespace NGIN::Execution
         // Driver thread: manages timers/delays
         void DriverLoop()
         {
-            while (!m_stop)
+            while (!m_stop.load(std::memory_order_acquire))
             {
                 NGIN::Units::Milliseconds nextSleep {5.0};
                 bool hasSleeping                    = false;
+                const auto observedWakeGeneration   = m_timerWake.Load();
 
                 {
                     std::lock_guard lock(m_timersMutex);
@@ -220,11 +226,23 @@ namespace NGIN::Execution
                 CheckSleepingTasks();
                 m_readyCv.notify_all();
 
-                // Yield if no sleeping tasks, or if nextSleep is zero; otherwise sleep
-                if (!hasSleeping || nextSleep.GetValue() == 0.0)
-                    std::this_thread::yield();
-                else
-                    NGIN::Time::SleepFor(nextSleep);
+                if (m_stop.load(std::memory_order_acquire))
+                {
+                    break;
+                }
+
+                if (!hasSleeping)
+                {
+                    m_timerWake.Wait(observedWakeGeneration);
+                    continue;
+                }
+
+                if (nextSleep.GetValue() <= 0.0)
+                {
+                    continue;
+                }
+
+                (void)m_timerWake.WaitFor(observedWakeGeneration, nextSleep);
             }
         }
 

@@ -1,10 +1,21 @@
 #pragma once
 
+#include <exception>
 #include <memory>
 #include <atomic>
 
 namespace NGIN::Async
 {
+    /// @brief Exception thrown when an async operation observes cancellation.
+    class TaskCanceled : public std::exception
+    {
+    public:
+        const char* what() const noexcept override
+        {
+            return "Task was canceled";
+        }
+    };
+
     // Cancellation primitives
     class CancellationToken
     {

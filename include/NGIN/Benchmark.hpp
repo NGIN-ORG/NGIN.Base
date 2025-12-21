@@ -37,6 +37,7 @@ namespace NGIN
         /// \brief  Begin timing.
         void start()
         {
+            m_hasMeasurement = false;
             m_timer.Start();
         }
 
@@ -44,7 +45,19 @@ namespace NGIN
         F64 stop()
         {
             m_timer.Stop();
-            return m_timer.GetElapsed<Units::Nanoseconds>().GetValue();
+            m_lastElapsedNanoseconds = m_timer.GetElapsed<Units::Nanoseconds>().GetValue();
+            m_hasMeasurement         = true;
+            return m_lastElapsedNanoseconds;
+        }
+
+        [[nodiscard]] bool HasMeasurement() const noexcept
+        {
+            return m_hasMeasurement;
+        }
+
+        [[nodiscard]] F64 GetElapsedNanoseconds() const noexcept
+        {
+            return m_lastElapsedNanoseconds;
         }
 
         /// \brief  Prevents compiler from optimizing away `value`.
@@ -77,6 +90,8 @@ namespace NGIN
 
     private:
         Timer m_timer;
+        F64   m_lastElapsedNanoseconds = 0.0;
+        bool  m_hasMeasurement         = false;
     };
 
     /// \brief  Configuration parameters for a benchmark run.
@@ -305,9 +320,16 @@ namespace NGIN
         F64 invokeOnceTimed(F64 overheadMean)
         {
             BenchmarkContext ctx;
-            ctx.start();
+
+            Timer wallTimer;
+            wallTimer.Reset();
+            wallTimer.Start();
             m_callable(ctx);
-            F64 elapsed = ctx.stop();
+            wallTimer.Stop();
+
+            F64 elapsed = ctx.HasMeasurement()
+                                  ? ctx.GetElapsedNanoseconds()
+                                  : wallTimer.GetElapsed<Units::Nanoseconds>().GetValue();
             elapsed -= overheadMean;
             if (elapsed < 0.0)
                 elapsed = 0.0;

@@ -19,12 +19,17 @@ Second priority is ergonomics (a .NET-like async experience) built on top of the
 - [x] **Timer subsystem**: removed per-delay detached threads in `ThreadPoolScheduler::ScheduleAt` by adding an internal timer queue + timer thread.
 - [x] **ExecutorRef (coroutine path)**: introduced `NGIN::Execution::ExecutorRef` and migrated `TaskContext`/`Task` to use it.
 - [x] **WorkItem execution**: added `NGIN::Execution::WorkItem` (coroutine or job) and extended `ExecutorRef` + schedulers to execute jobs without coroutines.
-- [ ] **Executor layer (full)**: add job scheduling + `WorkItem` and decouple scheduling from coroutines.
+- [x] **Executor layer (core)**: schedulers support `Execute(WorkItem)` / `ExecuteAt(WorkItem, TimePoint)` and `ExecutorRef` can dispatch both jobs and coroutines.
+- [x] **Concepts + type erasure**: added `include/NGIN/Execution/Concepts.hpp` and removed the `IScheduler` vtable interface in favor of concrete executors + `ExecutorRef`.
 - [x] **Thread pool rewrite**: per-worker queues + work stealing + `NGIN::Sync::AtomicCondition` wakeups (spinlock-based queues; can be upgraded to lock-free later).
 - [x] **Task continuation cleanup (partial)**: removed detached threads from `Task::Then` and scheduled task continuations via `ExecutorRef` instead of resuming inline.
 - [x] **Task completion cleanup (partial)**: replaced `std::condition_variable` waits with `NGIN::Sync::AtomicCondition` + atomic completion flag.
 - [x] **SchedulerBenchmarks coverage**: added job enqueue+run baselines for both `FiberScheduler` and `ThreadPoolScheduler`.
-- [ ] **Task cleanup**: implement cancellation propagation, and add `WhenAll/WhenAny` after perf baseline.
+- [x] **Benchmark harness semantics**: `BenchmarkContext::start/stop` now control what is measured (no implicit start/stop in the runner).
+- [x] **Phase 0 scheduler microbenchmarks**: added contended (multi-producer) job scheduling and `ExecuteAt` timer enqueue baselines.
+- [x] **Task cancellation (cooperative)**: `CancellationToken` on `TaskContext` + cancellation-aware `Yield/Delay`, and `Task::IsCanceled()` tracks `TaskCanceled`.
+- [x] **Task combinators (baseline)**: added `WhenAll` and `WhenAny` built on `ExecutorRef` for composing lazy tasks.
+- [ ] **Task cleanup**: implement cancellation propagation rules across composed tasks (beyond pre-cancel checks) and improve cancellation wakeups for `Delay`.
 
 ## Goals
 
@@ -52,15 +57,13 @@ Second priority is ergonomics (a .NET-like async experience) built on top of the
 
 ### Safety & scalability
 
-- **Detached timer threads** (per delay) are unsafe and expensive.
-  - Example: `ThreadPoolScheduler::ScheduleAt` currently spawns a detached thread and captures `this`.
-- Continuation implementation (`Then`) spawns detached OS threads and blocks, defeating scheduling.
-- `IScheduler::Schedule` is `noexcept`, but implementations can take locks and potentially throw `std::system_error`.
+- Removed per-delay detached timer threads in `ThreadPoolScheduler` by adding a timer heap + timer thread.
+- Removed detached OS threads from `Task::Then`; continuations are scheduled via `ExecutorRef`.
+- Remaining: verify `noexcept` guarantees on hot-path `Execute` and keep shutdown deterministic under contention.
 
 ### Over-wide interface
 
-- `IScheduler` forces methods that many schedulers can’t meaningfully implement (`RunOne`, priority/affinity, instrumentation),
-  leading to no-op overrides and muddled semantics.
+- Removed `IScheduler`; optional capabilities are intended to become opt-in concepts/interfaces instead of required vtable methods.
 
 ### Time model
 

@@ -2,7 +2,7 @@
 /// @brief Scheduler that runs coroutines inline.
 #pragma once
 
-#include <NGIN/Execution/IScheduler.hpp>
+#include <NGIN/Execution/WorkItem.hpp>
 
 #include <coroutine>
 #include <cstdint>
@@ -13,20 +13,17 @@
 namespace NGIN::Execution
 {
     /// @brief Scheduler that resumes scheduled coroutines immediately on the calling thread.
-    class InlineScheduler final : public IScheduler
+    class InlineScheduler final
     {
     public:
         InlineScheduler() = default;
 
-        void Schedule(std::coroutine_handle<> coro) noexcept override
+        void Execute(WorkItem item) noexcept
         {
-            if (coro && !coro.done())
-            {
-                coro.resume();
-            }
+            item.Invoke();
         }
 
-        void ScheduleAt(std::coroutine_handle<> coro, NGIN::Time::TimePoint resumeAt) override
+        void ExecuteAt(WorkItem item, NGIN::Time::TimePoint resumeAt)
         {
             const auto now = NGIN::Time::MonotonicClock::Now();
             if (resumeAt > now)
@@ -34,25 +31,38 @@ namespace NGIN::Execution
                 const auto delayNs = resumeAt.ToNanoseconds() - now.ToNanoseconds();
                 NGIN::Time::SleepFor(NGIN::Units::Nanoseconds(static_cast<double>(delayNs)));
             }
-            Schedule(coro);
+            Execute(std::move(item));
         }
 
-        bool RunOne() override
+        void Schedule(std::coroutine_handle<> coro) noexcept
+        {
+            if (coro && !coro.done())
+            {
+                coro.resume();
+            }
+        }
+
+        void ScheduleAt(std::coroutine_handle<> coro, NGIN::Time::TimePoint resumeAt)
+        {
+            ExecuteAt(WorkItem(coro), resumeAt);
+        }
+
+        [[nodiscard]] bool RunOne() noexcept
         {
             return false;
         }
 
-        void RunUntilIdle() noexcept override {}
+        void RunUntilIdle() noexcept {}
 
-        void CancelAll() noexcept override {}
+        void CancelAll() noexcept {}
 
-        void SetPriority(int) noexcept override {}
+        void SetPriority(int) noexcept {}
 
-        void SetAffinity(uint64_t) noexcept override {}
+        void SetAffinity(uint64_t) noexcept {}
 
-        void OnTaskStart(uint64_t, const char*) noexcept override {}
-        void OnTaskSuspend(uint64_t) noexcept override {}
-        void OnTaskResume(uint64_t) noexcept override {}
-        void OnTaskComplete(uint64_t) noexcept override {}
+        void OnTaskStart(uint64_t, const char*) noexcept {}
+        void OnTaskSuspend(uint64_t) noexcept {}
+        void OnTaskResume(uint64_t) noexcept {}
+        void OnTaskComplete(uint64_t) noexcept {}
     };
 }// namespace NGIN::Execution
