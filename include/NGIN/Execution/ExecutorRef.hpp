@@ -3,7 +3,9 @@
 #pragma once
 
 #include <coroutine>
+#include <stdexcept>
 
+#include <NGIN/Execution/WorkItem.hpp>
 #include <NGIN/Time/TimePoint.hpp>
 
 namespace NGIN::Execution
@@ -14,15 +16,15 @@ namespace NGIN::Execution
     class ExecutorRef final
     {
     public:
-        using ScheduleFn   = void (*)(void*, std::coroutine_handle<>) noexcept;
-        using ScheduleAtFn = void (*)(void*, std::coroutine_handle<>, NGIN::Time::TimePoint);
+        using ExecuteFn   = void (*)(void*, WorkItem) noexcept;
+        using ExecuteAtFn = void (*)(void*, WorkItem, NGIN::Time::TimePoint);
 
         constexpr ExecutorRef() noexcept = default;
 
-        constexpr ExecutorRef(void* self, ScheduleFn schedule, ScheduleAtFn scheduleAt) noexcept
+        constexpr ExecutorRef(void* self, ExecuteFn execute, ExecuteAtFn executeAt) noexcept
             : m_self(self)
-            , m_schedule(schedule)
-            , m_scheduleAt(scheduleAt)
+            , m_execute(execute)
+            , m_executeAt(executeAt)
         {
         }
 
@@ -31,33 +33,93 @@ namespace NGIN::Execution
         {
             return ExecutorRef(
                     &scheduler,
-                    +[](void* s, std::coroutine_handle<> h) noexcept {
-                        static_cast<TScheduler*>(s)->Schedule(h);
+                    +[](void* s, WorkItem item) noexcept {
+                        auto* sched = static_cast<TScheduler*>(s);
+                        if constexpr (requires(TScheduler& t, WorkItem w) { t.Execute(std::move(w)); })
+                        {
+                            sched->Execute(std::move(item));
+                        }
+                        else
+                        {
+                            if (item.IsCoroutine())
+                            {
+                                sched->Schedule(item.GetCoroutine());
+                            }
+                            else
+                            {
+                                item.Invoke();
+                            }
+                        }
                     },
-                    +[](void* s, std::coroutine_handle<> h, NGIN::Time::TimePoint tp) {
-                        static_cast<TScheduler*>(s)->ScheduleAt(h, tp);
+                    +[](void* s, WorkItem item, NGIN::Time::TimePoint tp) {
+                        auto* sched = static_cast<TScheduler*>(s);
+                        if constexpr (requires(TScheduler& t, WorkItem w, NGIN::Time::TimePoint p) { t.ExecuteAt(std::move(w), p); })
+                        {
+                            sched->ExecuteAt(std::move(item), tp);
+                        }
+                        else
+                        {
+                            if (item.IsCoroutine())
+                            {
+                                sched->ScheduleAt(item.GetCoroutine(), tp);
+                            }
+                            else
+                            {
+                                throw std::runtime_error("NGIN::Execution::ExecutorRef: scheduler lacks ExecuteAt(job)");
+                            }
+                        }
                     });
         }
 
         [[nodiscard]] constexpr bool IsValid() const noexcept
         {
-            return m_self != nullptr && m_schedule != nullptr && m_scheduleAt != nullptr;
+            return m_self != nullptr && m_execute != nullptr && m_executeAt != nullptr;
         }
 
+        void Execute(WorkItem item) const noexcept
+        {
+            m_execute(m_self, std::move(item));
+        }
+
+        void ExecuteAt(WorkItem item, NGIN::Time::TimePoint resumeAt) const
+        {
+            m_executeAt(m_self, std::move(item), resumeAt);
+        }
+
+        void Execute(std::coroutine_handle<> coro) const noexcept
+        {
+            Execute(WorkItem(coro));
+        }
+
+        void Execute(NGIN::Utilities::Callable<void()> job) const
+        {
+            Execute(WorkItem(std::move(job)));
+        }
+
+        void ExecuteAt(std::coroutine_handle<> coro, NGIN::Time::TimePoint resumeAt) const
+        {
+            ExecuteAt(WorkItem(coro), resumeAt);
+        }
+
+        void ExecuteAt(NGIN::Utilities::Callable<void()> job, NGIN::Time::TimePoint resumeAt) const
+        {
+            ExecuteAt(WorkItem(std::move(job)), resumeAt);
+        }
+
+        // Compatibility shims for existing coroutine-only call sites.
         void Schedule(std::coroutine_handle<> coro) const noexcept
         {
-            m_schedule(m_self, coro);
+            Execute(coro);
         }
 
         void ScheduleAt(std::coroutine_handle<> coro, NGIN::Time::TimePoint resumeAt) const
         {
-            m_scheduleAt(m_self, coro, resumeAt);
+            ExecuteAt(coro, resumeAt);
         }
 
     private:
-        void*        m_self {nullptr};
-        ScheduleFn   m_schedule {nullptr};
-        ScheduleAtFn m_scheduleAt {nullptr};
+        void*      m_self {nullptr};
+        ExecuteFn  m_execute {nullptr};
+        ExecuteAtFn m_executeAt {nullptr};
     };
 }// namespace NGIN::Execution
-

@@ -11,6 +11,7 @@
 #include <thread>
 #include <condition_variable>
 #include <coroutine>
+#include <algorithm>
 #include <cassert>
 #include <functional>
 #include <iostream>// For logging, can remove if not desired
@@ -20,6 +21,7 @@
 #include <NGIN/Units.hpp>
 #include "IScheduler.hpp"
 #include "Fiber.hpp"
+#include "WorkItem.hpp"
 
 namespace NGIN::Execution
 {
@@ -70,27 +72,37 @@ namespace NGIN::Execution
             // Clean up sleeping tasks
             {
                 std::lock_guard lock(m_timersMutex);
-                while (!m_sleepingTasks.empty())
-                    m_sleepingTasks.pop();
+                m_timerHeap.clear();
+            }
+        }
+
+        void Execute(WorkItem item) noexcept
+        {
+            {
+                std::lock_guard lock(m_readyMutex);
+                m_readyQueue.push(std::move(item));
+            }
+            m_readyCv.notify_one();
+        }
+
+        void ExecuteAt(WorkItem item, NGIN::Time::TimePoint resumeAt)
+        {
+            {
+                std::lock_guard lock(m_timersMutex);
+                m_timerHeap.emplace_back(resumeAt, std::move(item));
+                std::push_heap(m_timerHeap.begin(), m_timerHeap.end(), SleepEntryCompare {});
             }
         }
 
 
         void Schedule(std::coroutine_handle<> coro) noexcept override
         {
-            {
-                std::lock_guard lock(m_readyMutex);
-                m_readyQueue.push(coro);
-            }
-            m_readyCv.notify_one();
+            Execute(WorkItem(coro));
         }
 
         void ScheduleAt(std::coroutine_handle<> coro, NGIN::Time::TimePoint resumeAt) override
         {
-            {
-                std::lock_guard lock(m_timersMutex);
-                m_sleepingTasks.emplace(resumeAt, coro);
-            }
+            ExecuteAt(WorkItem(coro), resumeAt);
         }
 
         bool RunOne() override
@@ -108,13 +120,12 @@ namespace NGIN::Execution
         {
             {
                 std::lock_guard lock(m_readyMutex);
-                std::queue<std::coroutine_handle<>> empty;
+                std::queue<WorkItem> empty;
                 std::swap(m_readyQueue, empty);
             }
             {
                 std::lock_guard lock(m_timersMutex);
-                while (!m_sleepingTasks.empty())
-                    m_sleepingTasks.pop();
+                m_timerHeap.clear();
             }
         }
 
@@ -144,12 +155,12 @@ namespace NGIN::Execution
         std::thread m_driverThread;
 
         // Ready queue
-        std::queue<std::coroutine_handle<>> m_readyQueue;
+        std::queue<WorkItem> m_readyQueue;
         std::mutex m_readyMutex;
         std::condition_variable m_readyCv;
 
         // Delayed tasks
-        using SleepEntry = std::pair<time_point, std::coroutine_handle<>>;
+        using SleepEntry = std::pair<time_point, WorkItem>;
         struct SleepEntryCompare
         {
             bool operator()(const SleepEntry& a, const SleepEntry& b) const
@@ -157,25 +168,26 @@ namespace NGIN::Execution
                 return a.first > b.first;// Min-heap: soonest first
             }
         };
-        std::priority_queue<SleepEntry, std::vector<SleepEntry>, SleepEntryCompare> m_sleepingTasks;
+        std::vector<SleepEntry> m_timerHeap;
         std::mutex m_timersMutex;
 
         // Timer management
         void CheckSleepingTasks()
         {
             auto now = NGIN::Time::MonotonicClock::Now();
-            std::vector<std::coroutine_handle<>> expired;
+            std::vector<WorkItem> expired;
             {
                 std::lock_guard lock(m_timersMutex);
-                while (!m_sleepingTasks.empty() && m_sleepingTasks.top().first <= now)
+                while (!m_timerHeap.empty() && m_timerHeap.front().first <= now)
                 {
-                    expired.push_back(m_sleepingTasks.top().second);
-                    m_sleepingTasks.pop();
+                    std::pop_heap(m_timerHeap.begin(), m_timerHeap.end(), SleepEntryCompare {});
+                    expired.push_back(std::move(m_timerHeap.back().second));
+                    m_timerHeap.pop_back();
                 }
             }
-            for (auto h: expired)
+            for (auto& item: expired)
             {
-                Schedule(h);
+                Execute(std::move(item));
             }
         }
 
@@ -189,11 +201,11 @@ namespace NGIN::Execution
 
                 {
                     std::lock_guard lock(m_timersMutex);
-                    if (!m_sleepingTasks.empty())
+                    if (!m_timerHeap.empty())
                     {
                         hasSleeping   = true;
                         auto now      = NGIN::Time::MonotonicClock::Now();
-                        auto resumeAt = m_sleepingTasks.top().first;
+                        auto resumeAt = m_timerHeap.front().first;
                         if (resumeAt > now)
                         {
                             const auto deltaNs = resumeAt.ToNanoseconds() - now.ToNanoseconds();
@@ -235,7 +247,7 @@ namespace NGIN::Execution
 
             while (!m_stop.load())
             {
-                std::coroutine_handle<> coro = nullptr;
+                WorkItem work;
                 {
                     std::unique_lock lock(m_readyMutex);
                     if (m_stop.load())
@@ -247,20 +259,19 @@ namespace NGIN::Execution
                         break;
                     if (!m_readyQueue.empty())
                     {
-                        coro = m_readyQueue.front();
+                        work = std::move(m_readyQueue.front());
                         m_readyQueue.pop();
                     }
                 }
 
-                if (!coro)
+                if (work.IsEmpty())
                     continue;
 
                 Fiber* fiber = nullptr;
                 if (fiberPool.empty())
                 {
                     // Defensive fallback: should not happen; run directly rather than deadlocking.
-                    if (coro && !coro.done())
-                        coro.resume();
+                    work.Invoke();
                     continue;
                 }
                 fiber = fiberPool.back();
@@ -269,10 +280,7 @@ namespace NGIN::Execution
                 // Defensive: must be assignable (not running)
                 try
                 {
-                    fiber->Assign([coro]() {
-                        if (coro && !coro.done())
-                            coro.resume();
-                    });
+                    fiber->Assign([work = std::move(work)]() mutable { work.Invoke(); });
                 } catch (const std::exception& ex)
                 {
                     // Should never happen unless fiber is misused, but handle gracefully
