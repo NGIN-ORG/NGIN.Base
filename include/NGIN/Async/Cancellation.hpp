@@ -2,6 +2,7 @@
 
 #include <coroutine>
 #include <exception>
+#include <initializer_list>
 #include <memory>
 #include <mutex>
 #include <utility>
@@ -10,6 +11,10 @@
 
 #include <NGIN/Execution/ExecutorRef.hpp>
 #include <NGIN/Sync/SpinLock.hpp>
+#include <NGIN/Time/MonotonicClock.hpp>
+#include <NGIN/Time/TimePoint.hpp>
+#include <NGIN/Units.hpp>
+#include <NGIN/Utilities/Callable.hpp>
 
 namespace NGIN::Async
 {
@@ -241,6 +246,42 @@ namespace NGIN::Async
             return m_state->canceled.load(std::memory_order_acquire);
         }
 
+        void CancelAt(NGIN::Execution::ExecutorRef exec, NGIN::Time::TimePoint at) noexcept
+        {
+            if (IsCancellationRequested() || !exec.IsValid())
+            {
+                return;
+            }
+
+            auto state = m_state;
+            exec.ExecuteAt(NGIN::Utilities::Callable<void()>([state]() noexcept { state->Cancel(); }), at);
+        }
+
+        template<typename TUnit>
+            requires NGIN::Units::QuantityOf<NGIN::Units::TIME, TUnit>
+        void CancelAfter(NGIN::Execution::ExecutorRef exec, const TUnit& delay) noexcept
+        {
+            if (IsCancellationRequested() || !exec.IsValid())
+            {
+                return;
+            }
+
+            const auto nsDouble = NGIN::Units::UnitCast<NGIN::Units::Nanoseconds>(delay).GetValue();
+            if (nsDouble <= 0.0)
+            {
+                Cancel();
+                return;
+            }
+
+            const auto now = NGIN::Time::MonotonicClock::Now().ToNanoseconds();
+            auto       add = static_cast<NGIN::UInt64>(nsDouble);
+            if (static_cast<double>(add) < nsDouble)
+            {
+                ++add;
+            }
+            CancelAt(exec, NGIN::Time::TimePoint::FromNanoseconds(now + add));
+        }
+
     private:
         std::shared_ptr<detail::CancellationState> m_state;
     };
@@ -257,7 +298,13 @@ namespace NGIN::Async
                                             void* callbackCtx) const noexcept
     {
         outRegistration.Reset();
-        if (!m_state || !exec.IsValid() || !handle)
+        if (!m_state)
+        {
+            return;
+        }
+
+        const bool wantsResume = exec.IsValid() && handle;
+        if (!wantsResume && callback == nullptr)
         {
             return;
         }
@@ -271,7 +318,10 @@ namespace NGIN::Async
             }
             if (shouldResume)
             {
-                exec.Execute(handle);
+                if (wantsResume)
+                {
+                    exec.Execute(handle);
+                }
             }
             return;
         }
@@ -283,6 +333,94 @@ namespace NGIN::Async
         outRegistration.m_callbackCtx = callbackCtx;
         outRegistration.m_armed.store(true, std::memory_order_relaxed);
         m_state->Register(&outRegistration);
+    }
+
+    namespace detail
+    {
+        [[nodiscard]] inline bool CancelLinkedSource(void* ctx) noexcept
+        {
+            auto* source = static_cast<CancellationSource*>(ctx);
+            if (source)
+            {
+                source->Cancel();
+            }
+            return false;
+        }
+
+        struct LinkedCancellationState final
+        {
+            CancellationSource                    source {};
+            std::vector<CancellationRegistration> registrations {};
+
+            void Link(std::initializer_list<CancellationToken> tokens) noexcept
+            {
+                registrations.resize(tokens.size());
+
+                std::size_t index = 0;
+                for (const auto& token: tokens)
+                {
+                    if (token.IsCancellationRequested())
+                    {
+                        source.Cancel();
+                        return;
+                    }
+                    token.Register(registrations[index++], {}, {}, &CancelLinkedSource, &source);
+                }
+            }
+        };
+    }// namespace detail
+
+    /// @brief A cancellation source that is cancelled when any of the linked tokens are cancelled.
+    ///
+    /// This type owns the registrations required to link tokens together.
+    class LinkedCancellationSource final
+    {
+    public:
+        LinkedCancellationSource() = default;
+
+        explicit LinkedCancellationSource(std::initializer_list<CancellationToken> tokens)
+            : m_state(std::make_shared<detail::LinkedCancellationState>())
+        {
+            m_state->Link(tokens);
+        }
+
+        template<typename... TTokens>
+            requires(sizeof...(TTokens) > 0)
+        explicit LinkedCancellationSource(const TTokens&... tokens)
+            : LinkedCancellationSource({tokens...})
+        {
+        }
+
+        [[nodiscard]] CancellationToken GetToken() const noexcept
+        {
+            if (!m_state)
+            {
+                return {};
+            }
+            return m_state->source.GetToken();
+        }
+
+        void Cancel() noexcept
+        {
+            if (m_state)
+            {
+                m_state->source.Cancel();
+            }
+        }
+
+        [[nodiscard]] bool IsCancellationRequested() const noexcept
+        {
+            return m_state && m_state->source.IsCancellationRequested();
+        }
+
+    private:
+        std::shared_ptr<detail::LinkedCancellationState> m_state {};
+    };
+
+    /// @brief Convenience helper to create a linked cancellation source.
+    [[nodiscard]] inline LinkedCancellationSource CreateLinkedTokenSource(std::initializer_list<CancellationToken> tokens)
+    {
+        return LinkedCancellationSource(tokens);
     }
 
     inline void CancellationRegistration::Reset() noexcept

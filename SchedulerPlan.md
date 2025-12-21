@@ -29,7 +29,9 @@ Second priority is ergonomics (a .NET-like async experience) built on top of the
 - [x] **Phase 0 scheduler microbenchmarks**: added contended (multi-producer) job scheduling and `ExecuteAt` timer enqueue baselines.
 - [x] **Task cancellation (cooperative)**: `CancellationToken` on `TaskContext` + cancellation-aware `Yield/Delay` (incl. cancellation registrations to wake delays), and `Task::IsCanceled()` tracks `TaskCanceled`.
 - [x] **Task combinators (baseline)**: added `WhenAll` and `WhenAny` built on `ExecutorRef` for composing lazy tasks.
-- [ ] **Task cleanup**: implement cancellation propagation rules across composed tasks (beyond pre-cancel checks), and add cancellation-aware timeouts (`CancelAfter`).
+- [x] **CancelAfter/CancelAt (baseline)**: added `CancellationSource::CancelAfter(exec, duration)` and `CancelAt(exec, timepoint)` for cancellation-aware timeouts.
+- [x] **Token linking**: added `CreateLinkedTokenSource` / `LinkedCancellationSource` to cancel when any input token cancels.
+- [ ] **Task cleanup**: implement cancellation propagation rules across composed tasks (beyond pre-cancel checks) and consider `TaskContext`-level token linking for child tasks.
 
 ## Goals
 

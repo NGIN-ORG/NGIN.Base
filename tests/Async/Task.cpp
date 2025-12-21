@@ -6,6 +6,7 @@
 #include <NGIN/Async/Task.hpp>
 #include <NGIN/Execution/InlineScheduler.hpp>
 #include <NGIN/Execution/WorkItem.hpp>
+#include <NGIN/Time/TimePoint.hpp>
 #include <NGIN/Units.hpp>
 
 namespace
@@ -44,6 +45,15 @@ namespace
         void RunUntilIdle() noexcept
         {
             while (RunOne()) {}
+        }
+
+        void RunAllDelayed() noexcept
+        {
+            for (auto& item: m_delayed)
+            {
+                Execute(std::move(item));
+            }
+            m_delayed.clear();
         }
 
     private:
@@ -104,6 +114,30 @@ TEST_CASE("Task cancellation: Delay is woken by cancellation")
     REQUIRE_FALSE(task.IsCompleted());
 
     source.Cancel();
+    exec.RunUntilIdle();
+
+    REQUIRE(task.IsCompleted());
+    REQUIRE(task.IsCanceled());
+    REQUIRE_THROWS_AS(task.Get(), NGIN::Async::TaskCanceled);
+}
+
+TEST_CASE("Task cancellation: CancelAt wakes Delay without firing timers")
+{
+    ManualTimerExecutor exec;
+    NGIN::Async::CancellationSource source;
+    NGIN::Async::TaskContext ctx(exec, source.GetToken());
+
+    auto task = DelayForever(ctx);
+    task.Start(ctx);
+
+    exec.RunUntilIdle();
+    REQUIRE_FALSE(task.IsCompleted());
+
+    source.CancelAt(ctx.GetExecutor(), NGIN::Time::TimePoint::FromNanoseconds(1));
+    exec.RunUntilIdle();
+    REQUIRE_FALSE(task.IsCompleted());
+
+    exec.RunAllDelayed(); // execute the cancel job
     exec.RunUntilIdle();
 
     REQUIRE(task.IsCompleted());
