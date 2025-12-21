@@ -1,11 +1,11 @@
-#include <NGIN/Async/Fiber.hpp>
+#include <NGIN/Execution/Fiber.hpp>
 
 #include "FiberPlatform.hpp"
 
 #include <stdexcept>
 #include <utility>
 
-namespace NGIN::Async
+namespace NGIN::Execution
 {
     struct Fiber::Impl
     {
@@ -30,7 +30,7 @@ namespace NGIN::Async
     {
         [[noreturn]] void ThrowInvalidFiber()
         {
-            throw std::runtime_error("NGIN::Async::Fiber: invalid fiber state");
+            throw std::runtime_error("NGIN::Execution::Fiber: invalid fiber state");
         }
     }// namespace
 
@@ -69,7 +69,7 @@ namespace NGIN::Async
     {
         if (!job)
         {
-            throw std::invalid_argument("NGIN::Async::Fiber::Assign requires a callable job");
+            throw std::invalid_argument("NGIN::Execution::Fiber::Assign requires a callable job");
         }
         if (!m_impl || m_impl->state == nullptr)
         {
@@ -101,4 +101,4 @@ namespace NGIN::Async
     {
         detail::YieldFiber();
     }
-}// namespace NGIN::Async
+}// namespace NGIN::Execution

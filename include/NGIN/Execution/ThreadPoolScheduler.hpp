@@ -1,5 +1,5 @@
 /// <summary>
-/// Thread-pool-based scheduler implementation for NGIN::Async::IScheduler (header-only).
+/// Thread-pool-based scheduler implementation for NGIN::Execution::IScheduler (header-only).
 /// </summary>
 #pragma once
 
@@ -12,7 +12,7 @@
 #include <atomic>
 #include <chrono>
 
-namespace NGIN::Async
+namespace NGIN::Execution
 {
     /// <summary>
     /// Scheduler that dispatches coroutines onto a pool of worker threads.
@@ -146,4 +146,4 @@ namespace NGIN::Async
         uint64_t m_affinityMask {0};
     };
 
-}// namespace NGIN::Async
+}// namespace NGIN::Execution

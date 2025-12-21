@@ -1,12 +1,12 @@
 #pragma once
 
 #include <shared_mutex>
-#include <NGIN/Async/SharedMutex.hpp>
+#include <NGIN/Sync/SharedMutex.hpp>
 
-namespace NGIN::Async
+namespace NGIN::Sync
 {
     /// @brief A read-write lock that allows multiple readers or a single writer at a time.
-    /// @note This is a wrapper around the NGIN::Async::SharedMutex class.
+    /// @note This is a wrapper around the NGIN::Sync::SharedMutex class.
     class ReadWriteLock : private SharedMutex
     {
     public:
@@ -57,4 +57,4 @@ namespace NGIN::Async
             TryLock();
         }
     };
-}// namespace NGIN::Async
+}// namespace NGIN::Sync

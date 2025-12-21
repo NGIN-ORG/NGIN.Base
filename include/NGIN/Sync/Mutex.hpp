@@ -1,9 +1,9 @@
 #pragma once
 
 #include <mutex>
-#include <NGIN/Async/ILockable.hpp>
+#include <NGIN/Sync/ILockable.hpp>
 
-namespace NGIN::Async
+namespace NGIN::Sync
 {
     /// @brief A simple mutex wrapper.
     class Mutex : public ILockable
@@ -32,4 +32,4 @@ namespace NGIN::Async
     private:
         std::mutex m_mutex {};
     };
-}// namespace NGIN::Async
+}// namespace NGIN::Sync

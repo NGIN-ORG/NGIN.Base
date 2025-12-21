@@ -1,9 +1,9 @@
 #pragma once
 
-#include <NGIN/Async/Fiber.hpp>
+#include <NGIN/Execution/Fiber.hpp>
 #include <NGIN/Defines.hpp>
 
-namespace NGIN::Async::detail
+namespace NGIN::Execution::detail
 {
     struct FiberState;
 
@@ -14,4 +14,4 @@ namespace NGIN::Async::detail
     NGIN_BASE_LOCAL void        EnsureMainFiber();
     NGIN_BASE_LOCAL bool        IsMainFiberInitialized() noexcept;
     NGIN_BASE_LOCAL void        YieldFiber();
-}// namespace NGIN::Async::detail
+}// namespace NGIN::Execution::detail

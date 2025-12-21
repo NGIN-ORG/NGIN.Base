@@ -7,20 +7,8 @@
 #include <chrono>
 #include <cstdint>
 
-namespace NGIN::Async
+namespace NGIN::Execution
 {
-    /// <summary>
-    /// Exception thrown when a Task is canceled.
-    /// </summary>
-    class TaskCanceled : public std::exception
-    {
-    public:
-        const char* what() const noexcept override
-        {
-            return "Task was canceled";
-        }
-    };
-
     /// <summary>
     /// Pure virtual interface for all scheduler implementations.
     /// </summary>
@@ -79,4 +67,4 @@ namespace NGIN::Async
         virtual ~IScheduler() = default;
     };
 
-}// namespace NGIN::Async
+}// namespace NGIN::Execution

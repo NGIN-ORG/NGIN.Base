@@ -9,7 +9,7 @@
 #include <string>
 #include <utility>
 
-namespace NGIN::Async::detail
+namespace NGIN::Execution::detail
 {
     struct FiberState
     {
@@ -180,7 +180,7 @@ namespace NGIN::Async::detail
         }
     }
 
-}// namespace NGIN::Async::detail
+}// namespace NGIN::Execution::detail
 
 #else
 static_assert(false, "Fiber.win32.cpp included on non-Windows platform");

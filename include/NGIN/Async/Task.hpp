@@ -11,96 +11,22 @@
 #include <utility>
 #include <atomic>
 #include <cassert>
-#include "IScheduler.hpp"
+#include <thread>
+
+#include <NGIN/Async/TaskContext.hpp>
 
 namespace NGIN::Async
 {
-
     /// <summary>
-    /// Execution context binding tasks to a specific IScheduler.
+    /// Exception thrown when a Task is canceled.
     /// </summary>
-    class TaskContext
+    class TaskCanceled : public std::exception
     {
     public:
-        explicit TaskContext(IScheduler* scheduler = nullptr) noexcept
-            : m_scheduler(scheduler) {}
-
-        void Bind(IScheduler* scheduler) noexcept
+        const char* what() const noexcept override
         {
-            m_scheduler = scheduler;
+            return "Task was canceled";
         }
-
-        IScheduler* GetScheduler() const noexcept
-        {
-            return m_scheduler;
-        }
-
-        // Awaiter that yields control to the scheduler
-        auto Yield() const noexcept
-        {
-            struct Awaiter
-            {
-                IScheduler* sched;
-                bool        await_ready() const noexcept
-                {
-                    return false;
-                }
-                void await_suspend(std::coroutine_handle<> h) const noexcept
-                {
-                    sched->Schedule(h);
-                }
-                void await_resume() const noexcept {}
-            };
-            return Awaiter {m_scheduler};
-        }
-
-        // In TaskContext:
-        auto Delay(std::chrono::milliseconds dur) const noexcept
-        {
-            struct DelayAwaiter
-            {
-                IScheduler*                           sched;
-                std::chrono::milliseconds             dur;
-                std::chrono::steady_clock::time_point until;
-
-                DelayAwaiter(IScheduler* s, std::chrono::milliseconds d)
-                    : sched(s), dur(d), until(std::chrono::steady_clock::now() + d) {}
-
-                bool await_ready() const noexcept
-                {
-                    return dur.count() == 0;
-                }
-                void await_suspend(std::coroutine_handle<> handle) const
-                {
-                    sched->ScheduleDelay(handle, until);
-                }
-                void await_resume() const noexcept {}
-            };
-            return DelayAwaiter {m_scheduler, dur};
-        }
-
-
-        // Helper to start a task on this context and return it
-        template<typename TaskT>
-        TaskT Run(TaskT&& task)
-        {
-            task.Start(*this);
-            return std::forward<TaskT>(task);
-        }
-
-        ///TODO: Make this use NGIN::Utilities::Callable to allow any callable
-        template<typename Func, typename... Args>
-        auto Run(Func&& func, Args&&... args)
-                -> decltype(auto)
-        {
-            // Call the coroutine function with this context and all args
-            auto task = func(*this, std::forward<Args>(args)...);
-            task.Start(*this);
-            return task;
-        }
-
-    private:
-        IScheduler* m_scheduler {nullptr};
     };
 
     class BaseTask
@@ -336,7 +262,7 @@ namespace NGIN::Async
 
     private:
         handle_type      m_handle;
-        IScheduler*      m_scheduler;
+        NGIN::Execution::IScheduler* m_scheduler;
         std::atomic_bool m_started;
 
         // For continuation support
@@ -563,7 +489,7 @@ namespace NGIN::Async
 
     private:
         handle_type      m_handle;
-        IScheduler*      m_scheduler;
+        NGIN::Execution::IScheduler* m_scheduler;
         std::atomic_bool m_started;
 
         // For continuation support
@@ -576,7 +502,7 @@ namespace NGIN::Async
         {
             struct Awaiter
             {
-                IScheduler*               sched;
+                NGIN::Execution::IScheduler* sched;
                 std::chrono::milliseconds dur;
                 bool                      await_ready() const noexcept
                 {

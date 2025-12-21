@@ -1,5 +1,5 @@
 /// <summary>
-/// Fiber/thread hybrid scheduler for NGIN::Async::IScheduler (Windows-only, cooperative).
+/// Fiber/thread hybrid scheduler for NGIN::Execution::IScheduler (Windows-only, cooperative).
 /// </summary>
 #pragma once
 
@@ -19,7 +19,7 @@
 #include "IScheduler.hpp"
 #include "Fiber.hpp"
 
-namespace NGIN::Async
+namespace NGIN::Execution
 {
     class FiberScheduler : public IScheduler
     {
@@ -286,4 +286,4 @@ namespace NGIN::Async
         FiberScheduler(const FiberScheduler&)            = delete;
         FiberScheduler& operator=(const FiberScheduler&) = delete;
     };
-}// namespace NGIN::Async
+}// namespace NGIN::Execution

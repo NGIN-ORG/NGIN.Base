@@ -1,17 +1,17 @@
 /// @file AtomicConditionTest.cpp
-/// @brief Tests for NGIN::Async::AtomicCondition.
+/// @brief Tests for NGIN::Sync::AtomicCondition.
 
-#include <NGIN/Async/AtomicCondition.hpp>
+#include <NGIN/Sync/AtomicCondition.hpp>
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
 #include <thread>
 #include <vector>
 
-using namespace NGIN::Async;
+using namespace NGIN::Sync;
 using namespace std::chrono_literals;
 
-TEST_CASE("AtomicCondition wakes one waiting thread", "[Async][AtomicCondition]")
+TEST_CASE("AtomicCondition wakes one waiting thread", "[Sync][AtomicCondition]")
 {
     AtomicCondition  condition;
     std::atomic<int> counter {0};
@@ -28,7 +28,7 @@ TEST_CASE("AtomicCondition wakes one waiting thread", "[Async][AtomicCondition]"
     CHECK(counter.load() == 1);
 }
 
-TEST_CASE("AtomicCondition NotifyOne wakes threads individually", "[Async][AtomicCondition]")
+TEST_CASE("AtomicCondition NotifyOne wakes threads individually", "[Sync][AtomicCondition]")
 {
     AtomicCondition          condition;
     std::atomic<int>         counter {0};
@@ -57,7 +57,7 @@ TEST_CASE("AtomicCondition NotifyOne wakes threads individually", "[Async][Atomi
     CHECK(counter.load() == 2);
 }
 
-TEST_CASE("AtomicCondition NotifyAll wakes arbitrary thread counts", "[Async][AtomicCondition]")
+TEST_CASE("AtomicCondition NotifyAll wakes arbitrary thread counts", "[Sync][AtomicCondition]")
 {
     for (int threadCount: {1, 2, 4, 8})
     {

@@ -5,10 +5,9 @@
 #include <NGIN/Defines.hpp>
 #include <NGIN/Memory/SmartPointers.hpp>
 #include <NGIN/Primitives.hpp>
-#include <print>
 #include <NGIN/Utilities/Callable.hpp>
 
-namespace NGIN::Async
+namespace NGIN::Execution
 {
     class NGIN_BASE_API Fiber
     {
@@ -37,6 +36,6 @@ namespace NGIN::Async
         struct Impl;
         NGIN::Memory::Scoped<Impl> m_impl;
     };
-}// namespace NGIN::Async
+}// namespace NGIN::Execution
 
 #undef Yield

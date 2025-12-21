@@ -1,6 +1,6 @@
 #pragma once
 
-namespace NGIN::Async
+namespace NGIN::Sync
 {
     class ILockable
     {
@@ -10,4 +10,4 @@ namespace NGIN::Async
         virtual void Unlock()                         = 0;
         [[nodiscard]] virtual bool TryLock() noexcept = 0;
     };
-}// namespace NGIN::Async
+}// namespace NGIN::Sync

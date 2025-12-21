@@ -1,21 +1,21 @@
 /// @file FiberTest.cpp
-/// @brief Tests for NGIN::Async::Fiber.
+/// @brief Tests for NGIN::Execution::Fiber.
 
-#include <NGIN/Async/Fiber.hpp>
+#include <NGIN/Execution/Fiber.hpp>
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <functional>
 #include <stdexcept>
 
-using namespace NGIN::Async;
+using namespace NGIN::Execution;
 
-TEST_CASE("Fiber constructs with default behavior", "[Async][Fiber]")
+TEST_CASE("Fiber constructs with default behavior", "[Execution][Fiber]")
 {
     Fiber fiber([] {}, 64 * 1024);
     CHECK_NOTHROW(fiber.Resume());
 }
 
-TEST_CASE("Fiber yields and resumes", "[Async][Fiber]")
+TEST_CASE("Fiber yields and resumes", "[Execution][Fiber]")
 {
     std::atomic<bool> entered {false};
     std::atomic<bool> yielded {false};
@@ -35,7 +35,7 @@ TEST_CASE("Fiber yields and resumes", "[Async][Fiber]")
     CHECK(yielded.load());
 }
 
-TEST_CASE("Fiber supports multiple yield/resume cycles", "[Async][Fiber]")
+TEST_CASE("Fiber supports multiple yield/resume cycles", "[Execution][Fiber]")
 {
     int   counter = 0;
     Fiber fiber([&] {
@@ -55,7 +55,7 @@ TEST_CASE("Fiber supports multiple yield/resume cycles", "[Async][Fiber]")
     CHECK(counter == 3);
 }
 
-TEST_CASE("Fiber completes once", "[Async][Fiber]")
+TEST_CASE("Fiber completes once", "[Execution][Fiber]")
 {
     int   counter = 0;
     Fiber fiber([&] { counter++; }, 64 * 1024);
@@ -66,18 +66,18 @@ TEST_CASE("Fiber completes once", "[Async][Fiber]")
     CHECK(counter == 1);
 }
 
-TEST_CASE("Fiber respects configured stack size", "[Async][Fiber]")
+TEST_CASE("Fiber respects configured stack size", "[Execution][Fiber]")
 {
     Fiber fiber([] {}, 128 * 1024);
     CHECK_NOTHROW(fiber.Resume());
 }
 
-TEST_CASE("Fiber forwards exceptions", "[Async][Fiber]")
+TEST_CASE("Fiber forwards exceptions", "[Execution][Fiber]")
 {
     SUCCEED("Exception propagation is not yet supported by Fiber on POSIX platforms");
 }
 
-TEST_CASE("Fiber cleans up derived resources", "[Async][Fiber]")
+TEST_CASE("Fiber cleans up derived resources", "[Execution][Fiber]")
 {
     bool destroyed = false;
     struct TestFiber : Fiber

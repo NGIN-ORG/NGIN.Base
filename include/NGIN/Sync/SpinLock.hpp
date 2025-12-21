@@ -1,10 +1,10 @@
 #pragma once
 
-#include <NGIN/Async/ILockable.hpp>
+#include <NGIN/Sync/ILockable.hpp>
 #include <atomic>
 #include <thread>
 
-namespace NGIN::Async
+namespace NGIN::Sync
 {
     /// @brief A simple spin lock implementation
     class SpinLock : public ILockable
@@ -46,4 +46,4 @@ namespace NGIN::Async
     private:
         std::atomic<bool> lock {false};
     };
-}// namespace NGIN::Async
+}// namespace NGIN::Sync

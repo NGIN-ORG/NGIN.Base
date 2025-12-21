@@ -1,10 +1,10 @@
 #pragma once
 
-#include <NGIN/Async/ILockable.hpp>
+#include <NGIN/Sync/ILockable.hpp>
 #include <semaphore>
 #include <thread>
 
-namespace NGIN::Async
+namespace NGIN::Sync
 {
     /// @brief A simple semaphore wrapper.
     template<int MaxCount = std::counting_semaphore<>::max()>
@@ -43,4 +43,4 @@ namespace NGIN::Async
     private:
         std::counting_semaphore<MaxCount> semaphore;
     };
-}// namespace NGIN::Async
+}// namespace NGIN::Sync

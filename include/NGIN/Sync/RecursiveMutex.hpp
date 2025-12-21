@@ -1,9 +1,9 @@
 #pragma once
 
 #include <mutex>
-#include <NGIN/Async/ILockable.hpp>
+#include <NGIN/Sync/ILockable.hpp>
 
-namespace NGIN::Async
+namespace NGIN::Sync
 {
     /// @brief A simple recursive mutex wrapper.
     class RecursiveMutex : public ILockable
@@ -32,4 +32,4 @@ namespace NGIN::Async
     private:
         std::recursive_mutex m_recursiveMutex;
     };
-}// namespace NGIN::Async
+}// namespace NGIN::Sync

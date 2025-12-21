@@ -1,5 +1,7 @@
 #include <iostream>
+#if __has_include(<print>)
 #include <print>
+#endif
 
 #include <NGIN/Units.hpp>
 using namespace NGIN::Units;
@@ -44,7 +46,11 @@ int main()
     /// Formatting example
     Seconds t {3.5};
     Meters  d {12.0};
+#if __has_include(<print>)
     std::println("Speed: {:.1f}", (d / t));// prints “Speed: 3.4 m/s”
+#else
+    std::cout << "Speed: " << (d / t) << std::endl;
+#endif
 
     return 0;
 }

@@ -11,7 +11,7 @@
 
 #include <ucontext.h>
 
-namespace NGIN::Async::detail
+namespace NGIN::Execution::detail
 {
     struct FiberState
     {
@@ -153,7 +153,7 @@ namespace NGIN::Async::detail
         }
     }
 
-}// namespace NGIN::Async::detail
+}// namespace NGIN::Execution::detail
 
 #else
 static_assert(false, "Fiber.posix.cpp included on unsupported platform");

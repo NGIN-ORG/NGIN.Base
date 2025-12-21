@@ -3,9 +3,9 @@
 #include <atomic>
 #include <thread>
 #include <NGIN/Primitives.hpp>
-#include <NGIN/Async/ILockable.hpp>
+#include <NGIN/Sync/ILockable.hpp>
 
-namespace NGIN::Async
+namespace NGIN::Sync
 {
 
     class TicketLock : public ILockable
@@ -53,4 +53,4 @@ namespace NGIN::Async
         std::atomic<UInt32> m_nowServing {0};
     };
 
-}// namespace NGIN::Async
+}// namespace NGIN::Sync

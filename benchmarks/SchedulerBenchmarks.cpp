@@ -1,6 +1,6 @@
 #include <NGIN/Benchmark.hpp>
-#include <NGIN/Async/FiberScheduler.hpp>
-#include <NGIN/Async/ThreadPoolScheduler.hpp>
+#include <NGIN/Execution/FiberScheduler.hpp>
+#include <NGIN/Execution/ThreadPoolScheduler.hpp>
 #include <iostream>
 #include <coroutine>
 #include <atomic>
@@ -54,11 +54,11 @@ int main()
     // FiberScheduler benchmark
     Benchmark::Register([](BenchmarkContext& ctx) {
         ctx.start();
-        NGIN::Async::FiberScheduler scheduler(numThreads, numFibers);
+        NGIN::Execution::FiberScheduler scheduler(numThreads, numFibers);
         std::atomic<int> completed {0};
         struct Awaitable
         {
-            NGIN::Async::FiberScheduler& sched;
+            NGIN::Execution::FiberScheduler& sched;
             std::atomic<int>& completed;
             bool await_ready() const noexcept
             {
@@ -73,7 +73,7 @@ int main()
                 ++completed;
             }
         };
-        auto bench_coro = [](NGIN::Async::FiberScheduler& sched, std::atomic<int>& completed) -> BenchTask {
+        auto bench_coro = [](NGIN::Execution::FiberScheduler& sched, std::atomic<int>& completed) -> BenchTask {
             co_await Awaitable {sched, completed};
         };
         std::vector<BenchTask> tasks;
@@ -96,11 +96,11 @@ int main()
     // ThreadPoolScheduler benchmark
     Benchmark::Register([](BenchmarkContext& ctx) {
         ctx.start();
-        NGIN::Async::ThreadPoolScheduler scheduler(numThreads);
+        NGIN::Execution::ThreadPoolScheduler scheduler(numThreads);
         std::atomic<int> completed {0};
         struct Awaitable
         {
-            NGIN::Async::ThreadPoolScheduler& sched;
+            NGIN::Execution::ThreadPoolScheduler& sched;
             std::atomic<int>& completed;
             bool await_ready() const noexcept
             {
@@ -115,7 +115,7 @@ int main()
                 ++completed;
             }
         };
-        auto bench_coro = [](NGIN::Async::ThreadPoolScheduler& sched, std::atomic<int>& completed) -> BenchTask {
+        auto bench_coro = [](NGIN::Execution::ThreadPoolScheduler& sched, std::atomic<int>& completed) -> BenchTask {
             co_await Awaitable {sched, completed};
         };
         std::vector<BenchTask> tasks;

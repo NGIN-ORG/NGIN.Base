@@ -10,7 +10,7 @@
 #include <cassert>
 #endif
 
-namespace NGIN::Async
+namespace NGIN::Sync
 {
 
     /// @brief A minimal condition-like object using C++20 atomic wait/notify.
@@ -115,4 +115,4 @@ namespace NGIN::Async
 #endif
     };
 
-}// namespace NGIN::Async
+}// namespace NGIN::Sync
