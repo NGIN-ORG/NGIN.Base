@@ -19,7 +19,7 @@ namespace NGIN
             static auto Test(...) -> std::false_type
             {
                 return std::false_type {};
-            };
+            }
 
         public:
             static constexpr bool value = decltype(Test<T>(nullptr))::value;

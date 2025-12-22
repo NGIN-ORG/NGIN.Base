@@ -117,13 +117,13 @@ namespace NGIN
         ////////////////////////////////////////////////////////////////////////////////
 
         /// @brief Constructs a DynamicLibrary object with the specified library path.
-        /// @param libraryPath The path to the dynamic/shared library.
-        inline DynamicLibrary::DynamicLibrary(std::string libraryPath)
-            : libraryPath(std::move(libraryPath)), handle(nullptr)
+        /// @param path The path to the dynamic/shared library.
+        inline DynamicLibrary::DynamicLibrary(std::string path)
+            : libraryPath(std::move(path)), handle(nullptr)
         {
             if (this->libraryPath.empty())
             {
-                throw std::invalid_argument("DynamicLibrary: libraryPath cannot be empty.");
+                throw std::invalid_argument("DynamicLibrary: path cannot be empty.");
             }
         }
 
