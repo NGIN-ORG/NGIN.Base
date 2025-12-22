@@ -8,6 +8,7 @@
 #include <utility>
 #include <atomic>
 #include <cassert>
+#include <type_traits>
 
 #include <NGIN/Async/Cancellation.hpp>
 #include <NGIN/Async/TaskContext.hpp>
@@ -246,12 +247,30 @@ namespace NGIN::Async
         template<typename F>
         auto Then(F&& func)
         {
+            using Func = std::decay_t<F>;
+
+            struct SharedState final
+            {
+                std::atomic<bool>               done {false};
+                NGIN::Execution::ExecutorRef    exec {};
+                std::coroutine_handle<>         awaiting {};
+                CancellationRegistration        cancellationRegistration {};
+                std::exception_ptr              error {};
+            };
+
             struct Awaiter
             {
-                Task& parent;
-                F     func;
-                bool  await_ready() const noexcept { return false; }
-                void  await_suspend(std::coroutine_handle<> awaiting)
+                Task&                      parent;
+                Func                       func;
+                std::shared_ptr<SharedState> state {};
+
+                bool await_ready() const noexcept
+                {
+                    auto* ctx = parent.m_scheduler_ctx;
+                    return ctx && ctx->IsCancellationRequested();
+                }
+
+                std::coroutine_handle<> await_suspend(std::coroutine_handle<> awaiting)
                 {
                     auto* ctx = parent.m_scheduler_ctx;
                     assert(ctx != nullptr && "Task::Then requires the parent task to have been started with a TaskContext");
@@ -297,32 +316,86 @@ namespace NGIN::Async
                         ~Detached() = default;
                     };
 
-                    auto chain =
-                            [](Task& parent, TaskContext& ctx, F func, std::coroutine_handle<> awaiting) -> Detached {
+                    if (ctx->IsCancellationRequested())
+                    {
+                        return awaiting;
+                    }
+
+                    state          = std::make_shared<SharedState>();
+                    state->exec    = ctx->GetExecutor();
+                    state->awaiting = awaiting;
+                    ctx->GetCancellationToken().Register(
+                            state->cancellationRegistration,
+                            state->exec,
+                            awaiting,
+                            +[](void* ctx) noexcept -> bool {
+                                auto* state = static_cast<SharedState*>(ctx);
+                                bool  expected = false;
+                                if (!state->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
+                                {
+                                    return false;
+                                }
+
+                                state->error = std::make_exception_ptr(TaskCanceled());
+                                return true;
+                            },
+                            state.get());
+
+                    auto chain = [](Task& parent,
+                                    TaskContext& ctx,
+                                    std::shared_ptr<SharedState> state,
+                                    Func func) -> Detached {
+                        std::exception_ptr error {};
                         try
                         {
+                            ctx.ThrowIfCancellationRequested();
                             parent.Start(ctx);
-                            auto value    = co_await parent;
+                            auto value = co_await parent;
+                            ctx.ThrowIfCancellationRequested();
+
                             auto nextTask = func(std::move(value));
                             nextTask.Start(ctx);
                             co_await nextTask;
                         } catch (...)
                         {
+                            error = std::current_exception();
                         }
-                        ctx.GetExecutor().Execute(awaiting);
-                    }(parent, *ctx, std::move(func), awaiting);
 
-                    ctx->GetExecutor().Execute(std::coroutine_handle<>::from_address(chain.handle.address()));
+                        bool expected = false;
+                        if (state->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
+                        {
+                            state->error = std::move(error);
+                            if (state->awaiting)
+                            {
+                                state->exec.Execute(state->awaiting);
+                            }
+                        }
+                        co_return;
+                    }(parent, *ctx, state, std::move(func));
+
+                    return std::coroutine_handle<>::from_address(chain.handle.address());
                 }
-                auto await_resume() {}
+
+                void await_resume()
+                {
+                    auto* ctx = parent.m_scheduler_ctx;
+                    if (ctx && ctx->IsCancellationRequested() && (!state || !state->error))
+                    {
+                        throw TaskCanceled();
+                    }
+                    if (state && state->error)
+                    {
+                        std::rethrow_exception(state->error);
+                    }
+                }
             };
             struct ContTask
             {
                 Task& parent;
-                F     func;
+                Func  func;
                 auto  operator co_await() { return Awaiter {parent, std::move(func)}; }
             };
-            return ContTask {*this, std::forward<F>(func)};
+            return ContTask {*this, Func(std::forward<F>(func))};
         }
 
     private:
@@ -530,12 +603,30 @@ namespace NGIN::Async
         template<typename F>
         auto Then(F&& func)
         {
+            using Func = std::decay_t<F>;
+
+            struct SharedState final
+            {
+                std::atomic<bool>               done {false};
+                NGIN::Execution::ExecutorRef    exec {};
+                std::coroutine_handle<>         awaiting {};
+                CancellationRegistration        cancellationRegistration {};
+                std::exception_ptr              error {};
+            };
+
             struct Awaiter
             {
-                Task& parent;
-                F     func;
-                bool  await_ready() const noexcept { return false; }
-                void  await_suspend(std::coroutine_handle<> awaiting)
+                Task&                      parent;
+                Func                       func;
+                std::shared_ptr<SharedState> state {};
+
+                bool await_ready() const noexcept
+                {
+                    auto* ctx = parent.m_scheduler_ctx;
+                    return ctx && ctx->IsCancellationRequested();
+                }
+
+                std::coroutine_handle<> await_suspend(std::coroutine_handle<> awaiting)
                 {
                     auto* ctx = parent.m_scheduler_ctx;
                     assert(ctx != nullptr && "Task::Then requires the parent task to have been started with a TaskContext");
@@ -581,32 +672,86 @@ namespace NGIN::Async
                         ~Detached() = default;
                     };
 
-                    auto chain =
-                            [](Task& parent, TaskContext& ctx, F func, std::coroutine_handle<> awaiting) -> Detached {
+                    if (ctx->IsCancellationRequested())
+                    {
+                        return awaiting;
+                    }
+
+                    state          = std::make_shared<SharedState>();
+                    state->exec    = ctx->GetExecutor();
+                    state->awaiting = awaiting;
+                    ctx->GetCancellationToken().Register(
+                            state->cancellationRegistration,
+                            state->exec,
+                            awaiting,
+                            +[](void* ctx) noexcept -> bool {
+                                auto* state = static_cast<SharedState*>(ctx);
+                                bool  expected = false;
+                                if (!state->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
+                                {
+                                    return false;
+                                }
+
+                                state->error = std::make_exception_ptr(TaskCanceled());
+                                return true;
+                            },
+                            state.get());
+
+                    auto chain = [](Task& parent,
+                                    TaskContext& ctx,
+                                    std::shared_ptr<SharedState> state,
+                                    Func func) -> Detached {
+                        std::exception_ptr error {};
                         try
                         {
+                            ctx.ThrowIfCancellationRequested();
                             parent.Start(ctx);
                             co_await parent;
+                            ctx.ThrowIfCancellationRequested();
+
                             auto nextTask = func();
                             nextTask.Start(ctx);
                             co_await nextTask;
                         } catch (...)
                         {
+                            error = std::current_exception();
                         }
-                        ctx.GetExecutor().Execute(awaiting);
-                    }(parent, *ctx, std::move(func), awaiting);
 
-                    ctx->GetExecutor().Execute(std::coroutine_handle<>::from_address(chain.handle.address()));
+                        bool expected = false;
+                        if (state->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
+                        {
+                            state->error = std::move(error);
+                            if (state->awaiting)
+                            {
+                                state->exec.Execute(state->awaiting);
+                            }
+                        }
+                        co_return;
+                    }(parent, *ctx, state, std::move(func));
+
+                    return std::coroutine_handle<>::from_address(chain.handle.address());
                 }
-                auto await_resume() {}
+
+                void await_resume()
+                {
+                    auto* ctx = parent.m_scheduler_ctx;
+                    if (ctx && ctx->IsCancellationRequested() && (!state || !state->error))
+                    {
+                        throw TaskCanceled();
+                    }
+                    if (state && state->error)
+                    {
+                        std::rethrow_exception(state->error);
+                    }
+                }
             };
             struct ContTask
             {
                 Task& parent;
-                F     func;
+                Func  func;
                 auto  operator co_await() { return Awaiter {parent, std::move(func)}; }
             };
-            return ContTask {*this, std::forward<F>(func)};
+            return ContTask {*this, Func(std::forward<F>(func))};
         }
 
     private:

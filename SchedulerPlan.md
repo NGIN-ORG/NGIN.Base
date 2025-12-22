@@ -32,7 +32,8 @@ Second priority is ergonomics (a .NET-like async experience) built on top of the
 - [x] **CancelAfter/CancelAt (baseline)**: added `CancellationSource::CancelAfter(exec, duration)` and `CancelAt(exec, timepoint)` for cancellation-aware timeouts.
 - [x] **Token linking**: added `CreateLinkedTokenSource` / `LinkedCancellationSource` to cancel when any input token cancels.
 - [x] **Combinator cancellation**: `WhenAll`/`WhenAny` wake on cancellation even when children don't observe it.
-- [ ] **Task cleanup**: implement cancellation propagation rules for `Then` (do not swallow cancellations/errors) and consider `TaskContext`-level token linking for child tasks.
+- [x] **Task cleanup**: `Then` propagates faults/cancellation (no swallowing) and wakes on cancellation even if the parent never completes.
+- [ ] **TaskContext token linking**: consider linking child task tokens to a parent context/token for structured cancellation.
 
 ## Goals
 
