@@ -4,12 +4,12 @@
 #include <exception>
 #include <initializer_list>
 #include <memory>
-#include <mutex>
 #include <utility>
 #include <atomic>
 #include <vector>
 
 #include <NGIN/Execution/ExecutorRef.hpp>
+#include <NGIN/Sync/LockGuard.hpp>
 #include <NGIN/Sync/SpinLock.hpp>
 #include <NGIN/Time/MonotonicClock.hpp>
 #include <NGIN/Time/TimePoint.hpp>
@@ -119,6 +119,11 @@ namespace NGIN::Async
         {
         }
 
+        [[nodiscard]] bool HasState() const noexcept
+        {
+            return static_cast<bool>(m_state);
+        }
+
         [[nodiscard]] bool IsCancellationRequested() const noexcept;
 
         [[nodiscard]] explicit operator bool() const noexcept
@@ -156,7 +161,7 @@ namespace NGIN::Async
                 {
                     return;
                 }
-                std::lock_guard guard(lock);
+                NGIN::Sync::LockGuard guard(lock);
                 registration->m_index = registrations.size();
                 registrations.push_back(registration);
             }
@@ -167,7 +172,7 @@ namespace NGIN::Async
                 {
                     return;
                 }
-                std::lock_guard guard(lock);
+                NGIN::Sync::LockGuard guard(lock);
                 if (registration->m_index < registrations.size() && registrations[registration->m_index] == registration)
                 {
                     const auto lastIndex = registrations.size() - 1;
@@ -208,7 +213,7 @@ namespace NGIN::Async
 
                 std::vector<CancellationRegistration*> local;
                 {
-                    std::lock_guard guard(lock);
+                    NGIN::Sync::LockGuard guard(lock);
                     local = registrations;
                 }
 

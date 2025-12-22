@@ -5,6 +5,7 @@
 
 #include <coroutine>
 #include <utility>
+#include <memory>
 
 #include <NGIN/Async/Cancellation.hpp>
 #include <NGIN/Execution/ExecutorRef.hpp>
@@ -44,6 +45,7 @@ namespace NGIN::Async
 
         void BindCancellation(CancellationToken cancellation) noexcept
         {
+            m_cancellationOwner.reset();
             m_cancellation = std::move(cancellation);
         }
 
@@ -51,6 +53,50 @@ namespace NGIN::Async
         {
             TaskContext copy = *this;
             copy.BindCancellation(std::move(cancellation));
+            return copy;
+        }
+
+        void BindLinkedCancellation(CancellationToken cancellation) noexcept
+        {
+            if (!m_cancellation.HasState())
+            {
+                BindCancellation(std::move(cancellation));
+                return;
+            }
+
+            if (!cancellation.HasState())
+            {
+                return;
+            }
+
+            auto linked = std::make_shared<detail::LinkedCancellationState>();
+            linked->Link({m_cancellation, cancellation});
+
+            if (m_cancellationOwner)
+            {
+                struct OwnerChain final
+                {
+                    std::shared_ptr<void> previous {};
+                    std::shared_ptr<void> current {};
+                };
+
+                auto chain     = std::make_shared<OwnerChain>();
+                chain->previous = m_cancellationOwner;
+                chain->current  = linked;
+                m_cancellationOwner = std::move(chain);
+            }
+            else
+            {
+                m_cancellationOwner = linked;
+            }
+
+            m_cancellation = linked->source.GetToken();
+        }
+
+        [[nodiscard]] TaskContext WithLinkedCancellation(CancellationToken cancellation) const noexcept
+        {
+            TaskContext copy = *this;
+            copy.BindLinkedCancellation(std::move(cancellation));
             return copy;
         }
 
@@ -174,5 +220,6 @@ namespace NGIN::Async
     private:
         NGIN::Execution::ExecutorRef m_executor {};
         CancellationToken            m_cancellation {};
+        std::shared_ptr<void>        m_cancellationOwner {};
     };
 }// namespace NGIN::Async

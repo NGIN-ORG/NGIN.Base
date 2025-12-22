@@ -20,10 +20,12 @@ Second priority is ergonomics (a .NET-like async experience) built on top of the
 - [x] **ExecutorRef (coroutine path)**: introduced `NGIN::Execution::ExecutorRef` and migrated `TaskContext`/`Task` to use it.
 - [x] **WorkItem execution**: added `NGIN::Execution::WorkItem` (coroutine or job) and extended `ExecutorRef` + schedulers to execute jobs without coroutines.
 - [x] **Executor layer (core)**: schedulers support `Execute(WorkItem)` / `ExecuteAt(WorkItem, TimePoint)` and `ExecutorRef` can dispatch both jobs and coroutines.
+- [x] **Cooperative runtime**: added `NGIN::Execution::CooperativeScheduler` (single-thread) with `RunUntilIdle` pumping and timer support.
 - [x] **Concepts + type erasure**: added `include/NGIN/Execution/Concepts.hpp` and removed the `IScheduler` vtable interface in favor of concrete executors + `ExecutorRef`.
 - [x] **Thread pool rewrite**: per-worker queues + work stealing + `NGIN::Sync::AtomicCondition` wakeups (spinlock-based queues; can be upgraded to lock-free later).
 - [x] **Task continuation cleanup (partial)**: removed detached threads from `Task::Then` and scheduled task continuations via `ExecutorRef` instead of resuming inline.
 - [x] **Task completion cleanup (partial)**: replaced `std::condition_variable` waits with `NGIN::Sync::AtomicCondition` + atomic completion flag.
+- [x] **Sync lock guards**: added `NGIN::Sync::LockGuard`/`SharedLockGuard` and migrated Async internals away from `<mutex>`-based guards.
 - [x] **SchedulerBenchmarks coverage**: added job enqueue+run baselines for both `FiberScheduler` and `ThreadPoolScheduler`.
 - [x] **Benchmark harness semantics**: `BenchmarkContext::start/stop` now control what is measured (no implicit start/stop in the runner).
 - [x] **Phase 0 scheduler microbenchmarks**: added contended (multi-producer) job scheduling and `ExecuteAt` timer enqueue baselines.
@@ -33,7 +35,13 @@ Second priority is ergonomics (a .NET-like async experience) built on top of the
 - [x] **Token linking**: added `CreateLinkedTokenSource` / `LinkedCancellationSource` to cancel when any input token cancels.
 - [x] **Combinator cancellation**: `WhenAll`/`WhenAny` wake on cancellation even when children don't observe it.
 - [x] **Task cleanup**: `Then` propagates faults/cancellation (no swallowing) and wakes on cancellation even if the parent never completes.
-- [ ] **TaskContext token linking**: consider linking child task tokens to a parent context/token for structured cancellation.
+- [x] **TaskContext token linking**: added `TaskContext::WithLinkedCancellation` / `BindLinkedCancellation` for structured cancellation.
+
+## Next (short-term)
+
+- [ ] **WorkItem/job storage**: reduce allocations in the job path (SBO + per-worker freelist/pool); keep coroutine path minimal.
+- [ ] **ExecuteAfter**: add `ExecuteAfter(WorkItem, duration)` convenience on `ExecutorRef` (Units-based) to avoid callers precomputing `TimePoint`.
+- [ ] **Runtime ergonomics**: document/benchmark `CooperativeScheduler` as a first-class “RunUntilIdle” runtime and add Task-based (`When*`, `Then`, `Delay`) benchmarks.
 
 ## Goals
 

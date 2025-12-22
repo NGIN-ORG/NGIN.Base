@@ -13,6 +13,7 @@
 #include <NGIN/Async/Cancellation.hpp>
 #include <NGIN/Async/Task.hpp>
 #include <NGIN/Primitives.hpp>
+#include <NGIN/Sync/LockGuard.hpp>
 #include <NGIN/Sync/SpinLock.hpp>
 
 namespace NGIN::Async
@@ -93,7 +94,7 @@ namespace NGIN::Async
             {
                 if (auto state = weakState.lock())
                 {
-                    std::lock_guard guard(state->errorLock);
+                    NGIN::Sync::LockGuard guard(state->errorLock);
                     if (!state->firstError)
                     {
                         state->firstError = std::current_exception();
