@@ -5,6 +5,7 @@
 
 #include <NGIN/Async/Cancellation.hpp>
 #include <NGIN/Async/Task.hpp>
+#include <NGIN/Execution/CooperativeScheduler.hpp>
 #include <NGIN/Execution/InlineScheduler.hpp>
 #include <NGIN/Execution/WorkItem.hpp>
 #include <NGIN/Time/TimePoint.hpp>
@@ -101,6 +102,21 @@ namespace
         co_await parent.Then([&](int) { return Noop(ctx); });
         co_return;
     }
+
+    NGIN::Async::Task<int> MultiplyAfterYield(NGIN::Async::TaskContext& ctx, int value, int factor)
+    {
+        co_await ctx.Yield();
+        co_return value * factor;
+    }
+
+    NGIN::Async::Task<int> ThenSuccess(NGIN::Async::TaskContext& ctx)
+    {
+        auto parent = ParentValue(ctx);
+        parent.Start(ctx);
+
+        co_await parent.Then([&](int v) { return MultiplyAfterYield(ctx, v, 3); });
+        co_return 21;
+    }
 }// namespace
 
 TEST_CASE("Task::Then propagates parent exception")
@@ -154,3 +170,17 @@ TEST_CASE("Task::Then is woken by cancellation even if parent never completes")
     REQUIRE_THROWS_AS(task.Get(), NGIN::Async::TaskCanceled);
 }
 
+TEST_CASE("Task::Then runs continuation on success")
+{
+    NGIN::Execution::CooperativeScheduler scheduler;
+    NGIN::Async::TaskContext              ctx(scheduler);
+
+    auto task = ThenSuccess(ctx);
+    task.Start(ctx);
+
+    scheduler.RunUntilIdle();
+
+    REQUIRE(task.IsCompleted());
+    REQUIRE_FALSE(task.IsFaulted());
+    REQUIRE(task.Get() == 21);
+}

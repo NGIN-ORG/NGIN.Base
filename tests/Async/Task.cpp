@@ -1,10 +1,12 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <vector>
+#include <stdexcept>
 
 #include <NGIN/Async/Cancellation.hpp>
 #include <NGIN/Async/Task.hpp>
 #include <NGIN/Execution/InlineScheduler.hpp>
+#include <NGIN/Execution/CooperativeScheduler.hpp>
 #include <NGIN/Execution/WorkItem.hpp>
 #include <NGIN/Time/TimePoint.hpp>
 #include <NGIN/Units.hpp>
@@ -82,6 +84,31 @@ namespace
     NGIN::Async::Task<void> DelayForever(NGIN::Async::TaskContext& ctx)
     {
         co_await ctx.Delay(NGIN::Units::Seconds(60.0));
+        co_return;
+    }
+
+    NGIN::Async::Task<int> AddAfterYield(NGIN::Async::TaskContext& ctx, int a, int b)
+    {
+        co_await ctx.Yield();
+        co_return a + b;
+    }
+
+    NGIN::Async::Task<int> ThrowAfterYield(NGIN::Async::TaskContext& ctx)
+    {
+        co_await ctx.Yield();
+        throw std::runtime_error("boom");
+    }
+
+    NGIN::Async::Task<int> AwaitChild(NGIN::Async::TaskContext& ctx)
+    {
+        auto child = AddAfterYield(ctx, 1, 2);
+        co_return co_await child;
+    }
+
+    NGIN::Async::Task<void> AwaitChildThatThrows(NGIN::Async::TaskContext& ctx)
+    {
+        auto child = ThrowAfterYield(ctx);
+        (void)co_await child;
         co_return;
     }
 }// namespace
@@ -173,4 +200,47 @@ TEST_CASE("Task cancellation: ThrowIfCancellationRequested throws TaskCanceled")
     REQUIRE(task.IsCompleted());
     REQUIRE(task.IsCanceled());
     REQUIRE_THROWS_AS(task.Get(), NGIN::Async::TaskCanceled);
+}
+
+TEST_CASE("Task can be awaited without calling Start() on the child task")
+{
+    NGIN::Execution::CooperativeScheduler scheduler;
+    NGIN::Async::TaskContext              ctx(scheduler);
+
+    auto task = AwaitChild(ctx);
+    task.Start(ctx);
+
+    scheduler.RunUntilIdle();
+
+    REQUIRE(task.IsCompleted());
+    REQUIRE_FALSE(task.IsFaulted());
+    REQUIRE_FALSE(task.IsCanceled());
+    REQUIRE(task.Get() == 3);
+}
+
+TEST_CASE("Task propagates exceptions through co_await")
+{
+    NGIN::Execution::CooperativeScheduler scheduler;
+    NGIN::Async::TaskContext              ctx(scheduler);
+
+    auto task = AwaitChildThatThrows(ctx);
+    task.Start(ctx);
+
+    scheduler.RunUntilIdle();
+
+    REQUIRE(task.IsCompleted());
+    REQUIRE(task.IsFaulted());
+    REQUIRE_THROWS_AS(task.Get(), std::runtime_error);
+}
+
+TEST_CASE("TaskContext::Run starts and schedules a task")
+{
+    NGIN::Execution::CooperativeScheduler scheduler;
+    NGIN::Async::TaskContext              ctx(scheduler);
+
+    auto task = ctx.Run(AddAfterYield, 2, 5);
+    scheduler.RunUntilIdle();
+
+    REQUIRE(task.IsCompleted());
+    REQUIRE(task.Get() == 7);
 }

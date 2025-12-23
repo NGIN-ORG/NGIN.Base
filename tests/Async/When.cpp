@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <stdexcept>
 #include <vector>
 
 #include <NGIN/Async/Cancellation.hpp>
@@ -118,6 +119,17 @@ namespace
     {
         co_await ctx.Delay(NGIN::Units::Seconds(60.0));
         co_return;
+    }
+
+    NGIN::Async::Task<int> ThrowOnce(NGIN::Async::TaskContext& ctx)
+    {
+        co_await ctx.Yield();
+        throw std::runtime_error("boom");
+    }
+
+    NGIN::Async::Task<int> Immediate(NGIN::Async::TaskContext&, int value)
+    {
+        co_return value;
     }
 }// namespace
 
@@ -242,4 +254,60 @@ TEST_CASE("WhenAll wakes and throws TaskCanceled even if children do not observe
     REQUIRE(all.IsCompleted());
     REQUIRE(all.IsCanceled());
     REQUIRE_THROWS_AS(all.Get(), NGIN::Async::TaskCanceled);
+}
+
+TEST_CASE("WhenAll propagates child exception")
+{
+    ManualExecutor           exec;
+    NGIN::Async::TaskContext ctx(exec);
+
+    auto a = ThrowOnce(ctx);
+    auto b = YieldOnce(ctx, 2);
+
+    auto all = NGIN::Async::WhenAll(ctx, a, b);
+    all.Start(ctx);
+
+    exec.RunUntilIdle();
+
+    REQUIRE(all.IsCompleted());
+    REQUIRE(all.IsFaulted());
+    REQUIRE_THROWS_AS(all.Get(), std::runtime_error);
+}
+
+TEST_CASE("WhenAny returns index when a task faults")
+{
+    ManualExecutor           exec;
+    NGIN::Async::TaskContext ctx(exec);
+
+    auto a = ThrowOnce(ctx);
+    auto b = YieldTwice(ctx, 123);
+
+    auto any = NGIN::Async::WhenAny(ctx, a, b);
+    any.Start(ctx);
+
+    exec.RunUntilIdle();
+
+    REQUIRE(any.IsCompleted());
+    REQUIRE(any.Get() == 0);
+    REQUIRE_THROWS_AS(a.Get(), std::runtime_error);
+}
+
+TEST_CASE("WhenAny returns immediately if one input is already completed")
+{
+    ManualExecutor           exec;
+    NGIN::Async::TaskContext ctx(exec);
+
+    auto a = YieldOnce(ctx, 1);
+    a.Start(ctx);
+    exec.RunUntilIdle();
+    REQUIRE(a.IsCompleted());
+
+    auto b = Immediate(ctx, 2); // left unstarted
+
+    auto any = NGIN::Async::WhenAny(ctx, a, b);
+    any.Start(ctx);
+    exec.RunUntilIdle();
+
+    REQUIRE(any.IsCompleted());
+    REQUIRE(any.Get() == 0);
 }

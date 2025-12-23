@@ -11,9 +11,76 @@
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
+#include <coroutine>
 #include <thread>
 
 using namespace std::chrono_literals;
+
+namespace
+{
+    struct ResumeOnceCoroutine final
+    {
+        struct promise_type final
+        {
+            std::atomic<int>* counter {nullptr};
+
+            ResumeOnceCoroutine get_return_object() noexcept
+            {
+                return ResumeOnceCoroutine {std::coroutine_handle<promise_type>::from_promise(*this)};
+            }
+
+            std::suspend_always initial_suspend() noexcept
+            {
+                return {};
+            }
+
+            std::suspend_always final_suspend() noexcept
+            {
+                return {};
+            }
+
+            void return_void() noexcept {}
+
+            void unhandled_exception() noexcept
+            {
+                std::terminate();
+            }
+        };
+
+        using handle_type = std::coroutine_handle<promise_type>;
+
+        explicit ResumeOnceCoroutine(handle_type h) noexcept
+            : handle(h)
+        {
+        }
+
+        ResumeOnceCoroutine(ResumeOnceCoroutine&& other) noexcept
+            : handle(other.handle)
+        {
+            other.handle = {};
+        }
+
+        ResumeOnceCoroutine(const ResumeOnceCoroutine&)            = delete;
+        ResumeOnceCoroutine& operator=(const ResumeOnceCoroutine&) = delete;
+        ResumeOnceCoroutine& operator=(ResumeOnceCoroutine&&)      = delete;
+
+        ~ResumeOnceCoroutine()
+        {
+            if (handle)
+            {
+                handle.destroy();
+            }
+        }
+
+        handle_type handle {};
+    };
+
+    ResumeOnceCoroutine MakeResumeOnce(std::atomic<int>& counter)
+    {
+        counter.fetch_add(1, std::memory_order_relaxed);
+        co_return;
+    }
+}// namespace
 
 TEST_CASE("WorkItem executes a large lambda job (heap/pool path)", "[Execution][WorkItem]")
 {
@@ -93,4 +160,33 @@ TEST_CASE("WorkItem rejects an empty job", "[Execution][WorkItem]")
 {
     NGIN::Utilities::Callable<void()> empty;
     REQUIRE_THROWS_AS(NGIN::Execution::WorkItem(std::move(empty)), std::invalid_argument);
+}
+
+TEST_CASE("WorkItem resumes a coroutine handle", "[Execution][WorkItem]")
+{
+    std::atomic<int> counter {0};
+    auto             coro = MakeResumeOnce(counter);
+
+    REQUIRE(counter.load(std::memory_order_relaxed) == 0);
+
+    auto item = NGIN::Execution::WorkItem(std::coroutine_handle<>(coro.handle));
+    item.Invoke();
+
+    REQUIRE(counter.load(std::memory_order_relaxed) == 1);
+    REQUIRE(coro.handle.done());
+}
+
+TEST_CASE("ExecutorRef ExecuteAt schedules a job for a specific timepoint", "[Execution][ExecutorRef]")
+{
+    NGIN::Execution::CooperativeScheduler scheduler;
+    const auto executor = NGIN::Execution::ExecutorRef::From(scheduler);
+
+    std::atomic<int> counter {0};
+    executor.ExecuteAt([&]() noexcept { counter.fetch_add(1, std::memory_order_relaxed); }, NGIN::Time::TimePoint::FromNanoseconds(10));
+
+    REQUIRE_FALSE(scheduler.RunOneAt(NGIN::Time::TimePoint::FromNanoseconds(9)));
+    REQUIRE(counter.load(std::memory_order_relaxed) == 0);
+
+    REQUIRE(scheduler.RunOneAt(NGIN::Time::TimePoint::FromNanoseconds(10)));
+    REQUIRE(counter.load(std::memory_order_relaxed) == 1);
 }
