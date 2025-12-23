@@ -39,9 +39,10 @@ Second priority is ergonomics (a .NET-like async experience) built on top of the
 
 ## Next (short-term)
 
-- [ ] **WorkItem/job storage**: reduce allocations in the job path (SBO + per-worker freelist/pool); keep coroutine path minimal.
-- [ ] **ExecuteAfter**: add `ExecuteAfter(WorkItem, duration)` convenience on `ExecutorRef` (Units-based) to avoid callers precomputing `TimePoint`.
-- [ ] **Runtime ergonomics**: document/benchmark `CooperativeScheduler` as a first-class “RunUntilIdle” runtime and add Task-based (`When*`, `Then`, `Delay`) benchmarks.
+- [x] **WorkItem/job storage (SBO)**: move-only job storage in `WorkItem` + direct lambda jobs in hot paths; leaves pooling as a follow-up.
+- [x] **ExecuteAfter**: added Units-based `ExecutorRef::ExecuteAfter(...)` convenience overloads.
+- [x] **Runtime ergonomics (benchmarks)**: added `CooperativeScheduler` baselines and Task-based (`Yield`, `Delay+cancel`, `WhenAll`) benchmarks.
+- [ ] **Job pooling**: add per-worker freelist/pool for large job nodes (avoid `new` fallback for oversized callables).
 
 ## Goals
 

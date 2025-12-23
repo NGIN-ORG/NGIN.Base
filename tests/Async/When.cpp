@@ -140,6 +140,26 @@ TEST_CASE("WhenAll returns tuple of results")
     REQUIRE(std::get<1>(result) == 2);
 }
 
+TEST_CASE("WhenAll can be co_awaited without calling Start() on the WhenAll task")
+{
+    ManualExecutor           exec;
+    NGIN::Async::TaskContext ctx(exec);
+
+    auto root = [](NGIN::Async::TaskContext& ctx) -> NGIN::Async::Task<std::tuple<int, int>> {
+        auto a = YieldOnce(ctx, 1);
+        auto b = YieldOnce(ctx, 2);
+        co_return co_await NGIN::Async::WhenAll(ctx, a, b);
+    }(ctx);
+
+    root.Start(ctx);
+    exec.RunUntilIdle();
+
+    REQUIRE(root.IsCompleted());
+    const auto result = root.Get();
+    REQUIRE(std::get<0>(result) == 1);
+    REQUIRE(std::get<1>(result) == 2);
+}
+
 TEST_CASE("WhenAny returns index of first completed task")
 {
     ManualExecutor        exec;

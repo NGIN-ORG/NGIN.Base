@@ -3,10 +3,15 @@
 #pragma once
 
 #include <coroutine>
+#include <concepts>
 #include <stdexcept>
+#include <type_traits>
 
 #include <NGIN/Execution/WorkItem.hpp>
+#include <NGIN/Primitives.hpp>
+#include <NGIN/Time/MonotonicClock.hpp>
 #include <NGIN/Time/TimePoint.hpp>
+#include <NGIN/Units.hpp>
 
 namespace NGIN::Execution
 {
@@ -81,9 +86,61 @@ namespace NGIN::Execution
             m_execute(m_self, std::move(item));
         }
 
+        template<typename F>
+            requires(!std::is_same_v<std::remove_cvref_t<F>, WorkItem>) &&
+                    (!std::is_same_v<std::remove_cvref_t<F>, NGIN::Utilities::Callable<void()>>) &&
+                    std::invocable<std::remove_reference_t<F>&> &&
+                    std::same_as<std::invoke_result_t<std::remove_reference_t<F>&>, void>
+        void Execute(F&& job) const noexcept
+        {
+            Execute(WorkItem(std::forward<F>(job)));
+        }
+
         void ExecuteAt(WorkItem item, NGIN::Time::TimePoint resumeAt) const
         {
             m_executeAt(m_self, std::move(item), resumeAt);
+        }
+
+        template<typename F>
+            requires(!std::is_same_v<std::remove_cvref_t<F>, WorkItem>) &&
+                    (!std::is_same_v<std::remove_cvref_t<F>, NGIN::Utilities::Callable<void()>>) &&
+                    std::invocable<std::remove_reference_t<F>&> &&
+                    std::same_as<std::invoke_result_t<std::remove_reference_t<F>&>, void>
+        void ExecuteAt(F&& job, NGIN::Time::TimePoint resumeAt) const
+        {
+            ExecuteAt(WorkItem(std::forward<F>(job)), resumeAt);
+        }
+
+        template<typename TUnit>
+            requires NGIN::Units::QuantityOf<NGIN::Units::TIME, TUnit>
+        void ExecuteAfter(WorkItem item, const TUnit& delay) const
+        {
+            const auto nsDouble = NGIN::Units::UnitCast<NGIN::Units::Nanoseconds>(delay).GetValue();
+            if (nsDouble <= 0.0)
+            {
+                Execute(std::move(item));
+                return;
+            }
+
+            const auto now = NGIN::Time::MonotonicClock::Now().ToNanoseconds();
+            auto       add = static_cast<NGIN::UInt64>(nsDouble);
+            if (static_cast<double>(add) < nsDouble)
+            {
+                ++add;
+            }
+
+            ExecuteAt(std::move(item), NGIN::Time::TimePoint::FromNanoseconds(now + add));
+        }
+
+        template<typename F, typename TUnit>
+            requires(!std::is_same_v<std::remove_cvref_t<F>, WorkItem>) &&
+                    (!std::is_same_v<std::remove_cvref_t<F>, NGIN::Utilities::Callable<void()>>) &&
+                    std::invocable<std::remove_reference_t<F>&> &&
+                    std::same_as<std::invoke_result_t<std::remove_reference_t<F>&>, void> &&
+                    NGIN::Units::QuantityOf<NGIN::Units::TIME, TUnit>
+        void ExecuteAfter(F&& job, const TUnit& delay) const
+        {
+            ExecuteAfter(WorkItem(std::forward<F>(job)), delay);
         }
 
         void Execute(std::coroutine_handle<> coro) const noexcept
@@ -104,6 +161,20 @@ namespace NGIN::Execution
         void ExecuteAt(NGIN::Utilities::Callable<void()> job, NGIN::Time::TimePoint resumeAt) const
         {
             ExecuteAt(WorkItem(std::move(job)), resumeAt);
+        }
+
+        template<typename TUnit>
+            requires NGIN::Units::QuantityOf<NGIN::Units::TIME, TUnit>
+        void ExecuteAfter(std::coroutine_handle<> coro, const TUnit& delay) const
+        {
+            ExecuteAfter(WorkItem(coro), delay);
+        }
+
+        template<typename TUnit>
+            requires NGIN::Units::QuantityOf<NGIN::Units::TIME, TUnit>
+        void ExecuteAfter(NGIN::Utilities::Callable<void()> job, const TUnit& delay) const
+        {
+            ExecuteAfter(WorkItem(std::move(job)), delay);
         }
 
         // Compatibility shims for existing coroutine-only call sites.

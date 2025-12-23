@@ -57,9 +57,23 @@ namespace NGIN::Async
             std::atomic<bool>       m_finished {false};
             NGIN::Sync::AtomicCondition m_finishedCondition {};
             std::coroutine_handle<> m_continuation {};
+            TaskContext*            m_ctx {nullptr};
             NGIN::Execution::ExecutorRef m_executor {};
 
             promise_type() = default;
+
+            explicit promise_type(TaskContext& ctx) noexcept
+                : m_ctx(&ctx)
+                , m_executor(ctx.GetExecutor())
+            {
+            }
+
+            template<typename... Args>
+                requires(sizeof...(Args) > 0)
+            explicit promise_type(TaskContext& ctx, Args&&...) noexcept
+                : promise_type(ctx)
+            {
+            }
 
             Task get_return_object() noexcept
             {
@@ -111,7 +125,12 @@ namespace NGIN::Async
         using handle_type = std::coroutine_handle<promise_type>;
 
         explicit Task(handle_type h) noexcept
-            : m_handle(h), m_executor(), m_started(false) {}
+            : m_handle(h)
+            , m_executor(h ? h.promise().m_executor : NGIN::Execution::ExecutorRef {})
+            , m_started(false)
+            , m_scheduler_ctx(h ? h.promise().m_ctx : nullptr)
+        {
+        }
 
         Task(Task&& o) noexcept
             : m_handle(o.m_handle), m_executor(o.m_executor), m_started(o.m_started.load()), m_scheduler_ctx(o.m_scheduler_ctx)
@@ -156,13 +175,25 @@ namespace NGIN::Async
         {
             auto& prom          = m_handle.promise();
             prom.m_continuation = awaiting;
-            prom.m_executor     = m_executor;
+            if (m_executor.IsValid())
+            {
+                prom.m_executor = m_executor;
+            }
+            else
+            {
+                m_executor = prom.m_executor;
+            }
             // Schedule only if not already started (atomic for thread safety)
             bool expected = false;
             if (m_started.compare_exchange_strong(expected, true))
             {
-                // If a scheduler is not yet set, this is a bug!
+                // If a scheduler is not yet set, this is a programmer error; fail fast even in Release.
                 assert(m_executor.IsValid() && "Task must have an executor before being awaited!");
+                if (!m_executor.IsValid())
+                {
+                    std::terminate();
+                }
+                prom.m_executor = m_executor;
                 m_executor.Schedule(m_handle);
             }
             // else: already scheduled, just attach continuation
@@ -183,6 +214,7 @@ namespace NGIN::Async
             {
                 m_executor      = ctx.GetExecutor();
                 m_handle.promise().m_executor = m_executor;
+                m_handle.promise().m_ctx      = &ctx;
                 m_scheduler_ctx = &ctx;
                 m_executor.Schedule(m_handle);
             }
@@ -422,9 +454,23 @@ namespace NGIN::Async
             std::atomic<bool>       m_finished {false};
             NGIN::Sync::AtomicCondition m_finishedCondition {};
             std::coroutine_handle<> m_continuation {};
+            TaskContext*            m_ctx {nullptr};
             NGIN::Execution::ExecutorRef m_executor {};
 
             promise_type() = default;
+
+            explicit promise_type(TaskContext& ctx) noexcept
+                : m_ctx(&ctx)
+                , m_executor(ctx.GetExecutor())
+            {
+            }
+
+            template<typename... Args>
+                requires(sizeof...(Args) > 0)
+            explicit promise_type(TaskContext& ctx, Args&&...) noexcept
+                : promise_type(ctx)
+            {
+            }
 
             Task get_return_object() noexcept
             {
@@ -473,7 +519,12 @@ namespace NGIN::Async
         using handle_type = std::coroutine_handle<promise_type>;
 
         explicit Task(handle_type h) noexcept
-            : m_handle(h), m_executor(), m_started(false) {}
+            : m_handle(h)
+            , m_executor(h ? h.promise().m_executor : NGIN::Execution::ExecutorRef {})
+            , m_started(false)
+            , m_scheduler_ctx(h ? h.promise().m_ctx : nullptr)
+        {
+        }
 
         Task(Task&& o) noexcept
             : m_handle(o.m_handle), m_executor(o.m_executor), m_started(o.m_started.load()), m_scheduler_ctx(o.m_scheduler_ctx)
@@ -518,12 +569,24 @@ namespace NGIN::Async
         {
             auto& prom          = m_handle.promise();
             prom.m_continuation = awaiting;
-            prom.m_executor     = m_executor;
+            if (m_executor.IsValid())
+            {
+                prom.m_executor = m_executor;
+            }
+            else
+            {
+                m_executor = prom.m_executor;
+            }
             // Schedule only if not already started (atomic for thread safety)
             bool expected = false;
             if (m_started.compare_exchange_strong(expected, true))
             {
                 assert(m_executor.IsValid() && "Task must have an executor before being awaited!");
+                if (!m_executor.IsValid())
+                {
+                    std::terminate();
+                }
+                prom.m_executor = m_executor;
                 m_executor.Schedule(m_handle);
             }
         }
@@ -540,6 +603,7 @@ namespace NGIN::Async
             {
                 m_executor      = ctx.GetExecutor();
                 m_handle.promise().m_executor = m_executor;
+                m_handle.promise().m_ctx      = &ctx;
                 m_scheduler_ctx = &ctx;
                 m_executor.Schedule(m_handle);
             }
