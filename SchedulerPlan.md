@@ -42,7 +42,7 @@ Second priority is ergonomics (a .NET-like async experience) built on top of the
 - [x] **WorkItem/job storage (SBO)**: move-only job storage in `WorkItem` + direct lambda jobs in hot paths; leaves pooling as a follow-up.
 - [x] **ExecuteAfter**: added Units-based `ExecutorRef::ExecuteAfter(...)` convenience overloads.
 - [x] **Runtime ergonomics (benchmarks)**: added `CooperativeScheduler` baselines and Task-based (`Yield`, `Delay+cancel`, `WhenAll`) benchmarks.
-- [ ] **Job pooling**: add per-worker freelist/pool for large job nodes (avoid `new` fallback for oversized callables).
+- [x] **Job pooling**: added a lock-free size-class pool for WorkItem’s heap-fallback job allocations (avoids repeated `new/delete` for oversized callables).
 
 ## Goals
 

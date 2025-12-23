@@ -6,6 +6,7 @@
 #include <concepts>
 #include <coroutine>
 #include <exception>
+#include <atomic>
 #include <memory>
 #include <new>
 #include <stdexcept>
@@ -16,6 +17,163 @@
 
 namespace NGIN::Execution
 {
+    namespace detail
+    {
+        class JobPool final
+        {
+        public:
+            JobPool()                          = delete;
+            JobPool(const JobPool&)            = delete;
+            JobPool& operator=(const JobPool&) = delete;
+            JobPool(JobPool&&)                 = delete;
+            JobPool& operator=(JobPool&&)      = delete;
+            ~JobPool()                         = delete;
+
+            static constexpr std::size_t PoolAlignment = alignof(std::max_align_t);
+            static constexpr std::size_t Class64       = 64;
+            static constexpr std::size_t Class128      = 128;
+            static constexpr std::size_t Class256      = 256;
+            static constexpr std::size_t Class512      = 512;
+
+            static void* Allocate(std::size_t size, std::size_t alignment)
+            {
+                if (alignment > PoolAlignment)
+                {
+                    return ::operator new(size, std::align_val_t(alignment));
+                }
+
+                const auto classSize = SizeClass(size);
+                if (classSize == 0)
+                {
+                    return ::operator new(size, std::align_val_t(PoolAlignment));
+                }
+
+                auto& head = HeadFor(classSize);
+                if (auto* node = Pop(head))
+                {
+                    return node;
+                }
+
+                Refill(classSize);
+
+                if (auto* node = Pop(head))
+                {
+                    return node;
+                }
+
+                return ::operator new(size, std::align_val_t(PoolAlignment));
+            }
+
+            static void Deallocate(void* ptr, std::size_t size, std::size_t alignment) noexcept
+            {
+                if (!ptr)
+                {
+                    return;
+                }
+
+                if (alignment > PoolAlignment)
+                {
+                    ::operator delete(ptr, std::align_val_t(alignment));
+                    return;
+                }
+
+                const auto classSize = SizeClass(size);
+                if (classSize == 0)
+                {
+                    ::operator delete(ptr, std::align_val_t(PoolAlignment));
+                    return;
+                }
+
+                Push(HeadFor(classSize), static_cast<Node*>(ptr));
+            }
+
+        private:
+            struct Node final
+            {
+                Node* next {nullptr};
+            };
+
+            static constexpr std::size_t SizeClass(std::size_t size) noexcept
+            {
+                if (size == 0)
+                {
+                    return 0;
+                }
+                if (size <= Class64)
+                {
+                    return Class64;
+                }
+                if (size <= Class128)
+                {
+                    return Class128;
+                }
+                if (size <= Class256)
+                {
+                    return Class256;
+                }
+                if (size <= Class512)
+                {
+                    return Class512;
+                }
+                return 0;
+            }
+
+            static std::atomic<Node*>& HeadFor(std::size_t classSize) noexcept
+            {
+                switch (classSize)
+                {
+                    case Class64: return s_head64;
+                    case Class128: return s_head128;
+                    case Class256: return s_head256;
+                    default: return s_head512;
+                }
+            }
+
+            static Node* Pop(std::atomic<Node*>& head) noexcept
+            {
+                Node* node = head.load(std::memory_order_acquire);
+                while (node)
+                {
+                    Node* next = node->next;
+                    if (head.compare_exchange_weak(node, next, std::memory_order_acq_rel, std::memory_order_acquire))
+                    {
+                        node->next = nullptr;
+                        return node;
+                    }
+                }
+                return nullptr;
+            }
+
+            static void Push(std::atomic<Node*>& head, Node* node) noexcept
+            {
+                Node* cur = head.load(std::memory_order_relaxed);
+                do
+                {
+                    node->next = cur;
+                } while (!head.compare_exchange_weak(cur, node, std::memory_order_release, std::memory_order_relaxed));
+            }
+
+            static void Refill(std::size_t classSize)
+            {
+                static constexpr std::size_t blocksPerSlab = 64;
+                const auto slabBytes = classSize * blocksPerSlab;
+                auto* slab = static_cast<std::byte*>(::operator new(slabBytes, std::align_val_t(PoolAlignment)));
+
+                auto& head = HeadFor(classSize);
+                for (std::size_t i = 0; i < blocksPerSlab; ++i)
+                {
+                    auto* node = std::launder(reinterpret_cast<Node*>(slab + i * classSize));
+                    Push(head, node);
+                }
+            }
+
+            inline static std::atomic<Node*> s_head64 {nullptr};
+            inline static std::atomic<Node*> s_head128 {nullptr};
+            inline static std::atomic<Node*> s_head256 {nullptr};
+            inline static std::atomic<Node*> s_head512 {nullptr};
+        };
+    }// namespace detail
+
     /// @brief A move-only unit of work that can be executed by an executor/scheduler.
     ///
     /// WorkItem is a lightweight wrapper that can represent either:
@@ -180,7 +338,8 @@ namespace NGIN::Execution
                 }
                 else
                 {
-                    auto* ptr = new T(std::forward<F>(job));
+                    void* mem = detail::JobPool::Allocate(sizeof(T), alignof(T));
+                    auto* ptr = new (mem) T(std::forward<F>(job));
                     *static_cast<T**>(StoragePtr()) = ptr;
                     m_vtable = &GetVTable<T, true>();
                 }
@@ -248,7 +407,8 @@ namespace NGIN::Execution
                             if constexpr (Heap)
                             {
                                 auto* ptr = *static_cast<T**>(storage);
-                                delete ptr;
+                                std::destroy_at(ptr);
+                                detail::JobPool::Deallocate(ptr, sizeof(T), alignof(T));
                             }
                             else
                             {

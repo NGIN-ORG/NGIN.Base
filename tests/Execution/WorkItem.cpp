@@ -7,12 +7,32 @@
 #include <NGIN/Execution/WorkItem.hpp>
 #include <NGIN/Units.hpp>
 
+#include <array>
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
 #include <thread>
 
 using namespace std::chrono_literals;
+
+TEST_CASE("WorkItem executes a large lambda job (heap/pool path)", "[Execution][WorkItem]")
+{
+    struct BigJob
+    {
+        std::array<std::byte, 512> padding {};
+        std::atomic<int>*          counter {nullptr};
+
+        void operator()() noexcept
+        {
+            counter->fetch_add(1, std::memory_order_relaxed);
+        }
+    };
+
+    std::atomic<int> counter {0};
+    auto             item = NGIN::Execution::WorkItem(BigJob {.counter = &counter});
+    item.Invoke();
+    REQUIRE(counter.load(std::memory_order_relaxed) == 1);
+}
 
 TEST_CASE("WorkItem executes an inline lambda job", "[Execution][WorkItem]")
 {
