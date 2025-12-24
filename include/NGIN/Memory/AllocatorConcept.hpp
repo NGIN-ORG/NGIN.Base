@@ -10,6 +10,13 @@
 
 namespace NGIN::Memory
 {
+    enum class Ownership : std::uint8_t
+    {
+        Owns,
+        DoesNotOwn,
+        Unknown,
+    };
+
     // -------------------------------------------------------------------------
     // MemoryBlock: Optional rich allocation result for extended allocators
     // -------------------------------------------------------------------------
@@ -120,17 +127,25 @@ namespace NGIN::Memory
             }
         }
 
-        // Provide Owns with a conservative default (assume "maybe")
-        static bool Owns(const A& allocator, const void* pointer) noexcept
+        // Tri-state ownership query.
+        //
+        // IMPORTANT: "Unknown" must not be treated as "Owns" for routing decisions.
+        static Ownership OwnershipOf(const A& allocator, const void* pointer) noexcept
         {
             if constexpr (HasOwnsPointerCapability)
             {
-                return allocator.Owns(pointer);
+                return allocator.Owns(pointer) ? Ownership::Owns : Ownership::DoesNotOwn;
             }
             else
             {
-                return true;// Conservative default useful for debug assertions and tooling
+                return Ownership::Unknown;
             }
+        }
+
+        // Convenience bool query: safe default is false when ownership is unknown.
+        static bool Owns(const A& allocator, const void* pointer) noexcept
+        {
+            return OwnershipOf(allocator, pointer) == Ownership::Owns;
         }
 
         // Unified extended allocation: prefer AllocateEx when available, otherwise synthesize a MemoryBlock
@@ -147,6 +162,16 @@ namespace NGIN::Memory
                 return MemoryBlock(ptr, ptr ? sizeInBytes : 0, alignmentInBytes, 0);
             }
         }
+    };
+
+    template<class A>
+    struct AllocatorPropagationTraits
+    {
+        static constexpr bool PropagateOnCopyAssignment = false;
+        static constexpr bool PropagateOnMoveAssignment = true;
+        static constexpr bool PropagateOnSwap           = true;
+
+        static constexpr bool IsAlwaysEqual = std::is_empty_v<A>;
     };
 
     // -------------------------------------------------------------------------

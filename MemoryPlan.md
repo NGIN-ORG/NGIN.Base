@@ -6,6 +6,38 @@ This plan assumes breaking changes are allowed.
 
 ---
 
+## Status (Current → Next → Done)
+
+### Current (Start Here)
+
+- [ ] Phase 3: Make `EpochReclaimer` explicitly-owned + allocator-injected (`include/NGIN/Memory/EpochReclaimer.hpp`)
+- [ ] Phase 3: Add bounded/fixed-capacity variants where needed (hash map, queue, etc.)
+
+### Next
+
+- [ ] Phase 2: Update `include/NGIN/Memory/README.md` to match current allocator types (remove `BumpArena`/`OwnedTag` drift)
+
+### Done
+
+- [x] Documented problem inventory and refactor plan (`MemoryPlan.md`)
+- [x] Locked in defaults: tri-state ownership in traits; cookie-first routing; allocator handles by value; move-propagation enabled; replace hash map (breaking) (`MemoryPlan.md`)
+- [x] Phase 0: Fix `AllocationHelpers` array layout/deallocation base pointer (`include/NGIN/Memory/AllocationHelpers.hpp`)
+- [x] Phase 0: Fix `HalfPointer::ToAbsolute` typing + add overflow assertions (`include/NGIN/Memory/HalfPointer.hpp`)
+- [x] Phase 0: Make `ThreadSafeAllocator` lock for `MaxSize/Remaining/Owns` and add lock-type parameter (`include/NGIN/Memory/ThreadSafeAllocator.hpp`)
+- [x] Phase 0: Add tests for `AllocationHelpers` and `HalfPointer` (`tests/Memory/AllocationHelpersTests.cpp`, `tests/Memory/HalfPointerTests.cpp`)
+- [x] Phase 1: Add tri-state ownership to `AllocatorTraits`; remove “unknown == owns” behavior (`include/NGIN/Memory/AllocatorConcept.hpp`)
+- [x] Phase 1: Make wrappers/composites traits-correct and explicit about requirements (`include/NGIN/Memory/FallbackAllocator.hpp`, `include/NGIN/Memory/TrackingAllocator.hpp`, `include/NGIN/Memory/AllocatorRef.hpp`)
+- [x] Phase 1: Implement header-tagged fallback allocator (`TaggedFallbackAllocator`) (`include/NGIN/Memory/FallbackAllocator.hpp`)
+- [x] Phase 1: Replace owning `PolyAllocator` with non-owning `PolyAllocatorRef` (`include/NGIN/Memory/PolyAllocator.hpp`)
+- [x] Phase 1: Add allocator propagation traits and apply to core containers (`include/NGIN/Memory/AllocatorConcept.hpp`, `include/NGIN/Containers/Vector.hpp`, `include/NGIN/Containers/String.hpp`)
+- [x] Phase 2: Replace `FlatHashMap` with allocator-aware explicit-lifetime hash map (`include/NGIN/Containers/HashMap.hpp`)
+- [x] Phase 2: Update tests for hash map behavior (`tests/Containers/HashMap.cpp`)
+- [x] Phase 2: Remove legacy `FlatHashMap` implementation (replaced in place) (`include/NGIN/Containers/HashMap.hpp`)
+- [x] Phase 2: Document hash map invalidation/constraints (`include/NGIN/Containers/HashMap.hpp`)
+- [x] Phase 2: Remove empty header `include/NGIN/Containers/Array.hpp`
+
+---
+
 ## Goals (Performance-First)
 
 1. **Correctness/UB-free** allocation/deallocation across alignment, size, and composites.
@@ -158,6 +190,11 @@ Practical rule:
 - Make it allocator-aware:
   - `template<class Key, class Value, ..., Memory::AllocatorConcept Alloc = Memory::SystemAllocator>`
   - store allocator with `[[no_unique_address]]` and define allocator propagation semantics.
+
+**Implemented**
+- `include/NGIN/Containers/HashMap.hpp` replaced in-place with an allocator-aware, explicit-lifetime flat hash map.
+- Backward-shift deletion is now correct for general probe sequences (no “stop at home” bug).
+- New constraint: `Key` and `Value` must be `std::is_nothrow_move_constructible_v` (required for backward-shift relocation without risking partial corruption).
 
 ### 9) `Vector` docs vs behavior mismatch (and allocator propagation needs a policy)
 

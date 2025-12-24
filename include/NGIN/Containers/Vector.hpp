@@ -59,6 +59,10 @@ namespace NGIN::Containers
                     m_alloc.Deallocate(m_data, m_capacity * sizeof(T), alignof(T));
                 m_data     = nullptr;
                 m_capacity = m_size = 0;
+                if constexpr (NGIN::Memory::AllocatorPropagationTraits<Alloc>::PropagateOnCopyAssignment)
+                {
+                    m_alloc = other.m_alloc;
+                }
                 Reserve(other.m_size);
                 for (std::size_t i = 0; i < other.m_size; ++i)
                     ::new (&m_data[i]) T(other.m_data[i]);
@@ -76,15 +80,38 @@ namespace NGIN::Containers
         {
             if (this != &other)
             {
-                Clear();
-                if (m_data)
-                    m_alloc.Deallocate(m_data, m_capacity * sizeof(T), alignof(T));
-                m_alloc      = std::move(other.m_alloc);
-                m_data       = other.m_data;
-                m_size       = other.m_size;
-                m_capacity   = other.m_capacity;
-                other.m_data = nullptr;
-                other.m_size = other.m_capacity = 0;
+                if constexpr (NGIN::Memory::AllocatorPropagationTraits<Alloc>::PropagateOnMoveAssignment)
+                {
+                    Clear();
+                    if (m_data)
+                        m_alloc.Deallocate(m_data, m_capacity * sizeof(T), alignof(T));
+                    m_alloc      = std::move(other.m_alloc);
+                    m_data       = other.m_data;
+                    m_size       = other.m_size;
+                    m_capacity   = other.m_capacity;
+                    other.m_data = nullptr;
+                    other.m_size = other.m_capacity = 0;
+                }
+                else if constexpr (NGIN::Memory::AllocatorPropagationTraits<Alloc>::IsAlwaysEqual)
+                {
+                    Clear();
+                    if (m_data)
+                        m_alloc.Deallocate(m_data, m_capacity * sizeof(T), alignof(T));
+                    m_data     = other.m_data;
+                    m_size     = other.m_size;
+                    m_capacity = other.m_capacity;
+                    other.m_data = nullptr;
+                    other.m_size = other.m_capacity = 0;
+                }
+                else
+                {
+                    Clear();
+                    Reserve(other.m_size);
+                    for (std::size_t i = 0; i < other.m_size; ++i)
+                        ::new (&m_data[i]) T(std::move(other.m_data[i]));
+                    m_size = other.m_size;
+                    other.Clear();
+                }
             }
             return *this;
         }

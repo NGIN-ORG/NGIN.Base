@@ -257,7 +257,10 @@ namespace NGIN::Containers
             if (!m_isSmall && m_storage.heap.ptr)
                 DeallocateHeap();
 
-            m_allocator = other.m_allocator;// keep semantics simple; same allocator after copy
+            if constexpr (NGIN::Memory::AllocatorPropagationTraits<Alloc>::PropagateOnCopyAssignment)
+            {
+                m_allocator = other.m_allocator;
+            }
 
             if (other.m_isSmall)
             {
@@ -282,17 +285,21 @@ namespace NGIN::Containers
             if (!m_isSmall && m_storage.heap.ptr)
                 DeallocateHeap();
 
-            m_allocator = std::move(other.m_allocator);
+            if constexpr (NGIN::Memory::AllocatorPropagationTraits<Alloc>::PropagateOnMoveAssignment)
+            {
+                m_allocator = std::move(other.m_allocator);
+            }
 
             if (other.m_isSmall)
             {
                 SetSmall();
                 std::memcpy(m_storage.small.bytes, other.m_storage.small.bytes, SBOBytes);
-                other.SetSmallSize(0);
+                other.SetSize(0);
                 if constexpr (sbo_chars > 0)
                     other.SmallData()[0] = CharT(0);
             }
-            else
+            else if constexpr (NGIN::Memory::AllocatorPropagationTraits<Alloc>::PropagateOnMoveAssignment ||
+                               NGIN::Memory::AllocatorPropagationTraits<Alloc>::IsAlwaysEqual)
             {
                 m_isSmall           = false;
                 m_storage.heap.ptr  = other.m_storage.heap.ptr;
@@ -300,9 +307,14 @@ namespace NGIN::Containers
                 m_storage.heap.cap  = other.m_storage.heap.cap;
 
                 other.SetSmall();
-                other.SetSmallSize(0);
+                other.SetSize(0);
                 if constexpr (sbo_chars > 0)
                     other.SmallData()[0] = CharT(0);
+            }
+            else
+            {
+                InitFromView(view_type {other.Data(), other.Size()});
+                other.SetSize(0);
             }
             return *this;
         }

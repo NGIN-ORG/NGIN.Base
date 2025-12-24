@@ -8,6 +8,7 @@
 #include <utility>
 #include <stdexcept>
 #include <cassert>
+#include <limits>
 
 #include <NGIN/Memory/AllocatorConcept.hpp>
 
@@ -17,8 +18,11 @@ namespace NGIN::Memory
     {
         struct ArrayHeader
         {
-            std::size_t count;                                 // number of elements
-            std::uint32_t magic;                               // sentinel for verification
+            void*         rawBase {nullptr};      // pointer returned by allocator (must be deallocated)
+            std::size_t   rawSizeInBytes {0};     // bytes passed to Allocate for rawBase
+            std::size_t   rawAlignmentInBytes {0};// alignment passed to Allocate for rawBase
+            std::size_t   count {0};              // number of elements
+            std::uint32_t magic {0};              // sentinel for verification
             static constexpr std::uint32_t MAGIC = 0xA11A0C42u;// 'A','ll','oc' stylized
         };
     }// namespace detail
@@ -61,11 +65,15 @@ namespace NGIN::Memory
         if (count == 0)
             return nullptr;
         constexpr std::size_t AAlign = alignof(T);
-        // Layout: raw: [ padding | header | (optional padding < AAlign) | elements ... ]
-        // We align the ELEMENT region; header will live immediately before elements.
+        // Layout: raw: [ ... | header | (optional padding < AAlign) | elements ... ]
+        // We align the ELEMENT region; header lives immediately before elements.
+        if (count > (std::numeric_limits<std::size_t>::max() / sizeof(T)))
+            throw std::bad_alloc();
         const std::size_t bytesForElems = count * sizeof(T);
-        const std::size_t rawSize       = bytesForElems + sizeof(detail::ArrayHeader) + (AAlign - 1);
-        void* raw                       = alloc.Allocate(rawSize, AAlign);
+        if (bytesForElems > std::numeric_limits<std::size_t>::max() - sizeof(detail::ArrayHeader) - (AAlign - 1))
+            throw std::bad_alloc();
+        const std::size_t rawSizeInBytes = bytesForElems + sizeof(detail::ArrayHeader) + (AAlign - 1);
+        void*             raw            = alloc.Allocate(rawSizeInBytes, AAlign);
         if (!raw)
             throw std::bad_alloc();
         std::byte* base            = static_cast<std::byte*>(raw);
@@ -73,6 +81,9 @@ namespace NGIN::Memory
         std::uintptr_t alignedAddr = (afterHeader + (AAlign - 1)) & ~(static_cast<std::uintptr_t>(AAlign) - 1);
         T* arr                     = reinterpret_cast<T*>(alignedAddr);
         auto* header               = reinterpret_cast<detail::ArrayHeader*>(arr) - 1;// header lives immediately before array
+        header->rawBase            = raw;
+        header->rawSizeInBytes     = rawSizeInBytes;
+        header->rawAlignmentInBytes = AAlign;
         header->count              = count;
         header->magic              = detail::ArrayHeader::MAGIC;
         return arr;
@@ -96,7 +107,7 @@ namespace NGIN::Memory
                 arr[j].~T();
             // Recover header to free entire region.
             auto* header = reinterpret_cast<detail::ArrayHeader*>(arr) - 1;
-            alloc.Deallocate(static_cast<void*>(header), 0, alignof(T));
+            alloc.Deallocate(header->rawBase, header->rawSizeInBytes, header->rawAlignmentInBytes);
             throw;
         }
         return arr;
@@ -126,7 +137,7 @@ namespace NGIN::Memory
             for (std::size_t j = 0; j < i; ++j)
                 arr[j].~T();
             auto* header = reinterpret_cast<detail::ArrayHeader*>(arr) - 1;
-            alloc.Deallocate(static_cast<void*>(header), 0, alignof(T));
+            alloc.Deallocate(header->rawBase, header->rawSizeInBytes, header->rawAlignmentInBytes);
             throw;
         }
         return arr;
@@ -151,6 +162,6 @@ namespace NGIN::Memory
         std::size_t count = header->count;
         for (std::size_t i = count; i > 0; --i)
             ptr[i - 1].~T();
-        alloc.Deallocate(static_cast<void*>(header), 0, alignof(T));
+        alloc.Deallocate(header->rawBase, header->rawSizeInBytes, header->rawAlignmentInBytes);
     }
 }// namespace NGIN::Memory

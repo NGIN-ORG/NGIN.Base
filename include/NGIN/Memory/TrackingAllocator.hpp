@@ -58,13 +58,20 @@ namespace NGIN::Memory
 
         [[nodiscard]] std::size_t MaxSize() const noexcept
         {
-            return m_inner.MaxSize();
+            return AllocatorTraits<Inner>::MaxSize(m_inner);
         }
         [[nodiscard]] std::size_t Remaining() const noexcept
         {
-            return m_inner.Remaining();
+            return AllocatorTraits<Inner>::Remaining(m_inner);
         }
+
+        [[nodiscard]] Ownership OwnershipOf(const void* p) const noexcept
+        {
+            return AllocatorTraits<Inner>::OwnershipOf(m_inner, p);
+        }
+
         [[nodiscard]] bool Owns(const void* p) const noexcept
+            requires AllocatorOwnsPointer<Inner>
         {
             return m_inner.Owns(p);
         }

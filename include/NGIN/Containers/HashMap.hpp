@@ -1,119 +1,392 @@
-/// @file FlatHashMap.hpp
-/// @brief Header-only flat open-addressing hashmap with growth support.
+/// @file HashMap.hpp
+/// @brief Header-only flat open-addressing hash map with allocator support and explicit lifetime management.
+///
+/// Semantics / constraints (performance-first):
+/// - Capacity is always a power-of-two (>= 16); probing uses `hash & (capacity - 1)`.
+/// - Deletion uses backward-shift (no tombstones). This can relocate entries, so:
+///   - Any `Remove()` may invalidate iterators, pointers, and references (not just to the erased element).
+/// - To keep `Remove()` robust and fast, `Key` and `Value` must be nothrow-move-constructible.
+/// - Any `Rehash()`/growth invalidates all iterators, pointers, and references.
 
 #pragma once
 
 #include <NGIN/Defines.hpp>
 #include <NGIN/Primitives.hpp>
-#include <NGIN/Containers/Vector.hpp>
+#include <NGIN/Memory/AllocatorConcept.hpp>
+#include <NGIN/Memory/SystemAllocator.hpp>
 
+#include <bit>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <functional>
-#include <optional>
+#include <limits>
+#include <new>
 #include <stdexcept>
-#include <utility>
-#include <vector>
-#include <algorithm>
 #include <type_traits>
+#include <utility>
 #include <iterator>
 
 namespace NGIN::Containers
 {
-    /// @brief Flat hashmap implementation with dynamic growth.
-    /// Linear probing + backward-shift deletion (no tombstones).
-    template<typename Key, typename Value, typename Hash = std::hash<Key>, typename KeyEqual = std::equal_to<Key>>
-        requires requires { Value(); }// TODO: Replace with a proper concept
+    namespace detail
+    {
+        constexpr bool IsPowerOfTwo(std::size_t value) noexcept
+        {
+            return value && ((value & (value - 1)) == 0);
+        }
+
+        constexpr std::size_t NextPow2(std::size_t value) noexcept
+        {
+            if (value <= 1)
+                return 1;
+            return std::bit_ceil(value);
+        }
+
+        constexpr std::size_t Distance(std::size_t from, std::size_t to, std::size_t mask) noexcept
+        {
+            return (to - from) & mask;
+        }
+    }// namespace detail
+
+    /// @brief Flat open-addressing hash map.
+    ///
+    /// Design notes:
+    /// - Linear probing.
+    /// - Backward-shift deletion (no tombstones).
+    /// - Explicit lifetime storage: buckets do not default-construct keys/values.
+    template<typename Key,
+             typename Value,
+             typename Hash                         = std::hash<Key>,
+             typename KeyEqual                     = std::equal_to<Key>,
+             Memory::AllocatorConcept AllocatorType = Memory::SystemAllocator>
     class FlatHashMap
     {
-
     public:
-        /// @brief Constructs a new FlatHashMap with the specified initial capacity.
-        FlatHashMap();
+        using key_type       = Key;
+        using mapped_type    = Value;
+        using hash_type      = Hash;
+        using key_equal      = KeyEqual;
+        using allocator_type = AllocatorType;
+        using size_type      = std::size_t;
 
-        /// @brief Inserts or updates a key-value pair.
-        void Insert(const Key& key, const Value& value);
+        static constexpr double kMaxLoadFactor = 0.75;
+        static constexpr size_type kInitialCapacity = 16;
 
-        /// @brief Inserts or updates a key-value pair.
-        void Insert(const Key& key, Value&& value);
+        static_assert(std::is_nothrow_move_constructible_v<Key> && std::is_nothrow_move_constructible_v<Value>,
+                      "FlatHashMap requires nothrow move constructible Key and Value (backward-shift deletion).");
 
-        /// @brief Removes a key-value pair by its key.
-        void Remove(const Key& key);
+        FlatHashMap() { Initialize_(kInitialCapacity); }
 
-        /// @brief Retrieves the value associated with the key.
-        /// @param key The key to search for.
-        /// @return The value if found, throws std::out_of_range otherwise.
-        Value Get(const Key& key) const;
-
-        Value& operator[](const Key& key);
-
-        const Value& operator[](const Key& key) const;
-
-        /// @brief Reference-returning lookup; throws if not found.
-        Value& GetRef(const Key& key);
-
-        /// @brief Reference-returning lookup; throws if not found.
-        const Value& GetRef(const Key& key) const;
-
-        /// @brief Pointer-returning lookup for no-throw access. Returns nullptr if missing.
-        Value* GetPtr(const Key& key) noexcept;
-
-        /// @brief Pointer-returning lookup for no-throw access. Returns nullptr if missing.
-        const Value* GetPtr(const Key& key) const noexcept;
-
-        /// @brief Checks if the key exists in the hashmap.
-        bool Contains(const Key& key) const;
-
-        // Heterogeneous lookup (enabled when Hash/KeyEqual are transparent)
-        template<class K>
-            requires requires(const Hash& h, const KeyEqual& eq, const K& k, const Key& kk) {
-                h(k);
-                eq(k, kk);
-                eq(kk, k);
-            }
-        bool Contains(const K& key) const;
-
-        template<class K>
-            requires requires(const Hash& h, const KeyEqual& eq, const K& k, const Key& kk) {
-                h(k);
-                eq(k, kk);
-                eq(kk, k);
-            }
-        const Value* GetPtr(const K& key) const noexcept;
-
-        template<class K>
-            requires requires(const Hash& h, const KeyEqual& eq, const K& k, const Key& kk) {
-                h(k);
-                eq(k, kk);
-                eq(kk, k);
-            }
-        Value* GetPtr(const K& key) noexcept;
-
-        /// @brief Clears all entries in the hashmap.
-        void Clear();
-
-        /// @brief Returns the current number of elements in the hashmap.
-        NGIN_ALWAYS_INLINE UIntSize Size() const
+        explicit FlatHashMap(size_type initialCapacity,
+                             const Hash& hash      = Hash {},
+                             const KeyEqual& equal = KeyEqual {},
+                             const AllocatorType& allocator = AllocatorType {})
+            : m_hash(hash), m_equal(equal), m_allocator(allocator)
         {
-            return m_size;
+            Initialize_(initialCapacity);
         }
 
-        /// @brief Returns the current capacity of the hashmap.
-        NGIN_ALWAYS_INLINE UIntSize Capacity() const
+        FlatHashMap(const FlatHashMap& other)
+            : m_hash(other.m_hash), m_equal(other.m_equal), m_allocator(other.m_allocator)
         {
-            return m_table.Capacity();
+            Initialize_(other.m_capacity);
+            for (size_type i = 0; i < other.m_capacity; ++i)
+            {
+                if (!other.m_buckets[i].occupied)
+                    continue;
+                InsertExisting_(other.m_buckets[i].hash, other.KeyRef_(i), other.ValueRef_(i));
+            }
         }
 
-        /// @brief Ensure capacity for at least `count` elements without rehash during insert.
-        void Reserve(UIntSize count);
+        FlatHashMap& operator=(const FlatHashMap& other)
+        {
+            if (this == &other)
+                return *this;
 
-        /// @brief Rehash to a specific bucket count (rounded to power-of-two, >= m_size / loadFactor).
-        void Rehash(UIntSize newBucketCount);
+            ClearAndRelease_();
 
-        // === Iterators over occupied entries ===
+            if constexpr (Memory::AllocatorPropagationTraits<AllocatorType>::PropagateOnCopyAssignment)
+            {
+                m_allocator = other.m_allocator;
+            }
+
+            m_hash  = other.m_hash;
+            m_equal = other.m_equal;
+
+            Initialize_(other.m_capacity);
+            for (size_type i = 0; i < other.m_capacity; ++i)
+            {
+                if (!other.m_buckets[i].occupied)
+                    continue;
+                InsertExisting_(other.m_buckets[i].hash, other.KeyRef_(i), other.ValueRef_(i));
+            }
+            return *this;
+        }
+
+        FlatHashMap(FlatHashMap&& other) noexcept
+            : m_hash(std::move(other.m_hash)),
+              m_equal(std::move(other.m_equal)),
+              m_allocator(std::move(other.m_allocator)),
+              m_buckets(other.m_buckets),
+              m_capacity(other.m_capacity),
+              m_mask(other.m_mask),
+              m_size(other.m_size)
+        {
+            other.m_buckets  = nullptr;
+            other.m_capacity = 0;
+            other.m_mask     = 0;
+            other.m_size     = 0;
+        }
+
+        FlatHashMap& operator=(FlatHashMap&& other) noexcept
+        {
+            if (this == &other)
+                return *this;
+
+            if constexpr (Memory::AllocatorPropagationTraits<AllocatorType>::PropagateOnMoveAssignment)
+            {
+                ClearAndRelease_();
+                m_hash      = std::move(other.m_hash);
+                m_equal     = std::move(other.m_equal);
+                m_allocator = std::move(other.m_allocator);
+                m_buckets   = other.m_buckets;
+                m_capacity  = other.m_capacity;
+                m_mask      = other.m_mask;
+                m_size      = other.m_size;
+
+                other.m_buckets  = nullptr;
+                other.m_capacity = 0;
+                other.m_mask     = 0;
+                other.m_size     = 0;
+            }
+            else if constexpr (Memory::AllocatorPropagationTraits<AllocatorType>::IsAlwaysEqual)
+            {
+                ClearAndRelease_();
+                m_hash     = std::move(other.m_hash);
+                m_equal    = std::move(other.m_equal);
+                m_buckets  = other.m_buckets;
+                m_capacity = other.m_capacity;
+                m_mask     = other.m_mask;
+                m_size     = other.m_size;
+
+                other.m_buckets  = nullptr;
+                other.m_capacity = 0;
+                other.m_mask     = 0;
+                other.m_size     = 0;
+            }
+            else
+            {
+                Clear();
+                Reserve(other.m_size);
+                for (auto it = other.begin(); it != other.end(); ++it)
+                {
+                    auto kv = *it;
+                    Insert(kv.key, std::move(kv.value));
+                }
+                other.Clear();
+            }
+
+            return *this;
+        }
+
+        ~FlatHashMap() { ClearAndRelease_(); }
+
+        //--------------------------------------------------------------------------
+        // Core ops
+        //--------------------------------------------------------------------------
+
+        void Insert(const Key& key, const Value& value) { InsertImpl_(key, value); }
+        void Insert(const Key& key, Value&& value) { InsertImpl_(key, std::move(value)); }
+
+        template<class K, class V>
+        void Insert(K&& key, V&& value)
+        {
+            InsertImpl_(std::forward<K>(key), std::forward<V>(value));
+        }
+
+        void Remove(const Key& key) { RemoveImpl_(key); }
+
+        template<class K>
+            requires requires(const Hash& h, const KeyEqual& eq, const K& k, const Key& kk) { h(k); eq(k, kk); eq(kk, k); }
+        void Remove(const K& key)
+        {
+            RemoveImpl_(key);
+        }
+
+        [[nodiscard]] Value Get(const Key& key) const
+        {
+            const Value* p = GetPtr(key);
+            if (!p)
+                throw std::out_of_range("Key not found in hashmap");
+            return *p;
+        }
+
+        template<class K>
+            requires requires(const Hash& h, const KeyEqual& eq, const K& k, const Key& kk) { h(k); eq(k, kk); eq(kk, k); }
+        [[nodiscard]] Value Get(const K& key) const
+        {
+            const Value* p = GetPtr(key);
+            if (!p)
+                throw std::out_of_range("Key not found in hashmap");
+            return *p;
+        }
+
+        [[nodiscard]] Value& GetRef(const Key& key)
+        {
+            Value* p = GetPtr(key);
+            if (!p)
+                throw std::out_of_range("Key not found in hashmap");
+            return *p;
+        }
+
+        [[nodiscard]] const Value& GetRef(const Key& key) const
+        {
+            const Value* p = GetPtr(key);
+            if (!p)
+                throw std::out_of_range("Key not found in hashmap");
+            return *p;
+        }
+
+        template<class K>
+            requires requires(const Hash& h, const KeyEqual& eq, const K& k, const Key& kk) { h(k); eq(k, kk); eq(kk, k); }
+        [[nodiscard]] Value& GetRef(const K& key)
+        {
+            Value* p = GetPtr(key);
+            if (!p)
+                throw std::out_of_range("Key not found in hashmap");
+            return *p;
+        }
+
+        template<class K>
+            requires requires(const Hash& h, const KeyEqual& eq, const K& k, const Key& kk) { h(k); eq(k, kk); eq(kk, k); }
+        [[nodiscard]] const Value& GetRef(const K& key) const
+        {
+            const Value* p = GetPtr(key);
+            if (!p)
+                throw std::out_of_range("Key not found in hashmap");
+            return *p;
+        }
+
+        [[nodiscard]] Value* GetPtr(const Key& key) noexcept { return GetPtrImpl_(key); }
+        [[nodiscard]] const Value* GetPtr(const Key& key) const noexcept { return GetPtrImpl_(key); }
+
+        template<class K>
+            requires requires(const Hash& h, const KeyEqual& eq, const K& k, const Key& kk) { h(k); eq(k, kk); eq(kk, k); }
+        [[nodiscard]] Value* GetPtr(const K& key) noexcept
+        {
+            return GetPtrImpl_(key);
+        }
+
+        template<class K>
+            requires requires(const Hash& h, const KeyEqual& eq, const K& k, const Key& kk) { h(k); eq(k, kk); eq(kk, k); }
+        [[nodiscard]] const Value* GetPtr(const K& key) const noexcept
+        {
+            return GetPtrImpl_(key);
+        }
+
+        [[nodiscard]] bool Contains(const Key& key) const { return GetPtr(key) != nullptr; }
+
+        template<class K>
+            requires requires(const Hash& h, const KeyEqual& eq, const K& k, const Key& kk) { h(k); eq(k, kk); eq(kk, k); }
+        [[nodiscard]] bool Contains(const K& key) const
+        {
+            return GetPtr(key) != nullptr;
+        }
+
+        void Clear()
+        {
+            if (!m_buckets)
+                return;
+            for (size_type i = 0; i < m_capacity; ++i)
+            {
+                if (m_buckets[i].occupied)
+                {
+                    DestroyAt_(i);
+                    m_buckets[i].occupied = false;
+                }
+            }
+            m_size = 0;
+        }
+
+        //--------------------------------------------------------------------------
+        // Capacity
+        //--------------------------------------------------------------------------
+
+        [[nodiscard]] NGIN_ALWAYS_INLINE UIntSize Size() const { return static_cast<UIntSize>(m_size); }
+        [[nodiscard]] NGIN_ALWAYS_INLINE UIntSize Capacity() const { return static_cast<UIntSize>(m_capacity); }
+
+        void Reserve(UIntSize count)
+        {
+            const auto desired = static_cast<double>(count) / kMaxLoadFactor;
+            size_type  buckets = static_cast<size_type>(desired) + 1;
+            if (buckets < kInitialCapacity)
+                buckets = kInitialCapacity;
+            buckets = detail::NextPow2(buckets);
+            if (buckets <= m_capacity)
+                return;
+            Rehash(static_cast<UIntSize>(buckets));
+        }
+
+        void Rehash(UIntSize newBucketCount)
+        {
+            size_type target = detail::NextPow2(static_cast<size_type>(newBucketCount));
+            if (target < kInitialCapacity)
+                target = kInitialCapacity;
+            if (target == m_capacity)
+                return;
+
+            Bucket*    oldBuckets  = m_buckets;
+            size_type  oldCapacity = m_capacity;
+
+            m_buckets  = nullptr;
+            m_capacity = 0;
+            m_mask     = 0;
+            m_size     = 0;
+            Initialize_(target);
+
+            if (oldBuckets)
+            {
+                for (size_type i = 0; i < oldCapacity; ++i)
+                {
+                    if (!oldBuckets[i].occupied)
+                        continue;
+                    const auto h = oldBuckets[i].hash;
+                    InsertExisting_(h, KeyRef_(oldBuckets, i), ValueRef_(oldBuckets, i));
+                    DestroyAt_(oldBuckets, i);
+                }
+                DeallocateBuckets_(oldBuckets, oldCapacity);
+            }
+        }
+
+        //--------------------------------------------------------------------------
+        // operator[]
+        //--------------------------------------------------------------------------
+
+        Value& operator[](const Key& key)
+            requires std::default_initializable<Value>
+        {
+            if (Value* p = GetPtr(key))
+                return *p;
+            Insert(key, Value {});
+            return *GetPtr(key);
+        }
+
+        const Value& operator[](const Key& key) const
+        {
+            return GetRef(key);
+        }
+
+        //--------------------------------------------------------------------------
+        // Iteration
+        //--------------------------------------------------------------------------
+
         struct KeyValueRef
         {
             const Key& key;
             Value&     value;
         };
+
         struct KeyValueConstRef
         {
             const Key&   key;
@@ -130,29 +403,31 @@ namespace NGIN::Containers
             using iterator_category = std::forward_iterator_tag;
 
             Iterator() = default;
-            Iterator(FlatHashMap* map, UIntSize idx) : m_map(map), m_index(idx) { AdvanceToOccupied(); }
+            Iterator(FlatHashMap* map, size_type idx) : m_map(map), m_index(idx) { Advance_(); }
 
-            reference operator*() const { return {m_map->m_table[m_index].key, m_map->m_table[m_index].value}; }
+            reference operator*() const { return {m_map->KeyRef_(m_index), m_map->ValueRef_(m_index)}; }
 
             Iterator& operator++()
             {
                 ++m_index;
-                AdvanceToOccupied();
+                Advance_();
                 return *this;
             }
+
             bool operator==(const Iterator& other) const { return m_map == other.m_map && m_index == other.m_index; }
             bool operator!=(const Iterator& other) const { return !(*this == other); }
 
         private:
-            void AdvanceToOccupied()
+            void Advance_()
             {
                 if (!m_map)
                     return;
-                while (m_index < m_map->m_table.Size() && !m_map->m_table[m_index].isOccupied)
+                while (m_index < m_map->m_capacity && !m_map->m_buckets[m_index].occupied)
                     ++m_index;
             }
+
             FlatHashMap* m_map {nullptr};
-            UIntSize     m_index {0};
+            size_type    m_index {0};
         };
 
         class ConstIterator
@@ -165,38 +440,39 @@ namespace NGIN::Containers
             using iterator_category = std::forward_iterator_tag;
 
             ConstIterator() = default;
-            ConstIterator(const FlatHashMap* map, UIntSize idx) : m_map(map), m_index(idx) { AdvanceToOccupied(); }
+            ConstIterator(const FlatHashMap* map, size_type idx) : m_map(map), m_index(idx) { Advance_(); }
 
-            reference operator*() const { return {m_map->m_table[m_index].key, m_map->m_table[m_index].value}; }
+            reference operator*() const { return {m_map->KeyRef_(m_index), m_map->ValueRef_(m_index)}; }
 
             ConstIterator& operator++()
             {
                 ++m_index;
-                AdvanceToOccupied();
+                Advance_();
                 return *this;
             }
+
             bool operator==(const ConstIterator& other) const { return m_map == other.m_map && m_index == other.m_index; }
             bool operator!=(const ConstIterator& other) const { return !(*this == other); }
 
         private:
-            void AdvanceToOccupied()
+            void Advance_()
             {
                 if (!m_map)
                     return;
-                while (m_index < m_map->m_table.Size() && !m_map->m_table[m_index].isOccupied)
+                while (m_index < m_map->m_capacity && !m_map->m_buckets[m_index].occupied)
                     ++m_index;
             }
+
             const FlatHashMap* m_map {nullptr};
-            UIntSize           m_index {0};
+            size_type          m_index {0};
         };
 
-        // PascalCase (project style) and std-style iterator accessors
         Iterator      Begin() { return Iterator(this, 0); }
-        Iterator      End() { return Iterator(this, m_table.Size()); }
+        Iterator      End() { return Iterator(this, m_capacity); }
         ConstIterator Begin() const { return ConstIterator(this, 0); }
-        ConstIterator End() const { return ConstIterator(this, m_table.Size()); }
+        ConstIterator End() const { return ConstIterator(this, m_capacity); }
         ConstIterator CBegin() const { return ConstIterator(this, 0); }
-        ConstIterator CEnd() const { return ConstIterator(this, m_table.Size()); }
+        ConstIterator CEnd() const { return ConstIterator(this, m_capacity); }
 
         Iterator      begin() { return Begin(); }
         Iterator      end() { return End(); }
@@ -206,452 +482,289 @@ namespace NGIN::Containers
         ConstIterator cend() const { return CEnd(); }
 
     private:
-        static constexpr F32      loadFactorThreshold = 0.75f;
-        static constexpr UIntSize initialCapacity     = 16;
-
-        struct Entry
+        struct Bucket
         {
-            Key   key;
-            Value value;
-            bool  isOccupied;
+            std::size_t hash;
+            bool        occupied;
 
-            /// @brief Default constructor initializing as unoccupied.
-            inline Entry()
-                : isOccupied(false) {}
+            alignas(Key) std::byte keyStorage[sizeof(Key)];
+            alignas(Value) std::byte valueStorage[sizeof(Value)];
         };
 
-        // helpers
-        static constexpr UIntSize NextPow2(UIntSize x) noexcept
+        static_assert(std::is_trivially_default_constructible_v<Bucket>);
+
+        [[nodiscard]] static Key& KeyRef_(Bucket* buckets, size_type idx) noexcept
         {
-            if (x <= 1)
-                return 1;
-            --x;
-            x |= x >> 1;
-            x |= x >> 2;
-            x |= x >> 4;
-            x |= x >> 8;
-            x |= x >> 16;
-#if SIZE_MAX > 0xffffffff
-            x |= x >> 32;
-#endif
-            return x + 1;
+            return *std::launder(reinterpret_cast<Key*>(buckets[idx].keyStorage));
+        }
+
+        [[nodiscard]] static const Key& KeyRef_(const Bucket* buckets, size_type idx) noexcept
+        {
+            return *std::launder(reinterpret_cast<const Key*>(buckets[idx].keyStorage));
+        }
+
+        [[nodiscard]] static Value& ValueRef_(Bucket* buckets, size_type idx) noexcept
+        {
+            return *std::launder(reinterpret_cast<Value*>(buckets[idx].valueStorage));
+        }
+
+        [[nodiscard]] static const Value& ValueRef_(const Bucket* buckets, size_type idx) noexcept
+        {
+            return *std::launder(reinterpret_cast<const Value*>(buckets[idx].valueStorage));
+        }
+
+        [[nodiscard]] Key& KeyRef_(size_type idx) noexcept { return KeyRef_(m_buckets, idx); }
+        [[nodiscard]] const Key& KeyRef_(size_type idx) const noexcept { return KeyRef_(m_buckets, idx); }
+        [[nodiscard]] Value& ValueRef_(size_type idx) noexcept { return ValueRef_(m_buckets, idx); }
+        [[nodiscard]] const Value& ValueRef_(size_type idx) const noexcept { return ValueRef_(m_buckets, idx); }
+
+        void DestroyAt_(Bucket* buckets, size_type idx) noexcept
+        {
+            if constexpr (!std::is_trivially_destructible_v<Value>)
+            {
+                ValueRef_(buckets, idx).~Value();
+            }
+            if constexpr (!std::is_trivially_destructible_v<Key>)
+            {
+                KeyRef_(buckets, idx).~Key();
+            }
+            buckets[idx].hash     = 0;
+            buckets[idx].occupied = false;
+        }
+
+        void DestroyAt_(size_type idx) noexcept { DestroyAt_(m_buckets, idx); }
+
+        void ClearAndRelease_() noexcept
+        {
+            if (!m_buckets)
+                return;
+            for (size_type i = 0; i < m_capacity; ++i)
+            {
+                if (m_buckets[i].occupied)
+                    DestroyAt_(i);
+            }
+            DeallocateBuckets_(m_buckets, m_capacity);
+            m_buckets  = nullptr;
+            m_capacity = 0;
+            m_mask     = 0;
+            m_size     = 0;
+        }
+
+        [[nodiscard]] Bucket* AllocateBuckets_(size_type capacity)
+        {
+            const auto bytes = capacity * sizeof(Bucket);
+            void*      mem   = m_allocator.Allocate(bytes, alignof(Bucket));
+            if (!mem)
+                throw std::bad_alloc();
+            std::memset(mem, 0, bytes);
+            return static_cast<Bucket*>(mem);
+        }
+
+        void DeallocateBuckets_(Bucket* buckets, size_type capacity) noexcept
+        {
+            const auto bytes = capacity * sizeof(Bucket);
+            m_allocator.Deallocate(buckets, bytes, alignof(Bucket));
+        }
+
+        void Initialize_(size_type requestedCapacity)
+        {
+            size_type cap = detail::NextPow2(requestedCapacity);
+            if (cap < kInitialCapacity)
+                cap = kInitialCapacity;
+            if (!detail::IsPowerOfTwo(cap))
+                cap = detail::NextPow2(cap);
+
+            m_buckets  = AllocateBuckets_(cap);
+            m_capacity = cap;
+            m_mask     = cap - 1;
+            m_size     = 0;
+        }
+
+        [[nodiscard]] double LoadFactor_() const noexcept
+        {
+            if (m_capacity == 0)
+                return 0.0;
+            return static_cast<double>(m_size) / static_cast<double>(m_capacity);
+        }
+
+        void MaybeGrow_()
+        {
+            if (LoadFactor_() <= kMaxLoadFactor)
+                return;
+            Rehash(static_cast<UIntSize>(m_capacity * 2));
         }
 
         template<class K>
-        NGIN_ALWAYS_INLINE UIntSize ComputeHash(const K& key) const
+        [[nodiscard]] std::size_t ComputeHash_(const K& key) const
         {
-            return static_cast<UIntSize>(m_hash(key));
+            return static_cast<std::size_t>(m_hash(key));
         }
 
-        void RehashGrow();
-        void ReinsertAll(Vector<Entry>& newTable);
-
-        // backward-shift deletion (linear probing)
-        void BackwardShiftFrom(UIntSize holeIndex);
-
-
-        Vector<Entry> m_table;
-        UIntSize      m_size;
-        Hash          m_hash {};
-        KeyEqual      m_equal {};
-
-        NGIN_ALWAYS_INLINE bool NeedsRehash() const
+        template<class K>
+        [[nodiscard]] size_type FindIndex_(const K& key, std::size_t h) const noexcept
         {
-            return static_cast<F32>(m_size) / static_cast<F32>(Capacity()) > loadFactorThreshold;
-        }
-    };
-
-    //---------------------------- IMPLEMENTATION ----------------------------//
-    template<typename Key, typename Value, typename Hash, typename KeyEqual>
-        requires requires { Value(); }
-    inline bool FlatHashMap<Key, Value, Hash, KeyEqual>::Contains(const Key& key) const
-    {
-        const auto mask   = Capacity() - 1;
-        UIntSize   index  = ComputeHash(key) & mask;
-        UIntSize   probed = 0;
-        while (probed < Capacity())
-        {
-            if (!m_table[index].isOccupied)
-                return false;
-            if (m_equal(m_table[index].key, key))
-                return true;
-            index = (index + 1) & mask;
-            ++probed;
-        }
-        return false;// table full and not found
-    }
-    template<typename Key, typename Value, typename Hash, typename KeyEqual>
-        requires requires { Value(); }
-    inline void FlatHashMap<Key, Value, Hash, KeyEqual>::Clear()
-    {
-        for (UIntSize i = 0; i < m_table.Size(); ++i)
-        {
-            m_table[i].isOccupied = false;
-        }
-        m_size = 0;
-    }
-
-    template<typename Key, typename Value, typename Hash, typename KeyEqual>
-        requires requires { Value(); }///TODO: Replace with a proper concept
-    inline void FlatHashMap<Key, Value, Hash, KeyEqual>::RehashGrow()
-    {
-        // Create a new table with double the capacity (power-of-two is preserved)
-        Vector<Entry> newTable(Capacity() * 2);
-
-        for (UIntSize i = 0; i < newTable.Capacity(); i++)
-        {
-            newTable.EmplaceBack();
-        }
-
-        ReinsertAll(newTable);
-        m_table = std::move(newTable);
-    }
-
-    template<typename Key, typename Value, typename Hash, typename KeyEqual>
-        requires requires { Value(); }///TODO: Replace with a proper concept
-    inline FlatHashMap<Key, Value, Hash, KeyEqual>::FlatHashMap()
-        : m_table(initialCapacity), m_size(0), m_hash(Hash {}), m_equal(KeyEqual {})
-    {
-        for (UIntSize i = 0; i < m_table.Capacity(); i++)
-        {
-            m_table.EmplaceBack();
-        }
-    }
-
-    template<typename Key, typename Value, typename Hash, typename KeyEqual>
-        requires requires { Value(); }///TODO: Replace with a proper concept
-    inline void FlatHashMap<Key, Value, Hash, KeyEqual>::Insert(const Key& key, const Value& value)
-    {
-        if (NeedsRehash())
-        {
-            RehashGrow();
-        }
-        const auto mask   = Capacity() - 1;
-        UIntSize   index  = ComputeHash(key) & mask;
-        UIntSize   probed = 0;
-        while (probed < Capacity())
-        {
-            if (!m_table[index].isOccupied)
+            if (!m_buckets || m_capacity == 0)
+                return kNotFound;
+            size_type index = h & m_mask;
+            for (size_type probed = 0; probed < m_capacity; ++probed)
             {
-                m_table[index].key        = key;
-                m_table[index].value      = value;
-                m_table[index].isOccupied = true;
-                ++m_size;
-                return;
+                const Bucket& b = m_buckets[index];
+                if (!b.occupied)
+                    return kNotFound;
+                if (b.hash == h && m_equal(KeyRef_(index), key))
+                    return index;
+                index = (index + 1) & m_mask;
             }
-            // If the key already exists, update the value
-            if (m_equal(m_table[index].key, key))
+            return kNotFound;
+        }
+
+        template<class K>
+        [[nodiscard]] size_type FindInsertSlot_(const K& key, std::size_t h) const noexcept
+        {
+            size_type index = h & m_mask;
+            for (size_type probed = 0; probed < m_capacity; ++probed)
             {
-                m_table[index].value = value;
-                return;
+                const Bucket& b = m_buckets[index];
+                if (!b.occupied)
+                    return index;
+                if (b.hash == h && m_equal(KeyRef_(index), key))
+                    return index;
+                index = (index + 1) & m_mask;
             }
-            index = (index + 1) & mask;
-            ++probed;
-        }
-        // Should not happen with resize policy
-        NGIN::Unreachable();
-    }
-
-    template<typename Key, typename Value, typename Hash, typename KeyEqual>
-        requires requires { Value(); }///TODO: Replace with a proper concept
-    inline void FlatHashMap<Key, Value, Hash, KeyEqual>::Insert(const Key& key, Value&& value)
-    {
-        if (NeedsRehash())
-        {
-            RehashGrow();
-        }
-        const auto mask   = Capacity() - 1;
-        UIntSize   index  = ComputeHash(key) & mask;
-        UIntSize   probed = 0;
-        while (probed < Capacity())
-        {
-            if (!m_table[index].isOccupied)
-            {
-                m_table[index].key        = key;
-                m_table[index].value      = std::move(value);
-                m_table[index].isOccupied = true;
-                ++m_size;
-                return;
-            }
-            // If the key already exists, update the value
-            if (m_equal(m_table[index].key, key))
-            {
-                m_table[index].value = std::move(value);
-                return;
-            }
-            index = (index + 1) & mask;
-            ++probed;
-        }
-        NGIN::Unreachable();
-    }
-
-    template<typename Key, typename Value, typename Hash, typename KeyEqual>
-        requires requires { Value(); }///TODO: Replace with a proper concept
-    inline void FlatHashMap<Key, Value, Hash, KeyEqual>::Remove(const Key& key)
-    {
-        const auto mask   = Capacity() - 1;
-        UIntSize   index  = ComputeHash(key) & mask;
-        UIntSize   probed = 0;
-        while (probed < Capacity())
-        {
-            if (!m_table[index].isOccupied)
-                return;// not found
-            if (m_equal(m_table[index].key, key))
-            {
-                // Robin Hood deletion via backward shift to keep cluster continuous.
-                m_table[index].isOccupied = false;
-                --m_size;
-                BackwardShiftFrom(index);
-                return;
-            }
-            index = (index + 1) & mask;
-            ++probed;
-        }
-    }
-
-    template<typename Key, typename Value, typename Hash, typename KeyEqual>
-        requires requires { Value(); }///TODO: Replace with a proper concept
-    inline Value FlatHashMap<Key, Value, Hash, KeyEqual>::Get(const Key& key) const
-    {
-        const auto mask   = Capacity() - 1;
-        UIntSize   index  = ComputeHash(key) & mask;
-        UIntSize   probed = 0;
-        while (probed < Capacity())
-        {
-            if (!m_table[index].isOccupied)
-                break;
-            if (m_equal(m_table[index].key, key))
-                return m_table[index].value;
-            index = (index + 1) & mask;
-            ++probed;
+            return kNotFound;
         }
 
-        throw std::out_of_range("Key not found in hashmap");
-    }
-
-    template<typename Key, typename Value, typename Hash, typename KeyEqual>
-        requires requires { Value(); }///TODO: Replace with a proper concept
-    inline Value& FlatHashMap<Key, Value, Hash, KeyEqual>::operator[](const Key& key)
-    {
-        if (NeedsRehash())
+        template<class K>
+        [[nodiscard]] Value* GetPtrImpl_(const K& key) const noexcept
         {
-            RehashGrow();
-        }
-
-        const auto mask   = Capacity() - 1;
-        UIntSize   index  = ComputeHash(key) & mask;
-        UIntSize   probed = 0;
-        while (probed < Capacity())
-        {
-            if (!m_table[index].isOccupied)
-            {
-                // Insert default
-                m_table[index].key        = key;
-                m_table[index].isOccupied = true;
-                m_table[index].value      = Value();
-                ++m_size;
-                return m_table[index].value;
-            }
-            if (m_equal(m_table[index].key, key))
-            {
-                return m_table[index].value;
-            }
-            index = (index + 1) & mask;
-            ++probed;
-        }
-        // If table managed properly, shouldn't reach here
-        NGIN::Unreachable();
-    }
-
-    template<typename Key, typename Value, typename Hash, typename KeyEqual>
-        requires requires { Value(); }///TODO: Replace with a proper concept
-    inline const Value& FlatHashMap<Key, Value, Hash, KeyEqual>::operator[](const Key& key) const
-    {
-        const auto mask   = Capacity() - 1;
-        UIntSize   index  = ComputeHash(key) & mask;
-        UIntSize   probed = 0;
-        while (probed < Capacity())
-        {
-            if (!m_table[index].isOccupied)
-                break;
-            if (m_equal(m_table[index].key, key))
-                return m_table[index].value;
-            index = (index + 1) & mask;
-            ++probed;
-        }
-
-        throw std::out_of_range("Key not found in hashmap");
-    }
-
-    // === GetRef / GetPtr ===
-    template<typename Key, typename Value, typename Hash, typename KeyEqual>
-        requires requires { Value(); }
-    inline Value& FlatHashMap<Key, Value, Hash, KeyEqual>::GetRef(const Key& key)
-    {
-        const auto* p = GetPtr(key);
-        if (!p)
-            throw std::out_of_range("Key not found in hashmap");
-        return *const_cast<Value*>(p);
-    }
-    template<typename Key, typename Value, typename Hash, typename KeyEqual>
-        requires requires { Value(); }
-    inline const Value& FlatHashMap<Key, Value, Hash, KeyEqual>::GetRef(const Key& key) const
-    {
-        const auto* p = GetPtr(key);
-        if (!p)
-            throw std::out_of_range("Key not found in hashmap");
-        return *p;
-    }
-    template<typename Key, typename Value, typename Hash, typename KeyEqual>
-        requires requires { Value(); }
-    inline Value* FlatHashMap<Key, Value, Hash, KeyEqual>::GetPtr(const Key& key) noexcept
-    {
-        const auto* cp = const_cast<const FlatHashMap*>(this)->GetPtr(key);
-        return const_cast<Value*>(cp);
-    }
-    template<typename Key, typename Value, typename Hash, typename KeyEqual>
-        requires requires { Value(); }
-    inline const Value* FlatHashMap<Key, Value, Hash, KeyEqual>::GetPtr(const Key& key) const noexcept
-    {
-        const auto mask   = Capacity() - 1;
-        UIntSize   index  = ComputeHash(key) & mask;
-        UIntSize   probed = 0;
-        while (probed < Capacity())
-        {
-            if (!m_table[index].isOccupied)
+            const auto h   = ComputeHash_(key);
+            const auto idx = FindIndex_(key, h);
+            if (idx == kNotFound)
                 return nullptr;
-            if (m_equal(m_table[index].key, key))
-                return &m_table[index].value;
-            index = (index + 1) & mask;
-            ++probed;
+            return const_cast<Value*>(&ValueRef_(idx));
         }
-        return nullptr;
-    }
 
-    // Heterogeneous overloads
-    template<typename Key, typename Value, typename Hash, typename KeyEqual>
-        requires requires { Value(); }
-    template<class K>
-        requires requires(const Hash& h, const KeyEqual& eq, const K& k, const Key& kk) { h(k); eq(k, kk); eq(kk, k); }
-    inline bool FlatHashMap<Key, Value, Hash, KeyEqual>::Contains(const K& key) const
-    {
-        return GetPtr(key) != nullptr;
-    }
-    template<typename Key, typename Value, typename Hash, typename KeyEqual>
-        requires requires { Value(); }
-    template<class K>
-        requires requires(const Hash& h, const KeyEqual& eq, const K& k, const Key& kk) { h(k); eq(k, kk); eq(kk, k); }
-    inline const Value* FlatHashMap<Key, Value, Hash, KeyEqual>::GetPtr(const K& key) const noexcept
-    {
-        const auto mask   = Capacity() - 1;
-        UIntSize   index  = ComputeHash(key) & mask;
-        UIntSize   probed = 0;
-        while (probed < Capacity())
+        template<class K, class V>
+        void InsertImpl_(K&& key, V&& value)
         {
-            if (!m_table[index].isOccupied)
-                return nullptr;
-            if (m_equal(m_table[index].key, key))
-                return &m_table[index].value;
-            index = (index + 1) & mask;
-            ++probed;
-        }
-        return nullptr;
-    }
-    template<typename Key, typename Value, typename Hash, typename KeyEqual>
-        requires requires { Value(); }
-    template<class K>
-        requires requires(const Hash& h, const KeyEqual& eq, const K& k, const Key& kk) { h(k); eq(k, kk); eq(kk, k); }
-    inline Value* FlatHashMap<Key, Value, Hash, KeyEqual>::GetPtr(const K& key) noexcept
-    {
-        const auto* cp = const_cast<const FlatHashMap*>(this)->GetPtr(key);
-        return const_cast<Value*>(cp);
-    }
+            MaybeGrow_();
 
-    // Reserve / Rehash
-    template<typename Key, typename Value, typename Hash, typename KeyEqual>
-        requires requires { Value(); }
-    inline void FlatHashMap<Key, Value, Hash, KeyEqual>::Reserve(UIntSize count)
-    {
-        // target bucket count so that count <= loadFactor * buckets
-        const F32 desired = static_cast<F32>(count) / loadFactorThreshold;
-        UIntSize  buckets = static_cast<UIntSize>(desired) + 1;
-        if (buckets < initialCapacity)
-            buckets = initialCapacity;
-        buckets = NextPow2(buckets);
-        if (buckets <= Capacity())
-            return;
-        Rehash(buckets);
-    }
-
-    template<typename Key, typename Value, typename Hash, typename KeyEqual>
-        requires requires { Value(); }
-    inline void FlatHashMap<Key, Value, Hash, KeyEqual>::Rehash(UIntSize newBucketCount)
-    {
-        UIntSize buckets = NextPow2(newBucketCount);
-        if (buckets < initialCapacity)
-            buckets = initialCapacity;
-        if (buckets == Capacity())
-            return;
-
-        Vector<Entry> newTable(buckets);
-        for (UIntSize i = 0; i < newTable.Capacity(); ++i)
-            newTable.EmplaceBack();
-        ReinsertAll(newTable);
-        m_table = std::move(newTable);
-    }
-
-    template<typename Key, typename Value, typename Hash, typename KeyEqual>
-        requires requires { Value(); }
-    inline void FlatHashMap<Key, Value, Hash, KeyEqual>::ReinsertAll(Vector<Entry>& newTable)
-    {
-        const auto newMask = newTable.Capacity() - 1;
-        for (UIntSize j = 0; j < m_table.Size(); ++j)
-        {
-            if (!m_table[j].isOccupied)
-                continue;
-            UIntSize index  = ComputeHash(m_table[j].key) & newMask;
-            UIntSize probed = 0;
-            while (probed < newTable.Capacity())
+            const auto h = ComputeHash_(key);
+            const auto idx = FindInsertSlot_(key, h);
+            if (idx == kNotFound)
             {
-                if (!newTable[index].isOccupied)
+                Rehash(static_cast<UIntSize>((std::max)(kInitialCapacity, m_capacity * 2)));
+                InsertImpl_(std::forward<K>(key), std::forward<V>(value));
+                return;
+            }
+
+            Bucket& b = m_buckets[idx];
+            if (b.occupied)
+            {
+                ValueRef_(idx) = std::forward<V>(value);
+                return;
+            }
+
+            b.hash     = h;
+            b.occupied = true;
+
+            ::new (static_cast<void*>(b.keyStorage)) Key(std::forward<K>(key));
+            try
+            {
+                ::new (static_cast<void*>(b.valueStorage)) Value(std::forward<V>(value));
+            }
+            catch (...)
+            {
+                KeyRef_(idx).~Key();
+                b.hash     = 0;
+                b.occupied = false;
+                throw;
+            }
+
+            ++m_size;
+        }
+
+        void InsertExisting_(std::size_t h, const Key& key, const Value& value)
+        {
+            const auto idx = FindInsertSlot_(key, h);
+            if (idx == kNotFound)
+                throw std::bad_alloc();
+
+            Bucket& b = m_buckets[idx];
+            b.hash     = h;
+            b.occupied = true;
+            ::new (static_cast<void*>(b.keyStorage)) Key(key);
+            try
+            {
+                ::new (static_cast<void*>(b.valueStorage)) Value(value);
+            }
+            catch (...)
+            {
+                KeyRef_(idx).~Key();
+                b.hash     = 0;
+                b.occupied = false;
+                throw;
+            }
+            ++m_size;
+        }
+
+        template<class K>
+        void RemoveImpl_(const K& key)
+        {
+            const auto h   = ComputeHash_(key);
+            size_type idx = FindIndex_(key, h);
+            if (idx == kNotFound)
+                return;
+
+            DestroyAt_(idx);
+            --m_size;
+            BackwardShiftFrom_(idx);
+        }
+
+        void BackwardShiftFrom_(size_type holeIndex) noexcept
+        {
+            size_type hole = holeIndex;
+            size_type next = (hole + 1) & m_mask;
+
+            while (m_buckets[next].occupied)
+            {
+                const size_type home = m_buckets[next].hash & m_mask;
+                const auto distHomeToNext = detail::Distance(home, next, m_mask);
+                const auto distHomeToHole = detail::Distance(home, hole, m_mask);
+
+                if (distHomeToHole < distHomeToNext)
                 {
-                    newTable[index].key        = std::move(m_table[j].key);
-                    newTable[index].value      = std::move(m_table[j].value);
-                    newTable[index].isOccupied = true;
-                    break;
+                    MoveBucket_(hole, next);
+                    hole = next;
                 }
-                index = (index + 1) & newMask;
-                ++probed;
+                next = (next + 1) & m_mask;
             }
-            if (probed >= newTable.Capacity())
-                NGIN::Unreachable();
         }
-    }
 
-    template<typename Key, typename Value, typename Hash, typename KeyEqual>
-        requires requires { Value(); }
-    inline void FlatHashMap<Key, Value, Hash, KeyEqual>::BackwardShiftFrom(UIntSize holeIndex)
-    {
-        const auto mask = Capacity() - 1;
-        UIntSize   prev = holeIndex;
-        UIntSize   curr = (prev + 1) & mask;
-        while (m_table[curr].isOccupied)
+        void MoveBucket_(size_type dst, size_type src) noexcept
         {
-            // Compute this element's ideal position
-            UIntSize home = ComputeHash(m_table[curr].key) & mask;
-            // Distance from home to current
-            const bool atHome = (home == curr);
-            if (atHome)
-                break;// don't shift elements that are at their home bucket
-            // Move current back into the hole
-            m_table[prev].key        = std::move(m_table[curr].key);
-            m_table[prev].value      = std::move(m_table[curr].value);
-            m_table[prev].isOccupied = true;
-            // Vacate current and advance
-            m_table[curr].isOccupied = false;
-            prev                     = curr;
-            curr                     = (curr + 1) & mask;
+            Bucket& d = m_buckets[dst];
+            Bucket& s = m_buckets[src];
+
+            d.hash     = s.hash;
+            d.occupied = true;
+
+            ::new (static_cast<void*>(d.keyStorage)) Key(std::move(KeyRef_(src)));
+            ::new (static_cast<void*>(d.valueStorage)) Value(std::move(ValueRef_(src)));
+
+            DestroyAt_(src);
         }
-    }
+
+        static constexpr size_type kNotFound = static_cast<size_type>(-1);
+
+        [[no_unique_address]] Hash          m_hash {};
+        [[no_unique_address]] KeyEqual      m_equal {};
+        [[no_unique_address]] AllocatorType m_allocator {};
+
+        Bucket*    m_buckets {nullptr};
+        size_type  m_capacity {0};
+        size_type  m_mask {0};
+        size_type  m_size {0};
+    };
 
 }// namespace NGIN::Containers

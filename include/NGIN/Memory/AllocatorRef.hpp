@@ -1,5 +1,5 @@
-/// @file FallbackAllocator.hpp
-/// @brief Allocator that tries a primary allocator then falls back to secondary.
+/// @file AllocatorRef.hpp
+/// @brief Non-owning reference wrapper that adapts an allocator instance to `AllocatorConcept`.
 #pragma once
 
 #include <utility>
@@ -19,24 +19,22 @@ namespace NGIN::Memory
         // Optional capabilities, forward if present:
         std::size_t MaxSize() const noexcept
         {
-            if constexpr (AllocatorReportsMaxSize<A>)
-                return ptr_->MaxSize();
-            else
-                return SIZE_MAX;
+            return AllocatorTraits<A>::MaxSize(*ptr_);
         }
         std::size_t Remaining() const noexcept
         {
-            if constexpr (AllocatorReportsRemainingBytes<A>)
-                return ptr_->Remaining();
-            else
-                return MaxSize();
+            return AllocatorTraits<A>::Remaining(*ptr_);
         }
-        bool Owns(const void* p) const noexcept
+
+        [[nodiscard]] Ownership OwnershipOf(const void* p) const noexcept
         {
-            if constexpr (AllocatorOwnsPointer<A>)
-                return ptr_->Owns(p);
-            else
-                return true;
+            return AllocatorTraits<A>::OwnershipOf(*ptr_, p);
+        }
+
+        [[nodiscard]] bool Owns(const void* p) const noexcept
+            requires AllocatorOwnsPointer<A>
+        {
+            return ptr_->Owns(p);
         }
 
     private:
