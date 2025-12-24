@@ -14,7 +14,6 @@
 #include <array>
 #include <cassert>
 #include <functional>
-#include <iostream>// For logging, can remove if not desired
 #include <exception>
 #include <NGIN/Primitives.hpp>
 #include <NGIN/Time/MonotonicClock.hpp>
@@ -338,34 +337,13 @@ namespace NGIN::Execution
                 fiber = fiberPool.back();
                 fiberPool.pop_back();
 
-                // Defensive: must be assignable (not running)
-                try
-                {
-                    fiber->Assign([work = std::move(work)]() mutable { work.Invoke(); });
-                } catch (const std::exception& ex)
-                {
-                    // Should never happen unless fiber is misused, but handle gracefully
-                    std::cerr << "[FiberScheduler] Fiber assign failed: " << ex.what() << std::endl;
-                    fiberPool.push_back(fiber);
-                    continue;
-                }
-
+                // Contract alignment: ThreadPoolScheduler/WorkItem terminate on uncaught job exceptions.
+                // FiberScheduler captures exceptions in the fiber trampoline; terminate here to keep behavior consistent.
+                fiber->Assign([work = std::move(work)]() mutable { work.Invoke(); });
                 const auto result = fiber->Resume();
                 if (result == FiberResumeResult::Faulted)
                 {
-                    if (auto ex = fiber->TakeException())
-                    {
-                        try
-                        {
-                            std::rethrow_exception(ex);
-                        } catch (const std::exception& e)
-                        {
-                            std::cerr << "[FiberScheduler] Exception in fiber: " << e.what() << std::endl;
-                        } catch (...)
-                        {
-                            std::cerr << "[FiberScheduler] Exception in fiber: <unknown>" << std::endl;
-                        }
-                    }
+                    std::terminate();
                 }
                 // Return fiber to pool
                 fiberPool.push_back(fiber);

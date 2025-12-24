@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <concepts>
 #include <cstring>
 #include <cstdint>
@@ -160,10 +161,11 @@ namespace NGIN::Execution
             (void) ::WaitForSingleObject(m_handle, INFINITE);
             (void) ::CloseHandle(m_handle);
             m_handle   = nullptr;
-            m_threadId = 0;
+            m_threadId.store(0, std::memory_order_release);
             m_joinable = false;
 #else
             (void) ::pthread_join(m_thread, nullptr);
+            m_threadId.store(0, std::memory_order_release);
             m_joinable = false;
 #endif
         }
@@ -178,10 +180,11 @@ namespace NGIN::Execution
 #if defined(_WIN32)
             (void) ::CloseHandle(m_handle);
             m_handle   = nullptr;
-            m_threadId = 0;
+            m_threadId.store(0, std::memory_order_release);
             m_joinable = false;
 #else
             (void) ::pthread_detach(m_thread);
+            m_threadId.store(0, std::memory_order_release);
             m_joinable = false;
 #endif
         }
@@ -193,13 +196,20 @@ namespace NGIN::Execution
 
         [[nodiscard]] ThreadId GetId() const noexcept
         {
-#if defined(_WIN32)
-            return static_cast<ThreadId>(m_threadId);
-#else
+            const auto id = m_threadId.load(std::memory_order_acquire);
+            if (id != 0)
+            {
+                return id;
+            }
+
+#if !defined(_WIN32)
+            // Fallback only; prefer the OS id captured inside the thread proc.
             ThreadId out = 0;
             const auto bytes = std::min<std::size_t>(sizeof(out), sizeof(m_thread));
             std::memcpy(&out, &m_thread, bytes);
             return out;
+#else
+            return 0;
 #endif
         }
 
@@ -284,6 +294,7 @@ namespace NGIN::Execution
             ThreadName                        name {};
             UInt64                            affinityMask {0};
             int                               priority {0};
+            std::atomic<ThreadId>*            outThreadId {nullptr};
         };
 
         static constexpr void TruncateForPthreadName(std::string_view name, std::array<char, 16>& out) noexcept
@@ -321,6 +332,10 @@ namespace NGIN::Execution
         static unsigned __stdcall ThreadProc(void* param) noexcept
         {
             auto* ctx = static_cast<StartContext*>(param);
+            if (ctx->outThreadId)
+            {
+                ctx->outThreadId->store(static_cast<ThreadId>(::GetCurrentThreadId()), std::memory_order_release);
+            }
             if (!ctx->name.Empty())
             {
                 std::array<wchar_t, 64> wide {};
@@ -354,6 +369,10 @@ namespace NGIN::Execution
         static void* ThreadProc(void* param) noexcept
         {
             auto* ctx = static_cast<StartContext*>(param);
+            if (ctx->outThreadId)
+            {
+                ctx->outThreadId->store(NGIN::Execution::ThisThread::GetId(), std::memory_order_release);
+            }
             if (!ctx->name.Empty())
             {
                 (void) NGIN::Execution::ThisThread::SetName(ctx->name.View());
@@ -397,6 +416,8 @@ namespace NGIN::Execution
             ctx->name          = m_options.name;
             ctx->affinityMask  = m_options.affinityMask;
             ctx->priority      = m_options.priority;
+            ctx->outThreadId   = &m_threadId;
+            m_threadId.store(0, std::memory_order_release);
 
 #if defined(_WIN32)
             unsigned threadId = 0;
@@ -409,7 +430,7 @@ namespace NGIN::Execution
                 std::terminate();
             }
             m_handle   = handle;
-            m_threadId = threadId;
+            m_threadId.store(static_cast<ThreadId>(threadId), std::memory_order_release);
             m_joinable = true;
 #else
             pthread_attr_t attr {};
@@ -438,13 +459,13 @@ namespace NGIN::Execution
 
 #if defined(_WIN32)
             m_handle         = other.m_handle;
-            m_threadId       = other.m_threadId;
             other.m_handle   = nullptr;
-            other.m_threadId = 0;
 #else
             m_thread = other.m_thread;
             other.m_thread = {};
 #endif
+            m_threadId.store(other.m_threadId.load(std::memory_order_acquire), std::memory_order_release);
+            other.m_threadId.store(0, std::memory_order_release);
             other.m_options = {};
         }
 
@@ -465,10 +486,10 @@ namespace NGIN::Execution
 
         Options m_options {};
         bool    m_joinable {false};
+        std::atomic<ThreadId> m_threadId {0};
 
 #if defined(_WIN32)
         void*    m_handle {nullptr};
-        unsigned m_threadId {0};
 #else
         pthread_t m_thread {};
 #endif

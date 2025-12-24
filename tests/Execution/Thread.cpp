@@ -27,6 +27,12 @@ namespace NGIN::Execution
         options.onDestruct = Thread::OnDestruct::Terminate;
 
         t.Start([&] { ran.store(true, std::memory_order_release); }, options);
+        // Best-effort: wait briefly for the thread proc to publish the OS thread id.
+        for (int i = 0; i < 10'000 && t.GetId() == 0; ++i)
+        {
+            ThisThread::YieldNow();
+        }
+        CHECK(t.GetId() != 0);
         t.Join();
         CHECK(ran.load(std::memory_order_acquire));
     }
@@ -40,4 +46,3 @@ namespace NGIN::Execution
         CHECK(ran.load(std::memory_order_acquire));
     }
 }// namespace NGIN::Execution
-

@@ -4,7 +4,6 @@
 
 #include <NGIN/Execution/Config.hpp>
 #include <NGIN/Defines.hpp>
-#include <NGIN/Memory/SmartPointers.hpp>
 #include <NGIN/Primitives.hpp>
 #include <NGIN/Utilities/Callable.hpp>
 
@@ -12,7 +11,16 @@
 
 namespace NGIN::Execution
 {
+#if (!NGIN_EXECUTION_HAS_STACKFUL_FIBERS) && NGIN_EXECUTION_FIBER_HARD_DISABLE
+#error "NGIN::Execution::Fiber is disabled (NGIN_EXECUTION_HAS_STACKFUL_FIBERS == 0)."
+#endif
+
 #if NGIN_EXECUTION_HAS_STACKFUL_FIBERS
+    namespace detail
+    {
+        struct FiberState;
+    }
+
     enum class FiberResumeResult : UInt8
     {
         Yielded,
@@ -48,8 +56,7 @@ namespace NGIN::Execution
         static void YieldNow() noexcept;
 
     private:
-        struct Impl;
-        NGIN::Memory::Scoped<Impl> m_impl;
+        detail::FiberState* m_state {nullptr};
     };
 #else
     class NGIN_BASE_API Fiber

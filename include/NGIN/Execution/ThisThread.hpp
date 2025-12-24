@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstring>
 #include <string_view>
 
 #if defined(_WIN32)
@@ -45,7 +46,6 @@ extern "C"
 #else
 #include <sched.h>
 #include <pthread.h>
-#include <functional>
 #include <unistd.h>
 #endif
 
@@ -82,7 +82,11 @@ namespace NGIN::Execution::ThisThread
         (void) ::pthread_threadid_np(nullptr, &tid);
         return static_cast<ThreadId>(tid);
 #else
-        return static_cast<ThreadId>(std::hash<pthread_t> {}(::pthread_self()));
+        ThreadId out = 0;
+        const auto self  = ::pthread_self();
+        const auto bytes = std::min<std::size_t>(sizeof(out), sizeof(self));
+        std::memcpy(&out, &self, bytes);
+        return out;
 #endif
     }
 

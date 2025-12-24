@@ -17,11 +17,15 @@ Scope: `include/NGIN/Execution/Thread.hpp` and `include/NGIN/Execution/Fiber.hpp
   - Fiber error model: `Resume() noexcept` returning `FiberResumeResult` + `TakeException()`; FiberScheduler/tests updated accordingly.
   - Fiber compile-time gating: `NGIN_EXECUTION_HAS_STACKFUL_FIBERS` stubbed in `Fiber.hpp` (errors only when used on unsupported builds).
   - Capability polish: documented `ThisThread::SetPriority` semantics (Windows priority vs Linux nice) in `include/NGIN/Execution/README.md`.
+  - ThisFiber semantics: `ThisFiber::IsInFiber()` is strict; added `ThisFiber::IsInitialized()` for thread initialization state.
+  - ThreadId hardening: `Thread::GetId()` returns an OS id captured inside the thread proc (with a POSIX fallback only if not yet observed).
+  - Fiber gating controls: added `NGIN_EXECUTION_FIBER_HARD_DISABLE` (opt-in hard-disable on unsupported builds).
+  - Fiber allocation reduction: removed the extra Fiber PIMPL allocation (no `Scoped<Impl>`; `Fiber` owns a `FiberState*`).
+  - Dependency trimming: removed `iostream` logging from `FiberScheduler` and removed `<functional>` from `ThisThread` fallback code.
 - **Current**
-  - Define the final semantics for `ThisFiber::IsInFiber()` (strict “currently executing inside a fiber” vs “fiber system initialized”).
+  - Clean up remaining rough edges (naming/priority semantics, docs consistency).
 - **Next**
-  - Decide whether fiber gating should be “stub with late `static_assert`” (current) vs hard-disable the header on unsupported builds.
-  - Reduce remaining std dependencies in public headers where practical (e.g. remove incidental `<functional>` from tests and legacy includes).
+  - Consider removing remaining legacy/unused includes and aligning naming (`IsJoinable` → `Joinable` etc) across new APIs.
 
 Goals:
 - **State-of-the-art performance**: no avoidable allocations, low overhead per resume/schedule, and predictable behavior.

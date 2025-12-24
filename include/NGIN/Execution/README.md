@@ -29,6 +29,7 @@ Invariants:
 - Yield-to-resumer (“stack discipline”): `YieldNow()` returns to the most recent active `Resume()`.
 - Thread-affine: a `Fiber` must be resumed on the thread that owns it.
 - `Resume()` is `noexcept` and returns `FiberResumeResult`; failures are observed via `TakeException()`.
+- `ThisFiber::IsInFiber()` is a strict check (true only while executing inside a running fiber); `ThisFiber::IsInitialized()` checks thread initialization.
 
 ## Capabilities (Guaranteed vs Best-effort)
 
@@ -45,9 +46,15 @@ The goal is “predictable behavior”: unsupported features do not silently suc
 - `ThisThread::SetPriority(value)` (Windows thread priority; Linux uses best-effort nice value for current TID)
 - `Thread::{SetName, SetAffinity, SetPriority}`
 
+## Fault Policy
+
+- `WorkItem::Invoke()` is `noexcept` and terminates on exceptions escaping a job/coroutine.
+- `FiberScheduler` captures job exceptions in the fiber trampoline; it terminates if a fiber reports `FiberResumeResult::Faulted` to keep behavior consistent.
+
 ### Platform-dependent
 - Thread stack size at creation (`Thread::Options::stackSize`)
 - Fiber guard pages (future)
 
 ### Compile-time gating
 - Stackful fibers: `NGIN_EXECUTION_HAS_STACKFUL_FIBERS` in `include/NGIN/Execution/Config.hpp`
+- Optional hard-disable: define `NGIN_EXECUTION_FIBER_HARD_DISABLE=1` to make including fiber headers an error when unsupported.

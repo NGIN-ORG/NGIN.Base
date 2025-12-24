@@ -18,3 +18,7 @@
 #define NGIN_EXECUTION_THREAD_BACKEND_OS 1
 #endif
 
+// If enabled and stackful fibers are unsupported, including Fiber headers becomes a hard error.
+#ifndef NGIN_EXECUTION_FIBER_HARD_DISABLE
+#define NGIN_EXECUTION_FIBER_HARD_DISABLE 0
+#endif
