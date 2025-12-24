@@ -113,11 +113,11 @@ namespace NGIN::Execution::detail
     {
         if (!state)
         {
-            throw std::runtime_error("Fiber: invalid state for AssignJob");
+            std::terminate();
         }
         if (state->running)
         {
-            throw std::runtime_error("Fiber: cannot assign job while running");
+            std::terminate();
         }
         state->job       = std::move(job);
         state->exception = nullptr;
@@ -127,7 +127,7 @@ namespace NGIN::Execution::detail
     {
         if (!state)
         {
-            throw std::runtime_error("Fiber: invalid state for Resume");
+            std::terminate();
         }
         EnsureMainFiber();
         FiberState* previousFiber = currentFiber;
@@ -139,18 +139,11 @@ namespace NGIN::Execution::detail
         {
             state->callerContext = nullptr;
             currentFiber         = previousFiber;
-            throw std::runtime_error("Fiber: swapcontext failed");
+            std::terminate();
         }
         state->callerContext = nullptr;
         state->running = false;
         currentFiber   = previousFiber;
-
-        if (state->exception)
-        {
-            auto ex          = state->exception;
-            state->exception = nullptr;
-            std::rethrow_exception(ex);
-        }
     }
 
     void EnsureMainFiber()
@@ -184,8 +177,34 @@ namespace NGIN::Execution::detail
         }
         if (swapcontext(&currentFiber->context, currentFiber->callerContext) == -1)
         {
-            throw std::runtime_error("Fiber: swapcontext failed during yield");
+            std::terminate();
         }
+    }
+
+    bool FiberHasJob(const FiberState* state) noexcept
+    {
+        return state && static_cast<bool>(state->job);
+    }
+
+    bool FiberIsRunning(const FiberState* state) noexcept
+    {
+        return state && state->running;
+    }
+
+    bool FiberHasException(const FiberState* state) noexcept
+    {
+        return state && static_cast<bool>(state->exception);
+    }
+
+    std::exception_ptr FiberTakeException(FiberState* state) noexcept
+    {
+        if (!state)
+        {
+            return {};
+        }
+        auto ex          = state->exception;
+        state->exception = nullptr;
+        return ex;
     }
 
 }// namespace NGIN::Execution::detail

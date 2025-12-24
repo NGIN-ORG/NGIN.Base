@@ -2,6 +2,7 @@
 /// @brief Calling-fiber utilities for stackful fibers.
 #pragma once
 
+#include <NGIN/Execution/Config.hpp>
 #include <NGIN/Execution/Fiber.hpp>
 
 namespace NGIN::Execution::ThisFiber

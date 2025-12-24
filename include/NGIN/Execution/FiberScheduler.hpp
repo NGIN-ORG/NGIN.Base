@@ -15,6 +15,7 @@
 #include <cassert>
 #include <functional>
 #include <iostream>// For logging, can remove if not desired
+#include <exception>
 #include <NGIN/Primitives.hpp>
 #include <NGIN/Time/MonotonicClock.hpp>
 #include <NGIN/Time/Sleep.hpp>
@@ -349,12 +350,22 @@ namespace NGIN::Execution
                     continue;
                 }
 
-                try
+                const auto result = fiber->Resume();
+                if (result == FiberResumeResult::Faulted)
                 {
-                    fiber->Resume();
-                } catch (const std::exception& ex)
-                {
-                    std::cerr << "[FiberScheduler] Exception in fiber: " << ex.what() << std::endl;
+                    if (auto ex = fiber->TakeException())
+                    {
+                        try
+                        {
+                            std::rethrow_exception(ex);
+                        } catch (const std::exception& e)
+                        {
+                            std::cerr << "[FiberScheduler] Exception in fiber: " << e.what() << std::endl;
+                        } catch (...)
+                        {
+                            std::cerr << "[FiberScheduler] Exception in fiber: <unknown>" << std::endl;
+                        }
+                    }
                 }
                 // Return fiber to pool
                 fiberPool.push_back(fiber);

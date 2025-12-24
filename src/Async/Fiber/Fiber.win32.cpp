@@ -121,11 +121,11 @@ namespace NGIN::Execution::detail
     {
         if (!state)
         {
-            throw std::runtime_error("Fiber: invalid state for AssignJob");
+            std::terminate();
         }
         if (state->running)
         {
-            throw std::runtime_error("Fiber: cannot assign job while running");
+            std::terminate();
         }
         state->job       = std::move(job);
         state->exception = nullptr;
@@ -135,7 +135,7 @@ namespace NGIN::Execution::detail
     {
         if (!state || !state->handle)
         {
-            throw std::runtime_error("Fiber: invalid state for Resume");
+            std::terminate();
         }
         EnsureMainFiber();
         FiberState* previousFiber = currentFiber;
@@ -146,13 +146,6 @@ namespace NGIN::Execution::detail
         state->callerFiber = nullptr;
         state->running = false;
         currentFiber   = previousFiber;
-
-        if (state->exception)
-        {
-            auto ex          = state->exception;
-            state->exception = nullptr;
-            std::rethrow_exception(ex);
-        }
     }
 
     void EnsureMainFiber()
@@ -194,6 +187,32 @@ namespace NGIN::Execution::detail
         }
 
         ::SwitchToFiber(currentFiber->callerFiber);
+    }
+
+    bool FiberHasJob(const FiberState* state) noexcept
+    {
+        return state && static_cast<bool>(state->job);
+    }
+
+    bool FiberIsRunning(const FiberState* state) noexcept
+    {
+        return state && state->running;
+    }
+
+    bool FiberHasException(const FiberState* state) noexcept
+    {
+        return state && static_cast<bool>(state->exception);
+    }
+
+    std::exception_ptr FiberTakeException(FiberState* state) noexcept
+    {
+        if (!state)
+        {
+            return {};
+        }
+        auto ex          = state->exception;
+        state->exception = nullptr;
+        return ex;
     }
 
 }// namespace NGIN::Execution::detail

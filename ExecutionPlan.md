@@ -14,11 +14,14 @@ Scope: `include/NGIN/Execution/Thread.hpp` and `include/NGIN/Execution/Fiber.hpp
   - Docs: `include/NGIN/Execution/README.md` added (call patterns + capability overview).
   - Best-effort controls: `ThisThread::{SetAffinity,SetPriority}` added (Windows + Linux) returning `bool`.
   - Debuggability: schedulers assign indexed worker names (`NGIN.TPW.<i>`, `NGIN.FW.<i>`).
+  - Fiber error model: `Resume() noexcept` returning `FiberResumeResult` + `TakeException()`; FiberScheduler/tests updated accordingly.
+  - Fiber compile-time gating: `NGIN_EXECUTION_HAS_STACKFUL_FIBERS` stubbed in `Fiber.hpp` (errors only when used on unsupported builds).
+  - Capability polish: documented `ThisThread::SetPriority` semantics (Windows priority vs Linux nice) in `include/NGIN/Execution/README.md`.
 - **Current**
-  - Capability polish: decide and document priority semantics per platform (`SetPriority` is Windows priority vs Linux nice).
+  - Define the final semantics for `ThisFiber::IsInFiber()` (strict “currently executing inside a fiber” vs “fiber system initialized”).
 - **Next**
-  - Decide whether to expose `ThisFiber::IsInFiber()` as a strict check (only true inside a running fiber) vs a broader “fiber system initialized” concept.
-  - Consider gating stackful fiber headers when `NGIN_EXECUTION_HAS_STACKFUL_FIBERS == 0` (hard disable vs stub with `static_assert`).
+  - Decide whether fiber gating should be “stub with late `static_assert`” (current) vs hard-disable the header on unsupported builds.
+  - Reduce remaining std dependencies in public headers where practical (e.g. remove incidental `<functional>` from tests and legacy includes).
 
 Goals:
 - **State-of-the-art performance**: no avoidable allocations, low overhead per resume/schedule, and predictable behavior.
@@ -34,22 +37,23 @@ Non-goals (for this plan):
 ## Current State Summary
 
 ### `NGIN::Execution::Thread`
-Current API is a thin wrapper around `std::thread`:
-- Construction/`Start` takes `std::function<void()>`.
-- Destructor calls `std::terminate()` if still joinable (std::thread semantics).
-- `SetName(const std::string&)` is Windows-only and includes `<Windows.h>` in the public header.
-- Provides `SleepFor/SleepUntil` helpers, duplicating `NGIN::Time` functionality.
-- Not used by the schedulers (they use `std::thread` directly).
+Current API is an OS-thread backed handle:
+- Backed by Win32 threads / pthreads (no `std::thread`).
+- `Thread::Options` supports best-effort naming/affinity/priority + stack size.
+- Destructor policy is explicit (`OnDestruct`), with `WorkerThread` joining on destruction for scheduler-owned threads.
+- Schedulers use `WorkerThread` (no direct `std::thread`).
 
 ### `NGIN::Execution::Fiber`
 Public API:
 - `Fiber(Job, stackSize)` where `Job = NGIN::Utilities::Callable<void()>`.
-- `Assign`, `Resume`, `Yield`, `EnsureMainFiber`.
+- `Assign`, `Resume() noexcept -> FiberResumeResult`, `TakeException()`, `YieldNow() noexcept`, `EnsureMainFiber`.
 
 Implementation:
 - Out-of-line (`src/Async/Fiber/FiberCommon.cpp` + `Fiber.*.cpp`) and uses a PIMPL (`Scoped<Impl>`) which adds an extra heap allocation per `Fiber`.
 - Windows uses OS fibers (`ConvertThreadToFiber`, `CreateFiberEx`, `SwitchToFiber`).
 - POSIX uses `ucontext` with a heap-allocated stack.
+- Yield-to-resumer semantics are implemented (nested resume works).
+- Compile-time gated via `NGIN_EXECUTION_HAS_STACKFUL_FIBERS` (stubbed on unsupported builds).
 
 ---
 

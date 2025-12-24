@@ -3,6 +3,8 @@
 #include <NGIN/Execution/Fiber.hpp>
 #include <NGIN/Defines.hpp>
 
+#include <exception>
+
 namespace NGIN::Execution::detail
 {
     struct FiberState;
@@ -15,4 +17,8 @@ namespace NGIN::Execution::detail
     NGIN_BASE_LOCAL bool        IsMainFiberInitialized() noexcept;
     NGIN_BASE_LOCAL bool        IsInFiber() noexcept;
     NGIN_BASE_LOCAL void        YieldFiber();
+    NGIN_BASE_LOCAL bool        FiberHasJob(const FiberState* state) noexcept;
+    NGIN_BASE_LOCAL bool        FiberIsRunning(const FiberState* state) noexcept;
+    NGIN_BASE_LOCAL bool        FiberHasException(const FiberState* state) noexcept;
+    NGIN_BASE_LOCAL std::exception_ptr FiberTakeException(FiberState* state) noexcept;
 }// namespace NGIN::Execution::detail

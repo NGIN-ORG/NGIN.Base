@@ -12,7 +12,7 @@ using namespace NGIN::Execution;
 TEST_CASE("Fiber constructs with default behavior", "[Execution][Fiber]")
 {
     Fiber fiber([] {}, 64 * 1024);
-    CHECK_NOTHROW(fiber.Resume());
+    CHECK(fiber.Resume() == FiberResumeResult::Completed);
 }
 
 TEST_CASE("Fiber yields and resumes", "[Execution][Fiber]")
@@ -27,11 +27,11 @@ TEST_CASE("Fiber yields and resumes", "[Execution][Fiber]")
     },
                 64 * 1024);
 
-    fiber.Resume();
+    CHECK(fiber.Resume() == FiberResumeResult::Yielded);
     CHECK(entered.load());
     CHECK_FALSE(yielded.load());
 
-    fiber.Resume();
+    CHECK(fiber.Resume() == FiberResumeResult::Completed);
     CHECK(yielded.load());
 }
 
@@ -47,11 +47,11 @@ TEST_CASE("Fiber supports multiple yield/resume cycles", "[Execution][Fiber]")
     },
                 64 * 1024);
 
-    fiber.Resume();
+    CHECK(fiber.Resume() == FiberResumeResult::Yielded);
     CHECK(counter == 1);
-    fiber.Resume();
+    CHECK(fiber.Resume() == FiberResumeResult::Yielded);
     CHECK(counter == 2);
-    fiber.Resume();
+    CHECK(fiber.Resume() == FiberResumeResult::Completed);
     CHECK(counter == 3);
 }
 
@@ -74,16 +74,16 @@ TEST_CASE("Fiber yields back to resumer (nested resume)", "[Execution][Fiber]")
 
     Fiber outer([&] {
         outerEntered = true;
-        inner.Resume();
+        (void) inner.Resume();
         afterInner1 = true;
         Fiber::YieldNow();
         outerYielded = true;
-        inner.Resume();
+        (void) inner.Resume();
         afterInner2 = true;
     },
                 64 * 1024);
 
-    outer.Resume();
+    CHECK(outer.Resume() == FiberResumeResult::Yielded);
     CHECK(outerEntered);
     CHECK(innerEntered);
     CHECK(afterInner1);
@@ -91,7 +91,7 @@ TEST_CASE("Fiber yields back to resumer (nested resume)", "[Execution][Fiber]")
     CHECK_FALSE(innerFinished);
     CHECK_FALSE(afterInner2);
 
-    outer.Resume();
+    CHECK(outer.Resume() == FiberResumeResult::Completed);
     afterOuter = true;
     CHECK(afterOuter);
     CHECK(outerYielded);
@@ -104,16 +104,16 @@ TEST_CASE("Fiber completes once", "[Execution][Fiber]")
     int   counter = 0;
     Fiber fiber([&] { counter++; }, 64 * 1024);
 
-    fiber.Resume();
+    CHECK(fiber.Resume() == FiberResumeResult::Completed);
     CHECK(counter == 1);
-    fiber.Resume();
+    CHECK(fiber.Resume() == FiberResumeResult::Completed);
     CHECK(counter == 1);
 }
 
 TEST_CASE("Fiber respects configured stack size", "[Execution][Fiber]")
 {
     Fiber fiber([] {}, 128 * 1024);
-    CHECK_NOTHROW(fiber.Resume());
+    CHECK(fiber.Resume() == FiberResumeResult::Completed);
 }
 
 TEST_CASE("Fiber forwards exceptions", "[Execution][Fiber]")
@@ -123,7 +123,10 @@ TEST_CASE("Fiber forwards exceptions", "[Execution][Fiber]")
                 throw std::runtime_error("boom");
             },
             64 * 1024);
-    REQUIRE_THROWS_AS(fiber.Resume(), std::runtime_error);
+    CHECK(fiber.Resume() == FiberResumeResult::Faulted);
+    auto ex = fiber.TakeException();
+    REQUIRE(ex != nullptr);
+    REQUIRE_THROWS_AS(std::rethrow_exception(ex), std::runtime_error);
 }
 
 TEST_CASE("Fiber cleans up derived resources", "[Execution][Fiber]")
@@ -139,7 +142,7 @@ TEST_CASE("Fiber cleans up derived resources", "[Execution][Fiber]")
 
     {
         TestFiber fiber([] {}, 64 * 1024, destroyed);
-        fiber.Resume();
+        CHECK(fiber.Resume() == FiberResumeResult::Completed);
     }
 
     CHECK(destroyed);
@@ -151,14 +154,14 @@ TEST_CASE("Concurrent fibers run independently", "[Async][Fiber]")
     Fiber            fiberA([&] { counter++; }, 64 * 1024);
     Fiber            fiberB([&] { counter += 2; }, 64 * 1024);
 
-    fiberA.Resume();
-    fiberB.Resume();
+    CHECK(fiberA.Resume() == FiberResumeResult::Completed);
+    CHECK(fiberB.Resume() == FiberResumeResult::Completed);
     CHECK(counter.load() == 3);
 }
 
 TEST_CASE("Resuming a completed fiber is harmless", "[Async][Fiber]")
 {
     Fiber fiber([] {}, 64 * 1024);
-    fiber.Resume();
-    CHECK_NOTHROW(fiber.Resume());
+    CHECK(fiber.Resume() == FiberResumeResult::Completed);
+    CHECK(fiber.Resume() == FiberResumeResult::Completed);
 }

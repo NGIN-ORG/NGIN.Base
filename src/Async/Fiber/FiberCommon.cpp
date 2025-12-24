@@ -78,13 +78,46 @@ namespace NGIN::Execution
         detail::AssignJob(m_impl->state, std::move(job));
     }
 
-    void Fiber::Resume()
+    FiberResumeResult Fiber::Resume() noexcept
     {
         if (!m_impl || m_impl->state == nullptr)
         {
-            ThrowInvalidFiber();
+            std::terminate();
         }
-        detail::ResumeFiber(m_impl->state);
+
+        try
+        {
+            detail::ResumeFiber(m_impl->state);
+        } catch (...)
+        {
+            std::terminate();
+        }
+
+        if (detail::FiberHasException(m_impl->state))
+        {
+            return FiberResumeResult::Faulted;
+        }
+
+        return detail::FiberHasJob(m_impl->state) ? FiberResumeResult::Yielded : FiberResumeResult::Completed;
+    }
+
+    std::exception_ptr Fiber::TakeException() noexcept
+    {
+        if (!m_impl || m_impl->state == nullptr)
+        {
+            return {};
+        }
+        return detail::FiberTakeException(m_impl->state);
+    }
+
+    bool Fiber::HasJob() const noexcept
+    {
+        return m_impl && m_impl->state && detail::FiberHasJob(m_impl->state);
+    }
+
+    bool Fiber::IsRunning() const noexcept
+    {
+        return m_impl && m_impl->state && detail::FiberIsRunning(m_impl->state);
     }
 
     void Fiber::EnsureMainFiber()
@@ -102,8 +135,14 @@ namespace NGIN::Execution
         return detail::IsInFiber();
     }
 
-    void Fiber::YieldNow()
+    void Fiber::YieldNow() noexcept
     {
-        detail::YieldFiber();
+        try
+        {
+            detail::YieldFiber();
+        } catch (...)
+        {
+            std::terminate();
+        }
     }
 }// namespace NGIN::Execution

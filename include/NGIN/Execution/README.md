@@ -28,6 +28,7 @@ Pattern:
 Invariants:
 - Yield-to-resumer (“stack discipline”): `YieldNow()` returns to the most recent active `Resume()`.
 - Thread-affine: a `Fiber` must be resumed on the thread that owns it.
+- `Resume()` is `noexcept` and returns `FiberResumeResult`; failures are observed via `TakeException()`.
 
 ## Capabilities (Guaranteed vs Best-effort)
 
@@ -41,7 +42,7 @@ The goal is “predictable behavior”: unsupported features do not silently suc
 ### Best-effort (returns `bool` so callers can log/ignore)
 - `ThisThread::SetName(...)`
 - `ThisThread::SetAffinity(mask)` (platform-dependent)
-- `ThisThread::SetPriority(value)` (platform-dependent)
+- `ThisThread::SetPriority(value)` (Windows thread priority; Linux uses best-effort nice value for current TID)
 - `Thread::{SetName, SetAffinity, SetPriority}`
 
 ### Platform-dependent
@@ -50,4 +51,3 @@ The goal is “predictable behavior”: unsupported features do not silently suc
 
 ### Compile-time gating
 - Stackful fibers: `NGIN_EXECUTION_HAS_STACKFUL_FIBERS` in `include/NGIN/Execution/Config.hpp`
-
