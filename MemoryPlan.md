@@ -14,6 +14,14 @@ This plan assumes breaking changes are allowed.
 4. **Allocator-aware containers** that avoid default-constructing N buckets, avoid unnecessary work, and support explicit lifetimes.
 5. **Clean layering**: minimal hot-path allocator concept; optional introspection layered on top.
 
+## Chosen Defaults (Decisions Locked In)
+
+- **Ownership query:** tri-state ownership in traits ✅
+- **Composite routing:** cookie-first routing (`AllocateEx` / `MemoryBlock::Cookie`), header fallback ✅
+- **Container allocator storage:** containers store allocator *handles* by value; `AllocatorRef` for explicit borrowing ✅
+- **Propagation:** traits-driven propagation; move-propagation generally enabled ✅
+- **Hash map:** replace `FlatHashMap` (breaking changes allowed) ✅
+
 Non-goals:
 - Replacing every standard library type everywhere immediately (incremental migration is fine).
 - Solving all concurrency reclamation patterns in one pass.
@@ -75,11 +83,10 @@ Non-goals:
 - Keep `AllocatorConcept` as-is for hot paths and generic code.
 - Make every “extra feature” exclusively accessed via `AllocatorTraits`, and make allocators/composites *not compile* (or take an alternate path) if a required capability isn’t present.
 - Fix the ownership-query model:
-  - Do **not** default `Owns` to `true` when the allocator can’t answer (`include/NGIN/Memory/AllocatorConcept.hpp:123`).
-  - Prefer a tri-state query in traits for ownership/routing:
+  - Replace boolean ownership with tri-state in traits:
     - `enum class Ownership { Owns, DoesNotOwn, Unknown };`
     - `static Ownership OwnershipOf(const A&, const void*) noexcept;`
-  - For routing decisions, treat `Unknown` as “cannot decide”: require tagging/cookies/headers instead.
+  - For routing decisions, treat `Unknown` as “cannot decide”: require cookie/header tagging instead.
 
 Practical rule:
 - `MaxSize/Remaining`: “unknown” may default to `numeric_limits<size_t>::max()` because it’s informational.
@@ -94,8 +101,8 @@ Practical rule:
 
 **Do instead**
 - Make routing explicit and independent of `Owns()`:
-  - Prefer `AllocateEx()` / `MemoryBlock::Cookie` tagging (`include/NGIN/Memory/AllocatorConcept.hpp:25`) when available.
-  - Otherwise store a small header immediately before the returned pointer with a sub-allocator id (and any required metadata).
+  - Prefer `AllocateEx()` / `MemoryBlock::Cookie` tagging (`include/NGIN/Memory/AllocatorConcept.hpp:25`) when available (**cookie-first**).
+  - Otherwise store a small header immediately before the returned pointer with a sub-allocator id (and any required metadata) (**header fallback**).
   - Provide a composite that guarantees correct deallocation without queries:
     - `TaggedFallbackAllocator` (header/cookie-based) for correctness.
     - Keep `FallbackAllocator` only if both allocators have reliable `Owns()` (and enforce that via traits checks / `static_assert`).
@@ -157,12 +164,13 @@ Practical rule:
 - Comment claims “externally-owned allocator” and `Allocator::Instance()` (`include/NGIN/Containers/Vector.hpp:4`), but `Vector` stores allocator by value (`include/NGIN/Containers/Vector.hpp:35`).
 
 **Do instead**
-- Decide on one rule:
-  - Containers store allocator *handle* by value (copyable, cheap, points to a resource), or
-  - Containers store a reference wrapper explicitly (`AllocatorRef`) and are non-default-constructible without it.
+- Standardize container allocator storage:
+  - Containers store allocator *handles* by value (copyable, cheap, points to a stable resource).
+  - Use `AllocatorRef` explicitly when borrowing a non-owning allocator reference is desired.
 - Document propagation:
-  - copy-assign: keep lhs allocator or take rhs allocator?
-  - move-assign: steal allocator or keep lhs allocator and move elements?
+  - Traits-driven propagation flags (std-like semantics) and default policy:
+    - move construction/assignment: propagate allocator handle by default
+    - copy assignment: do not silently switch allocator unless a trait explicitly opts in
 
 ### 10) `include/NGIN/Containers/Array.hpp` is an empty header
 
@@ -229,13 +237,15 @@ Any composite allocator that needs to route `Deallocate` should do so via:
 
 ### Phase 1 (Allocator consistency)
 - Enforce `AllocatorTraits` usage so types don’t silently depend on optional APIs (avoid proliferating concepts).
+- Add tri-state ownership to `AllocatorTraits` and remove “unknown == owns” behavior.
 - Redesign `FallbackAllocator` as either:
   - `FallbackAllocator<Primary, Secondary>` requiring `Owns`, or
   - `TaggedFallbackAllocator` that writes a tag/header and never calls `Owns`.
 - Replace `PolyAllocator` with `PolyAllocatorRef` and/or `AnyAllocator<InlineBytes>`.
+- Define container allocator propagation traits and adopt the default policy (move-propagation generally enabled).
 
 ### Phase 2 (Containers)
-- Replace `FlatHashMap` with an allocator-aware “explicit lifetime” hash map.
+- Replace `FlatHashMap` with an allocator-aware “explicit lifetime” hash map (breaking change).
   - Consider reusing `ConcurrentHashMap`’s `SlotStorage`/group layout for the single-threaded map to share optimizations.
 - Define allocator propagation policy for `Vector` (and all containers).
 - Remove or implement `include/NGIN/Containers/Array.hpp`.
@@ -250,7 +260,7 @@ Any composite allocator that needs to route `Deallocate` should do so via:
 
 Potentially breaking, but recommended:
 - Change array helper ABI/layout and deallocation requirements (`AllocationHelpers`).
-- Remove implicit “unknown means owns” behavior in allocator traits.
+- Replace boolean ownership with tri-state in allocator traits; remove implicit “unknown means owns”.
 - Change `FallbackAllocator`/`Tracking`/`PolyAllocator` constraints or behavior.
 - Replace `FlatHashMap` implementation and its requirements (default-constructibility, erase semantics).
 - Standardize allocator propagation rules across all containers (copy/move semantics).
