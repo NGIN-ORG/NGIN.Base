@@ -13,5 +13,6 @@ namespace NGIN::Execution::detail
     NGIN_BASE_LOCAL void        ResumeFiber(FiberState* state);
     NGIN_BASE_LOCAL void        EnsureMainFiber();
     NGIN_BASE_LOCAL bool        IsMainFiberInitialized() noexcept;
+    NGIN_BASE_LOCAL bool        IsInFiber() noexcept;
     NGIN_BASE_LOCAL void        YieldFiber();
 }// namespace NGIN::Execution::detail

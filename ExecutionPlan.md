@@ -2,6 +2,21 @@
 
 Scope: `include/NGIN/Execution/Thread.hpp` and `include/NGIN/Execution/Fiber.hpp` (and the platform fiber runtime under `src/Async/Fiber/`).
 
+## Progress Tracking
+- **Done**
+  - Fiber API hygiene: `Fiber::YieldNow()` rename and remove header macro hack.
+  - Fiber semantics: yield-to-resumer (stack discipline) implemented and validated with nested-resume test.
+  - Calling-context helpers: `include/NGIN/Execution/ThisThread.hpp` and `include/NGIN/Execution/ThisFiber.hpp`.
+  - Header hygiene: removed `<Windows.h>` from `include/NGIN/Time/Sleep.hpp`.
+  - OS-thread backend: `include/NGIN/Execution/Thread.hpp` now uses Win32/pthreads (no `std::thread`).
+  - Capabilities scaffolding: `include/NGIN/Execution/Config.hpp` and initial `Execution_ThreadTests`.
+- **Current**
+  - Scheduler adoption: switch worker creation in `ThreadPoolScheduler`/`FiberScheduler` to `WorkerThread`.
+- **Next**
+  - Wire scheduler workers to `WorkerThread` (`ThreadPoolScheduler`, `FiberScheduler`) and remove remaining direct `std::thread` usage.
+  - Add best-effort `ThisThread::{SetAffinity,SetPriority}` (optional) and consistent status returns for `Thread::Set*` calls.
+  - Add `include/NGIN/Execution/README.md` with call patterns + capability table.
+
 Goals:
 - **State-of-the-art performance**: no avoidable allocations, low overhead per resume/schedule, and predictable behavior.
 - **Usability**: safe defaults, explicit lifecycle, and a coherent “NGIN-native” surface (fits `WorkItem`/`ExecutorRef` patterns).

@@ -97,7 +97,12 @@ namespace NGIN::Execution
         return detail::IsMainFiberInitialized();
     }
 
-    void Fiber::Yield()
+    bool Fiber::IsInFiber() noexcept
+    {
+        return detail::IsInFiber();
+    }
+
+    void Fiber::YieldNow()
     {
         detail::YieldFiber();
     }

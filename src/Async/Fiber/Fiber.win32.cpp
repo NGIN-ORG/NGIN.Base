@@ -14,6 +14,7 @@ namespace NGIN::Execution::detail
     struct FiberState
     {
         LPVOID             handle = nullptr;
+        LPVOID             callerFiber = nullptr;
         Fiber::Job         job {};
         UIntSize           stackSize {Fiber::DEFAULT_STACK_SIZE};
         std::exception_ptr exception;
@@ -137,11 +138,14 @@ namespace NGIN::Execution::detail
             throw std::runtime_error("Fiber: invalid state for Resume");
         }
         EnsureMainFiber();
-        currentFiber   = state;
+        FiberState* previousFiber = currentFiber;
+        currentFiber              = state;
         state->running = true;
+        state->callerFiber = ::GetCurrentFiber();
         ::SwitchToFiber(state->handle);
+        state->callerFiber = nullptr;
         state->running = false;
-        currentFiber   = nullptr;
+        currentFiber   = previousFiber;
 
         if (state->exception)
         {
@@ -168,16 +172,28 @@ namespace NGIN::Execution::detail
         return mainFiber != nullptr;
     }
 
-    void YieldFiber()
+    bool IsInFiber() noexcept
     {
         if (!mainFiber)
         {
-            return;
+            return false;
         }
-        if (::GetCurrentFiber() != mainFiber)
+        return ::GetCurrentFiber() != mainFiber;
+    }
+
+    void YieldFiber()
+    {
+        if (currentFiber == nullptr)
         {
-            ::SwitchToFiber(mainFiber);
+            std::terminate();
         }
+
+        if (!currentFiber->callerFiber)
+        {
+            std::terminate();
+        }
+
+        ::SwitchToFiber(currentFiber->callerFiber);
     }
 
 }// namespace NGIN::Execution::detail

@@ -18,6 +18,7 @@ namespace NGIN::Execution::detail
     struct FiberState
     {
         ucontext_t              context {};
+        ucontext_t*             callerContext {nullptr};
         Fiber::Job              job {};
         std::unique_ptr<Byte[]> stack {};
         UIntSize                stackSize {Fiber::DEFAULT_STACK_SIZE};
@@ -28,7 +29,6 @@ namespace NGIN::Execution::detail
     namespace
     {
         thread_local FiberState* currentFiber = nullptr;
-        thread_local ucontext_t  mainContext;
         thread_local bool        mainContextInitialized = false;
 
         std::uintptr_t CombinePointerParts(int low, int high) noexcept
@@ -130,14 +130,20 @@ namespace NGIN::Execution::detail
             throw std::runtime_error("Fiber: invalid state for Resume");
         }
         EnsureMainFiber();
-        currentFiber   = state;
+        FiberState* previousFiber = currentFiber;
+        currentFiber              = state;
         state->running = true;
-        if (swapcontext(&mainContext, &state->context) == -1)
+        ucontext_t caller {};
+        state->callerContext = &caller;
+        if (swapcontext(&caller, &state->context) == -1)
         {
+            state->callerContext = nullptr;
+            currentFiber         = previousFiber;
             throw std::runtime_error("Fiber: swapcontext failed");
         }
+        state->callerContext = nullptr;
         state->running = false;
-        currentFiber   = nullptr;
+        currentFiber   = previousFiber;
 
         if (state->exception)
         {
@@ -151,10 +157,6 @@ namespace NGIN::Execution::detail
     {
         if (!mainContextInitialized)
         {
-            if (getcontext(&mainContext) == -1)
-            {
-                throw std::runtime_error("Fiber: getcontext failed for main context");
-            }
             mainContextInitialized = true;
         }
     }
@@ -164,13 +166,23 @@ namespace NGIN::Execution::detail
         return mainContextInitialized;
     }
 
+    bool IsInFiber() noexcept
+    {
+        return currentFiber != nullptr;
+    }
+
     void YieldFiber()
     {
         if (currentFiber == nullptr)
         {
-            return;
+            std::terminate();
         }
-        if (swapcontext(&currentFiber->context, &mainContext) == -1)
+
+        if (currentFiber->callerContext == nullptr)
+        {
+            std::terminate();
+        }
+        if (swapcontext(&currentFiber->context, currentFiber->callerContext) == -1)
         {
             throw std::runtime_error("Fiber: swapcontext failed during yield");
         }

@@ -7,7 +7,10 @@
 #include <NGIN/Units.hpp>
 
 #if defined(_WIN32)
-#include <Windows.h>
+extern "C"
+{
+    __declspec(dllimport) void __stdcall Sleep(unsigned long dwMilliseconds);
+}
 #else
 #include <time.h>
 #endif
@@ -40,7 +43,7 @@ namespace NGIN::Time
 #if defined(_WIN32)
         // Windows Sleep() is millisecond granularity; round up.
         const UInt64 ms = (ns + 999'999ull) / 1'000'000ull;
-        ::Sleep(static_cast<DWORD>(ms));
+        ::Sleep(static_cast<unsigned long>(ms));
 #else
         timespec req {};
         req.tv_sec  = static_cast<time_t>(ns / 1'000'000'000ull);
@@ -49,4 +52,3 @@ namespace NGIN::Time
 #endif
     }
 }// namespace NGIN::Time
-

@@ -30,12 +30,11 @@ namespace NGIN::Execution
 
         static void EnsureMainFiber();
         static bool IsMainFiberInitialized() noexcept;
-        static void Yield();
+        static bool IsInFiber() noexcept;
+        static void YieldNow();
 
     private:
         struct Impl;
         NGIN::Memory::Scoped<Impl> m_impl;
     };
 }// namespace NGIN::Execution
-
-#undef Yield

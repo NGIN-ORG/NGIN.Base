@@ -22,7 +22,7 @@ TEST_CASE("Fiber yields and resumes", "[Execution][Fiber]")
 
     Fiber fiber([&] {
         entered = true;
-        Fiber::Yield();
+        Fiber::YieldNow();
         yielded = true;
     },
                 64 * 1024);
@@ -40,9 +40,9 @@ TEST_CASE("Fiber supports multiple yield/resume cycles", "[Execution][Fiber]")
     int   counter = 0;
     Fiber fiber([&] {
         counter++;
-        Fiber::Yield();
+        Fiber::YieldNow();
         counter++;
-        Fiber::Yield();
+        Fiber::YieldNow();
         counter++;
     },
                 64 * 1024);
@@ -53,6 +53,50 @@ TEST_CASE("Fiber supports multiple yield/resume cycles", "[Execution][Fiber]")
     CHECK(counter == 2);
     fiber.Resume();
     CHECK(counter == 3);
+}
+
+TEST_CASE("Fiber yields back to resumer (nested resume)", "[Execution][Fiber]")
+{
+    bool outerEntered  = false;
+    bool innerEntered  = false;
+    bool afterInner1   = false;
+    bool outerYielded  = false;
+    bool afterOuter    = false;
+    bool innerFinished = false;
+    bool afterInner2   = false;
+
+    Fiber inner([&] {
+        innerEntered = true;
+        Fiber::YieldNow();
+        innerFinished = true;
+    },
+                64 * 1024);
+
+    Fiber outer([&] {
+        outerEntered = true;
+        inner.Resume();
+        afterInner1 = true;
+        Fiber::YieldNow();
+        outerYielded = true;
+        inner.Resume();
+        afterInner2 = true;
+    },
+                64 * 1024);
+
+    outer.Resume();
+    CHECK(outerEntered);
+    CHECK(innerEntered);
+    CHECK(afterInner1);
+    CHECK_FALSE(outerYielded);
+    CHECK_FALSE(innerFinished);
+    CHECK_FALSE(afterInner2);
+
+    outer.Resume();
+    afterOuter = true;
+    CHECK(afterOuter);
+    CHECK(outerYielded);
+    CHECK(innerFinished);
+    CHECK(afterInner2);
 }
 
 TEST_CASE("Fiber completes once", "[Execution][Fiber]")
@@ -74,7 +118,12 @@ TEST_CASE("Fiber respects configured stack size", "[Execution][Fiber]")
 
 TEST_CASE("Fiber forwards exceptions", "[Execution][Fiber]")
 {
-    SUCCEED("Exception propagation is not yet supported by Fiber on POSIX platforms");
+    Fiber fiber(
+            [&] {
+                throw std::runtime_error("boom");
+            },
+            64 * 1024);
+    REQUIRE_THROWS_AS(fiber.Resume(), std::runtime_error);
 }
 
 TEST_CASE("Fiber cleans up derived resources", "[Execution][Fiber]")
