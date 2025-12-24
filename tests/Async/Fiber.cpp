@@ -55,6 +55,31 @@ TEST_CASE("Fiber supports multiple yield/resume cycles", "[Execution][Fiber]")
     CHECK(counter == 3);
 }
 
+TEST_CASE("Fiber TryAssign only succeeds when idle", "[Execution][Fiber]")
+{
+    bool entered = false;
+    bool finished = false;
+
+    Fiber fiber(FiberOptions {.stackSize = 64 * 1024});
+    REQUIRE(fiber.TryAssign([&] {
+        entered = true;
+        Fiber::YieldNow();
+        finished = true;
+    }));
+
+    CHECK(fiber.Resume() == FiberResumeResult::Yielded);
+    CHECK(entered);
+    CHECK_FALSE(finished);
+
+    CHECK_FALSE(fiber.TryAssign([] {}));
+
+    CHECK(fiber.Resume() == FiberResumeResult::Completed);
+    CHECK(finished);
+
+    REQUIRE(fiber.TryAssign([] {}));
+    CHECK(fiber.Resume() == FiberResumeResult::Completed);
+}
+
 TEST_CASE("Fiber yields back to resumer (nested resume)", "[Execution][Fiber]")
 {
     bool outerEntered  = false;

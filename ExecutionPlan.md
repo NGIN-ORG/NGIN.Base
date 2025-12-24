@@ -22,10 +22,16 @@ Scope: `include/NGIN/Execution/Thread.hpp` and `include/NGIN/Execution/Fiber.hpp
   - Fiber gating controls: added `NGIN_EXECUTION_FIBER_HARD_DISABLE` (opt-in hard-disable on unsupported builds).
   - Fiber allocation reduction: removed the extra Fiber PIMPL allocation (no `Scoped<Impl>`; `Fiber` owns a `FiberState*`).
   - Dependency trimming: removed `iostream` logging from `FiberScheduler` and removed `<functional>` from `ThisThread` fallback code.
+  - Fiber allocators: `FiberOptions` has a type-erased `FiberAllocatorRef` used for `FiberState` + POSIX stack allocations.
+  - Fiber assignment ergonomics: added `Fiber::TryAssign(Job) noexcept` (idle-only assignment fast-path).
+  - Fiber guard pages (best-effort): POSIX `ucontext` stack can be `mmap`-backed with a low guard page (`FiberOptions.guardPages`).
+  - Fiber backend identification: added `NGIN_EXECUTION_FIBER_BACKEND` macro in `include/NGIN/Execution/Config.hpp` (WinFiber/ucontext; custom backend reserved).
+  - Benchmarks: added `benchmarks/FiberBenchmarks.cpp` and `FiberBenchmarks` build target.
 - **Current**
-  - Clean up remaining rough edges (naming/priority semantics, docs consistency).
+  - Refresh remaining stale sections in this plan and align them with the implemented OS-thread + fiber changes.
 - **Next**
-  - Consider removing remaining legacy/unused includes and aligning naming (`IsJoinable` → `Joinable` etc) across new APIs.
+  - Extend scheduler-loop benchmarks to include repeated yield/reschedule cycles (not just one `Yield()` per task).
+  - Start the internal “fiber backend” interface for future custom context switching (tier-1 backend) and route POSIX through it (ucontext vs future custom backend).
 
 Goals:
 - **State-of-the-art performance**: no avoidable allocations, low overhead per resume/schedule, and predictable behavior.
@@ -51,9 +57,11 @@ Current API is an OS-thread backed handle:
 Public API:
 - `Fiber(Job, stackSize)` where `Job = NGIN::Utilities::Callable<void()>`.
 - `Assign`, `Resume() noexcept -> FiberResumeResult`, `TakeException()`, `YieldNow() noexcept`, `EnsureMainFiber`.
+- `FiberOptions` supports a stack size and a type-erased allocator hook (used for state + POSIX stack).
 
 Implementation:
-- Out-of-line (`src/Async/Fiber/FiberCommon.cpp` + `Fiber.*.cpp`) and uses a PIMPL (`Scoped<Impl>`) which adds an extra heap allocation per `Fiber`.
+- Out-of-line (`src/Async/Fiber/FiberCommon.cpp` + `Fiber.*.cpp`).
+- No extra PIMPL allocation: `Fiber` owns a `detail::FiberState*`.
 - Windows uses OS fibers (`ConvertThreadToFiber`, `CreateFiberEx`, `SwitchToFiber`).
 - POSIX uses `ucontext` with a heap-allocated stack.
 - Yield-to-resumer semantics are implemented (nested resume works).
@@ -64,23 +72,15 @@ Implementation:
 ## Current Flaws / Risks
 
 ### Thread – API and Semantics
-- **High std overhead in the API**: `std::function` (type-erased + often heap allocating) is used for the entry point; this is inconsistent with `WorkItem`/`Callable`.
-- **Heavy header dependency**: `<Windows.h>` is included by `Thread.hpp` on `_WIN32`, impacting compile times and macro pollution for all consumers.
-- **Surprising RAII**: destructor terminates if joinable (like `std::thread`) which is hostile to usability in a library wrapper.
-- **Move assignment footgun**: `Thread::operator=(Thread&&)` blindly move-assigns the `std::thread`; if `*this` is joinable, `std::thread` move assignment terminates.
-- **`SetName` encoding**: Windows path converts `std::string` to `std::wstring` by byte widening, which is not UTF-8 safe.
-- **Duplicated concerns**: `SleepFor/SleepUntil` belong in `NGIN::Time` (or as free functions), not on a thread handle type.
-- **Inconsistent adoption**: schedulers use `std::thread` directly, so `Thread` does not centralize naming/affinity/priority or policy.
+Remaining items after the OS-thread backend migration:
+- **Stack size semantics**: `ThreadOptions::stackSize` is platform-dependent; define “best-effort vs guaranteed” per platform in docs and tests.
+- **Lifecycle sharp edges**: ensure `OnDestruct::Terminate` is consistently used for general `Thread` and `WorkerThread` is scheduler-only (join on destruction).
+- **Best-effort controls**: naming/affinity/priority should remain observable (`bool`) and never throw.
 
 ### Fiber – API and Semantics
-- **Macro hack**: `#undef Yield` at the end of `Fiber.hpp` is dangerous to consumers (it mutates preprocessor state outside NGIN).
-- **Yield-to-main limitation**: both POSIX and Windows implementations yield back to “main fiber context”, not to the *resuming* context. This prevents safe nested resumes and makes `Yield()` semantics non-local.
-- **Unspecified thread affinity**: fibers are effectively thread-affine, but the API does not document/enforce this.
-- **Extra allocation per fiber**: `Scoped<Impl>` + `new FiberState` + stack allocation; at least two allocations on POSIX, one extra on Windows.
-- **Stack allocation not configurable**: no guard pages, no alignment/commit/reserve controls, no allocator selection (despite NGIN having allocator infrastructure).
+- **Guard pages are best-effort**: `FiberOptions::{guardPages,guardSize}` are implemented on POSIX via an `mmap`-backed stack with a low guard page; other backends may ignore.
 - **POSIX `ucontext` portability**: `ucontext` is obsolete/deprecated on some platforms; long-term viability is questionable.
-- **Diagnostics**: POSIX `ThrowErrno("...")` does not include `errno`; Windows uses `FormatMessage` (good), POSIX should match (use `std::system_error`).
-- **Tests are stale**: `tests/Async/Fiber.cpp` claims exception propagation is “not supported” on POSIX, but the implementation *does* propagate via `exception_ptr`.
+- **Tier-1 backend missing**: a custom context switch backend is not implemented yet (ucontext is currently the POSIX fallback).
 
 ---
 

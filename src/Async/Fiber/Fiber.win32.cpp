@@ -5,9 +5,12 @@
 #include <Windows.h>
 
 #include <exception>
+#include <new>
 #include <stdexcept>
 #include <string>
 #include <utility>
+
+#include <NGIN/Execution/ThisThread.hpp>
 
 namespace NGIN::Execution::detail
 {
@@ -15,6 +18,8 @@ namespace NGIN::Execution::detail
     {
         LPVOID             handle = nullptr;
         LPVOID             callerFiber = nullptr;
+        NGIN::Execution::ThisThread::ThreadId ownerThreadId {0};
+        NGIN::Execution::FiberAllocatorRef allocator {};
         Fiber::Job         job {};
         UIntSize           stackSize {Fiber::DEFAULT_STACK_SIZE};
         std::exception_ptr exception;
@@ -83,16 +88,29 @@ namespace NGIN::Execution::detail
         }
     }// namespace
 
-    FiberState* CreateFiberState(UIntSize stackSize)
+    FiberState* CreateFiberState(FiberOptions options)
     {
         EnsureMainFiber();
 
-        auto* state      = new FiberState {};
-        state->stackSize = stackSize == 0 ? Fiber::DEFAULT_STACK_SIZE : stackSize;
+        if (!options.allocator.IsValid())
+        {
+            options.allocator = NGIN::Execution::FiberAllocatorRef::System();
+        }
+
+        void* stateMem = options.allocator.Allocate(sizeof(FiberState), alignof(FiberState));
+        if (!stateMem)
+        {
+            throw std::bad_alloc();
+        }
+        auto* state = ::new (stateMem) FiberState {};
+        state->ownerThreadId = NGIN::Execution::ThisThread::GetId();
+        state->allocator      = options.allocator;
+        state->stackSize = options.stackSize == 0 ? Fiber::DEFAULT_STACK_SIZE : options.stackSize;
         state->handle    = ::CreateFiberEx(state->stackSize, state->stackSize, 0, &Trampoline, state);
         if (!state->handle)
         {
-            delete state;
+            state->~FiberState();
+            state->allocator.Deallocate(stateMem, sizeof(FiberState), alignof(FiberState));
             ThrowLastError("Fiber: CreateFiberEx failed");
         }
         return state;
@@ -114,12 +132,18 @@ namespace NGIN::Execution::detail
             ::DeleteFiber(state->handle);
             state->handle = nullptr;
         }
-        delete state;
+        auto alloc = state->allocator;
+        state->~FiberState();
+        alloc.Deallocate(state, sizeof(FiberState), alignof(FiberState));
     }
 
     void AssignJob(FiberState* state, Fiber::Job job)
     {
         if (!state)
+        {
+            std::terminate();
+        }
+        if (NGIN::Execution::ThisThread::GetId() != state->ownerThreadId)
         {
             std::terminate();
         }
@@ -134,6 +158,10 @@ namespace NGIN::Execution::detail
     void ResumeFiber(FiberState* state)
     {
         if (!state || !state->handle)
+        {
+            std::terminate();
+        }
+        if (NGIN::Execution::ThisThread::GetId() != state->ownerThreadId)
         {
             std::terminate();
         }

@@ -13,6 +13,26 @@
 #endif
 #endif
 
+// Fiber backend identifiers (compile-time selection).
+#define NGIN_EXECUTION_FIBER_BACKEND_NONE 0
+#define NGIN_EXECUTION_FIBER_BACKEND_WIN_FIBER 1
+#define NGIN_EXECUTION_FIBER_BACKEND_UCONTEXT 2
+#define NGIN_EXECUTION_FIBER_BACKEND_CUSTOM_ASM 3
+
+#ifndef NGIN_EXECUTION_FIBER_BACKEND
+#if NGIN_EXECUTION_HAS_STACKFUL_FIBERS
+#if defined(_WIN32)
+#define NGIN_EXECUTION_FIBER_BACKEND NGIN_EXECUTION_FIBER_BACKEND_WIN_FIBER
+#elif defined(__unix__) || defined(__linux__) || defined(__APPLE__)
+#define NGIN_EXECUTION_FIBER_BACKEND NGIN_EXECUTION_FIBER_BACKEND_UCONTEXT
+#else
+#define NGIN_EXECUTION_FIBER_BACKEND NGIN_EXECUTION_FIBER_BACKEND_NONE
+#endif
+#else
+#define NGIN_EXECUTION_FIBER_BACKEND NGIN_EXECUTION_FIBER_BACKEND_NONE
+#endif
+#endif
+
 // Thread backend policy: OS threads are the default target backend. A std::thread fallback is possible but not enabled here.
 #ifndef NGIN_EXECUTION_THREAD_BACKEND_OS
 #define NGIN_EXECUTION_THREAD_BACKEND_OS 1

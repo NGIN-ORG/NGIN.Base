@@ -53,8 +53,10 @@ The goal is “predictable behavior”: unsupported features do not silently suc
 
 ### Platform-dependent
 - Thread stack size at creation (`Thread::Options::stackSize`)
-- Fiber guard pages (future)
+- Fiber guard pages (`FiberOptions::{guardPages,guardSize}`): best-effort (POSIX uses an `mmap`-backed stack with a low guard page; Windows fibers use OS-managed stacks)
+  - Note: when guard pages are enabled on POSIX, the fiber stack uses OS virtual memory; `FiberOptions::allocator` is still used for `FiberState`.
 
 ### Compile-time gating
 - Stackful fibers: `NGIN_EXECUTION_HAS_STACKFUL_FIBERS` in `include/NGIN/Execution/Config.hpp`
+- Fiber backend selection: `NGIN_EXECUTION_FIBER_BACKEND` in `include/NGIN/Execution/Config.hpp` (currently WinFiber on Windows, ucontext on POSIX)
 - Optional hard-disable: define `NGIN_EXECUTION_FIBER_HARD_DISABLE=1` to make including fiber headers an error when unsupported.

@@ -8,18 +8,29 @@
 namespace NGIN::Execution
 {
     Fiber::Fiber()
-        : Fiber(DEFAULT_STACK_SIZE)
+        : Fiber(FiberOptions {})
     {
     }
 
     Fiber::Fiber(UIntSize stackSize)
+        : Fiber(FiberOptions {.stackSize = (stackSize == 0 ? DEFAULT_STACK_SIZE : stackSize)})
+    {
+    }
+
+    Fiber::Fiber(FiberOptions options)
     {
         detail::EnsureMainFiber();
-        m_state = detail::CreateFiberState(stackSize == 0 ? DEFAULT_STACK_SIZE : stackSize);
+        m_state = detail::CreateFiberState(options);
     }
 
     Fiber::Fiber(Job job, UIntSize stackSize)
-        : Fiber(stackSize)
+        : Fiber(FiberOptions {.stackSize = (stackSize == 0 ? DEFAULT_STACK_SIZE : stackSize)})
+    {
+        Assign(std::move(job));
+    }
+
+    Fiber::Fiber(Job job, FiberOptions options)
+        : Fiber(options)
     {
         Assign(std::move(job));
     }
@@ -64,6 +75,32 @@ namespace NGIN::Execution
             std::terminate();
         }
         detail::AssignJob(m_state, std::move(job));
+    }
+
+    bool Fiber::TryAssign(Job job) noexcept
+    {
+        if (!job)
+        {
+            std::terminate();
+        }
+        if (m_state == nullptr)
+        {
+            std::terminate();
+        }
+        if (detail::FiberIsRunning(m_state) || detail::FiberHasJob(m_state))
+        {
+            return false;
+        }
+
+        try
+        {
+            detail::AssignJob(m_state, std::move(job));
+        } catch (...)
+        {
+            std::terminate();
+        }
+
+        return true;
     }
 
     FiberResumeResult Fiber::Resume() noexcept

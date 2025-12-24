@@ -184,7 +184,7 @@ namespace NGIN::Execution::ThisThread
 #elif defined(__linux__)
         cpu_set_t set {};
         CPU_ZERO(&set);
-        for (int bit = 0; bit < static_cast<int>(sizeof(UInt64) * 8); ++bit)
+        for (unsigned int bit = 0; bit < static_cast<unsigned int>(sizeof(UInt64) * 8); ++bit)
         {
             if ((affinityMask & (1ull << static_cast<UInt64>(bit))) != 0)
             {
@@ -204,7 +204,7 @@ namespace NGIN::Execution::ThisThread
         return ::SetThreadPriority(::GetCurrentThread(), value) != 0;
 #elif defined(__linux__)
         // Best-effort: interpret `value` as Linux nice value (-20..19). This affects the calling thread when using TID.
-        const auto tid = static_cast<int>(::syscall(SYS_gettid));
+        const auto tid = static_cast<id_t>(::syscall(SYS_gettid));
         return ::setpriority(PRIO_PROCESS, tid, value) == 0;
 #else
         (void) value;

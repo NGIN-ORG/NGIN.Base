@@ -25,6 +25,9 @@ target_link_libraries(VectorBenchmarks PRIVATE NGIN::Base)
 add_executable(CallableBenchmarks CallableBenchmarks.cpp)
 target_link_libraries(CallableBenchmarks PRIVATE NGIN::Base)
 
+add_executable(FiberBenchmarks FiberBenchmarks.cpp)
+target_link_libraries(FiberBenchmarks PRIVATE NGIN::Base)
+
 add_executable(SIMDFastMathBench SIMDFastMathBench.cpp)
 target_link_libraries(SIMDFastMathBench PRIVATE NGIN::Base)
 target_compile_options(SIMDFastMathBench PRIVATE -mavx2)

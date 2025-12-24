@@ -8,6 +8,10 @@
 #include <NGIN/Utilities/Callable.hpp>
 
 #include <exception>
+#include <cstddef>
+#include <new>
+#include <type_traits>
+#include <utility>
 
 namespace NGIN::Execution
 {
@@ -21,6 +25,107 @@ namespace NGIN::Execution
         struct FiberState;
     }
 
+    inline constexpr UIntSize DEFAULT_FIBER_STACK_SIZE = 128uz * 1024uz;
+
+    class FiberAllocatorRef final
+    {
+    public:
+        using AllocateFn   = void* (*)(void*, UIntSize, UIntSize) noexcept;
+        using DeallocateFn = void (*)(void*, void*, UIntSize, UIntSize) noexcept;
+
+        constexpr FiberAllocatorRef() noexcept = default;
+
+        constexpr FiberAllocatorRef(void* self, AllocateFn allocate, DeallocateFn deallocate) noexcept
+            : m_self(self)
+            , m_allocate(allocate)
+            , m_deallocate(deallocate)
+        {
+        }
+
+        [[nodiscard]] constexpr bool IsValid() const noexcept
+        {
+            return m_allocate != nullptr && m_deallocate != nullptr;
+        }
+
+        [[nodiscard]] void* Allocate(UIntSize size, UIntSize alignment) const noexcept
+        {
+            if (!IsValid())
+            {
+                return nullptr;
+            }
+            return m_allocate(m_self, size, alignment);
+        }
+
+        void Deallocate(void* ptr, UIntSize size, UIntSize alignment) const noexcept
+        {
+            if (!IsValid())
+            {
+                return;
+            }
+            m_deallocate(m_self, ptr, size, alignment);
+        }
+
+        [[nodiscard]] static constexpr FiberAllocatorRef System() noexcept
+        {
+            return FiberAllocatorRef(
+                    nullptr,
+                    +[](void*, UIntSize size, UIntSize alignment) noexcept -> void* {
+                        if (size == 0)
+                        {
+                            return nullptr;
+                        }
+                        const auto aln = alignment == 0 ? alignof(std::max_align_t) : alignment;
+                        return ::operator new(size, std::align_val_t(aln), std::nothrow);
+                    },
+                    +[](void*, void* ptr, UIntSize, UIntSize alignment) noexcept {
+                        if (!ptr)
+                        {
+                            return;
+                        }
+                        const auto aln = alignment == 0 ? alignof(std::max_align_t) : alignment;
+                        ::operator delete(ptr, std::align_val_t(aln), std::nothrow);
+                    });
+        }
+
+        template<class A>
+        static constexpr FiberAllocatorRef From(A& allocator) noexcept
+        {
+            return FiberAllocatorRef(
+                    &allocator,
+                    +[](void* self, UIntSize size, UIntSize alignment) noexcept -> void* {
+                        auto* a = static_cast<A*>(self);
+                        if constexpr (requires(A& x, UIntSize s, UIntSize al) { x.Allocate(s, al); })
+                        {
+                            return a->Allocate(size, alignment);
+                        }
+                        else
+                        {
+                            return nullptr;
+                        }
+                    },
+                    +[](void* self, void* ptr, UIntSize size, UIntSize alignment) noexcept {
+                        auto* a = static_cast<A*>(self);
+                        if constexpr (requires(A& x, void* p, UIntSize s, UIntSize al) { x.Deallocate(p, s, al); })
+                        {
+                            a->Deallocate(ptr, size, alignment);
+                        }
+                    });
+        }
+
+    private:
+        void*        m_self {nullptr};
+        AllocateFn   m_allocate {nullptr};
+        DeallocateFn m_deallocate {nullptr};
+    };
+
+    struct FiberOptions final
+    {
+        UIntSize          stackSize {DEFAULT_FIBER_STACK_SIZE};
+        bool              guardPages {false}; // best-effort; platform/backend dependent
+        UIntSize          guardSize {0};      // best-effort; platform/backend dependent (0 = backend default)
+        FiberAllocatorRef allocator {FiberAllocatorRef::System()};
+    };
+
     enum class FiberResumeResult : UInt8
     {
         Yielded,
@@ -32,11 +137,13 @@ namespace NGIN::Execution
     {
     public:
         using Job                                    = NGIN::Utilities::Callable<void()>;
-        constexpr static UIntSize DEFAULT_STACK_SIZE = 128uz * 1024uz;
+        constexpr static UIntSize DEFAULT_STACK_SIZE = DEFAULT_FIBER_STACK_SIZE;
 
         Fiber();
         explicit Fiber(UIntSize stackSize);
+        explicit Fiber(FiberOptions options);
         Fiber(Job job, UIntSize stackSize = DEFAULT_STACK_SIZE);
+        Fiber(Job job, FiberOptions options);
         ~Fiber();
 
         Fiber(const Fiber&)            = delete;
@@ -45,6 +152,7 @@ namespace NGIN::Execution
         Fiber& operator=(Fiber&& other) noexcept;
 
         void Assign(Job job);
+        [[nodiscard]] bool TryAssign(Job job) noexcept;
         [[nodiscard]] FiberResumeResult Resume() noexcept;
         [[nodiscard]] std::exception_ptr TakeException() noexcept;
         [[nodiscard]] bool HasJob() const noexcept;

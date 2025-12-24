@@ -9,7 +9,7 @@ namespace NGIN::Execution::detail
 {
     struct FiberState;
 
-    NGIN_BASE_LOCAL FiberState* CreateFiberState(UIntSize stackSize);
+    NGIN_BASE_LOCAL FiberState* CreateFiberState(FiberOptions options);
     NGIN_BASE_LOCAL void        DestroyFiberState(FiberState* state) noexcept;
     NGIN_BASE_LOCAL void        AssignJob(FiberState* state, Fiber::Job job);
     NGIN_BASE_LOCAL void        ResumeFiber(FiberState* state);
