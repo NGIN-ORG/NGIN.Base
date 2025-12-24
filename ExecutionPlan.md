@@ -26,12 +26,16 @@ Scope: `include/NGIN/Execution/Thread.hpp` and `include/NGIN/Execution/Fiber.hpp
   - Fiber assignment ergonomics: added `Fiber::TryAssign(Job) noexcept` (idle-only assignment fast-path).
   - Fiber guard pages (best-effort): POSIX `ucontext` stack can be `mmap`-backed with a low guard page (`FiberOptions.guardPages`).
   - Fiber backend identification: added `NGIN_EXECUTION_FIBER_BACKEND` macro in `include/NGIN/Execution/Config.hpp` (WinFiber/ucontext; custom backend reserved).
+  - Fiber backend selection layer: `src/Async/Fiber/Fiber.posix.cpp` / `src/Async/Fiber/Fiber.win32.cpp` now compile-time dispatch on `NGIN_EXECUTION_FIBER_BACKEND` (ucontext/winfiber routed; custom backend stubbed).
   - Benchmarks: added `benchmarks/FiberBenchmarks.cpp` and `FiberBenchmarks` build target.
+  - Benchmarks: extended `benchmarks/SchedulerBenchmarks.cpp` with repeated yield/reschedule workload (`Task<void> Yield x8 2k`) across schedulers.
+  - CUSTOM_ASM backend (Linux x86_64): added an internal context switch routine + backend implementation, selectable via `NGIN_EXECUTION_FIBER_BACKEND` (CMake: `-DNGIN_BASE_FIBER_BACKEND=custom_asm`).
+  - CUSTOM_ASM contract test: validates `mxcsr` + x87 control word are preserved across `YieldNow()`/`Resume()` (enabled only on Linux x86_64 CUSTOM_ASM builds).
 - **Current**
-  - Refresh remaining stale sections in this plan and align them with the implemented OS-thread + fiber changes.
+  - Document and harden CUSTOM_ASM contracts (unwind/profiling constraints, supported compilers/arches).
 - **Next**
-  - Extend scheduler-loop benchmarks to include repeated yield/reschedule cycles (not just one `Yield()` per task).
-  - Start the internal “fiber backend” interface for future custom context switching (tier-1 backend) and route POSIX through it (ucontext vs future custom backend).
+  - Add benchmarks comparing `ucontext` vs `CUSTOM_ASM` (same workloads, separate build configs) and record baseline numbers.
+  - Add a small “backend contract” test that validates `mxcsr` and x87 control word are preserved across `YieldNow()`/`Resume()` (CUSTOM_ASM only).
 
 Goals:
 - **State-of-the-art performance**: no avoidable allocations, low overhead per resume/schedule, and predictable behavior.

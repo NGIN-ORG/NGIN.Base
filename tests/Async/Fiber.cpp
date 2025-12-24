@@ -2,6 +2,7 @@
 /// @brief Tests for NGIN::Execution::Fiber.
 
 #include <NGIN/Execution/Fiber.hpp>
+#include <NGIN/Execution/Config.hpp>
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <functional>
@@ -153,6 +154,68 @@ TEST_CASE("Fiber forwards exceptions", "[Execution][Fiber]")
     REQUIRE(ex != nullptr);
     REQUIRE_THROWS_AS(std::rethrow_exception(ex), std::runtime_error);
 }
+
+#if defined(__linux__) && defined(__x86_64__) && (NGIN_EXECUTION_FIBER_BACKEND == NGIN_EXECUTION_FIBER_BACKEND_CUSTOM_ASM)
+TEST_CASE("Fiber CUSTOM_ASM preserves mxcsr and x87 control word across Yield/Resume", "[Execution][Fiber]")
+{
+    auto loadMxcsr = [](std::uint32_t value) noexcept {
+        asm volatile("ldmxcsr %0" : : "m"(value) : "memory");
+    };
+    auto storeMxcsr = []() noexcept -> std::uint32_t {
+        std::uint32_t value {};
+        asm volatile("stmxcsr %0" : "=m"(value) : : "memory");
+        return value;
+    };
+    auto loadFpuCw = [](std::uint16_t value) noexcept {
+        asm volatile("fldcw %0" : : "m"(value) : "memory");
+    };
+    auto storeFpuCw = []() noexcept -> std::uint16_t {
+        std::uint16_t value {};
+        asm volatile("fnstcw %0" : "=m"(value) : : "memory");
+        return value;
+    };
+
+    const auto mxcsrOriginal = storeMxcsr();
+    const auto fpuOriginal   = storeFpuCw();
+
+    const auto mxcsrCaller = static_cast<std::uint32_t>((mxcsrOriginal ^ (1u << 15)) & 0xFFFFu);
+    const auto fpuCaller   = static_cast<std::uint16_t>(fpuOriginal ^ (1u << 10));
+    loadMxcsr(mxcsrCaller);
+    loadFpuCw(fpuCaller);
+
+    std::uint32_t mxcsrFiberAfterYield = 0;
+    std::uint16_t fpuFiberAfterYield   = 0;
+
+    Fiber fiber(FiberOptions {.stackSize = 64 * 1024});
+    fiber.Assign([&] {
+        const auto mxcsrBefore = storeMxcsr();
+        const auto fpuBefore   = storeFpuCw();
+
+        const auto mxcsrFiber = static_cast<std::uint32_t>((mxcsrBefore ^ (1u << 6)) & 0xFFFFu);
+        const auto fpuFiber   = static_cast<std::uint16_t>(fpuBefore ^ (1u << 11));
+        loadMxcsr(mxcsrFiber);
+        loadFpuCw(fpuFiber);
+
+        Fiber::YieldNow();
+
+        mxcsrFiberAfterYield = storeMxcsr();
+        fpuFiberAfterYield   = storeFpuCw();
+    });
+
+    CHECK(fiber.Resume() == FiberResumeResult::Yielded);
+    CHECK(storeMxcsr() == mxcsrCaller);
+    CHECK(storeFpuCw() == fpuCaller);
+
+    CHECK(fiber.Resume() == FiberResumeResult::Completed);
+    CHECK(mxcsrFiberAfterYield != 0u);
+    CHECK(fpuFiberAfterYield != 0u);
+    CHECK(mxcsrFiberAfterYield != mxcsrCaller);
+    CHECK(fpuFiberAfterYield != fpuCaller);
+
+    loadMxcsr(mxcsrOriginal);
+    loadFpuCw(fpuOriginal);
+}
+#endif
 
 TEST_CASE("Fiber cleans up derived resources", "[Execution][Fiber]")
 {

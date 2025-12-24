@@ -69,6 +69,12 @@ endif()
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 #-------------------------------------------------------------------------------
+# Execution backend selection (internal)
+#-------------------------------------------------------------------------------
+set(NGIN_BASE_FIBER_BACKEND "default" CACHE STRING "Fiber backend: default/ucontext/winfiber/custom_asm")
+set_property(CACHE NGIN_BASE_FIBER_BACKEND PROPERTY STRINGS default ucontext winfiber custom_asm)
+
+#-------------------------------------------------------------------------------
 # Library Definition
 #-------------------------------------------------------------------------------
 set(NGIN_BASE_PLATFORM_DEFINITIONS
@@ -76,6 +82,33 @@ set(NGIN_BASE_PLATFORM_DEFINITIONS
   $<$<STREQUAL:$<PLATFORM_ID>,Darwin>:NGIN_PLATFORM=\"macOS\">
   $<$<STREQUAL:$<PLATFORM_ID>,Linux>:NGIN_PLATFORM=\"Linux\">
 )
+
+if(NGIN_BASE_FIBER_BACKEND STREQUAL "ucontext")
+  if(NOT UNIX)
+    message(FATAL_ERROR "NGIN_BASE_FIBER_BACKEND=ucontext is only supported on UNIX builds")
+  endif()
+  list(APPEND NGIN_BASE_PLATFORM_DEFINITIONS NGIN_EXECUTION_FIBER_BACKEND=NGIN_EXECUTION_FIBER_BACKEND_UCONTEXT)
+elseif(NGIN_BASE_FIBER_BACKEND STREQUAL "winfiber")
+  if(NOT WIN32)
+    message(FATAL_ERROR "NGIN_BASE_FIBER_BACKEND=winfiber is only supported on Windows builds")
+  endif()
+  list(APPEND NGIN_BASE_PLATFORM_DEFINITIONS NGIN_EXECUTION_FIBER_BACKEND=NGIN_EXECUTION_FIBER_BACKEND_WIN_FIBER)
+elseif(NGIN_BASE_FIBER_BACKEND STREQUAL "custom_asm")
+  if(NOT UNIX)
+    message(FATAL_ERROR "NGIN_BASE_FIBER_BACKEND=custom_asm is only supported on UNIX builds")
+  endif()
+  if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(FATAL_ERROR "NGIN_BASE_FIBER_BACKEND=custom_asm is currently only supported on Linux x86_64")
+  endif()
+  if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$")
+    message(FATAL_ERROR "NGIN_BASE_FIBER_BACKEND=custom_asm currently requires x86_64")
+  endif()
+  list(APPEND NGIN_BASE_PLATFORM_DEFINITIONS NGIN_EXECUTION_FIBER_BACKEND=NGIN_EXECUTION_FIBER_BACKEND_CUSTOM_ASM)
+elseif(NGIN_BASE_FIBER_BACKEND STREQUAL "default")
+  # Use platform defaults from include/NGIN/Execution/Config.hpp
+else()
+  message(FATAL_ERROR "Unknown NGIN_BASE_FIBER_BACKEND value: ${NGIN_BASE_FIBER_BACKEND}")
+endif()
 
 # On Windows, prevent the global min/max macros from <windows.h> from colliding with std::min/std::max.
 # This is a ubiquitous defensive definition across the codebase to avoid needing to locally parenthesize
@@ -100,6 +133,16 @@ elseif(UNIX)
   list(APPEND NGIN_BASE_CORE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Async/Fiber/Fiber.posix.cpp
   )
+
+  if(NGIN_BASE_FIBER_BACKEND STREQUAL "custom_asm")
+    list(APPEND NGIN_BASE_CORE_SOURCES
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/Async/Fiber/FiberContext.x86_64.cpp
+    )
+  elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$")
+    list(APPEND NGIN_BASE_CORE_SOURCES
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/Async/Fiber/FiberContext.x86_64.cpp
+    )
+  endif()
 endif()
 
 if(NGIN_BASE_BUILD_STATIC OR NGIN_BASE_BUILD_SHARED)

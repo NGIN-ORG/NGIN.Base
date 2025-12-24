@@ -18,6 +18,8 @@ int main()
     constexpr int numThreads    = 4;
     constexpr int numFibers     = 128;
     constexpr int numProducers  = 4;
+    constexpr int numYieldManyTasks  = 2000;
+    constexpr int yieldsPerYieldMany = 8;
     constexpr bool runCooperativeScheduler = true;
     constexpr bool runFiberScheduler      = true;
     constexpr bool runThreadPoolScheduler = true;
@@ -89,6 +91,42 @@ int main()
             benchCtx.stop();
         },
                             "FiberScheduler schedule+complete 10k coroutines");
+
+        Benchmark::Register([](BenchmarkContext& benchCtx) {
+            NGIN::Execution::FiberScheduler scheduler(numThreads, numFibers);
+            std::atomic<int> completed {0};
+
+            NGIN::Async::TaskContext taskCtx(scheduler);
+
+            auto taskYieldMany = [](NGIN::Async::TaskContext& ctx, std::atomic<int>& completed) -> NGIN::Async::Task<void> {
+                for (int i = 0; i < yieldsPerYieldMany; ++i)
+                {
+                    co_await ctx.Yield();
+                }
+                completed.fetch_add(1, std::memory_order_release);
+                completed.notify_one();
+                co_return;
+            };
+
+            std::vector<NGIN::Async::Task<void>> tasks;
+            tasks.reserve(numYieldManyTasks);
+
+            benchCtx.start();
+            for (int i = 0; i < numYieldManyTasks; ++i)
+            {
+                tasks.emplace_back(taskYieldMany(taskCtx, completed));
+                tasks.back().Start(taskCtx);
+            }
+
+            auto value = completed.load(std::memory_order_acquire);
+            while (value < numYieldManyTasks)
+            {
+                completed.wait(value);
+                value = completed.load(std::memory_order_acquire);
+            }
+            benchCtx.stop();
+        },
+                            "FiberScheduler Task<void> Yield x8 2k");
 
         Benchmark::Register([](BenchmarkContext& benchCtx) {
             NGIN::Execution::FiberScheduler scheduler(numThreads, numFibers);
@@ -367,6 +405,42 @@ int main()
 
         Benchmark::Register([](BenchmarkContext& benchCtx) {
             NGIN::Execution::ThreadPoolScheduler scheduler(numThreads);
+            std::atomic<int> completed {0};
+
+            NGIN::Async::TaskContext taskCtx(scheduler);
+
+            auto taskYieldMany = [](NGIN::Async::TaskContext& ctx, std::atomic<int>& completed) -> NGIN::Async::Task<void> {
+                for (int i = 0; i < yieldsPerYieldMany; ++i)
+                {
+                    co_await ctx.Yield();
+                }
+                completed.fetch_add(1, std::memory_order_release);
+                completed.notify_one();
+                co_return;
+            };
+
+            std::vector<NGIN::Async::Task<void>> tasks;
+            tasks.reserve(numYieldManyTasks);
+
+            benchCtx.start();
+            for (int i = 0; i < numYieldManyTasks; ++i)
+            {
+                tasks.emplace_back(taskYieldMany(taskCtx, completed));
+                tasks.back().Start(taskCtx);
+            }
+
+            auto value = completed.load(std::memory_order_acquire);
+            while (value < numYieldManyTasks)
+            {
+                completed.wait(value);
+                value = completed.load(std::memory_order_acquire);
+            }
+            benchCtx.stop();
+        },
+                            "ThreadPoolScheduler Task<void> Yield x8 2k");
+
+        Benchmark::Register([](BenchmarkContext& benchCtx) {
+            NGIN::Execution::ThreadPoolScheduler scheduler(numThreads);
             NGIN::Async::CancellationSource      cancelSource;
             NGIN::Async::TaskContext             taskCtx(scheduler, cancelSource.GetToken());
             std::atomic<int>                     completed {0};
@@ -374,7 +448,7 @@ int main()
             auto delayCanceled = [](NGIN::Async::TaskContext& ctx, std::atomic<int>& completed) -> NGIN::Async::Task<void> {
                 try
                 {
-                    co_await ctx.Delay(NGIN::Units::Seconds(60.0));
+                    co_await ctx.Delay(NGIN::Units::Milliseconds(100.0));
                 } catch (const NGIN::Async::TaskCanceled&)
                 {
                 }
@@ -403,7 +477,7 @@ int main()
             }
             benchCtx.stop();
         },
-                            "ThreadPoolScheduler Task<void> Delay(60s) + cancel 10k");
+                            "ThreadPoolScheduler Task<void> Delay(100ms) + cancel 10k");
 
         Benchmark::Register([](BenchmarkContext& benchCtx) {
             NGIN::Execution::ThreadPoolScheduler scheduler(numThreads);
@@ -500,6 +574,37 @@ int main()
 
         Benchmark::Register([](BenchmarkContext& benchCtx) {
             NGIN::Execution::CooperativeScheduler scheduler;
+            std::atomic<int> completed {0};
+            NGIN::Async::TaskContext taskCtx(scheduler);
+
+            auto taskYieldMany = [](NGIN::Async::TaskContext& ctx, std::atomic<int>& completed) -> NGIN::Async::Task<void> {
+                for (int i = 0; i < yieldsPerYieldMany; ++i)
+                {
+                    co_await ctx.Yield();
+                }
+                completed.fetch_add(1, std::memory_order_relaxed);
+                co_return;
+            };
+
+            std::vector<NGIN::Async::Task<void>> tasks;
+            tasks.reserve(numYieldManyTasks);
+
+            benchCtx.start();
+            for (int i = 0; i < numYieldManyTasks; ++i)
+            {
+                tasks.emplace_back(taskYieldMany(taskCtx, completed));
+                tasks.back().Start(taskCtx);
+            }
+            while (completed.load(std::memory_order_relaxed) < numYieldManyTasks)
+            {
+                static_cast<void>(scheduler.RunOne());
+            }
+            benchCtx.stop();
+        },
+                            "CooperativeScheduler Task<void> Yield x8 2k");
+
+        Benchmark::Register([](BenchmarkContext& benchCtx) {
+            NGIN::Execution::CooperativeScheduler scheduler;
             NGIN::Async::CancellationSource      cancelSource;
             NGIN::Async::TaskContext             taskCtx(scheduler, cancelSource.GetToken());
             std::atomic<int>                     completed {0};
@@ -507,7 +612,7 @@ int main()
             auto delayCanceled = [](NGIN::Async::TaskContext& ctx, std::atomic<int>& completed) -> NGIN::Async::Task<void> {
                 try
                 {
-                    co_await ctx.Delay(NGIN::Units::Seconds(60.0));
+                    co_await ctx.Delay(NGIN::Units::Milliseconds(100.0));
                 } catch (const NGIN::Async::TaskCanceled&)
                 {
                 }
@@ -532,7 +637,7 @@ int main()
             }
             benchCtx.stop();
         },
-                            "CooperativeScheduler Task<void> Delay(60s) + cancel 10k");
+                            "CooperativeScheduler Task<void> Delay(100ms) + cancel 10k");
 
         Benchmark::Register([](BenchmarkContext& benchCtx) {
             NGIN::Execution::CooperativeScheduler scheduler;
