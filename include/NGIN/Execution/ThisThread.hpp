@@ -19,6 +19,9 @@ extern "C"
 {
     __declspec(dllimport) unsigned long __stdcall GetCurrentThreadId();
     __declspec(dllimport) void* __stdcall GetCurrentThread();
+    __declspec(dllimport) unsigned long __stdcall GetActiveProcessorCount(unsigned short groupNumber);
+    __declspec(dllimport) std::uintptr_t __stdcall SetThreadAffinityMask(void* hThread, std::uintptr_t dwThreadAffinityMask);
+    __declspec(dllimport) int __stdcall SetThreadPriority(void* hThread, int nPriority);
     __declspec(dllimport) long __stdcall SetThreadDescription(void* hThread, const wchar_t* lpThreadDescription);
     __declspec(dllimport) int __stdcall MultiByteToWideChar(
             unsigned int codePage,
@@ -32,20 +35,41 @@ extern "C"
 #elif defined(__linux__)
 #include <sched.h>
 #include <pthread.h>
+#include <sys/resource.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 #elif defined(__APPLE__)
 #include <sched.h>
 #include <pthread.h>
+#include <unistd.h>
 #else
 #include <sched.h>
 #include <pthread.h>
 #include <functional>
+#include <unistd.h>
 #endif
 
 namespace NGIN::Execution::ThisThread
 {
     using ThreadId = NGIN::UInt64;
+
+    [[nodiscard]] inline std::uint32_t HardwareConcurrency() noexcept
+    {
+#if defined(_WIN32)
+        constexpr unsigned short ALL_PROCESSOR_GROUPS = 0xFFFFu;
+        const auto              count                = ::GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+        return count == 0 ? 1u : static_cast<std::uint32_t>(count);
+#elif defined(__linux__) || defined(__unix__) || defined(__APPLE__)
+        const auto v = ::sysconf(_SC_NPROCESSORS_ONLN);
+        if (v <= 0)
+        {
+            return 1u;
+        }
+        return static_cast<std::uint32_t>(v);
+#else
+        return 1u;
+#endif
+    }
 
     [[nodiscard]] inline ThreadId GetId() noexcept
     {
@@ -140,6 +164,46 @@ namespace NGIN::Execution::ThisThread
 
 #else
         (void) name;
+        return false;
+#endif
+    }
+
+    [[nodiscard]] inline bool SetAffinity(UInt64 affinityMask) noexcept
+    {
+        if (affinityMask == 0)
+        {
+            return false;
+        }
+
+#if defined(_WIN32)
+        return ::SetThreadAffinityMask(::GetCurrentThread(), static_cast<std::uintptr_t>(affinityMask)) != 0;
+#elif defined(__linux__)
+        cpu_set_t set {};
+        CPU_ZERO(&set);
+        for (int bit = 0; bit < static_cast<int>(sizeof(UInt64) * 8); ++bit)
+        {
+            if ((affinityMask & (1ull << static_cast<UInt64>(bit))) != 0)
+            {
+                CPU_SET(bit, &set);
+            }
+        }
+        return ::pthread_setaffinity_np(::pthread_self(), sizeof(set), &set) == 0;
+#else
+        (void) affinityMask;
+        return false;
+#endif
+    }
+
+    [[nodiscard]] inline bool SetPriority(int value) noexcept
+    {
+#if defined(_WIN32)
+        return ::SetThreadPriority(::GetCurrentThread(), value) != 0;
+#elif defined(__linux__)
+        // Best-effort: interpret `value` as Linux nice value (-20..19). This affects the calling thread when using TID.
+        const auto tid = static_cast<int>(::syscall(SYS_gettid));
+        return ::setpriority(PRIO_PROCESS, tid, value) == 0;
+#else
+        (void) value;
         return false;
 #endif
     }

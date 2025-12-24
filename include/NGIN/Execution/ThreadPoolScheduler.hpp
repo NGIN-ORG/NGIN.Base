@@ -4,9 +4,10 @@
 #pragma once
 
 #include "WorkItem.hpp"
+#include <NGIN/Execution/Thread.hpp>
 #include <algorithm>
+#include <array>
 #include <cstddef>
-#include <thread>
 #include <vector>
 #include <mutex>
 #include <atomic>
@@ -28,7 +29,7 @@ namespace NGIN::Execution
         /// <summary>
         /// Construct a thread pool with the given number of threads.
         /// </summary>
-        explicit ThreadPoolScheduler(size_t threadCount = std::thread::hardware_concurrency())
+        explicit ThreadPoolScheduler(size_t threadCount = static_cast<size_t>(ThisThread::HardwareConcurrency()))
             : m_stop(false)
         {
             if (threadCount == 0)
@@ -39,9 +40,15 @@ namespace NGIN::Execution
 
             for (size_t i = 0; i < threadCount; ++i)
             {
-                m_threads.emplace_back([this, i] { WorkerLoop(i); });
+                Thread::Options options {};
+                options.name = MakeIndexedThreadName("NGIN.TPW", i);
+                m_threads.emplace_back([this, i] { WorkerLoop(i); }, options);
             }
-            m_timerThread = std::thread([this] { TimerLoop(); });
+            {
+                Thread::Options options {};
+                options.name = ThreadName("NGIN.TPT");
+                m_timerThread.Start([this] { TimerLoop(); }, options);
+            }
         }
 
         /// <summary>
@@ -54,12 +61,14 @@ namespace NGIN::Execution
             m_timerWake.NotifyAll();
             for (auto& t: m_threads)
             {
-                if (t.joinable())
-                    t.join();
+                if (t.IsJoinable())
+                {
+                    t.Join();
+                }
             }
-            if (m_timerThread.joinable())
+            if (m_timerThread.IsJoinable())
             {
-                m_timerThread.join();
+                m_timerThread.Join();
             }
             ClearAllWork();
             {
@@ -151,6 +160,39 @@ namespace NGIN::Execution
 
 
     private:
+        static ThreadName MakeIndexedThreadName(std::string_view prefix, std::size_t index) noexcept
+        {
+            std::array<char, ThreadName::MaxBytes + 1> buffer {};
+            const auto                                 prefixLen = std::min<std::size_t>(prefix.size(), ThreadName::MaxBytes);
+            for (std::size_t i = 0; i < prefixLen; ++i)
+            {
+                buffer[i] = prefix[i];
+            }
+
+            std::size_t pos = prefixLen;
+            if (pos < ThreadName::MaxBytes)
+            {
+                buffer[pos++] = '.';
+            }
+
+            std::array<char, 24> digits {};
+            std::size_t          digitCount = 0;
+            auto                 value      = index;
+            do
+            {
+                digits[digitCount++] = static_cast<char>('0' + (value % 10));
+                value /= 10;
+            } while (value != 0 && digitCount < digits.size());
+
+            while (digitCount > 0 && pos < ThreadName::MaxBytes)
+            {
+                buffer[pos++] = digits[--digitCount];
+            }
+            buffer[pos] = '\0';
+
+            return ThreadName(std::string_view(buffer.data(), pos));
+        }
+
         struct WorkerQueue
         {
             NGIN::Sync::SpinLock lock {};
@@ -416,8 +458,8 @@ namespace NGIN::Execution
             s_workerIndex      = static_cast<size_t>(-1);
         }
 
-        std::vector<std::thread> m_threads;
-        std::thread m_timerThread;
+        std::vector<WorkerThread> m_threads;
+        WorkerThread              m_timerThread;
 
         std::vector<WorkerQueue> m_workers;
 

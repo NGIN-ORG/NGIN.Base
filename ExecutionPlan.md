@@ -10,12 +10,15 @@ Scope: `include/NGIN/Execution/Thread.hpp` and `include/NGIN/Execution/Fiber.hpp
   - Header hygiene: removed `<Windows.h>` from `include/NGIN/Time/Sleep.hpp`.
   - OS-thread backend: `include/NGIN/Execution/Thread.hpp` now uses Win32/pthreads (no `std::thread`).
   - Capabilities scaffolding: `include/NGIN/Execution/Config.hpp` and initial `Execution_ThreadTests`.
+  - Scheduler adoption: `ThreadPoolScheduler` and `FiberScheduler` now use `WorkerThread` (no `std::thread` workers/timer threads).
+  - Docs: `include/NGIN/Execution/README.md` added (call patterns + capability overview).
+  - Best-effort controls: `ThisThread::{SetAffinity,SetPriority}` added (Windows + Linux) returning `bool`.
+  - Debuggability: schedulers assign indexed worker names (`NGIN.TPW.<i>`, `NGIN.FW.<i>`).
 - **Current**
-  - Scheduler adoption: switch worker creation in `ThreadPoolScheduler`/`FiberScheduler` to `WorkerThread`.
+  - Capability polish: decide and document priority semantics per platform (`SetPriority` is Windows priority vs Linux nice).
 - **Next**
-  - Wire scheduler workers to `WorkerThread` (`ThreadPoolScheduler`, `FiberScheduler`) and remove remaining direct `std::thread` usage.
-  - Add best-effort `ThisThread::{SetAffinity,SetPriority}` (optional) and consistent status returns for `Thread::Set*` calls.
-  - Add `include/NGIN/Execution/README.md` with call patterns + capability table.
+  - Decide whether to expose `ThisFiber::IsInFiber()` as a strict check (only true inside a running fiber) vs a broader “fiber system initialized” concept.
+  - Consider gating stackful fiber headers when `NGIN_EXECUTION_HAS_STACKFUL_FIBERS == 0` (hard disable vs stub with `static_assert`).
 
 Goals:
 - **State-of-the-art performance**: no avoidable allocations, low overhead per resume/schedule, and predictable behavior.

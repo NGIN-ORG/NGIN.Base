@@ -8,10 +8,10 @@
 #include <memory>
 #include <mutex>
 #include <atomic>
-#include <thread>
 #include <condition_variable>
 #include <coroutine>
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <functional>
 #include <iostream>// For logging, can remove if not desired
@@ -20,6 +20,7 @@
 #include <NGIN/Time/Sleep.hpp>
 #include <NGIN/Sync/AtomicCondition.hpp>
 #include <NGIN/Units.hpp>
+#include <NGIN/Execution/Thread.hpp>
 #include "Fiber.hpp"
 #include "WorkItem.hpp"
 
@@ -47,10 +48,18 @@ namespace NGIN::Execution
 
             // Launch worker threads
             for (size_t i = 0; i < effectiveThreads; ++i)
-                m_threads.emplace_back([this] { WorkerLoop(); });
+            {
+                Thread::Options options {};
+                options.name = MakeIndexedThreadName("NGIN.FW", i);
+                m_threads.emplace_back([this] { WorkerLoop(); }, options);
+            }
 
             // Launch driver thread (for time-based scheduling)
-            m_driverThread = std::thread([this] { DriverLoop(); });
+            {
+                Thread::Options options {};
+                options.name = ThreadName("NGIN.FD");
+                m_driverThread.Start([this] { DriverLoop(); }, options);
+            }
         }
 
         ~FiberScheduler()
@@ -63,12 +72,12 @@ namespace NGIN::Execution
 
             // Join worker threads
             for (auto& t: m_threads)
-                if (t.joinable())
-                    t.join();
+                if (t.IsJoinable())
+                    t.Join();
 
             // Join the driver thread
-            if (m_driverThread.joinable())
-                m_driverThread.join();
+            if (m_driverThread.IsJoinable())
+                m_driverThread.Join();
 
             // Clean up sleeping tasks
             {
@@ -147,6 +156,39 @@ namespace NGIN::Execution
         void OnTaskComplete(uint64_t) noexcept {}
 
     private:
+        static ThreadName MakeIndexedThreadName(std::string_view prefix, std::size_t index) noexcept
+        {
+            std::array<char, ThreadName::MaxBytes + 1> buffer {};
+            const auto                                 prefixLen = std::min<std::size_t>(prefix.size(), ThreadName::MaxBytes);
+            for (std::size_t i = 0; i < prefixLen; ++i)
+            {
+                buffer[i] = prefix[i];
+            }
+
+            std::size_t pos = prefixLen;
+            if (pos < ThreadName::MaxBytes)
+            {
+                buffer[pos++] = '.';
+            }
+
+            std::array<char, 24> digits {};
+            std::size_t          digitCount = 0;
+            auto                 value      = index;
+            do
+            {
+                digits[digitCount++] = static_cast<char>('0' + (value % 10));
+                value /= 10;
+            } while (value != 0 && digitCount < digits.size());
+
+            while (digitCount > 0 && pos < ThreadName::MaxBytes)
+            {
+                buffer[pos++] = digits[--digitCount];
+            }
+            buffer[pos] = '\0';
+
+            return ThreadName(std::string_view(buffer.data(), pos));
+        }
+
         std::atomic<bool> m_stop {false};
         int m_priority {0};
         uint64_t m_affinityMask {0};
@@ -154,9 +196,9 @@ namespace NGIN::Execution
         size_t m_fibersPerThread {1};
 
         // Worker threads
-        std::vector<std::thread> m_threads;
+        std::vector<WorkerThread> m_threads;
         // Driver thread (timer pump)
-        std::thread m_driverThread;
+        WorkerThread m_driverThread;
 
         // Ready queue
         std::queue<WorkItem> m_readyQueue;
