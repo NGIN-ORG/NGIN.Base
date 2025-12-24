@@ -7,6 +7,8 @@
 
 namespace NGIN::Execution::detail
 {
+#if defined(__x86_64__)
+    static_assert(sizeof(FiberContext) == 72);
     static_assert(offsetof(FiberContext, rsp) == 0);
     static_assert(offsetof(FiberContext, rip) == 8);
     static_assert(offsetof(FiberContext, rbx) == 16);
@@ -17,6 +19,7 @@ namespace NGIN::Execution::detail
     static_assert(offsetof(FiberContext, r15) == 56);
     static_assert(offsetof(FiberContext, mxcsr) == 64);
     static_assert(offsetof(FiberContext, fpucw) == 68);
+#endif
 }// namespace NGIN::Execution::detail
 
 #if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))

@@ -58,11 +58,11 @@ The goal is “predictable behavior”: unsupported features do not silently suc
 
 ### Compile-time gating
 - Stackful fibers: `NGIN_EXECUTION_HAS_STACKFUL_FIBERS` in `include/NGIN/Execution/Config.hpp`
-- Fiber backend selection: `NGIN_EXECUTION_FIBER_BACKEND` in `include/NGIN/Execution/Config.hpp` (WinFiber on Windows, CUSTOM_ASM on Linux x86_64, ucontext elsewhere)
+- Fiber backend selection: `NGIN_EXECUTION_FIBER_BACKEND` in `include/NGIN/Execution/Config.hpp` (WinFiber on Windows, CUSTOM_ASM on Linux x86_64/aarch64, ucontext elsewhere)
 - Optional hard-disable: define `NGIN_EXECUTION_FIBER_HARD_DISABLE=1` to make including fiber headers an error when unsupported.
   - Repo convenience: top-level CMake supports `-DNGIN_BASE_FIBER_BACKEND=default|ucontext|winfiber|custom_asm`.
 
-## CUSTOM_ASM backend policy (Linux x86_64)
+## CUSTOM_ASM backend policy (Linux x86_64 / aarch64)
 
 When `NGIN_EXECUTION_FIBER_BACKEND == NGIN_EXECUTION_FIBER_BACKEND_CUSTOM_ASM`, fibers use an internal x86_64 context switch routine.
 

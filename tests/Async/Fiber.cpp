@@ -217,6 +217,46 @@ TEST_CASE("Fiber CUSTOM_ASM preserves mxcsr and x87 control word across Yield/Re
 }
 #endif
 
+#if defined(__linux__) && defined(__aarch64__) && (NGIN_EXECUTION_FIBER_BACKEND == NGIN_EXECUTION_FIBER_BACKEND_CUSTOM_ASM)
+TEST_CASE("Fiber CUSTOM_ASM preserves fpcr across Yield/Resume", "[Execution][Fiber]")
+{
+    auto readFpcr = []() noexcept -> std::uint64_t {
+        std::uint64_t value = 0;
+        asm volatile("mrs %0, fpcr" : "=r"(value));
+        return value;
+    };
+    auto writeFpcr = [](std::uint64_t value) noexcept {
+        asm volatile("msr fpcr, %0" : : "r"(value) : "memory");
+    };
+
+    const auto fpcrOriginal = readFpcr();
+    const auto fpcrCaller   = fpcrOriginal ^ (1ull << 24); // toggle FZ (flush-to-zero)
+    writeFpcr(fpcrCaller);
+
+    std::uint64_t fpcrFiberAfterYield = 0;
+
+    Fiber fiber(FiberOptions {.stackSize = 64 * 1024});
+    fiber.Assign([&] {
+        const auto fpcrBefore = readFpcr();
+        const auto fpcrFiber  = fpcrBefore ^ (1ull << 24);
+        writeFpcr(fpcrFiber);
+
+        Fiber::YieldNow();
+
+        fpcrFiberAfterYield = readFpcr();
+    });
+
+    CHECK(fiber.Resume() == FiberResumeResult::Yielded);
+    CHECK(readFpcr() == fpcrCaller);
+
+    CHECK(fiber.Resume() == FiberResumeResult::Completed);
+    CHECK(fpcrFiberAfterYield != 0u);
+    CHECK(fpcrFiberAfterYield != fpcrCaller);
+
+    writeFpcr(fpcrOriginal);
+}
+#endif
+
 TEST_CASE("Fiber cleans up derived resources", "[Execution][Fiber]")
 {
     bool destroyed = false;

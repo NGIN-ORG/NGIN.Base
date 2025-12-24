@@ -29,7 +29,7 @@ Scope: `include/NGIN/Execution/Thread.hpp` and `include/NGIN/Execution/Fiber.hpp
   - Fiber backend selection layer: `src/Async/Fiber/Fiber.posix.cpp` / `src/Async/Fiber/Fiber.win32.cpp` now compile-time dispatch on `NGIN_EXECUTION_FIBER_BACKEND` (ucontext/winfiber routed; custom backend stubbed).
   - Benchmarks: added `benchmarks/FiberBenchmarks.cpp` and `FiberBenchmarks` build target.
   - Benchmarks: extended `benchmarks/SchedulerBenchmarks.cpp` with repeated yield/reschedule workload (`Task<void> Yield x8 2k`) across schedulers.
-  - CUSTOM_ASM backend (Linux x86_64): added an internal context switch routine + backend implementation, selectable via `NGIN_EXECUTION_FIBER_BACKEND` (CMake: `-DNGIN_BASE_FIBER_BACKEND=custom_asm`).
+  - CUSTOM_ASM backend (Linux x86_64/aarch64): added an internal context switch routine + backend implementation, selectable via `NGIN_EXECUTION_FIBER_BACKEND` (CMake: `-DNGIN_BASE_FIBER_BACKEND=custom_asm`).
   - CUSTOM_ASM contract test: validates `mxcsr` + x87 control word are preserved across `YieldNow()`/`Resume()` (enabled only on Linux x86_64 CUSTOM_ASM builds).
   - CUSTOM_ASM hardening: context switch clears DF (`cld`) and integrates ASan fiber stack switch annotations when AddressSanitizer is enabled.
   - CUSTOM_ASM docs: clarified signal handling expectations (`sigaltstack`) and tooling constraints in `include/NGIN/Execution/README.md`.

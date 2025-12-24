@@ -98,10 +98,10 @@ elseif(NGIN_BASE_FIBER_BACKEND STREQUAL "custom_asm")
     message(FATAL_ERROR "NGIN_BASE_FIBER_BACKEND=custom_asm is only supported on UNIX builds")
   endif()
   if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    message(FATAL_ERROR "NGIN_BASE_FIBER_BACKEND=custom_asm is currently only supported on Linux x86_64")
+    message(FATAL_ERROR "NGIN_BASE_FIBER_BACKEND=custom_asm is currently only supported on Linux")
   endif()
-  if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$")
-    message(FATAL_ERROR "NGIN_BASE_FIBER_BACKEND=custom_asm currently requires x86_64")
+  if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64|aarch64|arm64)$")
+    message(FATAL_ERROR "NGIN_BASE_FIBER_BACKEND=custom_asm currently requires x86_64 or aarch64")
   endif()
   list(APPEND NGIN_BASE_PLATFORM_DEFINITIONS NGIN_EXECUTION_FIBER_BACKEND=NGIN_EXECUTION_FIBER_BACKEND_CUSTOM_ASM)
 elseif(NGIN_BASE_FIBER_BACKEND STREQUAL "default")
@@ -135,12 +135,22 @@ elseif(UNIX)
   )
 
   if(NGIN_BASE_FIBER_BACKEND STREQUAL "custom_asm")
-    list(APPEND NGIN_BASE_CORE_SOURCES
-      ${CMAKE_CURRENT_SOURCE_DIR}/src/Async/Fiber/FiberContext.x86_64.cpp
-    )
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$")
+      list(APPEND NGIN_BASE_CORE_SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/Async/Fiber/FiberContext.x86_64.cpp
+      )
+    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
+      list(APPEND NGIN_BASE_CORE_SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/Async/Fiber/FiberContext.aarch64.cpp
+      )
+    endif()
   elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$")
     list(APPEND NGIN_BASE_CORE_SOURCES
       ${CMAKE_CURRENT_SOURCE_DIR}/src/Async/Fiber/FiberContext.x86_64.cpp
+    )
+  elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
+    list(APPEND NGIN_BASE_CORE_SOURCES
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/Async/Fiber/FiberContext.aarch64.cpp
     )
   endif()
 endif()

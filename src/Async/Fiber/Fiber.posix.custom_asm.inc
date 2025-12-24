@@ -1,6 +1,6 @@
 #include "FiberPlatform.hpp"
 
-#if defined(__linux__) && defined(__x86_64__)
+#if defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
 
 #include "FiberContext.hpp"
 
@@ -122,12 +122,27 @@ namespace NGIN::Execution::detail
 
         void CaptureFpState(FiberContext& ctx) noexcept
         {
+#if defined(__x86_64__)
             asm volatile(
                     "stmxcsr %0\n\t"
                     "fnstcw %1\n\t"
                     : "=m"(ctx.mxcsr), "=m"(ctx.fpucw)
                     :
                     : "memory");
+#elif defined(__aarch64__)
+            std::uint64_t fpcr = 0;
+            std::uint64_t fpsr = 0;
+            asm volatile(
+                    "mrs %0, fpcr\n\t"
+                    "mrs %1, fpsr\n\t"
+                    : "=r"(fpcr), "=r"(fpsr)
+                    :
+                    : "memory");
+            ctx.fpcr = static_cast<std::uint32_t>(fpcr);
+            ctx.fpsr = static_cast<std::uint32_t>(fpsr);
+#else
+#error "CaptureFpState not implemented for this architecture."
+#endif
         }
 
         [[noreturn]] void ThrowErrno(const char* message)
@@ -213,12 +228,20 @@ namespace NGIN::Execution::detail
         CaptureFpState(state->context);
 
         const auto stackTop = reinterpret_cast<std::uintptr_t>(state->stackBase) + static_cast<std::uintptr_t>(state->stackSize);
-        auto       rsp      = AlignDown(stackTop, 16);
+#if defined(__x86_64__)
+        auto rsp = AlignDown(stackTop, 16);
         rsp -= 8;
         *reinterpret_cast<std::uintptr_t*>(rsp) = reinterpret_cast<std::uintptr_t>(&FiberTrampolineReturn);
-
         state->context.rsp = static_cast<std::uint64_t>(rsp);
         state->context.rip = reinterpret_cast<std::uint64_t>(&FiberTrampoline);
+#elif defined(__aarch64__)
+        auto sp = AlignDown(stackTop, 16);
+        state->context.sp  = static_cast<std::uint64_t>(sp);
+        state->context.pc  = reinterpret_cast<std::uint64_t>(&FiberTrampoline);
+        state->context.x30 = reinterpret_cast<std::uint64_t>(&FiberTrampolineReturn);
+#else
+#error "Fiber stack bootstrap not implemented for this architecture."
+#endif
         return state;
     }
 
