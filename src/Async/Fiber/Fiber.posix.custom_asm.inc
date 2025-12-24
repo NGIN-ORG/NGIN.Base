@@ -8,6 +8,7 @@
 #include <NGIN/Primitives.hpp>
 
 #include <cerrno>
+#include <cstddef>
 #include <exception>
 #include <new>
 #include <system_error>
@@ -17,6 +18,31 @@
 
 namespace NGIN::Execution::detail
 {
+    namespace
+    {
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define NGIN_EXECUTION_DETAIL_HAS_ASAN 1
+#endif
+#endif
+
+#ifndef NGIN_EXECUTION_DETAIL_HAS_ASAN
+#if defined(__SANITIZE_ADDRESS__)
+#define NGIN_EXECUTION_DETAIL_HAS_ASAN 1
+#else
+#define NGIN_EXECUTION_DETAIL_HAS_ASAN 0
+#endif
+#endif
+
+#if NGIN_EXECUTION_DETAIL_HAS_ASAN
+        extern "C"
+        {
+            void __sanitizer_start_switch_fiber(void** fakeStackSave, const void* stackBottom, std::size_t stackSize);
+            void __sanitizer_finish_switch_fiber(void* fakeStackSave, const void** oldStackBottom, std::size_t* oldStackSize);
+        }
+#endif
+    }// namespace
+
     struct FiberState
     {
         FiberContext                      context {};
@@ -32,6 +58,7 @@ namespace NGIN::Execution::detail
         std::exception_ptr                exception;
         bool                              running = false;
         bool                              stackUsesMmap = false;
+        void*                             asanFakeStack {nullptr};
     };
 
     namespace
@@ -259,7 +286,15 @@ namespace NGIN::Execution::detail
         state->running            = true;
         FiberContext caller {};
         state->callerContext = &caller;
+#if NGIN_EXECUTION_DETAIL_HAS_ASAN
+        const void*   oldBottom = nullptr;
+        std::size_t   oldSize   = 0;
+        __sanitizer_start_switch_fiber(&state->asanFakeStack, state->stackBase, static_cast<std::size_t>(state->stackSize));
         NGIN_FiberContextSwitch(&caller, &state->context);
+        __sanitizer_finish_switch_fiber(state->asanFakeStack, &oldBottom, &oldSize);
+#else
+        NGIN_FiberContextSwitch(&caller, &state->context);
+#endif
         state->callerContext = nullptr;
         state->running       = false;
         currentFiber         = previousFiber;
@@ -295,7 +330,15 @@ namespace NGIN::Execution::detail
             std::terminate();
         }
 
+#if NGIN_EXECUTION_DETAIL_HAS_ASAN
+        const void*   oldBottom = nullptr;
+        std::size_t   oldSize   = 0;
+        __sanitizer_start_switch_fiber(&currentFiber->asanFakeStack, nullptr, 0);
         NGIN_FiberContextSwitch(&currentFiber->context, currentFiber->callerContext);
+        __sanitizer_finish_switch_fiber(currentFiber->asanFakeStack, &oldBottom, &oldSize);
+#else
+        NGIN_FiberContextSwitch(&currentFiber->context, currentFiber->callerContext);
+#endif
     }
 
     bool FiberHasJob(const FiberState* state) noexcept
@@ -328,4 +371,3 @@ namespace NGIN::Execution::detail
 #else
 static_assert(false, "Fiber.posix.custom_asm.inc included on unsupported platform/arch");
 #endif
-

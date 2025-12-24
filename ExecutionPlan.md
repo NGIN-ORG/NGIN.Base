@@ -31,11 +31,15 @@ Scope: `include/NGIN/Execution/Thread.hpp` and `include/NGIN/Execution/Fiber.hpp
   - Benchmarks: extended `benchmarks/SchedulerBenchmarks.cpp` with repeated yield/reschedule workload (`Task<void> Yield x8 2k`) across schedulers.
   - CUSTOM_ASM backend (Linux x86_64): added an internal context switch routine + backend implementation, selectable via `NGIN_EXECUTION_FIBER_BACKEND` (CMake: `-DNGIN_BASE_FIBER_BACKEND=custom_asm`).
   - CUSTOM_ASM contract test: validates `mxcsr` + x87 control word are preserved across `YieldNow()`/`Resume()` (enabled only on Linux x86_64 CUSTOM_ASM builds).
+  - CUSTOM_ASM hardening: context switch clears DF (`cld`) and integrates ASan fiber stack switch annotations when AddressSanitizer is enabled.
+  - CUSTOM_ASM docs: clarified signal handling expectations (`sigaltstack`) and tooling constraints in `include/NGIN/Execution/README.md`.
+  - Default backend (Linux x86_64): `NGIN_EXECUTION_FIBER_BACKEND` now defaults to `CUSTOM_ASM` (override via `-DNGIN_BASE_FIBER_BACKEND=ucontext` if needed).
 - **Current**
   - Document and harden CUSTOM_ASM contracts (unwind/profiling constraints, supported compilers/arches).
 - **Next**
   - Add benchmarks comparing `ucontext` vs `CUSTOM_ASM` (same workloads, separate build configs) and record baseline numbers.
   - Add a small “backend contract” test that validates `mxcsr` and x87 control word are preserved across `YieldNow()`/`Resume()` (CUSTOM_ASM only).
+  - Integrate sanitizer/tooling hooks where feasible (ASan stack switch annotations; consider Valgrind stack registration).
 
 Goals:
 - **State-of-the-art performance**: no avoidable allocations, low overhead per resume/schedule, and predictable behavior.

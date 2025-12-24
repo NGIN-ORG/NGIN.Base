@@ -26,6 +26,7 @@ asm(R"(
 .globl NGIN_FiberContextSwitch
 .type NGIN_FiberContextSwitch, @function
 NGIN_FiberContextSwitch:
+    cld
     movq %rbx, 16(%rdi)
     movq %rbp, 24(%rdi)
     movq %r12, 32(%rdi)
@@ -55,4 +56,3 @@ NGIN_FiberContextSwitch:
 .size NGIN_FiberContextSwitch, .-NGIN_FiberContextSwitch
 )");
 #endif
-

@@ -58,7 +58,7 @@ The goal is “predictable behavior”: unsupported features do not silently suc
 
 ### Compile-time gating
 - Stackful fibers: `NGIN_EXECUTION_HAS_STACKFUL_FIBERS` in `include/NGIN/Execution/Config.hpp`
-- Fiber backend selection: `NGIN_EXECUTION_FIBER_BACKEND` in `include/NGIN/Execution/Config.hpp` (currently WinFiber on Windows, ucontext on POSIX)
+- Fiber backend selection: `NGIN_EXECUTION_FIBER_BACKEND` in `include/NGIN/Execution/Config.hpp` (WinFiber on Windows, CUSTOM_ASM on Linux x86_64, ucontext elsewhere)
 - Optional hard-disable: define `NGIN_EXECUTION_FIBER_HARD_DISABLE=1` to make including fiber headers an error when unsupported.
   - Repo convenience: top-level CMake supports `-DNGIN_BASE_FIBER_BACKEND=default|ucontext|winfiber|custom_asm`.
 
@@ -74,3 +74,5 @@ Debugging / unwinding / profiling:
 - Stack unwinding is **not supported across** `YieldNow()`/`Resume()` (treat it like `setjmp/longjmp`).
 - Stack traces **within** the currently-running fiber should work normally.
 - External sampling profilers/stack walkers may stop at the context-switch boundary (backend-dependent).
+- Signals run on the current stack; production builds that use signals should install an alternate signal stack (`sigaltstack`) to avoid overflowing small fiber stacks.
+- ASan: when built with AddressSanitizer, the CUSTOM_ASM backend annotates stack switches so ASan can track the active stack correctly.
