@@ -1,0 +1,276 @@
+# MemoryPlan.md
+
+Pinpoint problematic areas in `NGIN::Memory` + allocator-aware containers, and propose a performance-first refactor plan.
+
+This plan assumes breaking changes are allowed.
+
+---
+
+## Goals (Performance-First)
+
+1. **Correctness/UB-free** allocation/deallocation across alignment, size, and composites.
+2. **Deterministic behavior** options for real-time (no hidden global state, controllable allocation).
+3. **Explicit allocator semantics** (ownership, propagation, routing) that work with stateful allocators.
+4. **Allocator-aware containers** that avoid default-constructing N buckets, avoid unnecessary work, and support explicit lifetimes.
+5. **Clean layering**: minimal hot-path allocator concept; optional introspection layered on top.
+
+Non-goals:
+- Replacing every standard library type everywhere immediately (incremental migration is fine).
+- Solving all concurrency reclamation patterns in one pass.
+
+---
+
+## P0: Must-Fix Correctness Issues (UB / data races / compile breaks)
+
+### 1) Array helpers free the wrong pointer (UB for over-aligned `T`)
+
+- Problem: `AllocateArrayUninitialized` allocates `raw = alloc.Allocate(rawSize, AAlign)` but later deallocates `header` which may not equal `raw`.
+- Code: `include/NGIN/Memory/AllocationHelpers.hpp:58` to `include/NGIN/Memory/AllocationHelpers.hpp:79`, and `include/NGIN/Memory/AllocationHelpers.hpp:154`.
+- Why this is bad:
+  - If `alignof(T) > alignof(ArrayHeader)` or if the returned `raw` is not positioned such that `arr` lands immediately after the header, `header != raw`.
+  - Freeing `header` (not the original `raw`) is undefined behavior for most allocators (e.g. `SystemAllocator` calling `std::free`).
+  - `Tracking`/stats will become nonsense because deallocation sizes don’t match allocation sizes.
+
+**Do instead**
+- Change the array header layout to include a **back-pointer to the actual base** returned by the allocator (and ideally the allocated byte size + alignment).
+  - Example: `struct ArrayHeader { std::size_t count; std::size_t rawSize; void* rawBase; std::uint32_t magic; };`
+  - Deallocate uses `rawBase/rawSize/alignment`.
+- Alternatively: require `AllocateEx` and stash the `MemoryBlock` metadata in the header.
+
+### 2) `HalfPointer::ToAbsolute` returns the wrong type (and offset truncation risks)
+
+- Problem: `ToAbsolute(T* base)` returns `reinterpret_cast<char*>(base) + offset` as `T*` without casting.
+- Code: `include/NGIN/Memory/HalfPointer.hpp:26` to `include/NGIN/Memory/HalfPointer.hpp:32`.
+- Additional risk: offset is a `UInt32` (`include/NGIN/Memory/HalfPointer.hpp:14`), so it silently truncates for heaps > 4GiB.
+
+**Do instead**
+- Return `reinterpret_cast<T*>(reinterpret_cast<std::byte*>(base) + offset)` (or equivalent).
+- Add debug asserts (or checked constructor) that the distance fits `UInt32`.
+- Consider a `HalfPointer64` or a template parameter for offset width if large arenas are expected.
+
+### 3) `ThreadSafeAllocator` is not thread-safe for “const” queries
+
+- Problem: `MaxSize()`, `Remaining()`, and `Owns()` don’t lock.
+- Code: `include/NGIN/Memory/ThreadSafeAllocator.hpp:24` to `include/NGIN/Memory/ThreadSafeAllocator.hpp:35`.
+
+**Do instead**
+- Lock around all forwarded operations, including the “const” ones.
+- Prefer a configurable lock type for RT:
+  - `ThreadSafeAllocator<Inner, Lock = NGIN::Sync::SpinLock>` (or similar), defaulting to a low-contention spin lock for short critical sections.
+
+---
+
+## P1: Allocator API / Semantics Problems (inconsistencies, hidden requirements)
+
+### 4) The minimal allocator concept is good, but many allocators assume more than they require
+
+- `AllocatorConcept` only requires `Allocate/Deallocate` (`include/NGIN/Memory/AllocatorConcept.hpp:48`).
+- But these types assume `Owns/MaxSize/Remaining` exist:
+  - `include/NGIN/Memory/FallbackAllocator.hpp:24` (calls `m_primary.Owns(ptr)` and sums max/remaining)
+  - `include/NGIN/Memory/TrackingAllocator.hpp:59`
+  - `include/NGIN/Memory/PolyAllocator.hpp:23`
+
+**Do instead (traits-first; keep the core concept minimal)**
+
+- Keep `AllocatorConcept` as-is for hot paths and generic code.
+- Make every “extra feature” exclusively accessed via `AllocatorTraits`, and make allocators/composites *not compile* (or take an alternate path) if a required capability isn’t present.
+- Fix the ownership-query model:
+  - Do **not** default `Owns` to `true` when the allocator can’t answer (`include/NGIN/Memory/AllocatorConcept.hpp:123`).
+  - Prefer a tri-state query in traits for ownership/routing:
+    - `enum class Ownership { Owns, DoesNotOwn, Unknown };`
+    - `static Ownership OwnershipOf(const A&, const void*) noexcept;`
+  - For routing decisions, treat `Unknown` as “cannot decide”: require tagging/cookies/headers instead.
+
+Practical rule:
+- `MaxSize/Remaining`: “unknown” may default to `numeric_limits<size_t>::max()` because it’s informational.
+- `Owns`: “unknown” must *never* be treated as true in any code path that chooses which allocator to free with.
+
+### 5) Routing `Deallocate` via `Owns()` is fragile for composite allocators
+
+`FallbackAllocator` depends on `Owns()` routing (`include/NGIN/Memory/FallbackAllocator.hpp:24`), which tends to be:
+- slow (range checks or tree lookups),
+- sometimes impossible (system malloc can’t answer reliably),
+- and dangerous if defaulted.
+
+**Do instead**
+- Make routing explicit and independent of `Owns()`:
+  - Prefer `AllocateEx()` / `MemoryBlock::Cookie` tagging (`include/NGIN/Memory/AllocatorConcept.hpp:25`) when available.
+  - Otherwise store a small header immediately before the returned pointer with a sub-allocator id (and any required metadata).
+  - Provide a composite that guarantees correct deallocation without queries:
+    - `TaggedFallbackAllocator` (header/cookie-based) for correctness.
+    - Keep `FallbackAllocator` only if both allocators have reliable `Owns()` (and enforce that via traits checks / `static_assert`).
+
+---
+
+## P1: Type Erasure and Globals (RT-unfriendly defaults)
+
+### 6) `PolyAllocator` heap-allocates and assumes rich API
+
+- Heap allocate in ctor: `include/NGIN/Memory/PolyAllocator.hpp:14` to `include/NGIN/Memory/PolyAllocator.hpp:16`.
+- Assumes `MaxSize/Remaining/Owns` exist (`include/NGIN/Memory/PolyAllocator.hpp:23`).
+
+**Do instead**
+- Prefer non-owning “ref” erasure:
+  - `PolyAllocatorRef` stores `void* obj` + vtable, no allocation.
+- If you need owning erasure, use SBO:
+  - `AnyAllocator<InlineBytes>` storing the allocator object in-place.
+- For RT, explicitly label owning type-erasure as “slow path”.
+
+### 7) `EpochReclaimer` uses singleton + heap + `std::function`
+
+- Global singleton: `include/NGIN/Memory/EpochReclaimer.hpp:41`.
+- Per-thread heap allocation: `include/NGIN/Memory/EpochReclaimer.hpp:100`.
+- `std::function` and `std::vector` in hot paths: `include/NGIN/Memory/EpochReclaimer.hpp:15` and `include/NGIN/Memory/EpochReclaimer.hpp:37`.
+
+**Do instead**
+- Make reclamation **explicitly owned** and passed to the structure that needs it (no singleton).
+- Use allocator-aware containers (e.g., NGIN `Vector`) and deterministic storage (bounded ring buffer or fixed block lists) for retire lists.
+- Replace `std::function<void(void*)>` with:
+  - function pointer + context pointer, or
+  - templated deleter stored with the node (if the API allows).
+- Consider moving to `include/NGIN/Memory/Experimental/...` or clearly marking as non-RT by default.
+
+---
+
+## P1: Containers (Allocator awareness + lifetime correctness + hot-path costs)
+
+### 8) `FlatHashMap` is not allocator-aware and has problematic lifetime semantics
+
+- Not allocator aware: uses `Vector<Entry>` with default allocator and also includes unused `<vector>` (`include/NGIN/Containers/HashMap.hpp:14`).
+- Forces default-constructible `Value` (`include/NGIN/Containers/HashMap.hpp:24`) and effectively also needs default-constructible `Key` due to the bucket array strategy.
+- “Erase” doesn’t destroy `Key/Value`, only clears a flag:
+  - `include/NGIN/Containers/HashMap.hpp:220` stores `Key` and `Value` directly in every bucket.
+  - `Clear()` only clears flags (`include/NGIN/Containers/HashMap.hpp:285`).
+  - `Remove()` clears flag then shifts (`include/NGIN/Containers/HashMap.hpp:388`).
+
+**Do instead**
+- Replace with a new implementation that uses explicit storage + explicit lifetime:
+  - Store `std::byte keyStorage[...]` + `valueStorage[...]` (like `ConcurrentHashMap`’s `SlotStorage`).
+  - Construct/destruct payload on insert/erase.
+  - Keep a compact control byte array to support fast probing.
+- Make it allocator-aware:
+  - `template<class Key, class Value, ..., Memory::AllocatorConcept Alloc = Memory::SystemAllocator>`
+  - store allocator with `[[no_unique_address]]` and define allocator propagation semantics.
+
+### 9) `Vector` docs vs behavior mismatch (and allocator propagation needs a policy)
+
+- Comment claims “externally-owned allocator” and `Allocator::Instance()` (`include/NGIN/Containers/Vector.hpp:4`), but `Vector` stores allocator by value (`include/NGIN/Containers/Vector.hpp:35`).
+
+**Do instead**
+- Decide on one rule:
+  - Containers store allocator *handle* by value (copyable, cheap, points to a resource), or
+  - Containers store a reference wrapper explicitly (`AllocatorRef`) and are non-default-constructible without it.
+- Document propagation:
+  - copy-assign: keep lhs allocator or take rhs allocator?
+  - move-assign: steal allocator or keep lhs allocator and move elements?
+
+### 10) `include/NGIN/Containers/Array.hpp` is an empty header
+
+- File exists but is 0 bytes. (`include/NGIN/Containers/Array.hpp:1`)
+
+**Do instead**
+- Either delete it, or implement `Array<T, N>` with consistent conventions (and add tests).
+
+---
+
+## P2: Documentation / Naming Drift
+
+### 11) `include/NGIN/Memory/README.md` describes non-existent types and incorrect layout
+
+- Mentions `BumpArena`, `OwnedTag`, `BorrowedTag` that do not exist in headers (`include/NGIN/Memory/README.md:10` to `include/NGIN/Memory/README.md:29`).
+- Claims “header + back-pointer” (`include/NGIN/Memory/README.md:54`) but current array helper does not store a back-pointer.
+
+**Do instead**
+- Update docs to match reality, or add compatibility aliases/types:
+  - `using BumpArena = LinearAllocator<>;` (or rename the type).
+  - Add `OwnedTag`/`BorrowedTag` only if they’re actively used in public APIs.
+
+---
+
+## Target Architecture (Proposed)
+
+### A) Two-tier allocator API
+
+1) **Hot-path allocator concept** (minimal)
+- `Allocate(bytes, alignment) -> void*` (may return null)
+- `Deallocate(ptr, bytes, alignment) noexcept` (bytes/alignment may be ignored)
+
+2) **Optional introspection and routing**
+- `AllocateEx(bytes, alignment) -> MemoryBlock` (size/alignment/cookie)
+- `MaxSize()`, `Remaining()`
+- Ownership query should not be a bool default; use tri-state or require it only when needed.
+
+### B) “Allocator handle” rule for containers
+
+For stateful allocators, containers should store a *handle* that is:
+- cheap to copy/move,
+- refers to a stable backing resource,
+- and has well-defined semantics when copied.
+
+Concretely:
+- Keep `AllocatorRef<A>` as the non-owning “borrowed” handle.
+- Add `SharedAllocator<A>` or `IntrusiveRefAllocator<A>` if shared ownership is desired.
+- Only store heavyweight allocators by value when they are explicitly designed to be value-stored (e.g., bump arena with owning slab).
+
+### C) Eliminate “guessing” in composite allocators
+
+Any composite allocator that needs to route `Deallocate` should do so via:
+- explicit cookie/tag in allocation result, or
+- explicit header attached to returned pointer.
+
+---
+
+## Proposed Refactors (Work Items)
+
+### Phase 0 (Safety baseline)
+- Fix `AllocationHelpers` array layout + deallocation base pointer.
+- Fix `HalfPointer::ToAbsolute` typing and add overflow assertions.
+- Fix `ThreadSafeAllocator` to lock all forwarded operations.
+
+### Phase 1 (Allocator consistency)
+- Enforce `AllocatorTraits` usage so types don’t silently depend on optional APIs (avoid proliferating concepts).
+- Redesign `FallbackAllocator` as either:
+  - `FallbackAllocator<Primary, Secondary>` requiring `Owns`, or
+  - `TaggedFallbackAllocator` that writes a tag/header and never calls `Owns`.
+- Replace `PolyAllocator` with `PolyAllocatorRef` and/or `AnyAllocator<InlineBytes>`.
+
+### Phase 2 (Containers)
+- Replace `FlatHashMap` with an allocator-aware “explicit lifetime” hash map.
+  - Consider reusing `ConcurrentHashMap`’s `SlotStorage`/group layout for the single-threaded map to share optimizations.
+- Define allocator propagation policy for `Vector` (and all containers).
+- Remove or implement `include/NGIN/Containers/Array.hpp`.
+
+### Phase 3 (RT determinism)
+- Move `EpochReclaimer` behind explicit ownership + allocator injection; remove the singleton as default.
+- Add “bounded / fixed capacity” variants where it matters (hash map, queue, string if needed).
+
+---
+
+## Breaking Changes (Explicit)
+
+Potentially breaking, but recommended:
+- Change array helper ABI/layout and deallocation requirements (`AllocationHelpers`).
+- Remove implicit “unknown means owns” behavior in allocator traits.
+- Change `FallbackAllocator`/`Tracking`/`PolyAllocator` constraints or behavior.
+- Replace `FlatHashMap` implementation and its requirements (default-constructibility, erase semantics).
+- Standardize allocator propagation rules across all containers (copy/move semantics).
+
+---
+
+## Verification Checklist (before merging refactors)
+
+Tests (minimum):
+- Over-aligned array allocation/deallocation (`alignof(T) >= 64`) using `SystemAllocator` and `Tracking`.
+- `FallbackAllocator` routing correctness (including null returns and mixed frees).
+- `ThreadSafeAllocator` multi-thread smoke test.
+- Hash map erase semantics ensure destructors run and memory is reclaimed.
+
+Benchmarks (recommended):
+- `FlatHashMap` (old vs new) for insert/find/erase at various load factors.
+- Allocator overhead microbenchmarks: `Allocate/Deallocate` for System vs Linear vs composites.
+
+---
+
+## Next Step
+
+If you want, I can implement **Phase 0** immediately (the UB and race fixes), then follow with the allocator-layering refactor and a replacement for `FlatHashMap`.

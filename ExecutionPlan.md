@@ -33,13 +33,11 @@ Scope: `include/NGIN/Execution/Thread.hpp` and `include/NGIN/Execution/Fiber.hpp
   - CUSTOM_ASM contract test: validates `mxcsr` + x87 control word are preserved across `YieldNow()`/`Resume()` (enabled only on Linux x86_64 CUSTOM_ASM builds).
   - CUSTOM_ASM hardening: context switch clears DF (`cld`) and integrates ASan fiber stack switch annotations when AddressSanitizer is enabled.
   - CUSTOM_ASM docs: clarified signal handling expectations (`sigaltstack`) and tooling constraints in `include/NGIN/Execution/README.md`.
-  - Default backend (Linux x86_64): `NGIN_EXECUTION_FIBER_BACKEND` now defaults to `CUSTOM_ASM` (override via `-DNGIN_BASE_FIBER_BACKEND=ucontext` if needed).
+  - Default backend (Linux x86_64/aarch64): `NGIN_EXECUTION_FIBER_BACKEND` now defaults to `CUSTOM_ASM` (override via `-DNGIN_BASE_FIBER_BACKEND=ucontext` if needed).
 - **Current**
-  - Document and harden CUSTOM_ASM contracts (unwind/profiling constraints, supported compilers/arches).
+  - (Deferred) Benchmark `ucontext` vs `CUSTOM_ASM` baselines.
 - **Next**
-  - Add benchmarks comparing `ucontext` vs `CUSTOM_ASM` (same workloads, separate build configs) and record baseline numbers.
-  - Add a small “backend contract” test that validates `mxcsr` and x87 control word are preserved across `YieldNow()`/`Resume()` (CUSTOM_ASM only).
-  - Integrate sanitizer/tooling hooks where feasible (ASan stack switch annotations; consider Valgrind stack registration).
+  - (Optional) Decide whether to block signals around context switch (or keep `sigaltstack` as the documented requirement).
 
 Goals:
 - **State-of-the-art performance**: no avoidable allocations, low overhead per resume/schedule, and predictable behavior.
@@ -88,7 +86,7 @@ Remaining items after the OS-thread backend migration:
 ### Fiber – API and Semantics
 - **Guard pages are best-effort**: `FiberOptions::{guardPages,guardSize}` are implemented on POSIX via an `mmap`-backed stack with a low guard page; other backends may ignore.
 - **POSIX `ucontext` portability**: `ucontext` is obsolete/deprecated on some platforms; long-term viability is questionable.
-- **Tier-1 backend missing**: a custom context switch backend is not implemented yet (ucontext is currently the POSIX fallback).
+- **Tier-1 backend is partial**: `CUSTOM_ASM` is implemented on Linux x86_64/aarch64; other POSIX targets use `ucontext` fallback for now.
 
 ---
 
