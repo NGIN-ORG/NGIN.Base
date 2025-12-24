@@ -68,7 +68,16 @@ Implementation:
   - platform/impl headers only included where needed (or compiled `.cpp` if the project is not strictly header-only).
 - Use **NGIN-native callable types** (`NGIN::Utilities::Callable` / `WorkItem`) for entry points.
 - Treat misuse as programmer error: **assert in debug**, avoid exceptions on hot paths unless part of the contract.
--Prefer explicit contracts over “helpful” behavior on hot paths (e.g., don’t silently no-op on misuse).
+- Prefer explicit contracts over “helpful” behavior on hot paths (e.g., don’t silently no-op on misuse).
+
+### Decisions to Lock Early (to Avoid Churn)
+1. **Thread backend**: OS threads by default (Win32 + pthreads) for control and header hygiene; allow an opt-in guarded `std::thread` fallback for niche platforms.
+2. **Fiber backend**: introduce an internal backend interface now; treat `ucontext` as tier-2 fallback; plan a tier-1 custom context switch backend (platform/arch-specific).
+3. **Thread name ownership**: use a fixed-size inline `ThreadName` (truncate rule) and copy from call-site inputs immediately (no lifetime footguns).
+4. **Destructor defaults**: do not silently block in destructors by default; make “join on destroy” an explicit opt-in for scheduler-owned workers.
+5. **Programmer error handling**: debug assert with a clear message; release terminate (consistent, predictable).
+6. **Fiber error model**: `Resume() noexcept` + status result + explicit exception retrieval (`TakeException()`).
+7. **Capabilities**: naming/affinity/priority are best-effort with an observable result; stack size/guard pages are platform-dependent; stackful fibers are compile-time gated.
 
 ### Replacement for `std::this_thread` (Proposed)
 Add a dedicated “current thread” API mirroring the standard library split between `std::thread` (handle) and `std::this_thread`
@@ -96,11 +105,11 @@ Rationale:
 Introduce a modern thread primitive usable by schedulers and end users:
 
 - `struct ThreadOptions`:
-  - `ThreadName name` (recommended) or `std::string_view name` (only if applied during `Start` and not retained)
+  - `ThreadName name` (copied/owned; constructed from call-site inputs and may be truncated)
   - `UInt64 affinityMask` (optional)
   - `int priority` (optional)
   - `UIntSize stackSize` (optional, platform-dependent)
-  - `enum class OnDestruct { Join, Detach, Terminate }` (default should favor usability: `Join` for worker threads)
+  - `enum class OnDestruct { Join, Detach, Terminate }`
 
 - `class Thread` (move-only):
   - `Thread()` default
@@ -114,7 +123,13 @@ Introduce a modern thread primitive usable by schedulers and end users:
 Notes:
 - If `std::thread` remains the backing implementation, hide it behind a `.cpp` or a small `detail` layer so `<thread>` isn’t forced into every include chain.
 - If OS threads are used directly (pthreads/Win32), `Thread` can avoid `<thread>` entirely and gain stack size + affinity/priority control.
--If `ThreadOptions` exposes features that are not portable (stack size), codify “guaranteed vs best-effort” semantics per platform.
+- If `ThreadOptions` exposes features that are not portable (stack size), codify “guaranteed vs best-effort” semantics per platform.
+- Prefer the “two type” pattern to avoid destructor surprises:
+  - `Thread`: general-purpose thread handle with `OnDestruct::Terminate` default (forces explicit lifecycle).
+  - `WorkerThread`: scheduler-owned worker handle with `OnDestruct::Join` default (stop/join is part of scheduler teardown).
+- Backend selection policy:
+  - Default: OS threads (Win32 + pthreads).
+  - Optional fallback: `std::thread` behind a build macro (for niche platforms only).
 
 ### “Current Fiber” API (Parallel to `ThisThread`)
 Even though fibers are an NGIN primitive (not a standard primitive), having a “current fiber” namespace makes call sites uniform
@@ -127,7 +142,7 @@ Proposed surface:
 - `namespace NGIN::Execution::ThisFiber`
   - `bool IsInFiber() noexcept`
   - `void YieldNow() noexcept` (yields to the *resumer*; see below)
-  - `FiberId GetId() noexcept` 
+  - Optional: `FiberId GetId() noexcept` (debug/telemetry only; can be omitted initially)
 
 Important: avoid naming any public API `Yield` to prevent Windows macro collisions without resorting to `#undef` in NGIN headers.
 
@@ -146,7 +161,7 @@ Reframe Fiber as a low-level, thread-affine, stackful primitive:
   - `explicit Fiber(FiberOptions = {})`
   - `bool TryAssign(Job) noexcept` (fast-path, no throw; returns false if running)
   - `void Assign(Job)` (validated/throwing wrapper if desired)
-  - `FiberResumeResult Resume() noexcept` (recommended) + `std::exception_ptr TakeException() noexcept` for the `Faulted` case
+  - `FiberResumeResult Resume() noexcept` (required) + `std::exception_ptr TakeException() noexcept` for the `Faulted` case
   - `[[nodiscard]] bool IsRunning() const noexcept`, `[[nodiscard]] bool HasJob() const noexcept`
   - `static void YieldNow()` – yields to the *resumer*, not a global “main”.
   - `static bool IsInFiber() noexcept`
@@ -155,13 +170,24 @@ Reframe Fiber as a low-level, thread-affine, stackful primitive:
   - `static FiberThreadContext AttachCurrentThread()` for platforms that require it (Windows fibers).
   - Optionally supports detach on thread exit where legal.
 
-Key invariant: `Yield()` always returns execution to the most recent `Resume()` call (“stack discipline”), enabling nested resume patterns and composability.
+Key invariant: `YieldNow()` always returns execution to the most recent `Resume()` call (“stack discipline”), enabling nested resume patterns and
+composability.
 
 ### Contracts (Make These Explicit and Testable)
 - `Fiber` is thread-affine: a `Fiber` created on thread A must only be assigned/resumed/yielded on thread A (debug assert).
 - `Resume()` is not re-entrant for the same fiber: calling `Resume()` while that fiber is already running is a programmer error.
 - `ThisFiber::YieldNow()` returns to the most recent active resumer of the current fiber (stack discipline).
 - Calling `ThisFiber::YieldNow()` when not in a fiber is a programmer error (debug assert). Decide whether release is no-op or terminate; prefer terminate for “zero surprise”.
+- Yield-to-resumer implementation detail/invariant: store the caller context *per Resume()*, and clear it on return to prevent stale pointers/handles.
+
+### Fiber State Model (Recommended)
+Define a minimal, scheduler-friendly state machine:
+- `Idle` (no job) → `TryAssign` succeeds
+- `Ready` (job assigned) → `TryAssign` fails
+- `Running` → `TryAssign` fails; `Resume()` is in progress
+- On `Resume()` return:
+  - `Yielded`: transitions back to `Ready` (job still present)
+  - `Completed` / `Faulted`: transitions to `Idle` (job cleared; fiber reusable)
 
 ---
 
@@ -180,6 +206,8 @@ Key invariant: `Yield()` always returns execution to the most recent `Resume()` 
    - Fiber: Assign → Resume ↔ YieldNow … → Completed/Faulted.
 5. Add a platform capability table (docs):
    - thread backend, fiber backend, guard pages, notes per platform.
+6. Add a short rationale section in docs:
+   - “Why not just use `std::thread` / `std::this_thread`?” (compile-time hygiene, consistent naming/affinity/priority, allocator hooks, unified contracts).
 
 ### Phase 1 – Thread API Redesign (breaking)
 1. Replace `std::function<void()>` with:
@@ -197,7 +225,7 @@ Key invariant: `Yield()` always returns execution to the most recent `Resume()` 
 ### Phase 2 – Fiber Core Redesign (breaking, medium/high risk)
 1. Make yield/resume **return-to-resumer**:
    - POSIX: store a pointer to the caller `ucontext_t` in `FiberState` and swap back to it on yield.
-    - Windows: store the caller fiber handle (`GetCurrentFiber()`) per resume and yield back to it.
+   - Windows: store the caller fiber handle (`GetCurrentFiber()`) per resume and yield back to it.
 2. Remove the extra PIMPL allocation:
    - store `FiberState*` directly (opaque pointer) and keep ownership in `Fiber`.
 3. Integrate NGIN allocator hooks for stack/state where possible; add optional guard pages.
@@ -208,6 +236,8 @@ Key invariant: `Yield()` always returns execution to the most recent `Resume()` 
 6. Address “state of the art” context switching:
    - Keep `ucontext` as tier-2 fallback.
    - Add an internal backend point for a custom context switch implementation (platform/arch-specific, likely assembly), gated by a capability macro.
+   - Add a compile-time capability macro (proposed): `NGIN_EXECUTION_HAS_STACKFUL_FIBERS` (0/1).
+   - (Internal) track backend choice for benchmarks/logging: `enum class FiberBackend { WinFiber, UContext, CustomAsm }`.
 
 ### Phase 3 – Adoption in Schedulers (breaking/behavioral)
 1. Update `ThreadPoolScheduler` and `FiberScheduler` to use `Execution::Thread` (or the new thread primitive):
@@ -220,6 +250,7 @@ Add dedicated benchmarks:
 - `benchmarks/FiberBenchmarks.cpp`
   - `Resume/Yield` latency (median/p95), with/without exception propagation, with/without assigned job.
   - cost of `TryAssign + Resume` with different callable sizes.
+- scheduler-loop microbenchmark: enqueue N work items that each do minimal work and yield/reschedule (captures cache/queue effects).
 - `benchmarks/ThreadBenchmarks.cpp` (optional)
   - thread creation/join costs, name/affinity application costs.
 
@@ -243,20 +274,32 @@ Record and track at least:
 
 ---
 
-## Open Questions / Decisions to Make Early
-1. **Backing implementation for Thread**:
-   - keep `std::thread` (simpler, less code) vs OS threads (better control + fewer std dependencies).
-2. **Fiber portability strategy**:
-   - continue with `ucontext` as fallback, but introduce a “fast path” context switch implementation for supported architectures, or
-   - deprecate stackful fibers on platforms where `ucontext` is unreliable.
-3. **Exception policy for fibers**:
-   - propagate exceptions (current) vs explicit error channels for `noexcept` resume.
-4. **Allocator integration depth**:
-   - just use allocator for stack memory, or also for `FiberState` and internal bookkeeping.
-5. **Destruction policy defaults**:
-   - is `OnDestruct::Join` safe for the intended usage (scheduler-owned workers), or should default force explicit lifecycle?
-6. **Release-mode behavior on programmer error**:
-   - for `YieldNow()` outside a fiber, `Resume()` without a job, resume-while-running, wrong-thread usage.
+## Locked Decisions (Implementation Policy)
+These are intended to be “go implement” constraints (avoid churn):
+1. **Thread backend**: OS threads (Win32 + pthreads) by default; optional `std::thread` fallback behind a build macro for niche platforms.
+2. **Fiber backend**: internal backend interface; tier-1 custom context switch backend planned; tier-2 `ucontext` fallback where available; otherwise compile out stackful fibers.
+3. **Fiber errors**: `Fiber::Resume()` is `noexcept` and reports `Yielded/Completed/Faulted`; exceptions are retrieved with `TakeException()` and cleared on take.
+4. **Allocators**: first redesign includes allocator hooks for fiber stack + state; guard pages/tuning can be added later without changing the surface.
+5. **Destruction defaults**: `Thread` defaults to terminate-on-destroy; `WorkerThread` defaults to join-on-destroy (scheduler-owned).
+6. **Programmer errors**: debug assert with a clear message; release terminate (wrong-thread usage, yield outside fiber, resume without job, resume-while-running).
+7. **Capabilities**:
+   - Best-effort (observable): thread naming/affinity/priority return `bool`/status.
+   - Platform-dependent: thread stack size, fiber guard pages.
+   - Compile-time gated: stackful fibers (`NGIN_EXECUTION_HAS_STACKFUL_FIBERS`).
+
+## Capability Classification (Recommended)
+- Guaranteed:
+  - Thread creation/join/detach; `ThisThread::{GetId,YieldNow,SleepFor,SleepUntil,RelaxCpu}`.
+  - Fiber yield-to-resumer semantics when `NGIN_EXECUTION_HAS_STACKFUL_FIBERS == 1`.
+- Best-effort (return `bool`/status so callers can log/ignore):
+  - `ThisThread::SetName`, `Thread::SetName`, `Thread::SetAffinity`, `Thread::SetPriority`.
+- Platform-dependent / potentially unsupported:
+  - Thread stack size at creation; fiber guard pages/guard size; tier-1 custom-asm backend availability.
+
+## Remaining Open Questions (Smaller / Safe to Defer)
+1. Which architectures to support first for `CustomAsm` (x86_64 first, arm64 next).
+2. Exact stack/guard page API surface in `FiberOptions` (keep minimal initially: `stackSize` + `guardPages` boolean).
+3. Whether to hard-disable `Fiber.hpp` on unsupported builds or provide a stub type that fails with a targeted `static_assert`.
 
 ---
 
