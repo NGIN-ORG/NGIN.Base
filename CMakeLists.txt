@@ -6,10 +6,6 @@ project(NGIN.Base VERSION 0.1 LANGUAGES CXX)
 #-------------------------------------------------------------------------------
 cmake_policy(SET CMP0077 NEW)
 
-set(CMAKE_CXX_STANDARD 23)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
-
 #-------------------------------------------------------------------------------
 # Options
 #-------------------------------------------------------------------------------
@@ -108,6 +104,9 @@ set_property(CACHE NGIN_BASE_FIBER_BACKEND PROPERTY STRINGS default ucontext win
 # Library Definition
 #-------------------------------------------------------------------------------
 set(NGIN_BASE_PLATFORM_DEFINITIONS
+  $<$<STREQUAL:$<PLATFORM_ID>,Windows>:NGIN_PLATFORM_WINDOWS>
+  $<$<STREQUAL:$<PLATFORM_ID>,Darwin>:NGIN_PLATFORM_MACOS>
+  $<$<STREQUAL:$<PLATFORM_ID>,Linux>:NGIN_PLATFORM_LINUX>
   $<$<STREQUAL:$<PLATFORM_ID>,Windows>:NGIN_PLATFORM="Windows">
   $<$<STREQUAL:$<PLATFORM_ID>,Darwin>:NGIN_PLATFORM="macOS">
   $<$<STREQUAL:$<PLATFORM_ID>,Linux>:NGIN_PLATFORM="Linux">
@@ -188,9 +187,10 @@ endif()
 if(NGIN_BASE_BUILD_STATIC OR NGIN_BASE_BUILD_SHARED)
   add_library(NGIN.Base.Object OBJECT ${NGIN_BASE_CORE_SOURCES})
   target_compile_features(NGIN.Base.Object PRIVATE cxx_std_23)
+  set_target_properties(NGIN.Base.Object PROPERTIES CXX_EXTENSIONS OFF)
   target_include_directories(NGIN.Base.Object PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   target_compile_definitions(NGIN.Base.Object PRIVATE ${NGIN_BASE_PLATFORM_DEFINITIONS})
-  target_link_libraries(NGIN.Base.Object PRIVATE $<BUILD_INTERFACE:NGIN.Base.BuildOptions>)
+  target_link_libraries(NGIN.Base.Object PRIVATE $<BUILD_LOCAL_INTERFACE:NGIN.Base.BuildOptions>)
 endif()
 
 if(NGIN_BASE_BUILD_SHARED AND TARGET NGIN.Base.Object)
@@ -203,6 +203,7 @@ if(NGIN_BASE_BUILD_STATIC)
     target_sources(NGIN.Base.Static PRIVATE $<TARGET_OBJECTS:NGIN.Base.Object>)
   endif()
   target_compile_features(NGIN.Base.Static PUBLIC cxx_std_23)
+  set_target_properties(NGIN.Base.Static PROPERTIES CXX_EXTENSIONS OFF)
   target_include_directories(NGIN.Base.Static
     PUBLIC
       $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -213,7 +214,7 @@ if(NGIN_BASE_BUILD_STATIC)
       ${NGIN_BASE_PLATFORM_DEFINITIONS}
   )
   set_target_properties(NGIN.Base.Static PROPERTIES OUTPUT_NAME "NGINBase")
-  target_link_libraries(NGIN.Base.Static PRIVATE $<BUILD_INTERFACE:NGIN.Base.BuildOptions>)
+  target_link_libraries(NGIN.Base.Static PRIVATE $<BUILD_LOCAL_INTERFACE:NGIN.Base.BuildOptions>)
   list(APPEND NGIN_BASE_EXPORT_TARGETS NGIN.Base.Static)
   add_library(NGIN::Base::Static ALIAS NGIN.Base.Static)
   set(ngin_base_primary_target NGIN.Base.Static)
@@ -225,6 +226,7 @@ if(NGIN_BASE_BUILD_SHARED)
     target_sources(NGIN.Base.Shared PRIVATE $<TARGET_OBJECTS:NGIN.Base.Object>)
   endif()
   target_compile_features(NGIN.Base.Shared PUBLIC cxx_std_23)
+  set_target_properties(NGIN.Base.Shared PROPERTIES CXX_EXTENSIONS OFF)
   target_include_directories(NGIN.Base.Shared
     PUBLIC
       $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -242,7 +244,10 @@ if(NGIN_BASE_BUILD_SHARED)
       SOVERSION ${PROJECT_VERSION_MAJOR}
       VERSION ${PROJECT_VERSION})
   endif()
-  target_link_libraries(NGIN.Base.Shared PRIVATE $<BUILD_INTERFACE:NGIN.Base.BuildOptions>)
+  target_link_libraries(NGIN.Base.Shared PRIVATE $<BUILD_LOCAL_INTERFACE:NGIN.Base.BuildOptions>)
+  if(WIN32)
+    set_target_properties(NGIN.Base.Shared PROPERTIES ARCHIVE_OUTPUT_NAME "NGINBaseShared")
+  endif()
   list(APPEND NGIN_BASE_EXPORT_TARGETS NGIN.Base.Shared)
   add_library(NGIN::Base::Shared ALIAS NGIN.Base.Shared)
   set(ngin_base_primary_target NGIN.Base.Shared)
@@ -256,18 +261,28 @@ add_library(NGIN::Base ALIAS ${ngin_base_primary_target})
 
 # Link Time Optimization (IPO)
 if(NGIN_BASE_ENABLE_LTO)
-  include(CheckIPOSupported)
-  check_ipo_supported(RESULT NGIN_HAS_IPO OUTPUT NGIN_IPO_ERR)
-  if(NGIN_HAS_IPO)
-    foreach(tgt IN ITEMS NGIN.Base.Object NGIN.Base.Static NGIN.Base.Shared)
-      if(TARGET ${tgt})
-        foreach(cfg IN ITEMS Release RelWithDebInfo MinSizeRel)
-          set_property(TARGET ${tgt} PROPERTY INTERPROCEDURAL_OPTIMIZATION_${cfg} ON)
-        endforeach()
-      endif()
-    endforeach()
+  if(NGIN_BASE_ENABLE_ASAN OR NGIN_BASE_ENABLE_TSAN)
+    message(WARNING "LTO requested but sanitizers are enabled; skipping IPO/LTO.")
   else()
-    message(WARNING "LTO requested but not supported: ${NGIN_IPO_ERR}")
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT NGIN_HAS_IPO OUTPUT NGIN_IPO_ERR)
+    if(NGIN_HAS_IPO)
+      set(_ngin_ipo_enabled_targets)
+      foreach(tgt IN ITEMS NGIN.Base.Object NGIN.Base.Static NGIN.Base.Shared)
+        if(TARGET ${tgt})
+          foreach(cfg IN ITEMS Release RelWithDebInfo MinSizeRel)
+            set_property(TARGET ${tgt} PROPERTY INTERPROCEDURAL_OPTIMIZATION_${cfg} ON)
+          endforeach()
+          list(APPEND _ngin_ipo_enabled_targets ${tgt})
+        endif()
+      endforeach()
+      if(_ngin_ipo_enabled_targets)
+        string(JOIN ", " _ngin_ipo_enabled_targets_str ${_ngin_ipo_enabled_targets})
+        message(STATUS "IPO/LTO enabled for: ${_ngin_ipo_enabled_targets_str}")
+      endif()
+    else()
+      message(WARNING "LTO requested but not supported: ${NGIN_IPO_ERR}")
+    endif()
   endif()
 endif()
 
@@ -280,27 +295,32 @@ if(UNIX AND NOT APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     endif()
   else()
     include(CheckCXXSourceCompiles)
-    string(CONCAT _ngin_atomic_test_source
-      "#include <cstdint>\n"
-      "int main() {\n"
-      "  alignas(16) unsigned __int128 v = 0;\n"
-      "  unsigned __int128 out = 0;\n"
-      "  __atomic_load(&v, &out, __ATOMIC_SEQ_CST);\n"
-      "  return static_cast<int>(out);\n"
-      "}\n")
-    set(_ngin_required_quiet_prev "${CMAKE_REQUIRED_QUIET}")
-    set(CMAKE_REQUIRED_QUIET TRUE)
-    check_cxx_source_compiles("${_ngin_atomic_test_source}" NGIN_BASE_ATOMIC_LINKS_WITHOUT_LIBATOMIC)
-    if(NOT NGIN_BASE_ATOMIC_LINKS_WITHOUT_LIBATOMIC)
-      set(CMAKE_REQUIRED_LIBRARIES atomic)
-      check_cxx_source_compiles("${_ngin_atomic_test_source}" NGIN_BASE_ATOMIC_LINKS_WITH_LIBATOMIC)
-      if(NGIN_BASE_ATOMIC_LINKS_WITH_LIBATOMIC)
-        set(_ngin_need_atomic TRUE)
+    check_cxx_source_compiles(
+      "int main() { unsigned __int128 v = 0; (void)v; return 0; }"
+      NGIN_BASE_COMPILER_SUPPORTS_INT128)
+    if(NGIN_BASE_COMPILER_SUPPORTS_INT128)
+      string(CONCAT _ngin_atomic_test_source
+        "#include <cstdint>\n"
+        "int main() {\n"
+        "  alignas(16) unsigned __int128 v = 0;\n"
+        "  unsigned __int128 out = 0;\n"
+        "  __atomic_load(&v, &out, __ATOMIC_SEQ_CST);\n"
+        "  return static_cast<int>(out);\n"
+        "}\n")
+      set(_ngin_required_quiet_prev "${CMAKE_REQUIRED_QUIET}")
+      set(CMAKE_REQUIRED_QUIET TRUE)
+      check_cxx_source_compiles("${_ngin_atomic_test_source}" NGIN_BASE_ATOMIC_LINKS_WITHOUT_LIBATOMIC)
+      if(NOT NGIN_BASE_ATOMIC_LINKS_WITHOUT_LIBATOMIC)
+        set(CMAKE_REQUIRED_LIBRARIES atomic)
+        check_cxx_source_compiles("${_ngin_atomic_test_source}" NGIN_BASE_ATOMIC_LINKS_WITH_LIBATOMIC)
+        if(NGIN_BASE_ATOMIC_LINKS_WITH_LIBATOMIC)
+          set(_ngin_need_atomic TRUE)
+        endif()
+        unset(CMAKE_REQUIRED_LIBRARIES)
       endif()
-      unset(CMAKE_REQUIRED_LIBRARIES)
+      set(CMAKE_REQUIRED_QUIET "${_ngin_required_quiet_prev}")
+      unset(_ngin_required_quiet_prev)
     endif()
-    set(CMAKE_REQUIRED_QUIET "${_ngin_required_quiet_prev}")
-    unset(_ngin_required_quiet_prev)
   endif()
 endif()
 
