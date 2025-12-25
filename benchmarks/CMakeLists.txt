@@ -32,6 +32,20 @@ add_executable(SIMDFastMathBench SIMDFastMathBench.cpp)
 target_link_libraries(SIMDFastMathBench PRIVATE NGIN::Base)
 target_compile_options(SIMDFastMathBench PRIVATE -mavx2)
 
+if(TARGET NGIN.Base.BuildOptions)
+  foreach(tgt IN ITEMS
+    ExampleBenchmark
+    SchedulerBenchmarks
+    StringBenchmarks
+    VectorBenchmarks
+    CallableBenchmarks
+    FiberBenchmarks
+    SIMDFastMathBench
+  )
+    target_link_libraries(${tgt} PRIVATE NGIN.Base.BuildOptions)
+  endforeach()
+endif()
+
 # Optional: concurrent map comparison benchmarks (TBB via system or CPM)
 option(NGIN_TBB_STATIC "Prefer static TBB build via CPM" ON)
 set(_have_tbb OFF)
@@ -62,6 +76,9 @@ if(_have_tbb)
 		target_link_libraries(ConcurrentMapBench PRIVATE NGIN::Base TBB::tbb)
 	else()
 		target_link_libraries(ConcurrentMapBench PRIVATE NGIN::Base tbb)
+	endif()
+	if(TARGET NGIN.Base.BuildOptions)
+		target_link_libraries(ConcurrentMapBench PRIVATE NGIN.Base.BuildOptions)
 	endif()
 	target_compile_definitions(ConcurrentMapBench PRIVATE NGIN_HAVE_TBB=1)
 

@@ -6,13 +6,6 @@ project(NGIN.Base VERSION 0.1 LANGUAGES CXX)
 #-------------------------------------------------------------------------------
 cmake_policy(SET CMP0077 NEW)
 
-# Force libstdc++ only for Clang builds (Linux)
-if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-  add_compile_options(-stdlib=libstdc++)
-  add_link_options(-stdlib=libstdc++)
-  set(CMAKE_CXX_FLAGS "-stdlib=libstdc++ --gcc-toolchain=/opt/gcc-15.2") 
-endif()
-
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -24,6 +17,7 @@ option(NGIN_BASE_BUILD_STATIC      "Build NGIN.Base as a static library" ON)
 option(NGIN_BASE_BUILD_SHARED      "Build NGIN.Base as a shared library" OFF)
 option(NGIN_BASE_BUILD_TESTS       "Build NGIN.Base tests"     ON)
 option(NGIN_BASE_BUILD_EXAMPLES    "Build NGIN.Base examples"  ON)
+option(NGIN_BASE_BUILD_BENCHMARKS  "Build NGIN.Base benchmarks" ON)
 option(NGIN_BASE_DEVELOPMENT_MODE
        "Deprecated compatibility toggle for non-header builds"
        OFF)
@@ -34,6 +28,9 @@ option(NGIN_BASE_ENABLE_TSAN       "Enable ThreadSanitizer (GNU/Clang)" OFF)
 option(NGIN_BASE_ENABLE_LTO        "Enable Link Time Optimization for Release/RelWithDebInfo" OFF)
 option(NGIN_BASE_STRICT_WARNINGS   "Enable extra warning flags" ON)
 option(NGIN_BASE_ALL_FEATURES      "Convenience: enable tests + examples + benchmarks" OFF)
+option(NGIN_BASE_EXPORT_COMPILE_COMMANDS "Generate compile_commands.json" ON)
+
+set(NGIN_BASE_CLANG_GCC_TOOLCHAIN "" CACHE PATH "Clang (Linux): GCC toolchain root passed via --gcc-toolchain")
 
 if(NGIN_BASE_ALL_FEATURES)
   set(NGIN_BASE_BUILD_TESTS ON CACHE BOOL "Build tests" FORCE)
@@ -47,10 +44,15 @@ endif()
 
 function(ngin_enable_warnings tgt)
   if(NGIN_BASE_STRICT_WARNINGS)
+    get_target_property(_ngin_target_type ${tgt} TYPE)
+    set(_ngin_visibility PRIVATE)
+    if(_ngin_target_type STREQUAL "INTERFACE_LIBRARY")
+      set(_ngin_visibility INTERFACE)
+    endif()
     if(MSVC)
-      target_compile_options(${tgt} PRIVATE /W4 /permissive- /w44265 /w44263)
+      target_compile_options(${tgt} ${_ngin_visibility} /W4 /permissive- /w44265 /w44263)
     else()
-      target_compile_options(${tgt} PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow -Wdouble-promotion)
+      target_compile_options(${tgt} ${_ngin_visibility} -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow -Wdouble-promotion)
     endif()
   endif()
 endfunction()
@@ -66,7 +68,35 @@ if(NOT NGIN_BASE_BUILD_STATIC AND NOT NGIN_BASE_BUILD_SHARED)
   message(FATAL_ERROR "At least one of static or shared build options must be enabled.")
 endif()
 
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ${NGIN_BASE_EXPORT_COMPILE_COMMANDS})
+
+#-------------------------------------------------------------------------------
+# Internal build options (private to this repo build)
+#-------------------------------------------------------------------------------
+add_library(NGIN.Base.BuildOptions INTERFACE)
+add_library(NGIN::Base::BuildOptions ALIAS NGIN.Base.BuildOptions)
+
+ngin_enable_warnings(NGIN.Base.BuildOptions)
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  if(NGIN_BASE_ENABLE_ASAN)
+    target_compile_options(NGIN.Base.BuildOptions INTERFACE -fsanitize=address,undefined -fno-omit-frame-pointer)
+    target_link_options(NGIN.Base.BuildOptions INTERFACE -fsanitize=address,undefined)
+  endif()
+  if(NGIN_BASE_ENABLE_TSAN)
+    target_compile_options(NGIN.Base.BuildOptions INTERFACE -fsanitize=thread -fno-omit-frame-pointer)
+    target_link_options(NGIN.Base.BuildOptions INTERFACE -fsanitize=thread)
+  endif()
+endif()
+
+# Clang (Linux): allow selecting an explicit GCC toolchain for libstdc++/runtime.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NGIN_BASE_CLANG_GCC_TOOLCHAIN)
+  if(NOT EXISTS "${NGIN_BASE_CLANG_GCC_TOOLCHAIN}")
+    message(WARNING "NGIN_BASE_CLANG_GCC_TOOLCHAIN does not exist: ${NGIN_BASE_CLANG_GCC_TOOLCHAIN}")
+  endif()
+  target_compile_options(NGIN.Base.BuildOptions INTERFACE "--gcc-toolchain=${NGIN_BASE_CLANG_GCC_TOOLCHAIN}")
+  target_link_options(NGIN.Base.BuildOptions INTERFACE "--gcc-toolchain=${NGIN_BASE_CLANG_GCC_TOOLCHAIN}")
+endif()
 
 #-------------------------------------------------------------------------------
 # Execution backend selection (internal)
@@ -78,9 +108,9 @@ set_property(CACHE NGIN_BASE_FIBER_BACKEND PROPERTY STRINGS default ucontext win
 # Library Definition
 #-------------------------------------------------------------------------------
 set(NGIN_BASE_PLATFORM_DEFINITIONS
-  $<$<STREQUAL:$<PLATFORM_ID>,Windows>:NGIN_PLATFORM=\"Windows\">
-  $<$<STREQUAL:$<PLATFORM_ID>,Darwin>:NGIN_PLATFORM=\"macOS\">
-  $<$<STREQUAL:$<PLATFORM_ID>,Linux>:NGIN_PLATFORM=\"Linux\">
+  $<$<STREQUAL:$<PLATFORM_ID>,Windows>:NGIN_PLATFORM="Windows">
+  $<$<STREQUAL:$<PLATFORM_ID>,Darwin>:NGIN_PLATFORM="macOS">
+  $<$<STREQUAL:$<PLATFORM_ID>,Linux>:NGIN_PLATFORM="Linux">
 )
 
 if(NGIN_BASE_FIBER_BACKEND STREQUAL "ucontext")
@@ -160,6 +190,7 @@ if(NGIN_BASE_BUILD_STATIC OR NGIN_BASE_BUILD_SHARED)
   target_compile_features(NGIN.Base.Object PRIVATE cxx_std_23)
   target_include_directories(NGIN.Base.Object PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   target_compile_definitions(NGIN.Base.Object PRIVATE ${NGIN_BASE_PLATFORM_DEFINITIONS})
+  target_link_libraries(NGIN.Base.Object PRIVATE $<BUILD_INTERFACE:NGIN.Base.BuildOptions>)
 endif()
 
 if(NGIN_BASE_BUILD_SHARED AND TARGET NGIN.Base.Object)
@@ -182,6 +213,7 @@ if(NGIN_BASE_BUILD_STATIC)
       ${NGIN_BASE_PLATFORM_DEFINITIONS}
   )
   set_target_properties(NGIN.Base.Static PROPERTIES OUTPUT_NAME "NGINBase")
+  target_link_libraries(NGIN.Base.Static PRIVATE $<BUILD_INTERFACE:NGIN.Base.BuildOptions>)
   list(APPEND NGIN_BASE_EXPORT_TARGETS NGIN.Base.Static)
   add_library(NGIN::Base::Static ALIAS NGIN.Base.Static)
   set(ngin_base_primary_target NGIN.Base.Static)
@@ -210,6 +242,7 @@ if(NGIN_BASE_BUILD_SHARED)
       SOVERSION ${PROJECT_VERSION_MAJOR}
       VERSION ${PROJECT_VERSION})
   endif()
+  target_link_libraries(NGIN.Base.Shared PRIVATE $<BUILD_INTERFACE:NGIN.Base.BuildOptions>)
   list(APPEND NGIN_BASE_EXPORT_TARGETS NGIN.Base.Shared)
   add_library(NGIN::Base::Shared ALIAS NGIN.Base.Shared)
   set(ngin_base_primary_target NGIN.Base.Shared)
@@ -221,47 +254,57 @@ endif()
 
 add_library(NGIN::Base ALIAS ${ngin_base_primary_target})
 
-# Apply warnings to build targets created so far.
-if(TARGET NGIN.Base.Object)
-  ngin_enable_warnings(NGIN.Base.Object)
-endif()
-if(TARGET NGIN.Base.Static)
-  ngin_enable_warnings(NGIN.Base.Static)
-endif()
-if(TARGET NGIN.Base.Shared)
-  ngin_enable_warnings(NGIN.Base.Shared)
-endif()
-
-# Sanitizer instrumentation (applies globally for this directory scope)
-if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-  if(NGIN_BASE_ENABLE_ASAN)
-    add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
-    add_link_options(-fsanitize=address,undefined)
-  endif()
-  if(NGIN_BASE_ENABLE_TSAN)
-    add_compile_options(-fsanitize=thread -fno-omit-frame-pointer)
-    add_link_options(-fsanitize=thread)
-  endif()
-endif()
-
 # Link Time Optimization (IPO)
 if(NGIN_BASE_ENABLE_LTO)
   include(CheckIPOSupported)
   check_ipo_supported(RESULT NGIN_HAS_IPO OUTPUT NGIN_IPO_ERR)
   if(NGIN_HAS_IPO)
-    foreach(cfg IN ITEMS Release RelWithDebInfo MinSizeRel)
-      set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_${cfg} ON)
+    foreach(tgt IN ITEMS NGIN.Base.Object NGIN.Base.Static NGIN.Base.Shared)
+      if(TARGET ${tgt})
+        foreach(cfg IN ITEMS Release RelWithDebInfo MinSizeRel)
+          set_property(TARGET ${tgt} PROPERTY INTERPROCEDURAL_OPTIMIZATION_${cfg} ON)
+        endforeach()
+      endif()
     endforeach()
   else()
     message(WARNING "LTO requested but not supported: ${NGIN_IPO_ERR}")
   endif()
 endif()
 
-if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-  set(NEED_ATOMIC TRUE)
+set(_ngin_need_atomic FALSE)
+if(UNIX AND NOT APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  if(CMAKE_CROSSCOMPILING)
+    find_library(_ngin_atomic_lib atomic)
+    if(_ngin_atomic_lib)
+      set(_ngin_need_atomic TRUE)
+    endif()
+  else()
+    include(CheckCXXSourceCompiles)
+    string(CONCAT _ngin_atomic_test_source
+      "#include <cstdint>\n"
+      "int main() {\n"
+      "  alignas(16) unsigned __int128 v = 0;\n"
+      "  unsigned __int128 out = 0;\n"
+      "  __atomic_load(&v, &out, __ATOMIC_SEQ_CST);\n"
+      "  return static_cast<int>(out);\n"
+      "}\n")
+    set(_ngin_required_quiet_prev "${CMAKE_REQUIRED_QUIET}")
+    set(CMAKE_REQUIRED_QUIET TRUE)
+    check_cxx_source_compiles("${_ngin_atomic_test_source}" NGIN_BASE_ATOMIC_LINKS_WITHOUT_LIBATOMIC)
+    if(NOT NGIN_BASE_ATOMIC_LINKS_WITHOUT_LIBATOMIC)
+      set(CMAKE_REQUIRED_LIBRARIES atomic)
+      check_cxx_source_compiles("${_ngin_atomic_test_source}" NGIN_BASE_ATOMIC_LINKS_WITH_LIBATOMIC)
+      if(NGIN_BASE_ATOMIC_LINKS_WITH_LIBATOMIC)
+        set(_ngin_need_atomic TRUE)
+      endif()
+      unset(CMAKE_REQUIRED_LIBRARIES)
+    endif()
+    set(CMAKE_REQUIRED_QUIET "${_ngin_required_quiet_prev}")
+    unset(_ngin_required_quiet_prev)
+  endif()
 endif()
 
-if(NEED_ATOMIC)
+if(_ngin_need_atomic)
   if(TARGET NGIN.Base.Static)
     target_link_libraries(NGIN.Base.Static PRIVATE atomic)
   endif()
@@ -340,8 +383,6 @@ endif()
 #-------------------------------------------------------------------------------
 # Benchmarks
 #-------------------------------------------------------------------------------
-option(NGIN_BASE_BUILD_BENCHMARKS "Build NGIN.Base benchmarks" ON)
-
 if(NGIN_BASE_BUILD_BENCHMARKS)
   add_subdirectory(benchmarks)
 endif()
@@ -354,7 +395,7 @@ include(InstallRequiredSystemLibraries)
 set(CPACK_PACKAGE_NAME         "NGIN.Base")
 set(CPACK_PACKAGE_VENDOR       "NGIN Team")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
-    "NGIN.Base - A lightweight C++ header-only foundational library")
+    "NGIN.Base - A lightweight C++ foundational library")
 set(CPACK_PACKAGE_VERSION      ${PROJECT_VERSION})
 set(CPACK_PACKAGE_CONTACT      "berggrenmille+NGIN@hotmail.se")
 set(CPACK_PACKAGE_FILE_NAME    "${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}")

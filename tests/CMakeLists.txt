@@ -45,6 +45,9 @@ include(Catch)
 # ---------------------------------------------------------------------------
 add_library(ngin_base_test_config INTERFACE)
 target_link_libraries(ngin_base_test_config INTERFACE NGIN::Base)
+if(TARGET NGIN.Base.BuildOptions)
+  target_link_libraries(ngin_base_test_config INTERFACE NGIN.Base.BuildOptions)
+endif()
 target_compile_features(ngin_base_test_config INTERFACE cxx_std_23)
 
 option(NGIN_BASE_TESTS_ONE_EXE_PER_FILE "Split each test source into its own executable" ON)
