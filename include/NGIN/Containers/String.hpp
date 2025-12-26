@@ -21,7 +21,6 @@
 #include <cstring>
 #include <functional>
 #include <limits>
-#include <memory>
 #include <new>
 #include <stdexcept>
 #include <string_view>
@@ -208,7 +207,7 @@ namespace NGIN::Containers
                 for (size_type i = 0; i < count; ++i)
                     d[i] = ch;
                 d[count] = CharT(0);
-                SetSmallSize(static_cast<UInt8>(count));
+                SetSmallSize(count);
             }
             else
             {
@@ -457,7 +456,7 @@ namespace NGIN::Containers
                 SetSmall();
                 // Copy into SBO (including terminator)
                 std::memcpy(SmallData(), old, (currentSize + 1) * sizeof(CharT));
-                SetSmallSize(static_cast<UInt8>(currentSize));
+                SetSmallSize(currentSize);
                 Deallocate(old, currentCapacity);
             }
             else if (currentSize < currentCapacity)
@@ -546,7 +545,7 @@ namespace NGIN::Containers
                         std::memmove(SmallData(), src, n * sizeof(CharT));
                 }
                 SmallData()[n] = CharT(0);
-                SetSmallSize(static_cast<UInt8>(n));
+                SetSmallSize(n);
             }
             else
             {
@@ -617,8 +616,9 @@ namespace NGIN::Containers
 
 
         void Swap(ThisType& other) noexcept(
-                NGIN::Memory::AllocatorPropagationTraits<Alloc>::PropagateOnSwap ||
-                NGIN::Memory::AllocatorPropagationTraits<Alloc>::IsAlwaysEqual)
+                NGIN::Memory::AllocatorPropagationTraits<Alloc>::IsAlwaysEqual ||
+                (NGIN::Memory::AllocatorPropagationTraits<Alloc>::PropagateOnSwap &&
+                 std::is_nothrow_swappable_v<Alloc>))
         {
             using std::swap;
             if (this == &other)
@@ -790,7 +790,7 @@ namespace NGIN::Containers
         // Storage union
         Storage m_storage {};
         // Allocator instance
-        Alloc m_allocator {};
+        [[no_unique_address]] Alloc m_allocator {};
 
         // Small helpers
         UInt8 GetSmallSize() const noexcept
@@ -798,10 +798,11 @@ namespace NGIN::Containers
             assert(m_isSmall);
             return m_storage.small.size;
         }
-        void SetSmallSize(UInt8 n) noexcept
+        void SetSmallSize(size_type n) noexcept
         {
             assert(m_isSmall);
-            m_storage.small.size = n;
+            assert(n <= sbo_chars);
+            m_storage.small.size = static_cast<UInt8>(n);
         }
 
         CharT* SmallData() noexcept
@@ -815,25 +816,9 @@ namespace NGIN::Containers
             return m_storage.small.data;
         }
 
-        void SetSmall() noexcept
-        {
-            if (!m_isSmall)
-            {
-                std::destroy_at(std::addressof(m_storage.heap));
-                std::construct_at(std::addressof(m_storage.small));
-                m_isSmall = true;
-            }
-        }
+        void SetSmall() noexcept { m_isSmall = true; }
 
-        void SetHeap() noexcept
-        {
-            if (m_isSmall)
-            {
-                std::destroy_at(std::addressof(m_storage.small));
-                std::construct_at(std::addressof(m_storage.heap));
-                m_isSmall = false;
-            }
-        }
+        void SetHeap() noexcept { m_isSmall = false; }
 
         void ResetToEmptySmall() noexcept
         {
@@ -878,7 +863,7 @@ namespace NGIN::Containers
         {
             if (m_isSmall)
             {
-                SetSmallSize(static_cast<UInt8>(n));
+                SetSmallSize(n);
                 SmallData()[n] = CharT(0);
             }
             else
@@ -896,7 +881,7 @@ namespace NGIN::Containers
                 SetSmall();
                 std::memcpy(SmallData(), sv.data(), n * sizeof(CharT));
                 SmallData()[n] = CharT(0);
-                SetSmallSize(static_cast<UInt8>(n));
+                SetSmallSize(n);
             }
             else
             {
@@ -955,9 +940,12 @@ namespace NGIN::Containers
             const size_type oldSize = Size();
             const size_type newSize = oldSize + appendLen;
 
-            const CharT* oldData = Data();
-            const auto less       = std::less<const CharT*> {};
-            const bool sourceAlias = !less(src, oldData) && less(src, oldData + oldSize);
+            const CharT* oldData   = Data();
+            const CharT* srcEnd    = src + appendLen;
+            const CharT* destStart = oldData + oldSize;
+            const CharT* destEnd   = destStart + appendLen;
+            const auto   less      = std::less<const CharT*> {};
+            const bool   overlaps  = less(src, destEnd) && less(destStart, srcEnd);
 
             if (newSize > Capacity())
             {
@@ -975,17 +963,8 @@ namespace NGIN::Containers
                 else
                     std::memcpy(newPtr, m_storage.heap.ptr, oldSize * sizeof(CharT));
 
-                // append segment; if aliasing, refer to the copied region inside newPtr
-                if (sourceAlias)
-                {
-                    const size_type offset = static_cast<size_type>(src - oldData);
-                    // src now lives at newPtr + offset
-                    std::memmove(newPtr + oldSize, newPtr + offset, appendLen * sizeof(CharT));
-                }
-                else
-                {
-                    std::memcpy(newPtr + oldSize, src, appendLen * sizeof(CharT));
-                }
+                // append segment from original source (old buffer still valid here)
+                std::memcpy(newPtr + oldSize, src, appendLen * sizeof(CharT));
 
                 newPtr[newSize] = CharT(0);
 
@@ -1005,10 +984,10 @@ namespace NGIN::Containers
             {
                 // in-place append
                 CharT* dst = Data();
-                if (sourceAlias)
+                if (overlaps)
                 {
                     // Use move when ranges might overlap
-                    std::memmove(dst + oldSize, dst + (src - oldData), appendLen * sizeof(CharT));
+                    std::memmove(dst + oldSize, src, appendLen * sizeof(CharT));
                 }
                 else
                 {
