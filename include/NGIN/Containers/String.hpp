@@ -4,7 +4,7 @@
 // allocator concept integration, overlap-safe appends, and a clean memory model.
 //
 // - SBO sized in BYTES (works for CharT of any width)
-// - Single last byte in SBO stores the small size (in CHARS); null terminator is stored in-band
+// - Small representation stores a trailing size byte (in CHARS); null terminator is stored in-band
 // - No endian tricks; explicit discriminant
 // - Growth policy pluggable
 // - Uses NGIN::Memory::AllocatorConcept (e.g., SystemAllocator)
@@ -90,14 +90,39 @@ namespace NGIN::Containers
         static_assert(SBOBytes >= sizeof(CharT) + 1,
                       "SBOBytes must be large enough to store at least a CharT terminator and the size byte.");
 
+        static constexpr UIntSize SmallSizeBytes = sizeof(UInt8);
+
+        static constexpr UIntSize AlignUp(UIntSize value, UIntSize alignment) noexcept
+        {
+            return (value + alignment - 1) / alignment * alignment;
+        }
+
         // Compute usable small-buffer capacity in CHARS:
-        //  - reserve 1 byte (last) to store the small size (in chars)
+        //  - reserve 1 byte to store the small size (in chars)
         //  - remaining bytes must fit (size chars + 1 terminator char)
-        static constexpr UIntSize sbo_bytes = SBOBytes;
-        static constexpr UIntSize sbo_chars =
-                ((SBOBytes > 1) && ((SBOBytes - 1) >= sizeof(CharT)))
-                        ? (((SBOBytes - 1) / sizeof(CharT)) - 1)
-                        : 0;
+        static constexpr UIntSize ComputeSboChars() noexcept
+        {
+            if (SBOBytes <= SmallSizeBytes)
+                return 0;
+            UIntSize maxChars = (SBOBytes - SmallSizeBytes) / sizeof(CharT);
+            if (maxChars == 0)
+                return 0;
+            if (maxChars > 0)
+                --maxChars;// reserve space for terminator
+            while (true)
+            {
+                const UIntSize dataBytes   = (maxChars + 1) * sizeof(CharT);
+                const UIntSize totalBytes  = dataBytes + SmallSizeBytes;
+                const UIntSize alignedSize = AlignUp(totalBytes, alignof(CharT));
+                if (alignedSize <= SBOBytes)
+                    return maxChars;
+                if (maxChars == 0)
+                    return 0;
+                --maxChars;
+            }
+        }
+
+        static constexpr UIntSize sbo_chars = ComputeSboChars();
 
         // We store the small size in one byte (0..255). Ensure capacity fits.
         static_assert(sbo_chars <= 255,
@@ -116,8 +141,8 @@ namespace NGIN::Containers
 
             struct Small
             {
-                // Align SBO bytes to CharT to allow CharT* aliasing into the buffer
-                alignas(CharT) std::byte bytes[SBOBytes];
+                CharT data[sbo_chars + 1];// includes terminator slot
+                UInt8 size;
             };
 
             Heap  heap;
@@ -128,6 +153,9 @@ namespace NGIN::Containers
             {
             }
         };
+
+        static_assert(sizeof(typename Storage::Small) <= SBOBytes,
+                      "SBOBytes too small for Small representation.");
 
     public:
         using ThisType    = BasicString<CharT, SBOBytes, Alloc, Growth>;
@@ -200,7 +228,7 @@ namespace NGIN::Containers
             {
                 SetSmall();
                 // Copy SBO bytes (including size byte)
-                std::memcpy(m_storage.small.bytes, other.m_storage.small.bytes, SBOBytes);
+                std::memcpy(&m_storage.small, &other.m_storage.small, sizeof(m_storage.small));
             }
             else
             {
@@ -217,7 +245,7 @@ namespace NGIN::Containers
             if (other.m_isSmall)
             {
                 SetSmall();
-                std::memcpy(m_storage.small.bytes, other.m_storage.small.bytes, SBOBytes);
+                std::memcpy(&m_storage.small, &other.m_storage.small, sizeof(m_storage.small));
             }
             else
             {
@@ -258,7 +286,7 @@ namespace NGIN::Containers
             if (other.m_isSmall)
             {
                 SetSmall();
-                std::memcpy(m_storage.small.bytes, other.m_storage.small.bytes, SBOBytes);
+                std::memcpy(&m_storage.small, &other.m_storage.small, sizeof(m_storage.small));
             }
             else
             {
@@ -286,7 +314,7 @@ namespace NGIN::Containers
             if (other.m_isSmall)
             {
                 SetSmall();
-                std::memcpy(m_storage.small.bytes, other.m_storage.small.bytes, SBOBytes);
+                std::memcpy(&m_storage.small, &other.m_storage.small, sizeof(m_storage.small));
                 other.ResetToEmptySmall();
             }
             else if constexpr (NGIN::Memory::AllocatorPropagationTraits<Alloc>::PropagateOnMoveAssignment ||
@@ -504,7 +532,7 @@ namespace NGIN::Containers
             {
                 if (!m_isSmall)
                 {
-                    std::byte tmp[SBOBytes];
+                    std::byte tmp[(sbo_chars + 1) * sizeof(CharT)];
                     if (n != 0)
                         std::memcpy(tmp, src, n * sizeof(CharT));
                     DeallocateHeap();
@@ -601,10 +629,10 @@ namespace NGIN::Containers
             {
                 if (m_isSmall && other.m_isSmall)
                 {
-                    std::byte tmp[SBOBytes];
-                    std::memcpy(tmp, m_storage.small.bytes, SBOBytes);
-                    std::memcpy(m_storage.small.bytes, other.m_storage.small.bytes, SBOBytes);
-                    std::memcpy(other.m_storage.small.bytes, tmp, SBOBytes);
+                    std::byte tmp[sizeof(m_storage.small)];
+                    std::memcpy(tmp, &m_storage.small, sizeof(m_storage.small));
+                    std::memcpy(&m_storage.small, &other.m_storage.small, sizeof(m_storage.small));
+                    std::memcpy(&other.m_storage.small, tmp, sizeof(m_storage.small));
                 }
                 else if (!m_isSmall && !other.m_isSmall)
                 {
@@ -615,8 +643,8 @@ namespace NGIN::Containers
                 else if (m_isSmall)
                 {
                     // Small <-> Heap swap
-                    std::byte tmp[SBOBytes];
-                    std::memcpy(tmp, m_storage.small.bytes, SBOBytes);
+                    std::byte tmp[sizeof(m_storage.small)];
+                    std::memcpy(tmp, &m_storage.small, sizeof(m_storage.small));
 
                     CharT*          otherPtr  = other.m_storage.heap.ptr;
                     const size_type otherSize = other.m_storage.heap.size;
@@ -628,7 +656,7 @@ namespace NGIN::Containers
                     m_storage.heap.cap  = otherCap;
 
                     other.SetSmall();
-                    std::memcpy(other.m_storage.small.bytes, tmp, SBOBytes);
+                    std::memcpy(&other.m_storage.small, tmp, sizeof(m_storage.small));
                 }
                 else
                 {
@@ -765,28 +793,26 @@ namespace NGIN::Containers
         Alloc m_allocator {};
 
         // Small helpers
-        static constexpr UIntSize SboSizeByteIndex() noexcept { return SBOBytes - 1; }
-
         UInt8 GetSmallSize() const noexcept
         {
             assert(m_isSmall);
-            return static_cast<UInt8>(m_storage.small.bytes[SboSizeByteIndex()]);
+            return m_storage.small.size;
         }
         void SetSmallSize(UInt8 n) noexcept
         {
             assert(m_isSmall);
-            m_storage.small.bytes[SboSizeByteIndex()] = static_cast<std::byte>(n);
+            m_storage.small.size = n;
         }
 
         CharT* SmallData() noexcept
         {
             assert(m_isSmall);
-            return std::launder(reinterpret_cast<CharT*>(m_storage.small.bytes));
+            return m_storage.small.data;
         }
         const CharT* SmallData() const noexcept
         {
             assert(m_isSmall);
-            return std::launder(reinterpret_cast<const CharT*>(m_storage.small.bytes));
+            return m_storage.small.data;
         }
 
         void SetSmall() noexcept
