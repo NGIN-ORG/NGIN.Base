@@ -19,7 +19,10 @@
 #include <cassert>
 #include <cstddef>
 #include <cstring>
+#include <functional>
 #include <limits>
+#include <memory>
+#include <new>
 #include <stdexcept>
 #include <string_view>
 #include <type_traits>
@@ -56,7 +59,7 @@ namespace NGIN::Containers
             UIntSize newCap;
             if (oldCap < smallCapThreshold)
             {
-                newCap = std::max(NextPow2(required), required);
+                newCap = NextPow2(required);
             }
             else
             {
@@ -78,6 +81,9 @@ namespace NGIN::Containers
              UIntSize SBOBytes,
              class Alloc  = NGIN::Memory::SystemAllocator,
              class Growth = DefaultGrowthPolicy>
+    /// Small-string-optimized, allocator-aware string.
+    /// Note: non-const operations may invalidate pointers/references; not thread-safe.
+    /// Allocation uses alignof(CharT); Deallocate receives matching size/alignment.
     class BasicString
     {
         static_assert(std::is_trivial_v<CharT>, "BasicString requires a trivial character type.");
@@ -117,7 +123,10 @@ namespace NGIN::Containers
             Heap  heap;
             Small small;
 
-            Storage() noexcept {}// trivial
+            Storage() noexcept
+                : small {}
+            {
+            }
         };
 
     public:
@@ -134,23 +143,13 @@ namespace NGIN::Containers
         BasicString() noexcept(std::is_nothrow_default_constructible_v<Alloc>)
             : m_allocator()
         {
-            SetSmall();
-            SetSmallSize(0);
-            if constexpr (sbo_chars > 0)
-            {
-                SmallData()[0] = CharT(0);
-            }
+            ResetToEmptySmall();
         }
 
         explicit BasicString(const Alloc& alloc) noexcept
             : m_allocator(alloc)
         {
-            SetSmall();
-            SetSmallSize(0);
-            if constexpr (sbo_chars > 0)
-            {
-                SmallData()[0] = CharT(0);
-            }
+            ResetToEmptySmall();
         }
 
         BasicString(const CharT* cstr, const Alloc& alloc = Alloc())
@@ -158,10 +157,7 @@ namespace NGIN::Containers
         {
             if (!cstr)
             {
-                SetSmall();
-                SetSmallSize(0);
-                if constexpr (sbo_chars > 0)
-                    SmallData()[0] = CharT(0);
+                ResetToEmptySmall();
                 return;
             }
             const size_type len = traits_type::length(cstr);
@@ -188,7 +184,7 @@ namespace NGIN::Containers
             }
             else
             {
-                const size_type cap = Growth::Grow(0, count);
+                const size_type cap = CheckedGrow(0, count);
                 AllocateHeap(cap);
                 for (size_type i = 0; i < count; ++i)
                     m_storage.heap.ptr[i] = ch;
@@ -225,15 +221,12 @@ namespace NGIN::Containers
             }
             else
             {
-                m_isSmall           = false;
+                SetHeap();
                 m_storage.heap.ptr  = other.m_storage.heap.ptr;
                 m_storage.heap.size = other.m_storage.heap.size;
                 m_storage.heap.cap  = other.m_storage.heap.cap;
 
-                other.SetSmall();
-                other.SetSmallSize(0);
-                if constexpr (sbo_chars > 0)
-                    other.SmallData()[0] = CharT(0);
+                other.ResetToEmptySmall();
             }
         }
 
@@ -294,22 +287,17 @@ namespace NGIN::Containers
             {
                 SetSmall();
                 std::memcpy(m_storage.small.bytes, other.m_storage.small.bytes, SBOBytes);
-                other.SetSize(0);
-                if constexpr (sbo_chars > 0)
-                    other.SmallData()[0] = CharT(0);
+                other.ResetToEmptySmall();
             }
             else if constexpr (NGIN::Memory::AllocatorPropagationTraits<Alloc>::PropagateOnMoveAssignment ||
                                NGIN::Memory::AllocatorPropagationTraits<Alloc>::IsAlwaysEqual)
             {
-                m_isSmall           = false;
+                SetHeap();
                 m_storage.heap.ptr  = other.m_storage.heap.ptr;
                 m_storage.heap.size = other.m_storage.heap.size;
                 m_storage.heap.cap  = other.m_storage.heap.cap;
 
-                other.SetSmall();
-                other.SetSize(0);
-                if constexpr (sbo_chars > 0)
-                    other.SmallData()[0] = CharT(0);
+                other.ResetToEmptySmall();
             }
             else
             {
@@ -344,6 +332,7 @@ namespace NGIN::Containers
 
         const CharT* c_str() const noexcept { return Data(); }
         const CharT* CStr() const noexcept { return c_str(); }// compatibility alias
+        const Alloc& GetAllocator() const noexcept { return m_allocator; }
 
         const CharT* Data() const noexcept
         {
@@ -437,9 +426,9 @@ namespace NGIN::Containers
             {
                 // move back to small
                 CharT* old = m_storage.heap.ptr;
+                SetSmall();
                 // Copy into SBO (including terminator)
                 std::memcpy(SmallData(), old, (currentSize + 1) * sizeof(CharT));
-                SetSmall();
                 SetSmallSize(static_cast<UInt8>(currentSize));
                 Deallocate(old, currentCapacity);
             }
@@ -476,7 +465,7 @@ namespace NGIN::Containers
             const size_type needed = n;
             if (needed > Capacity())
             {
-                const size_type newCap = Growth::Grow(Capacity(), needed);
+                const size_type newCap = CheckedGrow(Capacity(), needed);
                 ReallocateTo(newCap);
             }
 
@@ -491,7 +480,7 @@ namespace NGIN::Containers
             const size_type sz = Size();
             if (sz + 1 > Capacity())
             {
-                const size_type newCap = Growth::Grow(Capacity(), sz + 1);
+                const size_type newCap = CheckedGrow(Capacity(), sz + 1);
                 ReallocateTo(newCap);
             }
             CharT* d = Data();
@@ -509,16 +498,25 @@ namespace NGIN::Containers
 
         void Assign(view_type sv)
         {
-            const size_type n = sv.size();
+            const size_type n   = sv.size();
+            const CharT*    src = sv.data();
             if (n <= sbo_chars)
             {
                 if (!m_isSmall)
                 {
-                    if (m_storage.heap.ptr)
-                        DeallocateHeap();
+                    std::byte tmp[SBOBytes];
+                    if (n != 0)
+                        std::memcpy(tmp, src, n * sizeof(CharT));
+                    DeallocateHeap();
                     SetSmall();
+                    if (n != 0)
+                        std::memcpy(SmallData(), tmp, n * sizeof(CharT));
                 }
-                traits_type::copy(SmallData(), sv.data(), n);
+                else
+                {
+                    if (n != 0)
+                        std::memmove(SmallData(), src, n * sizeof(CharT));
+                }
                 SmallData()[n] = CharT(0);
                 SetSmallSize(static_cast<UInt8>(n));
             }
@@ -526,16 +524,39 @@ namespace NGIN::Containers
             {
                 if (m_isSmall)
                 {
-                    AllocateHeap(Growth::Grow(0, n));
+                    AllocateHeap(CheckedGrow(0, n));
+                    if (n != 0)
+                        std::memcpy(m_storage.heap.ptr, src, n * sizeof(CharT));
+                    m_storage.heap.ptr[n] = CharT(0);
+                    m_storage.heap.size   = n;
+                    return;
                 }
                 else if (n > m_storage.heap.cap)
                 {
-                    ReallocateTo(Growth::Grow(m_storage.heap.cap, n));
+                    const size_type newCap = CheckedGrow(m_storage.heap.cap, n);
+                    const UIntSize  bytes  = (newCap + 1) * sizeof(CharT);
+                    void*           p      = m_allocator.Allocate(bytes, alignof(CharT));
+                    if (!p)
+                        throw std::bad_alloc {};
+                    CharT* newPtr = reinterpret_cast<CharT*>(p);
+                    if (n != 0)
+                        std::memcpy(newPtr, src, n * sizeof(CharT));
+                    newPtr[n] = CharT(0);
+
+                    CharT*          oldPtr = m_storage.heap.ptr;
+                    const size_type oldCap = m_storage.heap.cap;
+
+                    m_storage.heap.ptr  = newPtr;
+                    m_storage.heap.cap  = newCap;
+                    m_storage.heap.size = n;
+
+                    Deallocate(oldPtr, oldCap);
+                    return;
                 }
-                traits_type::copy(m_storage.heap.ptr, sv.data(), n);
+                if (n != 0)
+                    std::memmove(m_storage.heap.ptr, src, n * sizeof(CharT));
                 m_storage.heap.ptr[n] = CharT(0);
                 m_storage.heap.size   = n;
-                m_isSmall             = false;
             }
         }
 
@@ -567,52 +588,65 @@ namespace NGIN::Containers
         }
 
 
-        void Swap(ThisType& other) noexcept
+        void Swap(ThisType& other) noexcept(
+                NGIN::Memory::AllocatorPropagationTraits<Alloc>::PropagateOnSwap ||
+                NGIN::Memory::AllocatorPropagationTraits<Alloc>::IsAlwaysEqual)
         {
             using std::swap;
             if (this == &other)
                 return;
 
-            if (m_isSmall && other.m_isSmall)
+            if constexpr (NGIN::Memory::AllocatorPropagationTraits<Alloc>::PropagateOnSwap ||
+                          NGIN::Memory::AllocatorPropagationTraits<Alloc>::IsAlwaysEqual)
             {
-                std::byte tmp[SBOBytes];
-                std::memcpy(tmp, m_storage.small.bytes, SBOBytes);
-                std::memcpy(m_storage.small.bytes, other.m_storage.small.bytes, SBOBytes);
-                std::memcpy(other.m_storage.small.bytes, tmp, SBOBytes);
-            }
-            else if (!m_isSmall && !other.m_isSmall)
-            {
-                swap(m_storage.heap.ptr, other.m_storage.heap.ptr);
-                swap(m_storage.heap.size, other.m_storage.heap.size);
-                swap(m_storage.heap.cap, other.m_storage.heap.cap);
-            }
-            else
-            {
-                // Small <-> Heap swap
-                if (m_isSmall)
+                if (m_isSmall && other.m_isSmall)
                 {
-                    // this small, other heap
-                    Storage tmpSmall {};
-                    std::memcpy(tmpSmall.small.bytes, m_storage.small.bytes, SBOBytes);
+                    std::byte tmp[SBOBytes];
+                    std::memcpy(tmp, m_storage.small.bytes, SBOBytes);
+                    std::memcpy(m_storage.small.bytes, other.m_storage.small.bytes, SBOBytes);
+                    std::memcpy(other.m_storage.small.bytes, tmp, SBOBytes);
+                }
+                else if (!m_isSmall && !other.m_isSmall)
+                {
+                    swap(m_storage.heap.ptr, other.m_storage.heap.ptr);
+                    swap(m_storage.heap.size, other.m_storage.heap.size);
+                    swap(m_storage.heap.cap, other.m_storage.heap.cap);
+                }
+                else if (m_isSmall)
+                {
+                    // Small <-> Heap swap
+                    std::byte tmp[SBOBytes];
+                    std::memcpy(tmp, m_storage.small.bytes, SBOBytes);
 
-                    // move other's heap into this
-                    m_storage.heap.ptr  = other.m_storage.heap.ptr;
-                    m_storage.heap.size = other.m_storage.heap.size;
-                    m_storage.heap.cap  = other.m_storage.heap.cap;
+                    CharT*          otherPtr  = other.m_storage.heap.ptr;
+                    const size_type otherSize = other.m_storage.heap.size;
+                    const size_type otherCap  = other.m_storage.heap.cap;
 
-                    // move tmp small into other
-                    std::memcpy(other.m_storage.small.bytes, tmpSmall.small.bytes, SBOBytes);
+                    SetHeap();
+                    m_storage.heap.ptr  = otherPtr;
+                    m_storage.heap.size = otherSize;
+                    m_storage.heap.cap  = otherCap;
 
-                    std::swap(m_isSmall, other.m_isSmall);
+                    other.SetSmall();
+                    std::memcpy(other.m_storage.small.bytes, tmp, SBOBytes);
                 }
                 else
                 {
                     other.Swap(*this);
+                    return;
+                }
+
+                if constexpr (NGIN::Memory::AllocatorPropagationTraits<Alloc>::PropagateOnSwap)
+                {
+                    std::swap(m_allocator, other.m_allocator);
                 }
             }
-
-            // swap allocators as well (engine allocators often store routing)
-            std::swap(m_allocator, other.m_allocator);
+            else
+            {
+                ThisType tmp(view_type {Data(), Size()}, m_allocator);
+                Assign(view_type {other.Data(), other.Size()});
+                other.Assign(view_type {tmp.Data(), tmp.Size()});
+            }
         }
 
         //--------------------------------------------------------------------------
@@ -665,6 +699,18 @@ namespace NGIN::Containers
             const size_type N = hay.size();
             const size_type M = s.size();
 
+            if constexpr (std::is_same_v<CharT, char>)
+            {
+                if (M == 1)
+                {
+                    const void* hit =
+                            std::memchr(h + pos, n[0], static_cast<size_t>(N - pos));
+                    if (hit)
+                        return static_cast<size_type>(static_cast<const char*>(hit) - h);
+                    return view_type::npos;
+                }
+            }
+
             for (size_type i = pos; i <= N - M; ++i)
             {
                 if (traits_type::compare(h + i, n, M) == 0)
@@ -688,6 +734,28 @@ namespace NGIN::Containers
         //--------------------------------------------------------------------------
 
         static constexpr view_type empty_sv_() noexcept { return view_type {}; }
+        static constexpr size_type MaxCapacity() noexcept
+        {
+            return (std::numeric_limits<size_type>::max() / sizeof(CharT)) - 1;
+        }
+
+        static void ValidateCapacity(size_type cap)
+        {
+            if (cap > MaxCapacity())
+                throw std::length_error("BasicString capacity overflow");
+        }
+
+        static size_type CheckedGrow(size_type oldCap, size_type required)
+        {
+            if (required > MaxCapacity())
+                throw std::length_error("BasicString capacity overflow");
+            size_type grown = Growth::Grow(oldCap, required);
+            if (grown < required)
+                grown = required;
+            if (grown > MaxCapacity())
+                grown = MaxCapacity();
+            return grown;
+        }
 
         // Discriminant
         bool m_isSmall {true};
@@ -701,32 +769,63 @@ namespace NGIN::Containers
 
         UInt8 GetSmallSize() const noexcept
         {
+            assert(m_isSmall);
             return static_cast<UInt8>(m_storage.small.bytes[SboSizeByteIndex()]);
         }
         void SetSmallSize(UInt8 n) noexcept
         {
+            assert(m_isSmall);
             m_storage.small.bytes[SboSizeByteIndex()] = static_cast<std::byte>(n);
         }
 
         CharT* SmallData() noexcept
         {
-            return reinterpret_cast<CharT*>(m_storage.small.bytes);
+            assert(m_isSmall);
+            return std::launder(reinterpret_cast<CharT*>(m_storage.small.bytes));
         }
         const CharT* SmallData() const noexcept
         {
-            return reinterpret_cast<const CharT*>(m_storage.small.bytes);
+            assert(m_isSmall);
+            return std::launder(reinterpret_cast<const CharT*>(m_storage.small.bytes));
         }
 
-        void SetSmall() noexcept { m_isSmall = true; }
+        void SetSmall() noexcept
+        {
+            if (!m_isSmall)
+            {
+                std::destroy_at(std::addressof(m_storage.heap));
+                std::construct_at(std::addressof(m_storage.small));
+                m_isSmall = true;
+            }
+        }
+
+        void SetHeap() noexcept
+        {
+            if (m_isSmall)
+            {
+                std::destroy_at(std::addressof(m_storage.small));
+                std::construct_at(std::addressof(m_storage.heap));
+                m_isSmall = false;
+            }
+        }
+
+        void ResetToEmptySmall() noexcept
+        {
+            SetSmall();
+            SetSmallSize(0);
+            if constexpr (sbo_chars > 0)
+                SmallData()[0] = CharT(0);
+        }
 
         // Heap allocation helpers
         void AllocateHeap(size_type capacity)
         {
-            m_isSmall            = false;
+            ValidateCapacity(capacity);
             const UIntSize bytes = (capacity + 1) * sizeof(CharT);
             void*          p     = m_allocator.Allocate(bytes, alignof(CharT));
             if (!p)
                 throw std::bad_alloc {};
+            SetHeap();
             m_storage.heap.ptr    = reinterpret_cast<CharT*>(p);
             m_storage.heap.cap    = capacity;
             m_storage.heap.size   = 0;
@@ -769,15 +868,15 @@ namespace NGIN::Containers
             if (n <= sbo_chars)
             {
                 SetSmall();
-                traits_type::copy(SmallData(), sv.data(), n);
+                std::memcpy(SmallData(), sv.data(), n * sizeof(CharT));
                 SmallData()[n] = CharT(0);
                 SetSmallSize(static_cast<UInt8>(n));
             }
             else
             {
-                const size_type cap = Growth::Grow(0, n);
+                const size_type cap = CheckedGrow(0, n);
                 AllocateHeap(cap);
-                traits_type::copy(m_storage.heap.ptr, sv.data(), n);
+                std::memcpy(m_storage.heap.ptr, sv.data(), n * sizeof(CharT));
                 m_storage.heap.ptr[n] = CharT(0);
                 m_storage.heap.size   = n;
             }
@@ -786,6 +885,7 @@ namespace NGIN::Containers
         // Reallocate using growth policy (strong guarantee)
         void ReallocateTo(size_type newCap)
         {
+            ValidateCapacity(newCap);
             // allocate new
             const UIntSize bytes = (newCap + 1) * sizeof(CharT);
             void*          p     = m_allocator.Allocate(bytes, alignof(CharT));
@@ -806,7 +906,7 @@ namespace NGIN::Containers
                 Deallocate(m_storage.heap.ptr, m_storage.heap.cap);
 
             // switch to heap with new buffer
-            m_isSmall           = false;
+            SetHeap();
             m_storage.heap.ptr  = newPtr;
             m_storage.heap.cap  = newCap;
             m_storage.heap.size = oldSize;
@@ -830,13 +930,13 @@ namespace NGIN::Containers
             const size_type newSize = oldSize + appendLen;
 
             const CharT* oldData = Data();
-            const bool   sourceAlias =
-                    (src >= oldData) && (src < oldData + oldSize);
+            const auto less       = std::less<const CharT*> {};
+            const bool sourceAlias = !less(src, oldData) && less(src, oldData + oldSize);
 
             if (newSize > Capacity())
             {
                 // allocate new first
-                const size_type newCap = Growth::Grow(Capacity(), newSize);
+                const size_type newCap = CheckedGrow(Capacity(), newSize);
                 const UIntSize  bytes  = (newCap + 1) * sizeof(CharT);
                 void*           p      = m_allocator.Allocate(bytes, alignof(CharT));
                 if (!p)
@@ -854,11 +954,11 @@ namespace NGIN::Containers
                 {
                     const size_type offset = static_cast<size_type>(src - oldData);
                     // src now lives at newPtr + offset
-                    traits_type::move(newPtr + oldSize, newPtr + offset, appendLen);
+                    std::memmove(newPtr + oldSize, newPtr + offset, appendLen * sizeof(CharT));
                 }
                 else
                 {
-                    traits_type::copy(newPtr + oldSize, src, appendLen);
+                    std::memcpy(newPtr + oldSize, src, appendLen * sizeof(CharT));
                 }
 
                 newPtr[newSize] = CharT(0);
@@ -870,7 +970,7 @@ namespace NGIN::Containers
                 }
 
                 // switch to heap new buffer
-                m_isSmall           = false;
+                SetHeap();
                 m_storage.heap.ptr  = newPtr;
                 m_storage.heap.size = newSize;
                 m_storage.heap.cap  = newCap;
@@ -882,11 +982,11 @@ namespace NGIN::Containers
                 if (sourceAlias)
                 {
                     // Use move when ranges might overlap
-                    traits_type::move(dst + oldSize, dst + (src - oldData), appendLen);
+                    std::memmove(dst + oldSize, dst + (src - oldData), appendLen * sizeof(CharT));
                 }
                 else
                 {
-                    traits_type::copy(dst + oldSize, src, appendLen);
+                    std::memcpy(dst + oldSize, src, appendLen * sizeof(CharT));
                 }
                 SetSize(newSize);
             }
@@ -912,7 +1012,7 @@ namespace NGIN::Containers
     operator+(std::basic_string_view<CharT>                      a,
               const BasicString<CharT, SBOBytes, Alloc, Growth>& b)
     {
-        BasicString<CharT, SBOBytes, Alloc, Growth> r(a, b.get_allocator());
+        BasicString<CharT, SBOBytes, Alloc, Growth> r(a, b.GetAllocator());
         r += b;
         return r;
     }
@@ -925,21 +1025,6 @@ namespace NGIN::Containers
         BasicString<CharT, SBOBytes, Alloc, Growth> r(a);
         r += b;
         return r;
-    }
-
-    //--------------------------------------------------------------------------
-    // Access to allocator (optional helper)
-    //--------------------------------------------------------------------------
-
-    template<class CharT, UIntSize SBOBytes, class Alloc, class Growth>
-    inline const Alloc& get_allocator(const BasicString<CharT, SBOBytes, Alloc, Growth>& s) noexcept
-    {
-        // friend access not strictly necessary; could expose member if preferred
-        struct Expose : BasicString<CharT, SBOBytes, Alloc, Growth>
-        {
-            using BasicString<CharT, SBOBytes, Alloc, Growth>::m_allocator;
-        };
-        return static_cast<const Expose&>(s).m_allocator;
     }
 
     //--------------------------------------------------------------------------
