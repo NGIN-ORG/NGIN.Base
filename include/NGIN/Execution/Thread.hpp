@@ -21,35 +21,8 @@
 #include <NGIN/Utilities/Callable.hpp>
 
 #if defined(_WIN32)
-extern "C"
-{
-    __declspec(dllimport) void* __stdcall GetCurrentThread();
-    __declspec(dllimport) int __stdcall CloseHandle(void* hObject);
-    __declspec(dllimport) unsigned long __stdcall WaitForSingleObject(void* hHandle, unsigned long dwMilliseconds);
-
-    __declspec(dllimport) void* __cdecl _beginthreadex(
-            void* security,
-            unsigned stackSize,
-            unsigned(__stdcall* startAddress)(void*),
-            void* argList,
-            unsigned initFlag,
-            unsigned* threadAddr);
-
-    __declspec(dllimport) unsigned long __stdcall GetCurrentThreadId();
-    __declspec(dllimport) int __stdcall SwitchToThread();
-
-    __declspec(dllimport) long __stdcall SetThreadDescription(void* hThread, const wchar_t* lpThreadDescription);
-    __declspec(dllimport) int __stdcall MultiByteToWideChar(
-            unsigned int codePage,
-            unsigned long dwFlags,
-            const char* lpMultiByteStr,
-            int cbMultiByte,
-            wchar_t* lpWideCharStr,
-            int cchWideChar);
-
-    __declspec(dllimport) std::uintptr_t __stdcall SetThreadAffinityMask(void* hThread, std::uintptr_t dwThreadAffinityMask);
-    __declspec(dllimport) int __stdcall SetThreadPriority(void* hThread, int nPriority);
-}
+#include <Windows.h>
+#include <process.h>
 #else
 #include <pthread.h>
 #include <sched.h>
@@ -157,10 +130,9 @@ namespace NGIN::Execution
             }
 
 #if defined(_WIN32)
-            constexpr unsigned long INFINITE = 0xFFFFFFFFul;
             (void) ::WaitForSingleObject(m_handle, INFINITE);
             (void) ::CloseHandle(m_handle);
-            m_handle   = nullptr;
+            m_handle = nullptr;
             m_threadId.store(0, std::memory_order_release);
             m_joinable = false;
 #else
@@ -179,7 +151,7 @@ namespace NGIN::Execution
 
 #if defined(_WIN32)
             (void) ::CloseHandle(m_handle);
-            m_handle   = nullptr;
+            m_handle = nullptr;
             m_threadId.store(0, std::memory_order_release);
             m_joinable = false;
 #else
@@ -204,7 +176,7 @@ namespace NGIN::Execution
 
 #if !defined(_WIN32)
             // Fallback only; prefer the OS id captured inside the thread proc.
-            ThreadId out = 0;
+            ThreadId   out   = 0;
             const auto bytes = std::min<std::size_t>(sizeof(out), sizeof(m_thread));
             std::memcpy(&out, &m_thread, bytes);
             return out;
@@ -310,9 +282,8 @@ namespace NGIN::Execution
         static bool Utf8ToWide(std::string_view utf8, std::array<wchar_t, 64>& out) noexcept
         {
 #if defined(_WIN32)
-            constexpr unsigned int  CP_UTF8 = 65001u;
-            constexpr unsigned long Flags   = 0ul;
-            const auto              srcLen  = static_cast<int>(std::min<std::size_t>(utf8.size(), out.size() - 1));
+            constexpr unsigned long Flags  = 0ul;
+            const auto              srcLen = static_cast<int>(std::min<std::size_t>(utf8.size(), out.size() - 1));
             const int               written =
                     ::MultiByteToWideChar(CP_UTF8, Flags, utf8.data(), srcLen, out.data(), static_cast<int>(out.size() - 1));
             if (written <= 0)
@@ -411,25 +382,24 @@ namespace NGIN::Execution
 
         void StartImpl(NGIN::Utilities::Callable<void()> entry)
         {
-            auto* ctx          = new StartContext();
-            ctx->entry         = std::move(entry);
-            ctx->name          = m_options.name;
-            ctx->affinityMask  = m_options.affinityMask;
-            ctx->priority      = m_options.priority;
-            ctx->outThreadId   = &m_threadId;
+            auto* ctx         = new StartContext();
+            ctx->entry        = std::move(entry);
+            ctx->name         = m_options.name;
+            ctx->affinityMask = m_options.affinityMask;
+            ctx->priority     = m_options.priority;
+            ctx->outThreadId  = &m_threadId;
             m_threadId.store(0, std::memory_order_release);
 
 #if defined(_WIN32)
-            unsigned threadId = 0;
-            const auto stackSize = static_cast<unsigned>(m_options.stackSize);
-            void*      handle =
-                    ::_beginthreadex(nullptr, stackSize, &ThreadProc, ctx, 0u, &threadId);
-            if (!handle)
+            unsigned        threadId     = 0;
+            const auto      stackSize    = static_cast<unsigned>(m_options.stackSize);
+            const uintptr_t threadHandle = ::_beginthreadex(nullptr, stackSize, &ThreadProc, ctx, 0u, &threadId);
+            if (threadHandle == 0)
             {
                 delete ctx;
                 std::terminate();
             }
-            m_handle   = handle;
+            m_handle = reinterpret_cast<void*>(threadHandle);
             m_threadId.store(static_cast<ThreadId>(threadId), std::memory_order_release);
             m_joinable = true;
 #else
@@ -453,15 +423,15 @@ namespace NGIN::Execution
 
         void MoveFrom(Thread&& other) noexcept
         {
-            m_options  = other.m_options;
-            m_joinable = other.m_joinable;
+            m_options        = other.m_options;
+            m_joinable       = other.m_joinable;
             other.m_joinable = false;
 
 #if defined(_WIN32)
-            m_handle         = other.m_handle;
-            other.m_handle   = nullptr;
+            m_handle       = other.m_handle;
+            other.m_handle = nullptr;
 #else
-            m_thread = other.m_thread;
+            m_thread       = other.m_thread;
             other.m_thread = {};
 #endif
             m_threadId.store(other.m_threadId.load(std::memory_order_acquire), std::memory_order_release);
@@ -478,18 +448,23 @@ namespace NGIN::Execution
 
             switch (m_options.onDestruct)
             {
-                case OnDestruct::Join: Join(); return;
-                case OnDestruct::Detach: Detach(); return;
-                default: std::terminate();
+                case OnDestruct::Join:
+                    Join();
+                    return;
+                case OnDestruct::Detach:
+                    Detach();
+                    return;
+                default:
+                    std::terminate();
             }
         }
 
-        Options m_options {};
-        bool    m_joinable {false};
+        Options               m_options {};
+        bool                  m_joinable {false};
         std::atomic<ThreadId> m_threadId {0};
 
 #if defined(_WIN32)
-        void*    m_handle {nullptr};
+        void* m_handle {nullptr};
 #else
         pthread_t m_thread {};
 #endif
@@ -530,14 +505,14 @@ namespace NGIN::Execution
             m_thread.Start(std::move(entry), options);
         }
 
-        void Join() noexcept { m_thread.Join(); }
-        void Detach() noexcept { m_thread.Detach(); }
+        void               Join() noexcept { m_thread.Join(); }
+        void               Detach() noexcept { m_thread.Detach(); }
         [[nodiscard]] bool IsJoinable() const noexcept { return m_thread.IsJoinable(); }
 
         [[nodiscard]] Thread::ThreadId GetId() const noexcept { return m_thread.GetId(); }
-        [[nodiscard]] bool SetName(ThreadName name) noexcept { return m_thread.SetName(name); }
-        [[nodiscard]] bool SetAffinity(UInt64 mask) noexcept { return m_thread.SetAffinity(mask); }
-        [[nodiscard]] bool SetPriority(int priority) noexcept { return m_thread.SetPriority(priority); }
+        [[nodiscard]] bool             SetName(ThreadName name) noexcept { return m_thread.SetName(name); }
+        [[nodiscard]] bool             SetAffinity(UInt64 mask) noexcept { return m_thread.SetAffinity(mask); }
+        [[nodiscard]] bool             SetPriority(int priority) noexcept { return m_thread.SetPriority(priority); }
 
         [[nodiscard]] Thread::NativeHandle NativeHandleValue() noexcept { return m_thread.NativeHandleValue(); }
 

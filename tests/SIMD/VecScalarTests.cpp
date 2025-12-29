@@ -38,8 +38,11 @@ namespace
 
     [[nodiscard]] constexpr auto RelativeError(float approx, float reference, float floor = 1e-6F) noexcept -> float
     {
-        const auto denom = std::max(std::abs(reference), floor);
-        return std::abs((approx - reference) / denom);
+        const auto absf = [](float x) constexpr noexcept { return x < 0.0F ? -x : x; };
+        const auto maxf = [](float a, float b) constexpr noexcept { return a < b ? b : a; };
+
+        const float denom = maxf(absf(reference), floor);
+        return absf((approx - reference) / denom);
     }
 
     template<class Backend, std::size_t Count>

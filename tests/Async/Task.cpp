@@ -71,7 +71,7 @@ namespace
 
     NGIN::Async::Task<void> CancelledYieldTask(NGIN::Async::TaskContext& ctx)
     {
-        co_await ctx.Yield();
+        co_await ctx.YieldNow();
         co_return;
     }
 
@@ -89,13 +89,13 @@ namespace
 
     NGIN::Async::Task<int> AddAfterYield(NGIN::Async::TaskContext& ctx, int a, int b)
     {
-        co_await ctx.Yield();
+        co_await ctx.YieldNow();
         co_return a + b;
     }
 
     NGIN::Async::Task<int> ThrowAfterYield(NGIN::Async::TaskContext& ctx)
     {
-        co_await ctx.Yield();
+        co_await ctx.YieldNow();
         throw std::runtime_error("boom");
     }
 

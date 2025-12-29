@@ -123,7 +123,7 @@ namespace NGIN::Async
             }
         }
 
-        auto Yield() const noexcept
+        auto YieldNow() const noexcept
         {
             struct Awaiter
             {

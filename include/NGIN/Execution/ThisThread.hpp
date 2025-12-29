@@ -16,23 +16,7 @@
 #include <string_view>
 
 #if defined(_WIN32)
-extern "C"
-{
-    __declspec(dllimport) unsigned long __stdcall GetCurrentThreadId();
-    __declspec(dllimport) void* __stdcall GetCurrentThread();
-    __declspec(dllimport) unsigned long __stdcall GetActiveProcessorCount(unsigned short groupNumber);
-    __declspec(dllimport) std::uintptr_t __stdcall SetThreadAffinityMask(void* hThread, std::uintptr_t dwThreadAffinityMask);
-    __declspec(dllimport) int __stdcall SetThreadPriority(void* hThread, int nPriority);
-    __declspec(dllimport) long __stdcall SetThreadDescription(void* hThread, const wchar_t* lpThreadDescription);
-    __declspec(dllimport) int __stdcall MultiByteToWideChar(
-            unsigned int codePage,
-            unsigned long dwFlags,
-            const char* lpMultiByteStr,
-            int cbMultiByte,
-            wchar_t* lpWideCharStr,
-            int cchWideChar);
-    __declspec(dllimport) int __stdcall SwitchToThread();
-}
+#include <Windows.h>
 #elif defined(__linux__)
 #include <sched.h>
 #include <pthread.h>
@@ -56,8 +40,7 @@ namespace NGIN::Execution::ThisThread
     [[nodiscard]] inline std::uint32_t HardwareConcurrency() noexcept
     {
 #if defined(_WIN32)
-        constexpr unsigned short ALL_PROCESSOR_GROUPS = 0xFFFFu;
-        const auto              count                = ::GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+        const auto count = ::GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
         return count == 0 ? 1u : static_cast<std::uint32_t>(count);
 #elif defined(__linux__) || defined(__unix__) || defined(__APPLE__)
         const auto v = ::sysconf(_SC_NPROCESSORS_ONLN);
@@ -82,7 +65,7 @@ namespace NGIN::Execution::ThisThread
         (void) ::pthread_threadid_np(nullptr, &tid);
         return static_cast<ThreadId>(tid);
 #else
-        ThreadId out = 0;
+        ThreadId   out   = 0;
         const auto self  = ::pthread_self();
         const auto bytes = std::min<std::size_t>(sizeof(out), sizeof(self));
         std::memcpy(&out, &self, bytes);
@@ -130,8 +113,7 @@ namespace NGIN::Execution::ThisThread
         }
 
 #if defined(_WIN32)
-        constexpr unsigned int  CP_UTF8 = 65001u;
-        constexpr unsigned long Flags   = 0ul;
+        constexpr unsigned long Flags = 0ul;
         std::array<wchar_t, 64> wide {};
         const auto              srcLen = static_cast<int>(std::min<std::size_t>(name.size(), 63));
 

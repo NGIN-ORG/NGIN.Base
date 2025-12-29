@@ -40,6 +40,14 @@ if(Catch2_DIR)
 endif()
 include(Catch)
 
+if(TARGET Catch2)
+  target_compile_features(Catch2 PRIVATE cxx_std_17)
+endif()
+if(TARGET Catch2WithMain)
+  target_compile_features(Catch2WithMain PRIVATE cxx_std_17)
+endif()
+
+
 # ---------------------------------------------------------------------------
 # Common test config / options
 # ---------------------------------------------------------------------------

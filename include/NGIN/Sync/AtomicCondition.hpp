@@ -14,6 +14,7 @@
 
 #if defined(_WIN32)
 #include <Windows.h>
+#include <synchapi.h>
 #elif defined(__linux__)
 #include <errno.h>
 #include <linux/futex.h>

@@ -105,7 +105,7 @@ namespace
 
     NGIN::Async::Task<int> MultiplyAfterYield(NGIN::Async::TaskContext& ctx, int value, int factor)
     {
-        co_await ctx.Yield();
+        co_await ctx.YieldNow();
         co_return value * factor;
     }
 

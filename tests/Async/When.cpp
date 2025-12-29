@@ -62,20 +62,20 @@ namespace
 
     NGIN::Async::Task<int> YieldOnce(NGIN::Async::TaskContext& ctx, int value)
     {
-        co_await ctx.Yield();
+        co_await ctx.YieldNow();
         co_return value;
     }
 
     NGIN::Async::Task<int> YieldTwice(NGIN::Async::TaskContext& ctx, int value)
     {
-        co_await ctx.Yield();
-        co_await ctx.Yield();
+        co_await ctx.YieldNow();
+        co_await ctx.YieldNow();
         co_return value;
     }
 
     NGIN::Async::Task<void> SuspendForever(NGIN::Async::TaskContext& ctx)
     {
-        co_await ctx.Yield();
+        co_await ctx.YieldNow();
         co_await std::suspend_always {};
         co_return;
     }
@@ -123,7 +123,7 @@ namespace
 
     NGIN::Async::Task<int> ThrowOnce(NGIN::Async::TaskContext& ctx)
     {
-        co_await ctx.Yield();
+        co_await ctx.YieldNow();
         throw std::runtime_error("boom");
     }
 

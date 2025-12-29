@@ -13,16 +13,16 @@ namespace
     NGIN::Async::AsyncGenerator<int> ProduceValues(NGIN::Async::TaskContext& ctx)
     {
         co_yield 1;
-        co_await ctx.Yield();
+        co_await ctx.YieldNow();
         co_yield 2;
-        co_await ctx.Yield();
+        co_await ctx.YieldNow();
         co_yield 3;
     }
 
     NGIN::Async::AsyncGenerator<int> YieldThenThrow(NGIN::Async::TaskContext& ctx)
     {
         co_yield 1;
-        co_await ctx.Yield();
+        co_await ctx.YieldNow();
         throw std::runtime_error("boom");
     }
 
