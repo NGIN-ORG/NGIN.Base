@@ -8,7 +8,7 @@ Guidance for automated and human contributors to extend the library safely, cons
 
 High‑level principles that apply to every component:
 
-1. Header‑only Core: Public functionality lives in headers; only dummy/example/test sources exist in `*.cpp`.
+1. Compiled Core: Public API lives in headers; implementations live in `src/` when non-trivial or platform-specific. Templates and `constexpr` remain in headers.
 2. Modern Standard: Require C++23 (`cxx_std_23`). Prefer compile‑time (`constexpr`, `consteval`) where reasonable.
 3. ABI / ODR Safety: Use inline / templates / `constexpr` in headers. Avoid non‑inline function definitions with static storage.
 4. Determinism & Purity: Minimize hidden global state; prefer pure functions and stateless utilities.
@@ -214,3 +214,4 @@ Apache 2.0 (see `LICENSE`). Preserve license headers and attribution where prese
 ---
 
 Adhere to these guidelines for consistent, safe, and maintainable contributions.
+

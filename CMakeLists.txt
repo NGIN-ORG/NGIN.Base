@@ -185,6 +185,15 @@ elseif(UNIX)
   endif()
 endif()
 
+list(APPEND NGIN_BASE_CORE_SOURCES
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/NetworkDriver.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/SocketPlatform.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/TcpSocket.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/TcpListener.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/UdpSocket.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/PollerIocp.cpp
+)
+
 if(NGIN_BASE_BUILD_STATIC OR NGIN_BASE_BUILD_SHARED)
   add_library(NGIN.Base.Object OBJECT ${NGIN_BASE_CORE_SOURCES})
   target_compile_features(NGIN.Base.Object PRIVATE cxx_std_23)
@@ -310,6 +319,18 @@ if(WIN32)
     endif()
   else()
     message(WARNING "Windows Synchronization.lib not found; WaitOnAddress/WakeByAddress* will fail to link")
+  endif()
+
+  find_library(_ngin_ws2_32_lib Ws2_32)
+  if(_ngin_ws2_32_lib)
+    if(TARGET NGIN.Base.Static)
+      target_link_libraries(NGIN.Base.Static PRIVATE ${_ngin_ws2_32_lib})
+    endif()
+    if(TARGET NGIN.Base.Shared)
+      target_link_libraries(NGIN.Base.Shared PRIVATE ${_ngin_ws2_32_lib})
+    endif()
+  else()
+    message(WARNING "Windows Ws2_32.lib not found; socket APIs will fail to link")
   endif()
 endif()
 
