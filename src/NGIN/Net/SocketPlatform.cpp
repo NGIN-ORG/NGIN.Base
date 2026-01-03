@@ -13,6 +13,48 @@ namespace NGIN::Net::detail
     {
         std::once_flag s_wsaOnce;
         std::atomic<bool> s_wsaOk {false};
+        std::once_flag s_extOnce;
+        AcceptExFn s_acceptEx = nullptr;
+        ConnectExFn s_connectEx = nullptr;
+
+        void LoadExtensions() noexcept
+        {
+            if (!EnsureInitialized())
+            {
+                return;
+            }
+
+            const SOCKET probe = ::WSASocketW(AF_INET, SOCK_STREAM, IPPROTO_TCP, nullptr, 0, WSA_FLAG_OVERLAPPED);
+            if (probe == INVALID_SOCKET)
+            {
+                return;
+            }
+
+            DWORD bytes = 0;
+            GUID  acceptGuid = WSAID_ACCEPTEX;
+            ::WSAIoctl(probe,
+                       SIO_GET_EXTENSION_FUNCTION_POINTER,
+                       &acceptGuid,
+                       sizeof(acceptGuid),
+                       &s_acceptEx,
+                       sizeof(s_acceptEx),
+                       &bytes,
+                       nullptr,
+                       nullptr);
+
+            GUID connectGuid = WSAID_CONNECTEX;
+            ::WSAIoctl(probe,
+                       SIO_GET_EXTENSION_FUNCTION_POINTER,
+                       &connectGuid,
+                       sizeof(connectGuid),
+                       &s_connectEx,
+                       sizeof(s_connectEx),
+                       &bytes,
+                       nullptr,
+                       nullptr);
+
+            ::closesocket(probe);
+        }
     }
 #endif
 
@@ -323,6 +365,102 @@ namespace NGIN::Net::detail
         }
         return std::unexpected(MapError(error));
     }
+
+#if defined(NGIN_PLATFORM_WINDOWS)
+    AcceptExFn GetAcceptEx() noexcept
+    {
+        std::call_once(s_extOnce, &LoadExtensions);
+        return s_acceptEx;
+    }
+
+    ConnectExFn GetConnectEx() noexcept
+    {
+        std::call_once(s_extOnce, &LoadExtensions);
+        return s_connectEx;
+    }
+
+    AddressFamily GetSocketFamily(SocketHandle& handle) noexcept
+    {
+        sockaddr_storage storage {};
+        int length = static_cast<int>(sizeof(storage));
+        const auto sock = ToNative(handle);
+        if (::getsockname(sock, reinterpret_cast<sockaddr*>(&storage), &length) != 0)
+        {
+            return AddressFamily::V4;
+        }
+
+        if (storage.ss_family == AF_INET6)
+        {
+            return AddressFamily::V6;
+        }
+        return AddressFamily::V4;
+    }
+
+    bool EnsureBoundForConnectEx(SocketHandle& handle, const Endpoint& remoteEndpoint) noexcept
+    {
+        sockaddr_storage storage {};
+        int length = static_cast<int>(sizeof(storage));
+        const auto sock = ToNative(handle);
+        if (::getsockname(sock, reinterpret_cast<sockaddr*>(&storage), &length) != 0)
+        {
+            const int err = ::WSAGetLastError();
+            if (err != WSAEINVAL)
+            {
+                return false;
+            }
+            std::memset(&storage, 0, sizeof(storage));
+        }
+
+        if (storage.ss_family == AF_INET)
+        {
+            const auto* addr = reinterpret_cast<const sockaddr_in*>(&storage);
+            if (addr->sin_port != 0)
+            {
+                return true;
+            }
+        }
+        else if (storage.ss_family == AF_INET6)
+        {
+            const auto* addr = reinterpret_cast<const sockaddr_in6*>(&storage);
+            if (addr->sin6_port != 0)
+            {
+                return true;
+            }
+        }
+
+        Endpoint local {};
+        if (remoteEndpoint.address.IsV6())
+        {
+            local.address = IpAddress::AnyV6();
+        }
+        else
+        {
+            local.address = IpAddress::AnyV4();
+        }
+        local.port = 0;
+
+        socklen_t bindLength = 0;
+        sockaddr_storage bindStorage {};
+        if (!ToSockAddr(local, bindStorage, bindLength))
+        {
+            return false;
+        }
+
+        return ::bind(sock, reinterpret_cast<sockaddr*>(&bindStorage), bindLength) == 0;
+    }
+
+    bool IsV6Only(SocketHandle& handle) noexcept
+    {
+        const auto sock = ToNative(handle);
+        int value = 0;
+        int length = static_cast<int>(sizeof(value));
+        if (::getsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, reinterpret_cast<char*>(&value), &length) != 0)
+        {
+            return true;
+        }
+        return value != 0;
+    }
+#endif
 }
 
 namespace NGIN::Net

@@ -30,6 +30,8 @@ namespace NGIN::Net::detail
 #if defined(NGIN_PLATFORM_WINDOWS)
     using NativeSocket = SOCKET;
     constexpr NativeSocket InvalidNativeSocket = INVALID_SOCKET;
+    using AcceptExFn = BOOL (PASCAL *)(SOCKET, SOCKET, PVOID, DWORD, DWORD, DWORD, LPDWORD, LPOVERLAPPED);
+    using ConnectExFn = BOOL (PASCAL *)(SOCKET, const sockaddr*, int, PVOID, DWORD, LPDWORD, LPOVERLAPPED);
 #else
     using NativeSocket = int;
     constexpr NativeSocket InvalidNativeSocket = -1;
@@ -65,4 +67,12 @@ namespace NGIN::Net::detail
     [[nodiscard]] Endpoint FromSockAddr(const sockaddr_storage& storage, socklen_t length) noexcept;
 
     [[nodiscard]] NetExpected<void> CheckConnectResult(SocketHandle& handle) noexcept;
+
+#if defined(NGIN_PLATFORM_WINDOWS)
+    [[nodiscard]] AcceptExFn GetAcceptEx() noexcept;
+    [[nodiscard]] ConnectExFn GetConnectEx() noexcept;
+    [[nodiscard]] AddressFamily GetSocketFamily(SocketHandle& handle) noexcept;
+    [[nodiscard]] bool EnsureBoundForConnectEx(SocketHandle& handle, const Endpoint& remoteEndpoint) noexcept;
+    [[nodiscard]] bool IsV6Only(SocketHandle& handle) noexcept;
+#endif
 }

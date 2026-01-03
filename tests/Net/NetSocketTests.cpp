@@ -12,7 +12,11 @@
   #include <sys/socket.h>
 #endif
 
+#include <NGIN/Async/Task.hpp>
+#include <NGIN/Async/TaskContext.hpp>
+#include <NGIN/Execution/CooperativeScheduler.hpp>
 #include <NGIN/Execution/ThisThread.hpp>
+#include <NGIN/Net/Runtime/NetworkDriver.hpp>
 #include <NGIN/Net/Sockets/TcpListener.hpp>
 #include <NGIN/Net/Sockets/UdpSocket.hpp>
 #include <NGIN/Net/Types/BufferPool.hpp>
@@ -61,6 +65,24 @@ namespace NGIN::Net
         void SleepBrief() noexcept
         {
             NGIN::Execution::ThisThread::SleepFor(NGIN::Units::Milliseconds(1.0));
+        }
+
+        template<typename Predicate>
+        bool PumpUntil(NGIN::Execution::CooperativeScheduler& scheduler,
+                       NGIN::Net::NetworkDriver& driver,
+                       Predicate&& predicate)
+        {
+            for (int attempt = 0; attempt < 512; ++attempt)
+            {
+                driver.PollOnce();
+                scheduler.RunUntilIdle();
+                if (predicate())
+                {
+                    return true;
+                }
+                SleepBrief();
+            }
+            return false;
         }
     }
 
@@ -203,6 +225,105 @@ namespace NGIN::Net
             SleepBrief();
         }
         REQUIRE(received);
+
+        client.Close();
+        server.Close();
+        listener.Close();
+    }
+
+    TEST_CASE("Net.Udp.AsyncLoopbackSendReceive")
+    {
+        NGIN::Execution::CooperativeScheduler scheduler;
+        NGIN::Async::TaskContext              ctx(scheduler);
+        auto                                  driver = NetworkDriver::Create({.workerThreads = 0});
+
+        UdpSocket receiver;
+        REQUIRE(receiver.Open(AddressFamily::V4));
+        REQUIRE(receiver.Bind({IpAddress::AnyV4(), 0}));
+
+        const auto port = GetBoundPort(receiver.Handle());
+        REQUIRE(port != 0);
+
+        UdpSocket sender;
+        REQUIRE(sender.Open(AddressFamily::V4));
+
+        const char payload[] = "udp-async";
+        std::array<NGIN::Byte, 64> recvBuffer {};
+
+        auto recvTask = receiver.ReceiveFromAsync(ctx,
+                                                  *driver,
+                                                  ByteSpan {recvBuffer.data(), recvBuffer.size()},
+                                                  ctx.GetCancellationToken());
+        recvTask.Start(ctx);
+
+        auto sendTask = sender.SendToAsync(ctx,
+                                           *driver,
+                                           {IpAddress::LoopbackV4(), port},
+                                           ConstByteSpan {reinterpret_cast<const NGIN::Byte*>(payload),
+                                                         sizeof(payload)},
+                                           ctx.GetCancellationToken());
+        sendTask.Start(ctx);
+
+        REQUIRE(PumpUntil(scheduler, *driver, [&]() { return recvTask.IsCompleted() && sendTask.IsCompleted(); }));
+
+        REQUIRE(sendTask.Get() == sizeof(payload));
+        const auto result = recvTask.Get();
+        REQUIRE(result.bytesReceived == sizeof(payload));
+        REQUIRE(std::memcmp(recvBuffer.data(), payload, sizeof(payload)) == 0);
+
+        sender.Close();
+        receiver.Close();
+    }
+
+    TEST_CASE("Net.Tcp.AsyncLoopbackConnectSendReceive")
+    {
+        NGIN::Execution::CooperativeScheduler scheduler;
+        NGIN::Async::TaskContext              ctx(scheduler);
+        auto                                  driver = NetworkDriver::Create({.workerThreads = 0});
+
+        TcpListener listener;
+        REQUIRE(listener.Open(AddressFamily::V4));
+        REQUIRE(listener.Bind({IpAddress::AnyV4(), 0}));
+        REQUIRE(listener.Listen(16));
+
+        const auto port = GetBoundPort(listener.Handle());
+        REQUIRE(port != 0);
+
+        TcpSocket client;
+        REQUIRE(client.Open(AddressFamily::V4));
+
+        auto acceptTask = listener.AcceptAsync(ctx, *driver, ctx.GetCancellationToken());
+        acceptTask.Start(ctx);
+
+        auto connectTask = client.ConnectAsync(ctx, *driver, {IpAddress::LoopbackV4(), port}, ctx.GetCancellationToken());
+        connectTask.Start(ctx);
+
+        REQUIRE(PumpUntil(scheduler, *driver, [&]() { return acceptTask.IsCompleted() && connectTask.IsCompleted(); }));
+
+        connectTask.Get();
+        TcpSocket server = acceptTask.Get();
+
+        const char payload[] = "tcp-async";
+        std::array<NGIN::Byte, 64> recvBuffer {};
+
+        auto recvTask = server.ReceiveAsync(ctx,
+                                            *driver,
+                                            ByteSpan {recvBuffer.data(), recvBuffer.size()},
+                                            ctx.GetCancellationToken());
+        recvTask.Start(ctx);
+
+        auto sendTask = client.SendAsync(ctx,
+                                         *driver,
+                                         ConstByteSpan {reinterpret_cast<const NGIN::Byte*>(payload),
+                                                       sizeof(payload)},
+                                         ctx.GetCancellationToken());
+        sendTask.Start(ctx);
+
+        REQUIRE(PumpUntil(scheduler, *driver, [&]() { return recvTask.IsCompleted() && sendTask.IsCompleted(); }));
+
+        REQUIRE(sendTask.Get() == sizeof(payload));
+        REQUIRE(recvTask.Get() == sizeof(payload));
+        REQUIRE(std::memcmp(recvBuffer.data(), payload, sizeof(payload)) == 0);
 
         client.Close();
         server.Close();

@@ -22,6 +22,7 @@
 #include <limits>
 #include <mutex>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -56,6 +57,7 @@ namespace NGIN::Net
             DWORD                            flags {0};
             sockaddr_storage                 address {};
             int                              addressLength {0};
+            bool                             skipCompletionOnSuccess {false};
         };
 #endif
 
@@ -133,7 +135,26 @@ namespace NGIN::Net
             }
 
             const auto result = ::CreateIoCompletionPort(reinterpret_cast<HANDLE>(sock), m_iocp, 0, 0);
-            return result != nullptr;
+            if (result != nullptr)
+            {
+                return true;
+            }
+
+            const DWORD err = ::GetLastError();
+            return err == ERROR_INVALID_PARAMETER;
+        }
+
+        bool TrySkipCompletionOnSuccess(SocketHandle& handle) noexcept
+        {
+            const auto sock = detail::ToNative(handle);
+            if (sock == detail::InvalidNativeSocket)
+            {
+                return false;
+            }
+
+            const UCHAR flags = FILE_SKIP_COMPLETION_PORT_ON_SUCCESS | FILE_SKIP_SET_EVENT_ON_HANDLE;
+            const BOOL ok = ::SetFileCompletionNotificationModes(reinterpret_cast<HANDLE>(sock), flags);
+            return ok != FALSE;
         }
 
         void CompleteOperation(IocpOperation& op, DWORD bytes, DWORD error) noexcept
@@ -472,6 +493,8 @@ namespace NGIN::Net
                     return;
                 }
 
+                op.skipCompletionOnSuccess = owner->TrySkipCompletionOnSuccess(*handle);
+
                 if (data.size() > std::numeric_limits<ULONG>::max())
                 {
                     owner->CompleteOperationWithError(op, 0, NetError {NetErrc::MessageTooLarge, 0});
@@ -494,7 +517,10 @@ namespace NGIN::Net
                                              nullptr);
                 if (result == 0)
                 {
-                    owner->CompleteOperation(op, bytes, 0);
+                    if (op.skipCompletionOnSuccess)
+                    {
+                        owner->CompleteOperation(op, bytes, 0);
+                    }
                     return;
                 }
 
@@ -513,7 +539,7 @@ namespace NGIN::Net
                 }
                 if (op.error.code != NetErrc::Ok)
                 {
-                    throw std::runtime_error("NetworkDriver IOCP send failed");
+                    throw std::runtime_error("NetworkDriver IOCP send failed: " + std::to_string(op.error.native));
                 }
                 return static_cast<NGIN::UInt32>(op.bytes);
             }
@@ -565,6 +591,8 @@ namespace NGIN::Net
                     return;
                 }
 
+                op.skipCompletionOnSuccess = owner->TrySkipCompletionOnSuccess(*handle);
+
                 if (destination.size() > std::numeric_limits<ULONG>::max())
                 {
                     owner->CompleteOperationWithError(op, 0, NetError {NetErrc::MessageTooLarge, 0});
@@ -589,7 +617,10 @@ namespace NGIN::Net
                 op.flags = flags;
                 if (result == 0)
                 {
-                    owner->CompleteOperation(op, bytes, 0);
+                    if (op.skipCompletionOnSuccess)
+                    {
+                        owner->CompleteOperation(op, bytes, 0);
+                    }
                     return;
                 }
 
@@ -662,6 +693,8 @@ namespace NGIN::Net
                     return;
                 }
 
+                op.skipCompletionOnSuccess = owner->TrySkipCompletionOnSuccess(*handle);
+
                 if (data.size() > std::numeric_limits<ULONG>::max())
                 {
                     owner->CompleteOperationWithError(op, 0, NetError {NetErrc::MessageTooLarge, 0});
@@ -694,7 +727,10 @@ namespace NGIN::Net
                                                nullptr);
                 if (result == 0)
                 {
-                    owner->CompleteOperation(op, bytes, 0);
+                    if (op.skipCompletionOnSuccess)
+                    {
+                        owner->CompleteOperation(op, bytes, 0);
+                    }
                     return;
                 }
 
@@ -714,6 +750,10 @@ namespace NGIN::Net
                 if (op.error.code != NetErrc::Ok)
                 {
                     throw std::runtime_error("NetworkDriver IOCP send-to failed");
+                }
+                if (op.bytes == 0 && op.buffer.len > 0)
+                {
+                    return static_cast<NGIN::UInt32>(op.buffer.len);
                 }
                 return static_cast<NGIN::UInt32>(op.bytes);
             }
@@ -766,6 +806,8 @@ namespace NGIN::Net
                     return;
                 }
 
+                op.skipCompletionOnSuccess = owner->TrySkipCompletionOnSuccess(*handle);
+
                 if (destination.size() > std::numeric_limits<ULONG>::max())
                 {
                     owner->CompleteOperationWithError(op, 0, NetError {NetErrc::MessageTooLarge, 0});
@@ -792,7 +834,10 @@ namespace NGIN::Net
                 op.flags = flags;
                 if (result == 0)
                 {
-                    owner->CompleteOperation(op, bytes, 0);
+                    if (op.skipCompletionOnSuccess)
+                    {
+                        owner->CompleteOperation(op, bytes, 0);
+                    }
                     return;
                 }
 
@@ -818,6 +863,257 @@ namespace NGIN::Net
                 result.bytesReceived = static_cast<NGIN::UInt32>(op.bytes);
                 result.remoteEndpoint = detail::FromSockAddr(op.address, static_cast<socklen_t>(op.addressLength));
                 return result;
+            }
+        };
+
+        struct ConnectAwaiter final
+        {
+            Impl*                          owner {nullptr};
+            SocketHandle*                  handle {nullptr};
+            Endpoint                       remoteEndpoint {};
+            NGIN::Execution::ExecutorRef   exec {};
+            NGIN::Async::CancellationToken token {};
+            IocpOperation                  op {};
+
+            bool await_ready() const noexcept
+            {
+                return owner == nullptr || token.IsCancellationRequested();
+            }
+
+            void await_suspend(std::coroutine_handle<> continuation) noexcept
+            {
+                if (!owner || !handle)
+                {
+                    if (exec.IsValid())
+                    {
+                        exec.Execute(continuation);
+                    }
+                    else
+                    {
+                        continuation.resume();
+                    }
+                    return;
+                }
+
+                op.cancellation.Reset();
+                op.handle = handle;
+                op.exec = exec;
+                op.continuation = continuation;
+                op.done.store(false, std::memory_order_release);
+                op.error = NetError {NetErrc::Ok, 0};
+                op.bytes = 0;
+                op.flags = 0;
+                op.addressLength = 0;
+                std::memset(&op.overlapped, 0, sizeof(op.overlapped));
+                std::memset(&op.address, 0, sizeof(op.address));
+
+                auto connectEx = detail::GetConnectEx();
+                if (!connectEx)
+                {
+                    owner->CompleteOperationWithError(op, 0, NetError {NetErrc::Unknown, 0});
+                    return;
+                }
+
+                if (!owner->EnsureAssociated(*handle))
+                {
+                    owner->CompleteOperationWithError(op, 0, NetError {NetErrc::Unknown, static_cast<int>(::GetLastError())});
+                    return;
+                }
+
+                op.skipCompletionOnSuccess = owner->TrySkipCompletionOnSuccess(*handle);
+
+                socklen_t length = 0;
+                if (!detail::ToSockAddr(remoteEndpoint, op.address, length))
+                {
+                    owner->CompleteOperationWithError(op, 0, NetError {NetErrc::Unknown, 0});
+                    return;
+                }
+                op.addressLength = static_cast<int>(length);
+
+                token.Register(op.cancellation, exec, continuation, &CancelIocp, &op);
+
+                const auto sock = detail::ToNative(*handle);
+                const BOOL result = connectEx(sock,
+                                              reinterpret_cast<sockaddr*>(&op.address),
+                                              op.addressLength,
+                                              nullptr,
+                                              0,
+                                              nullptr,
+                                              reinterpret_cast<LPWSAOVERLAPPED>(&op.overlapped));
+                if (result != FALSE)
+                {
+                    if (op.skipCompletionOnSuccess)
+                    {
+                        owner->CompleteOperation(op, 0, 0);
+                    }
+                    return;
+                }
+
+                const int err = ::WSAGetLastError();
+                if (err != WSA_IO_PENDING)
+                {
+                    owner->CompleteOperation(op, 0, static_cast<DWORD>(err));
+                }
+            }
+
+            void await_resume()
+            {
+                if (token.IsCancellationRequested() || op.error.native == ERROR_OPERATION_ABORTED)
+                {
+                    throw NGIN::Async::TaskCanceled();
+                }
+                if (op.error.code != NetErrc::Ok)
+                {
+                    throw std::runtime_error("NetworkDriver IOCP connect failed");
+                }
+
+                const auto sock = detail::ToNative(*handle);
+                const int result = ::setsockopt(sock, SOL_SOCKET, SO_UPDATE_CONNECT_CONTEXT, nullptr, 0);
+                if (result != 0)
+                {
+                    throw std::runtime_error("NetworkDriver IOCP connect context update failed");
+                }
+            }
+        };
+
+        struct AcceptAwaiter final
+        {
+            static constexpr std::size_t AddressBytes = sizeof(sockaddr_storage) + 16;
+            static constexpr std::size_t BufferBytes = AddressBytes * 2;
+
+            Impl*                          owner {nullptr};
+            SocketHandle*                  listenHandle {nullptr};
+            NGIN::Execution::ExecutorRef   exec {};
+            NGIN::Async::CancellationToken token {};
+            IocpOperation                  op {};
+            SocketHandle                   accepted {};
+            std::array<NGIN::Byte, BufferBytes> buffer {};
+
+            bool await_ready() const noexcept
+            {
+                return owner == nullptr || token.IsCancellationRequested();
+            }
+
+            void await_suspend(std::coroutine_handle<> continuation) noexcept
+            {
+                if (!owner || !listenHandle)
+                {
+                    if (exec.IsValid())
+                    {
+                        exec.Execute(continuation);
+                    }
+                    else
+                    {
+                        continuation.resume();
+                    }
+                    return;
+                }
+
+                op.cancellation.Reset();
+                op.handle = listenHandle;
+                op.exec = exec;
+                op.continuation = continuation;
+                op.done.store(false, std::memory_order_release);
+                op.error = NetError {NetErrc::Ok, 0};
+                op.bytes = 0;
+                op.flags = 0;
+                op.addressLength = 0;
+                std::memset(&op.overlapped, 0, sizeof(op.overlapped));
+
+                auto acceptEx = detail::GetAcceptEx();
+                if (!acceptEx)
+                {
+                    owner->CompleteOperationWithError(op, 0, NetError {NetErrc::Unknown, 0});
+                    return;
+                }
+
+                const AddressFamily family = detail::GetSocketFamily(*listenHandle);
+                bool dualStack = false;
+                if (family == AddressFamily::V6)
+                {
+                    dualStack = !detail::IsV6Only(*listenHandle);
+                }
+                NetError createError {};
+                accepted = detail::CreateSocket(family, SOCK_STREAM, IPPROTO_TCP, dualStack, createError);
+                if (createError.code != NetErrc::Ok)
+                {
+                    owner->CompleteOperationWithError(op, 0, createError);
+                    return;
+                }
+
+                if (!owner->EnsureAssociated(*listenHandle))
+                {
+                    accepted.Close();
+                    owner->CompleteOperationWithError(op, 0, NetError {NetErrc::Unknown, static_cast<int>(::GetLastError())});
+                    return;
+                }
+
+                op.skipCompletionOnSuccess = owner->TrySkipCompletionOnSuccess(*listenHandle);
+
+                token.Register(op.cancellation, exec, continuation, &CancelIocp, &op);
+
+                DWORD bytes = 0;
+                const auto listenSock = detail::ToNative(*listenHandle);
+                const auto acceptSock = detail::ToNative(accepted);
+                const DWORD addressBytes = static_cast<DWORD>(AddressBytes);
+                const BOOL result = acceptEx(listenSock,
+                                             acceptSock,
+                                             buffer.data(),
+                                             0,
+                                             addressBytes,
+                                             addressBytes,
+                                             &bytes,
+                                             reinterpret_cast<LPWSAOVERLAPPED>(&op.overlapped));
+                if (result != FALSE)
+                {
+                    if (op.skipCompletionOnSuccess)
+                    {
+                        owner->CompleteOperation(op, bytes, 0);
+                    }
+                    return;
+                }
+
+                const int err = ::WSAGetLastError();
+                if (err != WSA_IO_PENDING)
+                {
+                    accepted.Close();
+                    owner->CompleteOperation(op, 0, static_cast<DWORD>(err));
+                }
+            }
+
+            SocketHandle await_resume()
+            {
+                if (token.IsCancellationRequested() || op.error.native == ERROR_OPERATION_ABORTED)
+                {
+                    accepted.Close();
+                    throw NGIN::Async::TaskCanceled();
+                }
+                if (op.error.code != NetErrc::Ok)
+                {
+                    accepted.Close();
+                    throw std::runtime_error("NetworkDriver IOCP accept failed");
+                }
+
+                const auto listenSock = detail::ToNative(*listenHandle);
+                const auto acceptSock = detail::ToNative(accepted);
+                const int update = ::setsockopt(acceptSock,
+                                                SOL_SOCKET,
+                                                SO_UPDATE_ACCEPT_CONTEXT,
+                                                reinterpret_cast<const char*>(&listenSock),
+                                                sizeof(listenSock));
+                if (update != 0)
+                {
+                    accepted.Close();
+                    throw std::runtime_error("NetworkDriver IOCP accept context update failed");
+                }
+
+                if (!owner->EnsureAssociated(accepted))
+                {
+                    accepted.Close();
+                    throw std::runtime_error("NetworkDriver IOCP accept association failed");
+                }
+
+                return accepted;
             }
         };
 #endif
@@ -919,13 +1215,14 @@ namespace NGIN::Net
         }
 
 #if defined(NGIN_PLATFORM_WINDOWS)
-        NGIN::Async::Task<NGIN::UInt32> SubmitSend(NGIN::Async::TaskContext& ctx,
-                                                   SocketHandle& handle,
-                                                   ConstByteSpan data,
-                                                   NGIN::Async::CancellationToken token)
+        static NGIN::Async::Task<NGIN::UInt32> SubmitSend(NGIN::Async::TaskContext& ctx,
+                                                          Impl& owner,
+                                                          SocketHandle& handle,
+                                                          ConstByteSpan data,
+                                                          NGIN::Async::CancellationToken token)
         {
             SendAwaiter awaiter {};
-            awaiter.owner = this;
+            awaiter.owner = &owner;
             awaiter.handle = &handle;
             awaiter.data = data;
             awaiter.exec = ctx.GetExecutor();
@@ -933,13 +1230,14 @@ namespace NGIN::Net
             co_return co_await awaiter;
         }
 
-        NGIN::Async::Task<NGIN::UInt32> SubmitReceive(NGIN::Async::TaskContext& ctx,
-                                                      SocketHandle& handle,
-                                                      ByteSpan destination,
-                                                      NGIN::Async::CancellationToken token)
+        static NGIN::Async::Task<NGIN::UInt32> SubmitReceive(NGIN::Async::TaskContext& ctx,
+                                                             Impl& owner,
+                                                             SocketHandle& handle,
+                                                             ByteSpan destination,
+                                                             NGIN::Async::CancellationToken token)
         {
             ReceiveAwaiter awaiter {};
-            awaiter.owner = this;
+            awaiter.owner = &owner;
             awaiter.handle = &handle;
             awaiter.destination = destination;
             awaiter.exec = ctx.GetExecutor();
@@ -947,14 +1245,15 @@ namespace NGIN::Net
             co_return co_await awaiter;
         }
 
-        NGIN::Async::Task<NGIN::UInt32> SubmitSendTo(NGIN::Async::TaskContext& ctx,
-                                                     SocketHandle& handle,
-                                                     Endpoint remoteEndpoint,
-                                                     ConstByteSpan data,
-                                                     NGIN::Async::CancellationToken token)
+        static NGIN::Async::Task<NGIN::UInt32> SubmitSendTo(NGIN::Async::TaskContext& ctx,
+                                                            Impl& owner,
+                                                            SocketHandle& handle,
+                                                            Endpoint remoteEndpoint,
+                                                            ConstByteSpan data,
+                                                            NGIN::Async::CancellationToken token)
         {
             SendToAwaiter awaiter {};
-            awaiter.owner = this;
+            awaiter.owner = &owner;
             awaiter.handle = &handle;
             awaiter.remoteEndpoint = remoteEndpoint;
             awaiter.data = data;
@@ -963,15 +1262,44 @@ namespace NGIN::Net
             co_return co_await awaiter;
         }
 
-        NGIN::Async::Task<DatagramReceiveResult> SubmitReceiveFrom(NGIN::Async::TaskContext& ctx,
-                                                                   SocketHandle& handle,
-                                                                   ByteSpan destination,
-                                                                   NGIN::Async::CancellationToken token)
+        static NGIN::Async::Task<DatagramReceiveResult> SubmitReceiveFrom(NGIN::Async::TaskContext& ctx,
+                                                                          Impl& owner,
+                                                                          SocketHandle& handle,
+                                                                          ByteSpan destination,
+                                                                          NGIN::Async::CancellationToken token)
         {
             ReceiveFromAwaiter awaiter {};
-            awaiter.owner = this;
+            awaiter.owner = &owner;
             awaiter.handle = &handle;
             awaiter.destination = destination;
+            awaiter.exec = ctx.GetExecutor();
+            awaiter.token = token;
+            co_return co_await awaiter;
+        }
+
+        static NGIN::Async::Task<void> SubmitConnect(NGIN::Async::TaskContext& ctx,
+                                                     Impl& owner,
+                                                     SocketHandle& handle,
+                                                     Endpoint remoteEndpoint,
+                                                     NGIN::Async::CancellationToken token)
+        {
+            ConnectAwaiter awaiter {};
+            awaiter.owner = &owner;
+            awaiter.handle = &handle;
+            awaiter.remoteEndpoint = remoteEndpoint;
+            awaiter.exec = ctx.GetExecutor();
+            awaiter.token = token;
+            co_await awaiter;
+        }
+
+        static NGIN::Async::Task<SocketHandle> SubmitAccept(NGIN::Async::TaskContext& ctx,
+                                                            Impl& owner,
+                                                            SocketHandle& handle,
+                                                            NGIN::Async::CancellationToken token)
+        {
+            AcceptAwaiter awaiter {};
+            awaiter.owner = &owner;
+            awaiter.listenHandle = &handle;
             awaiter.exec = ctx.GetExecutor();
             awaiter.token = token;
             co_return co_await awaiter;
@@ -1043,7 +1371,7 @@ namespace NGIN::Net
                                                               ConstByteSpan data,
                                                               NGIN::Async::CancellationToken token)
     {
-        return m_impl->SubmitSend(ctx, handle, data, token);
+        return Impl::SubmitSend(ctx, *m_impl, handle, data, token);
     }
 
     NGIN::Async::Task<NGIN::UInt32> NetworkDriver::SubmitReceive(NGIN::Async::TaskContext& ctx,
@@ -1051,7 +1379,7 @@ namespace NGIN::Net
                                                                  ByteSpan destination,
                                                                  NGIN::Async::CancellationToken token)
     {
-        return m_impl->SubmitReceive(ctx, handle, destination, token);
+        return Impl::SubmitReceive(ctx, *m_impl, handle, destination, token);
     }
 
     NGIN::Async::Task<NGIN::UInt32> NetworkDriver::SubmitSendTo(NGIN::Async::TaskContext& ctx,
@@ -1060,7 +1388,7 @@ namespace NGIN::Net
                                                                 ConstByteSpan data,
                                                                 NGIN::Async::CancellationToken token)
     {
-        return m_impl->SubmitSendTo(ctx, handle, remoteEndpoint, data, token);
+        return Impl::SubmitSendTo(ctx, *m_impl, handle, remoteEndpoint, data, token);
     }
 
     NGIN::Async::Task<DatagramReceiveResult> NetworkDriver::SubmitReceiveFrom(NGIN::Async::TaskContext& ctx,
@@ -1068,7 +1396,22 @@ namespace NGIN::Net
                                                                               ByteSpan destination,
                                                                               NGIN::Async::CancellationToken token)
     {
-        return m_impl->SubmitReceiveFrom(ctx, handle, destination, token);
+        return Impl::SubmitReceiveFrom(ctx, *m_impl, handle, destination, token);
+    }
+
+    NGIN::Async::Task<void> NetworkDriver::SubmitConnect(NGIN::Async::TaskContext& ctx,
+                                                         SocketHandle& handle,
+                                                         Endpoint remoteEndpoint,
+                                                         NGIN::Async::CancellationToken token)
+    {
+        return Impl::SubmitConnect(ctx, *m_impl, handle, remoteEndpoint, token);
+    }
+
+    NGIN::Async::Task<SocketHandle> NetworkDriver::SubmitAccept(NGIN::Async::TaskContext& ctx,
+                                                                SocketHandle& handle,
+                                                                NGIN::Async::CancellationToken token)
+    {
+        return Impl::SubmitAccept(ctx, *m_impl, handle, token);
     }
 #endif
 }

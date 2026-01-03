@@ -53,6 +53,15 @@ namespace NGIN::Net
                                                     Endpoint remoteEndpoint,
                                                     NGIN::Async::CancellationToken token)
     {
+#if defined(NGIN_PLATFORM_WINDOWS)
+        if (!detail::EnsureBoundForConnectEx(m_handle, remoteEndpoint))
+        {
+            throw std::runtime_error("TcpSocket::ConnectAsync failed to bind for ConnectEx");
+        }
+
+        co_await driver.SubmitConnect(ctx, m_handle, remoteEndpoint, token);
+        co_return;
+#else
         for (;;)
         {
             auto result = TryConnect(remoteEndpoint);
@@ -78,6 +87,7 @@ namespace NGIN::Net
                 throw std::runtime_error("TcpSocket::ConnectAsync failed");
             }
         }
+#endif
     }
 
     NetExpected<void> TcpSocket::ConnectBlocking(Endpoint remoteEndpoint)

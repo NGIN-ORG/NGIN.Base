@@ -68,6 +68,10 @@ namespace NGIN::Net
                                                           NetworkDriver& driver,
                                                           NGIN::Async::CancellationToken token)
     {
+#if defined(NGIN_PLATFORM_WINDOWS)
+        auto handle = co_await driver.SubmitAccept(ctx, m_handle, token);
+        co_return TcpSocket(handle);
+#else
         for (;;)
         {
             auto result = TryAccept();
@@ -83,6 +87,7 @@ namespace NGIN::Net
 
             co_await driver.WaitUntilReadable(ctx, m_handle, token);
         }
+#endif
     }
 
     void TcpListener::Close() noexcept

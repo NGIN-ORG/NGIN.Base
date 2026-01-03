@@ -23,6 +23,7 @@ namespace NGIN::Async
 namespace NGIN::Net
 {
     class TcpSocket;
+    class TcpListener;
     class UdpSocket;
     class SocketHandle;
     struct DatagramReceiveResult;
@@ -65,6 +66,7 @@ namespace NGIN::Net
 #if defined(NGIN_PLATFORM_WINDOWS)
         friend class TcpSocket;
         friend class UdpSocket;
+        friend class TcpListener;
 
         NGIN::Async::Task<NGIN::UInt32> SubmitSend(NGIN::Async::TaskContext& ctx,
                                                    SocketHandle& handle,
@@ -83,6 +85,13 @@ namespace NGIN::Net
                                                                    SocketHandle& handle,
                                                                    ByteSpan destination,
                                                                    NGIN::Async::CancellationToken token);
+        NGIN::Async::Task<void> SubmitConnect(NGIN::Async::TaskContext& ctx,
+                                              SocketHandle& handle,
+                                              Endpoint remoteEndpoint,
+                                              NGIN::Async::CancellationToken token);
+        NGIN::Async::Task<SocketHandle> SubmitAccept(NGIN::Async::TaskContext& ctx,
+                                                     SocketHandle& handle,
+                                                     NGIN::Async::CancellationToken token);
 #endif
 
         struct Impl;
