@@ -9,22 +9,30 @@
 #include <NGIN/Execution/Thread.hpp>
 #include <NGIN/Execution/ThreadName.hpp>
 #include <NGIN/Execution/ThisThread.hpp>
+#include <ioapiset.h>
 
 #if defined(NGIN_PLATFORM_WINDOWS)
-  #include <Windows.h>
-  #include <NGIN/Net/Sockets/UdpSocket.hpp>
+#include <Windows.h>
+#include <NGIN/Net/Sockets/UdpSocket.hpp>
 #endif
 
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cstdint>
 #include <cstring>
 #include <limits>
 #include <mutex>
 #include <stdexcept>
+#include <unordered_map>
 #include <string>
 #include <string_view>
 #include <vector>
+
+#if defined(__linux__)
+#include <sys/epoll.h>
+#include <unistd.h>
+#endif
 
 namespace NGIN::Net
 {
@@ -32,32 +40,32 @@ namespace NGIN::Net
     {
         struct Waiter final
         {
-            Impl*                              owner {nullptr};
-            SocketHandle*                      handle {nullptr};
-            bool                               wantRead {false};
-            bool                               wantWrite {false};
-            NGIN::Execution::ExecutorRef       exec {};
-            std::coroutine_handle<>            continuation {};
+            Impl*                                 owner {nullptr};
+            SocketHandle*                         handle {nullptr};
+            bool                                  wantRead {false};
+            bool                                  wantWrite {false};
+            NGIN::Execution::ExecutorRef          exec {};
+            std::coroutine_handle<>               continuation {};
             NGIN::Async::CancellationRegistration cancellation {};
-            std::atomic<bool>                  done {false};
+            std::atomic<bool>                     done {false};
         };
 
 #if defined(NGIN_PLATFORM_WINDOWS)
         struct IocpOperation final
         {
-            WSAOVERLAPPED                    overlapped {};
-            WSABUF                           buffer {};
-            SocketHandle*                    handle {nullptr};
-            NGIN::Execution::ExecutorRef     exec {};
-            std::coroutine_handle<>          continuation {};
+            WSAOVERLAPPED                         overlapped {};
+            WSABUF                                buffer {};
+            SocketHandle*                         handle {nullptr};
+            NGIN::Execution::ExecutorRef          exec {};
+            std::coroutine_handle<>               continuation {};
             NGIN::Async::CancellationRegistration cancellation {};
-            std::atomic<bool>                done {false};
-            NetError                         error {};
-            DWORD                            bytes {0};
-            DWORD                            flags {0};
-            sockaddr_storage                 address {};
-            int                              addressLength {0};
-            bool                             skipCompletionOnSuccess {false};
+            std::atomic<bool>                     done {false};
+            NetError                              error {};
+            DWORD                                 bytes {0};
+            DWORD                                 flags {0};
+            sockaddr_storage                      address {};
+            int                                   addressLength {0};
+            bool                                  skipCompletionOnSuccess {false};
         };
 #endif
 
@@ -67,34 +75,50 @@ namespace NGIN::Net
 #if defined(NGIN_PLATFORM_WINDOWS)
             m_iocp = ::CreateIoCompletionPort(INVALID_HANDLE_VALUE, nullptr, 0, 0);
 #endif
+#if defined(__linux__)
+            m_epollFd = ::epoll_create1(EPOLL_CLOEXEC);
+#endif
         }
 
-#if defined(NGIN_PLATFORM_WINDOWS)
         ~Impl()
         {
+#if defined(NGIN_PLATFORM_WINDOWS)
             if (m_iocp)
             {
                 ::CloseHandle(m_iocp);
                 m_iocp = nullptr;
             }
-        }
 #endif
+#if defined(__linux__)
+            if (m_epollFd >= 0)
+            {
+                ::close(m_epollFd);
+                m_epollFd = -1;
+            }
+#endif
+        }
 
         void RegisterWaiter(Waiter* waiter)
         {
             std::lock_guard guard(m_mutex);
             m_waiters.push_back(waiter);
+#if defined(__linux__)
+            UpdateEpollOnRegisterLocked(waiter);
+#endif
         }
 
         void UnregisterWaiter(Waiter* waiter)
         {
             std::lock_guard guard(m_mutex);
-            auto it = std::find(m_waiters.begin(), m_waiters.end(), waiter);
+            auto            it = std::find(m_waiters.begin(), m_waiters.end(), waiter);
             if (it != m_waiters.end())
             {
                 *it = m_waiters.back();
                 m_waiters.pop_back();
             }
+#if defined(__linux__)
+            UpdateEpollOnUnregisterLocked(waiter);
+#endif
         }
 
 #if defined(NGIN_PLATFORM_WINDOWS)
@@ -153,7 +177,7 @@ namespace NGIN::Net
             }
 
             const UCHAR flags = FILE_SKIP_COMPLETION_PORT_ON_SUCCESS | FILE_SKIP_SET_EVENT_ON_HANDLE;
-            const BOOL ok = ::SetFileCompletionNotificationModes(reinterpret_cast<HANDLE>(sock), flags);
+            const BOOL  ok    = ::SetFileCompletionNotificationModes(reinterpret_cast<HANDLE>(sock), flags);
             return ok != FALSE;
         }
 
@@ -217,17 +241,17 @@ namespace NGIN::Net
 
             for (int i = 0; i < 64; ++i)
             {
-                DWORD bytes = 0;
-                ULONG_PTR key = 0;
+                DWORD        bytes      = 0;
+                ULONG_PTR    key        = 0;
                 LPOVERLAPPED overlapped = nullptr;
-                const BOOL ok = ::GetQueuedCompletionStatus(m_iocp, &bytes, &key, &overlapped, 0);
+                const BOOL   ok         = ::GetQueuedCompletionStatus(m_iocp, &bytes, &key, &overlapped, 0);
                 if (!overlapped)
                 {
                     break;
                 }
 
                 const DWORD error = ok ? 0 : ::GetLastError();
-                auto* op = reinterpret_cast<IocpOperation*>(overlapped);
+                auto*       op    = reinterpret_cast<IocpOperation*>(overlapped);
                 if (op)
                 {
                     CompleteOperation(*op, bytes, error);
@@ -250,6 +274,75 @@ namespace NGIN::Net
                 }
                 waiters = m_waiters;
             }
+
+#if defined(__linux__)
+            if (m_epollFd >= 0)
+            {
+                std::array<epoll_event, 64> events {};
+                const int                   ready = ::epoll_wait(m_epollFd,
+                                                                 events.data(),
+                                                                 static_cast<int>(events.size()),
+                                                                 0);
+                if (ready <= 0)
+                {
+                    return;
+                }
+
+                std::unordered_map<int, std::uint32_t> readyEvents {};
+                readyEvents.reserve(static_cast<std::size_t>(ready));
+                for (int i = 0; i < ready; ++i)
+                {
+                    readyEvents[events[i].data.fd] |= events[i].events;
+                }
+
+                for (auto* waiter: waiters)
+                {
+                    if (!waiter || !waiter->handle)
+                    {
+                        continue;
+                    }
+                    const auto sock = detail::ToNative(*waiter->handle);
+                    if (sock == detail::InvalidNativeSocket)
+                    {
+                        continue;
+                    }
+
+                    const auto it = readyEvents.find(sock);
+                    if (it == readyEvents.end())
+                    {
+                        continue;
+                    }
+
+                    const auto eventsMask = it->second;
+                    const bool readyRead  = waiter->wantRead &&
+                                           (eventsMask & (EPOLLIN | EPOLLHUP | EPOLLERR | EPOLLRDHUP));
+                    const bool readyWrite = waiter->wantWrite && (eventsMask & (EPOLLOUT | EPOLLERR));
+                    if (!readyRead && !readyWrite)
+                    {
+                        continue;
+                    }
+
+                    bool expected = false;
+                    if (!waiter->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
+                    {
+                        continue;
+                    }
+
+                    UnregisterWaiter(waiter);
+                    waiter->cancellation.Reset();
+
+                    if (waiter->exec.IsValid())
+                    {
+                        waiter->exec.Execute(waiter->continuation);
+                    }
+                    else if (waiter->continuation)
+                    {
+                        waiter->continuation.resume();
+                    }
+                }
+                return;
+            }
+#endif
 
             fd_set readSet {};
             fd_set writeSet {};
@@ -287,7 +380,7 @@ namespace NGIN::Net
             }
 
             timeval timeout {};
-            timeout.tv_sec = 0;
+            timeout.tv_sec  = 0;
             timeout.tv_usec = 0;
 
 #if defined(NGIN_PLATFORM_WINDOWS)
@@ -312,7 +405,7 @@ namespace NGIN::Net
                     continue;
                 }
 
-                const bool readyRead = waiter->wantRead && FD_ISSET(sock, &readSet);
+                const bool readyRead  = waiter->wantRead && FD_ISSET(sock, &readSet);
                 const bool readyWrite = waiter->wantWrite && FD_ISSET(sock, &writeSet);
                 if (!readyRead && !readyWrite)
                 {
@@ -369,25 +462,143 @@ namespace NGIN::Net
             JoinWorkers();
         }
 
-        NetworkDriverOptions m_options {};
-        std::mutex m_mutex {};
-        std::vector<Waiter*> m_waiters {};
-        std::atomic<bool> m_stop {false};
+        NetworkDriverOptions                 m_options {};
+        std::mutex                           m_mutex {};
+        std::vector<Waiter*>                 m_waiters {};
+        std::atomic<bool>                    m_stop {false};
         std::vector<NGIN::Execution::Thread> m_workers {};
 #if defined(NGIN_PLATFORM_WINDOWS)
         HANDLE m_iocp {nullptr};
 #endif
+#if defined(__linux__)
+        struct EpollWatch final
+        {
+            std::uint32_t events {0};
+            int           readers {0};
+            int           writers {0};
+        };
+
+        int                                 m_epollFd {-1};
+        std::unordered_map<int, EpollWatch> m_epollWatches {};
+#endif
 
     private:
+#if defined(__linux__)
+        void UpdateEpollOnRegisterLocked(Waiter* waiter) noexcept
+        {
+            if (m_epollFd < 0 || !waiter || !waiter->handle)
+            {
+                return;
+            }
+
+            const int fd = detail::ToNative(*waiter->handle);
+            if (fd == detail::InvalidNativeSocket)
+            {
+                return;
+            }
+
+            auto&               watch      = m_epollWatches[fd];
+            const std::uint32_t prevEvents = watch.events;
+
+            if (waiter->wantRead)
+            {
+                ++watch.readers;
+            }
+            if (waiter->wantWrite)
+            {
+                ++watch.writers;
+            }
+
+            std::uint32_t events = 0;
+            if (watch.readers > 0)
+            {
+                events |= EPOLLIN | EPOLLRDHUP | EPOLLHUP | EPOLLERR;
+            }
+            if (watch.writers > 0)
+            {
+                events |= EPOLLOUT | EPOLLERR;
+            }
+
+            if (events == 0)
+            {
+                m_epollWatches.erase(fd);
+                return;
+            }
+
+            watch.events = events;
+            epoll_event ev {};
+            ev.events  = events;
+            ev.data.fd = fd;
+
+            const int op = (prevEvents == 0) ? EPOLL_CTL_ADD : EPOLL_CTL_MOD;
+            if (::epoll_ctl(m_epollFd, op, fd, &ev) != 0 && op == EPOLL_CTL_ADD)
+            {
+                m_epollWatches.erase(fd);
+            }
+        }
+
+        void UpdateEpollOnUnregisterLocked(Waiter* waiter) noexcept
+        {
+            if (m_epollFd < 0 || !waiter || !waiter->handle)
+            {
+                return;
+            }
+
+            const int fd = detail::ToNative(*waiter->handle);
+            if (fd == detail::InvalidNativeSocket)
+            {
+                return;
+            }
+
+            auto it = m_epollWatches.find(fd);
+            if (it == m_epollWatches.end())
+            {
+                return;
+            }
+
+            auto& watch = it->second;
+            if (waiter->wantRead && watch.readers > 0)
+            {
+                --watch.readers;
+            }
+            if (waiter->wantWrite && watch.writers > 0)
+            {
+                --watch.writers;
+            }
+
+            std::uint32_t events = 0;
+            if (watch.readers > 0)
+            {
+                events |= EPOLLIN | EPOLLRDHUP | EPOLLHUP | EPOLLERR;
+            }
+            if (watch.writers > 0)
+            {
+                events |= EPOLLOUT | EPOLLERR;
+            }
+
+            if (events == 0)
+            {
+                ::epoll_ctl(m_epollFd, EPOLL_CTL_DEL, fd, nullptr);
+                m_epollWatches.erase(it);
+                return;
+            }
+
+            watch.events = events;
+            epoll_event ev {};
+            ev.events  = events;
+            ev.data.fd = fd;
+            ::epoll_ctl(m_epollFd, EPOLL_CTL_MOD, fd, &ev);
+        }
+#endif
         struct WaiterAwaiter final
         {
-            Impl*                         owner {nullptr};
-            SocketHandle*                 handle {nullptr};
-            bool                          wantRead {false};
-            bool                          wantWrite {false};
-            NGIN::Execution::ExecutorRef  exec {};
+            Impl*                          owner {nullptr};
+            SocketHandle*                  handle {nullptr};
+            bool                           wantRead {false};
+            bool                           wantWrite {false};
+            NGIN::Execution::ExecutorRef   exec {};
             NGIN::Async::CancellationToken token {};
-            Waiter                        waiter {};
+            Waiter                         waiter {};
 
             bool await_ready() const noexcept
             {
@@ -409,19 +620,16 @@ namespace NGIN::Net
                     return;
                 }
 
-                waiter.owner = owner;
-                waiter.handle = handle;
-                waiter.wantRead = wantRead;
-                waiter.wantWrite = wantWrite;
-                waiter.exec = exec;
+                waiter.owner        = owner;
+                waiter.handle       = handle;
+                waiter.wantRead     = wantRead;
+                waiter.wantWrite    = wantWrite;
+                waiter.exec         = exec;
                 waiter.continuation = continuation;
 
                 owner->RegisterWaiter(&waiter);
 
-                token.Register(waiter.cancellation,
-                               exec,
-                               continuation,
-                               +[](void* ctx) noexcept -> bool {
+                token.Register(waiter.cancellation, exec, continuation, +[](void* ctx) noexcept -> bool {
                                    auto* w = static_cast<Waiter*>(ctx);
                                    bool expected = false;
                                    if (!w->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
@@ -432,9 +640,7 @@ namespace NGIN::Net
                                    {
                                        w->owner->UnregisterWaiter(w);
                                    }
-                                   return true;
-                               },
-                               &waiter);
+                                   return true; }, &waiter);
             }
 
             void await_resume()
@@ -477,13 +683,13 @@ namespace NGIN::Net
                 }
 
                 op.cancellation.Reset();
-                op.handle = handle;
-                op.exec = exec;
+                op.handle       = handle;
+                op.exec         = exec;
                 op.continuation = continuation;
                 op.done.store(false, std::memory_order_release);
-                op.error = NetError {NetErrc::Ok, 0};
-                op.bytes = 0;
-                op.flags = 0;
+                op.error         = NetError {NetErrc::Ok, 0};
+                op.bytes         = 0;
+                op.flags         = 0;
                 op.addressLength = 0;
                 std::memset(&op.overlapped, 0, sizeof(op.overlapped));
 
@@ -506,15 +712,15 @@ namespace NGIN::Net
 
                 token.Register(op.cancellation, exec, continuation, &CancelIocp, &op);
 
-                DWORD bytes = 0;
-                const auto sock = detail::ToNative(*handle);
-                const int result = ::WSASend(sock,
-                                             &op.buffer,
-                                             1,
-                                             &bytes,
-                                             op.flags,
-                                             reinterpret_cast<LPWSAOVERLAPPED>(&op.overlapped),
-                                             nullptr);
+                DWORD      bytes  = 0;
+                const auto sock   = detail::ToNative(*handle);
+                const int  result = ::WSASend(sock,
+                                              &op.buffer,
+                                              1,
+                                              &bytes,
+                                              op.flags,
+                                              reinterpret_cast<LPWSAOVERLAPPED>(&op.overlapped),
+                                              nullptr);
                 if (result == 0)
                 {
                     if (op.skipCompletionOnSuccess)
@@ -575,13 +781,13 @@ namespace NGIN::Net
                 }
 
                 op.cancellation.Reset();
-                op.handle = handle;
-                op.exec = exec;
+                op.handle       = handle;
+                op.exec         = exec;
                 op.continuation = continuation;
                 op.done.store(false, std::memory_order_release);
-                op.error = NetError {NetErrc::Ok, 0};
-                op.bytes = 0;
-                op.flags = 0;
+                op.error         = NetError {NetErrc::Ok, 0};
+                op.bytes         = 0;
+                op.flags         = 0;
                 op.addressLength = 0;
                 std::memset(&op.overlapped, 0, sizeof(op.overlapped));
 
@@ -604,17 +810,17 @@ namespace NGIN::Net
 
                 token.Register(op.cancellation, exec, continuation, &CancelIocp, &op);
 
-                DWORD bytes = 0;
-                DWORD flags = 0;
-                const auto sock = detail::ToNative(*handle);
-                const int result = ::WSARecv(sock,
-                                             &op.buffer,
-                                             1,
-                                             &bytes,
-                                             &flags,
-                                             reinterpret_cast<LPWSAOVERLAPPED>(&op.overlapped),
-                                             nullptr);
-                op.flags = flags;
+                DWORD      bytes  = 0;
+                DWORD      flags  = 0;
+                const auto sock   = detail::ToNative(*handle);
+                const int  result = ::WSARecv(sock,
+                                              &op.buffer,
+                                              1,
+                                              &bytes,
+                                              &flags,
+                                              reinterpret_cast<LPWSAOVERLAPPED>(&op.overlapped),
+                                              nullptr);
+                op.flags          = flags;
                 if (result == 0)
                 {
                     if (op.skipCompletionOnSuccess)
@@ -676,13 +882,13 @@ namespace NGIN::Net
                 }
 
                 op.cancellation.Reset();
-                op.handle = handle;
-                op.exec = exec;
+                op.handle       = handle;
+                op.exec         = exec;
                 op.continuation = continuation;
                 op.done.store(false, std::memory_order_release);
-                op.error = NetError {NetErrc::Ok, 0};
-                op.bytes = 0;
-                op.flags = 0;
+                op.error         = NetError {NetErrc::Ok, 0};
+                op.bytes         = 0;
+                op.flags         = 0;
                 op.addressLength = 0;
                 std::memset(&op.overlapped, 0, sizeof(op.overlapped));
                 std::memset(&op.address, 0, sizeof(op.address));
@@ -714,17 +920,17 @@ namespace NGIN::Net
 
                 token.Register(op.cancellation, exec, continuation, &CancelIocp, &op);
 
-                DWORD bytes = 0;
-                const auto sock = detail::ToNative(*handle);
-                const int result = ::WSASendTo(sock,
-                                               &op.buffer,
-                                               1,
-                                               &bytes,
-                                               op.flags,
-                                               reinterpret_cast<const sockaddr*>(&op.address),
-                                               op.addressLength,
-                                               reinterpret_cast<LPWSAOVERLAPPED>(&op.overlapped),
-                                               nullptr);
+                DWORD      bytes  = 0;
+                const auto sock   = detail::ToNative(*handle);
+                const int  result = ::WSASendTo(sock,
+                                                &op.buffer,
+                                                1,
+                                                &bytes,
+                                                op.flags,
+                                                reinterpret_cast<const sockaddr*>(&op.address),
+                                                op.addressLength,
+                                                reinterpret_cast<LPWSAOVERLAPPED>(&op.overlapped),
+                                                nullptr);
                 if (result == 0)
                 {
                     if (op.skipCompletionOnSuccess)
@@ -789,13 +995,13 @@ namespace NGIN::Net
                 }
 
                 op.cancellation.Reset();
-                op.handle = handle;
-                op.exec = exec;
+                op.handle       = handle;
+                op.exec         = exec;
                 op.continuation = continuation;
                 op.done.store(false, std::memory_order_release);
-                op.error = NetError {NetErrc::Ok, 0};
-                op.bytes = 0;
-                op.flags = 0;
+                op.error         = NetError {NetErrc::Ok, 0};
+                op.bytes         = 0;
+                op.flags         = 0;
                 op.addressLength = static_cast<int>(sizeof(op.address));
                 std::memset(&op.overlapped, 0, sizeof(op.overlapped));
                 std::memset(&op.address, 0, sizeof(op.address));
@@ -819,19 +1025,19 @@ namespace NGIN::Net
 
                 token.Register(op.cancellation, exec, continuation, &CancelIocp, &op);
 
-                DWORD bytes = 0;
-                DWORD flags = 0;
-                const auto sock = detail::ToNative(*handle);
-                const int result = ::WSARecvFrom(sock,
-                                                 &op.buffer,
-                                                 1,
-                                                 &bytes,
-                                                 &flags,
-                                                 reinterpret_cast<sockaddr*>(&op.address),
-                                                 &op.addressLength,
-                                                 reinterpret_cast<LPWSAOVERLAPPED>(&op.overlapped),
-                                                 nullptr);
-                op.flags = flags;
+                DWORD      bytes  = 0;
+                DWORD      flags  = 0;
+                const auto sock   = detail::ToNative(*handle);
+                const int  result = ::WSARecvFrom(sock,
+                                                  &op.buffer,
+                                                  1,
+                                                  &bytes,
+                                                  &flags,
+                                                  reinterpret_cast<sockaddr*>(&op.address),
+                                                  &op.addressLength,
+                                                  reinterpret_cast<LPWSAOVERLAPPED>(&op.overlapped),
+                                                  nullptr);
+                op.flags          = flags;
                 if (result == 0)
                 {
                     if (op.skipCompletionOnSuccess)
@@ -860,7 +1066,7 @@ namespace NGIN::Net
                 }
 
                 DatagramReceiveResult result {};
-                result.bytesReceived = static_cast<NGIN::UInt32>(op.bytes);
+                result.bytesReceived  = static_cast<NGIN::UInt32>(op.bytes);
                 result.remoteEndpoint = detail::FromSockAddr(op.address, static_cast<socklen_t>(op.addressLength));
                 return result;
             }
@@ -896,13 +1102,13 @@ namespace NGIN::Net
                 }
 
                 op.cancellation.Reset();
-                op.handle = handle;
-                op.exec = exec;
+                op.handle       = handle;
+                op.exec         = exec;
                 op.continuation = continuation;
                 op.done.store(false, std::memory_order_release);
-                op.error = NetError {NetErrc::Ok, 0};
-                op.bytes = 0;
-                op.flags = 0;
+                op.error         = NetError {NetErrc::Ok, 0};
+                op.bytes         = 0;
+                op.flags         = 0;
                 op.addressLength = 0;
                 std::memset(&op.overlapped, 0, sizeof(op.overlapped));
                 std::memset(&op.address, 0, sizeof(op.address));
@@ -932,7 +1138,7 @@ namespace NGIN::Net
 
                 token.Register(op.cancellation, exec, continuation, &CancelIocp, &op);
 
-                const auto sock = detail::ToNative(*handle);
+                const auto sock   = detail::ToNative(*handle);
                 const BOOL result = connectEx(sock,
                                               reinterpret_cast<sockaddr*>(&op.address),
                                               op.addressLength,
@@ -967,8 +1173,8 @@ namespace NGIN::Net
                     throw std::runtime_error("NetworkDriver IOCP connect failed");
                 }
 
-                const auto sock = detail::ToNative(*handle);
-                const int result = ::setsockopt(sock, SOL_SOCKET, SO_UPDATE_CONNECT_CONTEXT, nullptr, 0);
+                const auto sock   = detail::ToNative(*handle);
+                const int  result = ::setsockopt(sock, SOL_SOCKET, SO_UPDATE_CONNECT_CONTEXT, nullptr, 0);
                 if (result != 0)
                 {
                     throw std::runtime_error("NetworkDriver IOCP connect context update failed");
@@ -979,14 +1185,14 @@ namespace NGIN::Net
         struct AcceptAwaiter final
         {
             static constexpr std::size_t AddressBytes = sizeof(sockaddr_storage) + 16;
-            static constexpr std::size_t BufferBytes = AddressBytes * 2;
+            static constexpr std::size_t BufferBytes  = AddressBytes * 2;
 
-            Impl*                          owner {nullptr};
-            SocketHandle*                  listenHandle {nullptr};
-            NGIN::Execution::ExecutorRef   exec {};
-            NGIN::Async::CancellationToken token {};
-            IocpOperation                  op {};
-            SocketHandle                   accepted {};
+            Impl*                               owner {nullptr};
+            SocketHandle*                       listenHandle {nullptr};
+            NGIN::Execution::ExecutorRef        exec {};
+            NGIN::Async::CancellationToken      token {};
+            IocpOperation                       op {};
+            SocketHandle                        accepted {};
             std::array<NGIN::Byte, BufferBytes> buffer {};
 
             bool await_ready() const noexcept
@@ -1010,13 +1216,13 @@ namespace NGIN::Net
                 }
 
                 op.cancellation.Reset();
-                op.handle = listenHandle;
-                op.exec = exec;
+                op.handle       = listenHandle;
+                op.exec         = exec;
                 op.continuation = continuation;
                 op.done.store(false, std::memory_order_release);
-                op.error = NetError {NetErrc::Ok, 0};
-                op.bytes = 0;
-                op.flags = 0;
+                op.error         = NetError {NetErrc::Ok, 0};
+                op.bytes         = 0;
+                op.flags         = 0;
                 op.addressLength = 0;
                 std::memset(&op.overlapped, 0, sizeof(op.overlapped));
 
@@ -1027,8 +1233,8 @@ namespace NGIN::Net
                     return;
                 }
 
-                const AddressFamily family = detail::GetSocketFamily(*listenHandle);
-                bool dualStack = false;
+                const AddressFamily family    = detail::GetSocketFamily(*listenHandle);
+                bool                dualStack = false;
                 if (family == AddressFamily::V6)
                 {
                     dualStack = !detail::IsV6Only(*listenHandle);
@@ -1052,18 +1258,18 @@ namespace NGIN::Net
 
                 token.Register(op.cancellation, exec, continuation, &CancelIocp, &op);
 
-                DWORD bytes = 0;
-                const auto listenSock = detail::ToNative(*listenHandle);
-                const auto acceptSock = detail::ToNative(accepted);
+                DWORD       bytes        = 0;
+                const auto  listenSock   = detail::ToNative(*listenHandle);
+                const auto  acceptSock   = detail::ToNative(accepted);
                 const DWORD addressBytes = static_cast<DWORD>(AddressBytes);
-                const BOOL result = acceptEx(listenSock,
-                                             acceptSock,
-                                             buffer.data(),
-                                             0,
-                                             addressBytes,
-                                             addressBytes,
-                                             &bytes,
-                                             reinterpret_cast<LPWSAOVERLAPPED>(&op.overlapped));
+                const BOOL  result       = acceptEx(listenSock,
+                                                    acceptSock,
+                                                    buffer.data(),
+                                                    0,
+                                                    addressBytes,
+                                                    addressBytes,
+                                                    &bytes,
+                                                    reinterpret_cast<LPWSAOVERLAPPED>(&op.overlapped));
                 if (result != FALSE)
                 {
                     if (op.skipCompletionOnSuccess)
@@ -1096,11 +1302,11 @@ namespace NGIN::Net
 
                 const auto listenSock = detail::ToNative(*listenHandle);
                 const auto acceptSock = detail::ToNative(accepted);
-                const int update = ::setsockopt(acceptSock,
-                                                SOL_SOCKET,
-                                                SO_UPDATE_ACCEPT_CONTEXT,
-                                                reinterpret_cast<const char*>(&listenSock),
-                                                sizeof(listenSock));
+                const int  update     = ::setsockopt(acceptSock,
+                                                     SOL_SOCKET,
+                                                     SO_UPDATE_ACCEPT_CONTEXT,
+                                                     reinterpret_cast<const char*>(&listenSock),
+                                                     sizeof(listenSock));
                 if (update != 0)
                 {
                     accepted.Close();
@@ -1139,7 +1345,8 @@ namespace NGIN::Net
                             NGIN::Execution::ThisThread::SleepFor(m_options.pollInterval);
                         }
                     }
-                }, options);
+                },
+                                       options);
             }
         }
 
@@ -1157,7 +1364,7 @@ namespace NGIN::Net
         static NGIN::Execution::ThreadName MakeIndexedThreadName(std::string_view prefix, std::size_t index) noexcept
         {
             std::array<char, NGIN::Execution::ThreadName::MaxBytes + 1> buffer {};
-            const auto prefixLen = std::min<std::size_t>(prefix.size(), NGIN::Execution::ThreadName::MaxBytes);
+            const auto                                                  prefixLen = std::min<std::size_t>(prefix.size(), NGIN::Execution::ThreadName::MaxBytes);
             for (std::size_t i = 0; i < prefixLen; ++i)
             {
                 buffer[i] = prefix[i];
@@ -1170,8 +1377,8 @@ namespace NGIN::Net
             }
 
             std::array<char, 24> digits {};
-            std::size_t digitCount = 0;
-            auto value = index;
+            std::size_t          digitCount = 0;
+            auto                 value      = index;
             do
             {
                 digits[digitCount++] = static_cast<char>('0' + (value % 10));
@@ -1188,120 +1395,120 @@ namespace NGIN::Net
         }
 
     public:
-        NGIN::Async::Task<void> WaitUntilReadable(NGIN::Async::TaskContext& ctx,
-                                                  SocketHandle& handle,
+        NGIN::Async::Task<void> WaitUntilReadable(NGIN::Async::TaskContext&      ctx,
+                                                  SocketHandle&                  handle,
                                                   NGIN::Async::CancellationToken token)
         {
             WaiterAwaiter awaiter {};
-            awaiter.owner = this;
-            awaiter.handle = &handle;
+            awaiter.owner    = this;
+            awaiter.handle   = &handle;
             awaiter.wantRead = true;
-            awaiter.exec = ctx.GetExecutor();
-            awaiter.token = token;
+            awaiter.exec     = ctx.GetExecutor();
+            awaiter.token    = token;
             co_await awaiter;
         }
 
-        NGIN::Async::Task<void> WaitUntilWritable(NGIN::Async::TaskContext& ctx,
-                                                  SocketHandle& handle,
+        NGIN::Async::Task<void> WaitUntilWritable(NGIN::Async::TaskContext&      ctx,
+                                                  SocketHandle&                  handle,
                                                   NGIN::Async::CancellationToken token)
         {
             WaiterAwaiter awaiter {};
-            awaiter.owner = this;
-            awaiter.handle = &handle;
+            awaiter.owner     = this;
+            awaiter.handle    = &handle;
             awaiter.wantWrite = true;
-            awaiter.exec = ctx.GetExecutor();
-            awaiter.token = token;
+            awaiter.exec      = ctx.GetExecutor();
+            awaiter.token     = token;
             co_await awaiter;
         }
 
 #if defined(NGIN_PLATFORM_WINDOWS)
-        static NGIN::Async::Task<NGIN::UInt32> SubmitSend(NGIN::Async::TaskContext& ctx,
-                                                          Impl& owner,
-                                                          SocketHandle& handle,
-                                                          ConstByteSpan data,
+        static NGIN::Async::Task<NGIN::UInt32> SubmitSend(NGIN::Async::TaskContext&      ctx,
+                                                          Impl&                          owner,
+                                                          SocketHandle&                  handle,
+                                                          ConstByteSpan                  data,
                                                           NGIN::Async::CancellationToken token)
         {
             SendAwaiter awaiter {};
-            awaiter.owner = &owner;
+            awaiter.owner  = &owner;
             awaiter.handle = &handle;
-            awaiter.data = data;
-            awaiter.exec = ctx.GetExecutor();
-            awaiter.token = token;
+            awaiter.data   = data;
+            awaiter.exec   = ctx.GetExecutor();
+            awaiter.token  = token;
             co_return co_await awaiter;
         }
 
-        static NGIN::Async::Task<NGIN::UInt32> SubmitReceive(NGIN::Async::TaskContext& ctx,
-                                                             Impl& owner,
-                                                             SocketHandle& handle,
-                                                             ByteSpan destination,
+        static NGIN::Async::Task<NGIN::UInt32> SubmitReceive(NGIN::Async::TaskContext&      ctx,
+                                                             Impl&                          owner,
+                                                             SocketHandle&                  handle,
+                                                             ByteSpan                       destination,
                                                              NGIN::Async::CancellationToken token)
         {
             ReceiveAwaiter awaiter {};
-            awaiter.owner = &owner;
-            awaiter.handle = &handle;
+            awaiter.owner       = &owner;
+            awaiter.handle      = &handle;
             awaiter.destination = destination;
-            awaiter.exec = ctx.GetExecutor();
-            awaiter.token = token;
+            awaiter.exec        = ctx.GetExecutor();
+            awaiter.token       = token;
             co_return co_await awaiter;
         }
 
-        static NGIN::Async::Task<NGIN::UInt32> SubmitSendTo(NGIN::Async::TaskContext& ctx,
-                                                            Impl& owner,
-                                                            SocketHandle& handle,
-                                                            Endpoint remoteEndpoint,
-                                                            ConstByteSpan data,
+        static NGIN::Async::Task<NGIN::UInt32> SubmitSendTo(NGIN::Async::TaskContext&      ctx,
+                                                            Impl&                          owner,
+                                                            SocketHandle&                  handle,
+                                                            Endpoint                       remoteEndpoint,
+                                                            ConstByteSpan                  data,
                                                             NGIN::Async::CancellationToken token)
         {
             SendToAwaiter awaiter {};
-            awaiter.owner = &owner;
-            awaiter.handle = &handle;
+            awaiter.owner          = &owner;
+            awaiter.handle         = &handle;
             awaiter.remoteEndpoint = remoteEndpoint;
-            awaiter.data = data;
-            awaiter.exec = ctx.GetExecutor();
-            awaiter.token = token;
+            awaiter.data           = data;
+            awaiter.exec           = ctx.GetExecutor();
+            awaiter.token          = token;
             co_return co_await awaiter;
         }
 
-        static NGIN::Async::Task<DatagramReceiveResult> SubmitReceiveFrom(NGIN::Async::TaskContext& ctx,
-                                                                          Impl& owner,
-                                                                          SocketHandle& handle,
-                                                                          ByteSpan destination,
+        static NGIN::Async::Task<DatagramReceiveResult> SubmitReceiveFrom(NGIN::Async::TaskContext&      ctx,
+                                                                          Impl&                          owner,
+                                                                          SocketHandle&                  handle,
+                                                                          ByteSpan                       destination,
                                                                           NGIN::Async::CancellationToken token)
         {
             ReceiveFromAwaiter awaiter {};
-            awaiter.owner = &owner;
-            awaiter.handle = &handle;
+            awaiter.owner       = &owner;
+            awaiter.handle      = &handle;
             awaiter.destination = destination;
-            awaiter.exec = ctx.GetExecutor();
-            awaiter.token = token;
+            awaiter.exec        = ctx.GetExecutor();
+            awaiter.token       = token;
             co_return co_await awaiter;
         }
 
-        static NGIN::Async::Task<void> SubmitConnect(NGIN::Async::TaskContext& ctx,
-                                                     Impl& owner,
-                                                     SocketHandle& handle,
-                                                     Endpoint remoteEndpoint,
+        static NGIN::Async::Task<void> SubmitConnect(NGIN::Async::TaskContext&      ctx,
+                                                     Impl&                          owner,
+                                                     SocketHandle&                  handle,
+                                                     Endpoint                       remoteEndpoint,
                                                      NGIN::Async::CancellationToken token)
         {
             ConnectAwaiter awaiter {};
-            awaiter.owner = &owner;
-            awaiter.handle = &handle;
+            awaiter.owner          = &owner;
+            awaiter.handle         = &handle;
             awaiter.remoteEndpoint = remoteEndpoint;
-            awaiter.exec = ctx.GetExecutor();
-            awaiter.token = token;
+            awaiter.exec           = ctx.GetExecutor();
+            awaiter.token          = token;
             co_await awaiter;
         }
 
-        static NGIN::Async::Task<SocketHandle> SubmitAccept(NGIN::Async::TaskContext& ctx,
-                                                            Impl& owner,
-                                                            SocketHandle& handle,
+        static NGIN::Async::Task<SocketHandle> SubmitAccept(NGIN::Async::TaskContext&      ctx,
+                                                            Impl&                          owner,
+                                                            SocketHandle&                  handle,
                                                             NGIN::Async::CancellationToken token)
         {
             AcceptAwaiter awaiter {};
-            awaiter.owner = &owner;
+            awaiter.owner        = &owner;
             awaiter.listenHandle = &handle;
-            awaiter.exec = ctx.GetExecutor();
-            awaiter.token = token;
+            awaiter.exec         = ctx.GetExecutor();
+            awaiter.token        = token;
             co_return co_await awaiter;
         }
 #endif
@@ -1322,7 +1529,7 @@ namespace NGIN::Net
 
     std::unique_ptr<NetworkDriver> NetworkDriver::Create(NetworkDriverOptions options)
     {
-        auto driver = std::unique_ptr<NetworkDriver>(new NetworkDriver());
+        auto driver    = std::unique_ptr<NetworkDriver>(new NetworkDriver());
         driver->m_impl = std::make_unique<Impl>(options);
         return driver;
     }
@@ -1351,67 +1558,67 @@ namespace NGIN::Net
         }
     }
 
-    NGIN::Async::Task<void> NetworkDriver::WaitUntilReadable(NGIN::Async::TaskContext& ctx,
-                                                             SocketHandle& handle,
+    NGIN::Async::Task<void> NetworkDriver::WaitUntilReadable(NGIN::Async::TaskContext&      ctx,
+                                                             SocketHandle&                  handle,
                                                              NGIN::Async::CancellationToken token)
     {
         return m_impl->WaitUntilReadable(ctx, handle, token);
     }
 
-    NGIN::Async::Task<void> NetworkDriver::WaitUntilWritable(NGIN::Async::TaskContext& ctx,
-                                                             SocketHandle& handle,
+    NGIN::Async::Task<void> NetworkDriver::WaitUntilWritable(NGIN::Async::TaskContext&      ctx,
+                                                             SocketHandle&                  handle,
                                                              NGIN::Async::CancellationToken token)
     {
         return m_impl->WaitUntilWritable(ctx, handle, token);
     }
 
 #if defined(NGIN_PLATFORM_WINDOWS)
-    NGIN::Async::Task<NGIN::UInt32> NetworkDriver::SubmitSend(NGIN::Async::TaskContext& ctx,
-                                                              SocketHandle& handle,
-                                                              ConstByteSpan data,
+    NGIN::Async::Task<NGIN::UInt32> NetworkDriver::SubmitSend(NGIN::Async::TaskContext&      ctx,
+                                                              SocketHandle&                  handle,
+                                                              ConstByteSpan                  data,
                                                               NGIN::Async::CancellationToken token)
     {
         return Impl::SubmitSend(ctx, *m_impl, handle, data, token);
     }
 
-    NGIN::Async::Task<NGIN::UInt32> NetworkDriver::SubmitReceive(NGIN::Async::TaskContext& ctx,
-                                                                 SocketHandle& handle,
-                                                                 ByteSpan destination,
+    NGIN::Async::Task<NGIN::UInt32> NetworkDriver::SubmitReceive(NGIN::Async::TaskContext&      ctx,
+                                                                 SocketHandle&                  handle,
+                                                                 ByteSpan                       destination,
                                                                  NGIN::Async::CancellationToken token)
     {
         return Impl::SubmitReceive(ctx, *m_impl, handle, destination, token);
     }
 
-    NGIN::Async::Task<NGIN::UInt32> NetworkDriver::SubmitSendTo(NGIN::Async::TaskContext& ctx,
-                                                                SocketHandle& handle,
-                                                                Endpoint remoteEndpoint,
-                                                                ConstByteSpan data,
+    NGIN::Async::Task<NGIN::UInt32> NetworkDriver::SubmitSendTo(NGIN::Async::TaskContext&      ctx,
+                                                                SocketHandle&                  handle,
+                                                                Endpoint                       remoteEndpoint,
+                                                                ConstByteSpan                  data,
                                                                 NGIN::Async::CancellationToken token)
     {
         return Impl::SubmitSendTo(ctx, *m_impl, handle, remoteEndpoint, data, token);
     }
 
-    NGIN::Async::Task<DatagramReceiveResult> NetworkDriver::SubmitReceiveFrom(NGIN::Async::TaskContext& ctx,
-                                                                              SocketHandle& handle,
-                                                                              ByteSpan destination,
+    NGIN::Async::Task<DatagramReceiveResult> NetworkDriver::SubmitReceiveFrom(NGIN::Async::TaskContext&      ctx,
+                                                                              SocketHandle&                  handle,
+                                                                              ByteSpan                       destination,
                                                                               NGIN::Async::CancellationToken token)
     {
         return Impl::SubmitReceiveFrom(ctx, *m_impl, handle, destination, token);
     }
 
-    NGIN::Async::Task<void> NetworkDriver::SubmitConnect(NGIN::Async::TaskContext& ctx,
-                                                         SocketHandle& handle,
-                                                         Endpoint remoteEndpoint,
+    NGIN::Async::Task<void> NetworkDriver::SubmitConnect(NGIN::Async::TaskContext&      ctx,
+                                                         SocketHandle&                  handle,
+                                                         Endpoint                       remoteEndpoint,
                                                          NGIN::Async::CancellationToken token)
     {
         return Impl::SubmitConnect(ctx, *m_impl, handle, remoteEndpoint, token);
     }
 
-    NGIN::Async::Task<SocketHandle> NetworkDriver::SubmitAccept(NGIN::Async::TaskContext& ctx,
-                                                                SocketHandle& handle,
+    NGIN::Async::Task<SocketHandle> NetworkDriver::SubmitAccept(NGIN::Async::TaskContext&      ctx,
+                                                                SocketHandle&                  handle,
                                                                 NGIN::Async::CancellationToken token)
     {
         return Impl::SubmitAccept(ctx, *m_impl, handle, token);
     }
 #endif
-}
+}// namespace NGIN::Net
