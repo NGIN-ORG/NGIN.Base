@@ -38,6 +38,8 @@ namespace NGIN::Net
 
         NetExpected<NGIN::UInt32> TrySendTo(Endpoint remoteEndpoint, ConstByteSpan payload) noexcept;
         NetExpected<DatagramReceiveResult> TryReceiveFrom(ByteSpan destination) noexcept;
+        NetExpected<NGIN::UInt32> TrySendToSegments(Endpoint remoteEndpoint, BufferSegmentSpan payload) noexcept;
+        NetExpected<DatagramReceiveResult> TryReceiveFromSegments(MutableBufferSegmentSpan destination) noexcept;
 
         NGIN::Async::Task<NGIN::UInt32> SendToAsync(NGIN::Async::TaskContext& ctx,
                                                    NetworkDriver& driver,

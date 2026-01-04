@@ -337,6 +337,111 @@ namespace NGIN::Net
         listener.Close();
     }
 
+    TEST_CASE("Net.Tcp.VectoredSendReceive")
+    {
+        TcpListener listener;
+        REQUIRE(listener.Open(AddressFamily::V4));
+        REQUIRE(listener.Bind({IpAddress::AnyV4(), 0}));
+        REQUIRE(listener.Listen(16));
+
+        const auto port = GetBoundPort(listener.Handle());
+        REQUIRE(port != 0);
+
+        TcpSocket client;
+        REQUIRE(client.Open(AddressFamily::V4));
+        REQUIRE(client.ConnectBlocking({IpAddress::LoopbackV4(), port}));
+
+        TcpSocket server;
+        bool accepted = false;
+        for (int attempt = 0; attempt < 128; ++attempt)
+        {
+            auto acceptResult = listener.TryAccept();
+            if (acceptResult)
+            {
+                server = std::move(*acceptResult);
+                accepted = true;
+                break;
+            }
+            REQUIRE(acceptResult.error().code == NetErrc::WouldBlock);
+            SleepBrief();
+        }
+        REQUIRE(accepted);
+
+        const char partA[] = "vec-";
+        const char partB[] = "tcp";
+        constexpr std::size_t totalBytes = sizeof(partA) - 1 + sizeof(partB) - 1;
+
+        std::size_t sent = 0;
+        while (sent < totalBytes)
+        {
+            std::array<BufferSegment, 2> iovecs {};
+            std::size_t count = 0;
+            if (sent < (sizeof(partA) - 1))
+            {
+                const auto offsetA = sent;
+                iovecs[count++] = BufferSegment {reinterpret_cast<const NGIN::Byte*>(partA) + offsetA,
+                                                 static_cast<NGIN::UInt32>((sizeof(partA) - 1) - offsetA)};
+                iovecs[count++] = BufferSegment {reinterpret_cast<const NGIN::Byte*>(partB),
+                                                 static_cast<NGIN::UInt32>(sizeof(partB) - 1)};
+            }
+            else
+            {
+                const auto offsetB = sent - (sizeof(partA) - 1);
+                iovecs[count++] = BufferSegment {reinterpret_cast<const NGIN::Byte*>(partB) + offsetB,
+                                                 static_cast<NGIN::UInt32>((sizeof(partB) - 1) - offsetB)};
+            }
+
+            auto sendResult = client.TrySendSegments(BufferSegmentSpan {iovecs.data(), count});
+            if (!sendResult)
+            {
+                REQUIRE(sendResult.error().code == NetErrc::WouldBlock);
+                SleepBrief();
+                continue;
+            }
+            sent += *sendResult;
+        }
+
+        std::array<NGIN::Byte, sizeof(partA) - 1> recvA {};
+        std::array<NGIN::Byte, sizeof(partB) - 1> recvB {};
+        std::size_t received = 0;
+
+        while (received < totalBytes)
+        {
+            std::array<MutableBufferSegment, 2> iovecs {};
+            std::size_t count = 0;
+            if (received < recvA.size())
+            {
+                const auto offsetA = received;
+                iovecs[count++] = MutableBufferSegment {recvA.data() + offsetA,
+                                                        static_cast<NGIN::UInt32>(recvA.size() - offsetA)};
+                iovecs[count++] = MutableBufferSegment {recvB.data(),
+                                                        static_cast<NGIN::UInt32>(recvB.size())};
+            }
+            else
+            {
+                const auto offsetB = received - recvA.size();
+                iovecs[count++] = MutableBufferSegment {recvB.data() + offsetB,
+                                                        static_cast<NGIN::UInt32>(recvB.size() - offsetB)};
+            }
+
+            auto recvResult = server.TryReceiveSegments(MutableBufferSegmentSpan {iovecs.data(), count});
+            if (!recvResult)
+            {
+                REQUIRE(recvResult.error().code == NetErrc::WouldBlock);
+                SleepBrief();
+                continue;
+            }
+            received += *recvResult;
+        }
+
+        REQUIRE(std::memcmp(recvA.data(), partA, sizeof(partA) - 1) == 0);
+        REQUIRE(std::memcmp(recvB.data(), partB, sizeof(partB) - 1) == 0);
+
+        client.Close();
+        server.Close();
+        listener.Close();
+    }
+
     TEST_CASE("Net.Transport.TcpByteStream.Loopback")
     {
         NGIN::Execution::CooperativeScheduler scheduler;
@@ -401,6 +506,71 @@ namespace NGIN::Net
         static_cast<Transport::TcpByteStream*>(clientStream.get())->Socket().Close();
         static_cast<Transport::TcpByteStream*>(serverStream.get())->Socket().Close();
         listener.Close();
+    }
+
+    TEST_CASE("Net.Udp.VectoredSendReceive")
+    {
+        UdpSocket receiver;
+        REQUIRE(receiver.Open(AddressFamily::V4));
+        REQUIRE(receiver.Bind({IpAddress::AnyV4(), 0}));
+
+        const auto port = GetBoundPort(receiver.Handle());
+        REQUIRE(port != 0);
+
+        UdpSocket sender;
+        REQUIRE(sender.Open(AddressFamily::V4));
+
+        const char partA[] = "udp-";
+        const char partB[] = "vec";
+        constexpr std::size_t totalBytes = sizeof(partA) - 1 + sizeof(partB) - 1;
+
+        std::array<BufferSegment, 2> sendIov {};
+        sendIov[0] = BufferSegment {reinterpret_cast<const NGIN::Byte*>(partA),
+                                    static_cast<NGIN::UInt32>(sizeof(partA) - 1)};
+        sendIov[1] = BufferSegment {reinterpret_cast<const NGIN::Byte*>(partB),
+                                    static_cast<NGIN::UInt32>(sizeof(partB) - 1)};
+
+        bool sent = false;
+        for (int attempt = 0; attempt < 64; ++attempt)
+        {
+            auto sendResult = sender.TrySendToSegments({IpAddress::LoopbackV4(), port},
+                                                       BufferSegmentSpan {sendIov.data(), sendIov.size()});
+            if (sendResult)
+            {
+                REQUIRE(*sendResult == totalBytes);
+                sent = true;
+                break;
+            }
+            REQUIRE(sendResult.error().code == NetErrc::WouldBlock);
+            SleepBrief();
+        }
+        REQUIRE(sent);
+
+        std::array<NGIN::Byte, sizeof(partA) - 1> recvA {};
+        std::array<NGIN::Byte, sizeof(partB) - 1> recvB {};
+        std::array<MutableBufferSegment, 2> recvIov {};
+        recvIov[0] = MutableBufferSegment {recvA.data(), static_cast<NGIN::UInt32>(recvA.size())};
+        recvIov[1] = MutableBufferSegment {recvB.data(), static_cast<NGIN::UInt32>(recvB.size())};
+
+        bool received = false;
+        for (int attempt = 0; attempt < 64; ++attempt)
+        {
+            auto recvResult = receiver.TryReceiveFromSegments(MutableBufferSegmentSpan {recvIov.data(), recvIov.size()});
+            if (recvResult)
+            {
+                REQUIRE(recvResult->bytesReceived == totalBytes);
+                REQUIRE(std::memcmp(recvA.data(), partA, sizeof(partA) - 1) == 0);
+                REQUIRE(std::memcmp(recvB.data(), partB, sizeof(partB) - 1) == 0);
+                received = true;
+                break;
+            }
+            REQUIRE(recvResult.error().code == NetErrc::WouldBlock);
+            SleepBrief();
+        }
+        REQUIRE(received);
+
+        sender.Close();
+        receiver.Close();
     }
 
     TEST_CASE("Net.Transport.UdpDatagramChannel.Loopback")

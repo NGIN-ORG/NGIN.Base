@@ -15,14 +15,28 @@ namespace NGIN::Net
     using ByteSpan = std::span<NGIN::Byte>;
     using ConstByteSpan = std::span<const NGIN::Byte>;
 
-    /// @brief Vector I/O entry.
-    struct IOVec final
+    /// @brief Segment of a payload.
+    struct BufferSegment final
     {
         const NGIN::Byte* data {nullptr};
         NGIN::UInt32      size {0};
     };
 
-    using IOVecSpan = std::span<const IOVec>;
+    using BufferSegmentSpan = std::span<const BufferSegment>;
+
+    /// @brief Mutable payload segment.
+    struct MutableBufferSegment final
+    {
+        NGIN::Byte*  data {nullptr};
+        NGIN::UInt32 size {0};
+    };
+
+    using MutableBufferSegmentSpan = std::span<MutableBufferSegment>;
+
+    using IOVec = BufferSegment;
+    using IOVecSpan = BufferSegmentSpan;
+    using MutableIOVec = MutableBufferSegment;
+    using MutableIOVecSpan = MutableBufferSegmentSpan;
 
     /// @brief Move-only buffer that can return to a BufferPool.
     struct Buffer final

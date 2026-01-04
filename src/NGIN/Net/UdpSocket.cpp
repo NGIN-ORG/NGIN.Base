@@ -7,7 +7,13 @@
 #include <NGIN/Async/TaskContext.hpp>
 #include <NGIN/Net/Runtime/NetworkDriver.hpp>
 
+#if !defined(NGIN_PLATFORM_WINDOWS)
+  #include <sys/uio.h>
+#endif
+
+#include <array>
 #include <limits>
+#include <vector>
 #include <stdexcept>
 
 namespace NGIN::Net
@@ -113,6 +119,195 @@ namespace NGIN::Net
         result.remoteEndpoint = detail::FromSockAddr(storage, length);
         result.bytesReceived = static_cast<NGIN::UInt32>(bytes);
         return result;
+    }
+
+    NetExpected<NGIN::UInt32> UdpSocket::TrySendToSegments(Endpoint remoteEndpoint, BufferSegmentSpan payload) noexcept
+    {
+        if (payload.empty())
+        {
+            return static_cast<NGIN::UInt32>(0);
+        }
+
+        sockaddr_storage storage {};
+        socklen_t length = 0;
+        if (!detail::ToSockAddr(remoteEndpoint, storage, length))
+        {
+            return std::unexpected(NetError {NetErrc::Unknown, 0});
+        }
+
+#if defined(NGIN_PLATFORM_WINDOWS)
+        constexpr std::size_t kStackBuffers = 16;
+        if (payload.size() > std::numeric_limits<DWORD>::max())
+        {
+            return std::unexpected(NetError {NetErrc::MessageTooLarge, 0});
+        }
+
+        std::array<WSABUF, kStackBuffers> stackBuffers {};
+        std::vector<WSABUF> heapBuffers {};
+        WSABUF* buffers = stackBuffers.data();
+        if (payload.size() > stackBuffers.size())
+        {
+            heapBuffers.resize(payload.size());
+            buffers = heapBuffers.data();
+        }
+
+        for (std::size_t i = 0; i < payload.size(); ++i)
+        {
+            if (payload[i].size > std::numeric_limits<ULONG>::max())
+            {
+                return std::unexpected(NetError {NetErrc::MessageTooLarge, 0});
+            }
+            buffers[i].buf = reinterpret_cast<char*>(const_cast<NGIN::Byte*>(payload[i].data));
+            buffers[i].len = static_cast<ULONG>(payload[i].size);
+        }
+
+        DWORD bytes = 0;
+        const auto sock = detail::ToNative(m_handle);
+        const int result = ::WSASendTo(sock,
+                                       buffers,
+                                       static_cast<DWORD>(payload.size()),
+                                       &bytes,
+                                       0,
+                                       reinterpret_cast<const sockaddr*>(&storage),
+                                       static_cast<int>(length),
+                                       nullptr,
+                                       nullptr);
+        if (result != 0)
+        {
+            return std::unexpected(detail::LastError());
+        }
+        return static_cast<NGIN::UInt32>(bytes);
+#else
+        constexpr std::size_t kStackBuffers = 16;
+        const auto maxIov = static_cast<std::size_t>(IOV_MAX);
+        if (payload.size() > maxIov)
+        {
+            return std::unexpected(NetError {NetErrc::MessageTooLarge, 0});
+        }
+
+        std::array<iovec, kStackBuffers> stackBuffers {};
+        std::vector<iovec> heapBuffers {};
+        iovec* buffers = stackBuffers.data();
+        if (payload.size() > stackBuffers.size())
+        {
+            heapBuffers.resize(payload.size());
+            buffers = heapBuffers.data();
+        }
+
+        for (std::size_t i = 0; i < payload.size(); ++i)
+        {
+            buffers[i].iov_base = const_cast<NGIN::Byte*>(payload[i].data);
+            buffers[i].iov_len = payload[i].size;
+        }
+
+        msghdr msg {};
+        msg.msg_name = &storage;
+        msg.msg_namelen = length;
+        msg.msg_iov = buffers;
+        msg.msg_iovlen = payload.size();
+
+        const auto sock = detail::ToNative(m_handle);
+        const auto bytes = ::sendmsg(sock, &msg, 0);
+        if (bytes < 0)
+        {
+            return std::unexpected(detail::LastError());
+        }
+        return static_cast<NGIN::UInt32>(bytes);
+#endif
+    }
+
+    NetExpected<DatagramReceiveResult> UdpSocket::TryReceiveFromSegments(MutableBufferSegmentSpan destination) noexcept
+    {
+        if (destination.empty())
+        {
+            return DatagramReceiveResult {Endpoint {}, 0};
+        }
+
+        sockaddr_storage storage {};
+        socklen_t length = static_cast<socklen_t>(sizeof(storage));
+
+#if defined(NGIN_PLATFORM_WINDOWS)
+        constexpr std::size_t kStackBuffers = 16;
+        if (destination.size() > std::numeric_limits<DWORD>::max())
+        {
+            return std::unexpected(NetError {NetErrc::MessageTooLarge, 0});
+        }
+
+        std::array<WSABUF, kStackBuffers> stackBuffers {};
+        std::vector<WSABUF> heapBuffers {};
+        WSABUF* buffers = stackBuffers.data();
+        if (destination.size() > stackBuffers.size())
+        {
+            heapBuffers.resize(destination.size());
+            buffers = heapBuffers.data();
+        }
+
+        for (std::size_t i = 0; i < destination.size(); ++i)
+        {
+            if (destination[i].size > std::numeric_limits<ULONG>::max())
+            {
+                return std::unexpected(NetError {NetErrc::MessageTooLarge, 0});
+            }
+            buffers[i].buf = reinterpret_cast<char*>(destination[i].data);
+            buffers[i].len = static_cast<ULONG>(destination[i].size);
+        }
+
+        DWORD bytes = 0;
+        DWORD flags = 0;
+        const auto sock = detail::ToNative(m_handle);
+        const int result = ::WSARecvFrom(sock,
+                                         buffers,
+                                         static_cast<DWORD>(destination.size()),
+                                         &bytes,
+                                         &flags,
+                                         reinterpret_cast<sockaddr*>(&storage),
+                                         reinterpret_cast<int*>(&length),
+                                         nullptr,
+                                         nullptr);
+        if (result != 0)
+        {
+            return std::unexpected(detail::LastError());
+        }
+
+        return DatagramReceiveResult {detail::FromSockAddr(storage, length), static_cast<NGIN::UInt32>(bytes)};
+#else
+        constexpr std::size_t kStackBuffers = 16;
+        const auto maxIov = static_cast<std::size_t>(IOV_MAX);
+        if (destination.size() > maxIov)
+        {
+            return std::unexpected(NetError {NetErrc::MessageTooLarge, 0});
+        }
+
+        std::array<iovec, kStackBuffers> stackBuffers {};
+        std::vector<iovec> heapBuffers {};
+        iovec* buffers = stackBuffers.data();
+        if (destination.size() > stackBuffers.size())
+        {
+            heapBuffers.resize(destination.size());
+            buffers = heapBuffers.data();
+        }
+
+        for (std::size_t i = 0; i < destination.size(); ++i)
+        {
+            buffers[i].iov_base = destination[i].data;
+            buffers[i].iov_len = destination[i].size;
+        }
+
+        msghdr msg {};
+        msg.msg_name = &storage;
+        msg.msg_namelen = length;
+        msg.msg_iov = buffers;
+        msg.msg_iovlen = destination.size();
+
+        const auto sock = detail::ToNative(m_handle);
+        const auto bytes = ::recvmsg(sock, &msg, 0);
+        if (bytes < 0)
+        {
+            return std::unexpected(detail::LastError());
+        }
+
+        return DatagramReceiveResult {detail::FromSockAddr(storage, length), static_cast<NGIN::UInt32>(bytes)};
+#endif
     }
 
     NGIN::Async::Task<NGIN::UInt32> UdpSocket::SendToAsync(NGIN::Async::TaskContext& ctx,

@@ -7,7 +7,13 @@
 #include <NGIN/Async/TaskContext.hpp>
 #include <NGIN/Net/Runtime/NetworkDriver.hpp>
 
+#if !defined(NGIN_PLATFORM_WINDOWS)
+  #include <sys/uio.h>
+#endif
+
+#include <array>
 #include <limits>
+#include <vector>
 #include <stdexcept>
 
 namespace NGIN::Net
@@ -152,6 +158,156 @@ namespace NGIN::Net
         }
 
         return static_cast<NGIN::UInt32>(bytes);
+    }
+
+    NetExpected<NGIN::UInt32> TcpSocket::TrySendSegments(BufferSegmentSpan data) noexcept
+    {
+        if (data.empty())
+        {
+            return static_cast<NGIN::UInt32>(0);
+        }
+
+#if defined(NGIN_PLATFORM_WINDOWS)
+        constexpr std::size_t kStackBuffers = 16;
+        if (data.size() > std::numeric_limits<DWORD>::max())
+        {
+            return std::unexpected(NetError {NetErrc::MessageTooLarge, 0});
+        }
+
+        std::array<WSABUF, kStackBuffers> stackBuffers {};
+        std::vector<WSABUF> heapBuffers {};
+        WSABUF* buffers = stackBuffers.data();
+        if (data.size() > stackBuffers.size())
+        {
+            heapBuffers.resize(data.size());
+            buffers = heapBuffers.data();
+        }
+
+        for (std::size_t i = 0; i < data.size(); ++i)
+        {
+            if (data[i].size > std::numeric_limits<ULONG>::max())
+            {
+                return std::unexpected(NetError {NetErrc::MessageTooLarge, 0});
+            }
+            buffers[i].buf = reinterpret_cast<char*>(const_cast<NGIN::Byte*>(data[i].data));
+            buffers[i].len = static_cast<ULONG>(data[i].size);
+        }
+
+        DWORD bytes = 0;
+        DWORD flags = 0;
+        const auto sock = detail::ToNative(m_handle);
+        const int result = ::WSASend(sock, buffers, static_cast<DWORD>(data.size()), &bytes, flags, nullptr, nullptr);
+        if (result != 0)
+        {
+            return std::unexpected(detail::LastError());
+        }
+        return static_cast<NGIN::UInt32>(bytes);
+#else
+        constexpr std::size_t kStackBuffers = 16;
+        const auto maxIov = static_cast<std::size_t>(IOV_MAX);
+        if (data.size() > maxIov)
+        {
+            return std::unexpected(NetError {NetErrc::MessageTooLarge, 0});
+        }
+
+        std::array<iovec, kStackBuffers> stackBuffers {};
+        std::vector<iovec> heapBuffers {};
+        iovec* buffers = stackBuffers.data();
+        if (data.size() > stackBuffers.size())
+        {
+            heapBuffers.resize(data.size());
+            buffers = heapBuffers.data();
+        }
+
+        for (std::size_t i = 0; i < data.size(); ++i)
+        {
+            buffers[i].iov_base = const_cast<NGIN::Byte*>(data[i].data);
+            buffers[i].iov_len = data[i].size;
+        }
+
+        const auto sock = detail::ToNative(m_handle);
+        const auto bytes = ::writev(sock, buffers, static_cast<int>(data.size()));
+        if (bytes < 0)
+        {
+            return std::unexpected(detail::LastError());
+        }
+        return static_cast<NGIN::UInt32>(bytes);
+#endif
+    }
+
+    NetExpected<NGIN::UInt32> TcpSocket::TryReceiveSegments(MutableBufferSegmentSpan destination) noexcept
+    {
+        if (destination.empty())
+        {
+            return static_cast<NGIN::UInt32>(0);
+        }
+
+#if defined(NGIN_PLATFORM_WINDOWS)
+        constexpr std::size_t kStackBuffers = 16;
+        if (destination.size() > std::numeric_limits<DWORD>::max())
+        {
+            return std::unexpected(NetError {NetErrc::MessageTooLarge, 0});
+        }
+
+        std::array<WSABUF, kStackBuffers> stackBuffers {};
+        std::vector<WSABUF> heapBuffers {};
+        WSABUF* buffers = stackBuffers.data();
+        if (destination.size() > stackBuffers.size())
+        {
+            heapBuffers.resize(destination.size());
+            buffers = heapBuffers.data();
+        }
+
+        for (std::size_t i = 0; i < destination.size(); ++i)
+        {
+            if (destination[i].size > std::numeric_limits<ULONG>::max())
+            {
+                return std::unexpected(NetError {NetErrc::MessageTooLarge, 0});
+            }
+            buffers[i].buf = reinterpret_cast<char*>(destination[i].data);
+            buffers[i].len = static_cast<ULONG>(destination[i].size);
+        }
+
+        DWORD bytes = 0;
+        DWORD flags = 0;
+        const auto sock = detail::ToNative(m_handle);
+        const int result = ::WSARecv(sock, buffers, static_cast<DWORD>(destination.size()), &bytes, &flags, nullptr, nullptr);
+        if (result != 0)
+        {
+            return std::unexpected(detail::LastError());
+        }
+        return static_cast<NGIN::UInt32>(bytes);
+#else
+        constexpr std::size_t kStackBuffers = 16;
+        const auto maxIov = static_cast<std::size_t>(IOV_MAX);
+        if (destination.size() > maxIov)
+        {
+            return std::unexpected(NetError {NetErrc::MessageTooLarge, 0});
+        }
+
+        std::array<iovec, kStackBuffers> stackBuffers {};
+        std::vector<iovec> heapBuffers {};
+        iovec* buffers = stackBuffers.data();
+        if (destination.size() > stackBuffers.size())
+        {
+            heapBuffers.resize(destination.size());
+            buffers = heapBuffers.data();
+        }
+
+        for (std::size_t i = 0; i < destination.size(); ++i)
+        {
+            buffers[i].iov_base = destination[i].data;
+            buffers[i].iov_len = destination[i].size;
+        }
+
+        const auto sock = detail::ToNative(m_handle);
+        const auto bytes = ::readv(sock, buffers, static_cast<int>(destination.size()));
+        if (bytes < 0)
+        {
+            return std::unexpected(detail::LastError());
+        }
+        return static_cast<NGIN::UInt32>(bytes);
+#endif
     }
 
     NGIN::Async::Task<NGIN::UInt32> TcpSocket::SendAsync(NGIN::Async::TaskContext& ctx,

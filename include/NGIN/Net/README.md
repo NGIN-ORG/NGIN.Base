@@ -7,7 +7,7 @@ Purpose & Scope:
 Key Types:
 - Addressing: AddressFamily, IpAddress, Endpoint.
 - Errors: NetErrc, NetError, NetExpected.
-- Buffers: Buffer, BufferPool<Allocator>, IOVec.
+- Buffers: Buffer, BufferPool<Allocator>, BufferSegment.
 - Runtime: NetworkDriver.
 - Sockets: TcpSocket, TcpListener, UdpSocket.
 - Transport: IByteStream, IDatagramChannel, TcpByteStream, UdpDatagramChannel, ByteStreamBuilder, DatagramBuilder.

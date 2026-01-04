@@ -135,8 +135,8 @@ namespace NGIN::Net {
 namespace NGIN::Net {
     using ByteSpan = std::span<NGIN::Byte>;
     using ConstByteSpan = std::span<const NGIN::Byte>;
-    struct IOVec { const NGIN::Byte* data; NGIN::UInt32 size; };
-    using IOVecSpan = std::span<const IOVec>;
+    struct BufferSegment { const NGIN::Byte* data; NGIN::UInt32 size; };
+    using BufferSegmentSpan = std::span<const BufferSegment>;
 
     struct Buffer {
         NGIN::Byte* data {nullptr};
