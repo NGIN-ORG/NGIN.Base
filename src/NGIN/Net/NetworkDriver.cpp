@@ -1395,12 +1395,13 @@ namespace NGIN::Net
         }
 
     public:
-        NGIN::Async::Task<void> WaitUntilReadable(NGIN::Async::TaskContext&      ctx,
-                                                  SocketHandle&                  handle,
-                                                  NGIN::Async::CancellationToken token)
+        static NGIN::Async::Task<void> WaitUntilReadable(NGIN::Async::TaskContext&      ctx,
+                                                         Impl&                          owner,
+                                                         SocketHandle&                  handle,
+                                                         NGIN::Async::CancellationToken token)
         {
             WaiterAwaiter awaiter {};
-            awaiter.owner    = this;
+            awaiter.owner    = &owner;
             awaiter.handle   = &handle;
             awaiter.wantRead = true;
             awaiter.exec     = ctx.GetExecutor();
@@ -1408,12 +1409,13 @@ namespace NGIN::Net
             co_await awaiter;
         }
 
-        NGIN::Async::Task<void> WaitUntilWritable(NGIN::Async::TaskContext&      ctx,
-                                                  SocketHandle&                  handle,
-                                                  NGIN::Async::CancellationToken token)
+        static NGIN::Async::Task<void> WaitUntilWritable(NGIN::Async::TaskContext&      ctx,
+                                                         Impl&                          owner,
+                                                         SocketHandle&                  handle,
+                                                         NGIN::Async::CancellationToken token)
         {
             WaiterAwaiter awaiter {};
-            awaiter.owner     = this;
+            awaiter.owner     = &owner;
             awaiter.handle    = &handle;
             awaiter.wantWrite = true;
             awaiter.exec      = ctx.GetExecutor();
@@ -1562,14 +1564,14 @@ namespace NGIN::Net
                                                              SocketHandle&                  handle,
                                                              NGIN::Async::CancellationToken token)
     {
-        return m_impl->WaitUntilReadable(ctx, handle, token);
+        return Impl::WaitUntilReadable(ctx, *m_impl, handle, token);
     }
 
     NGIN::Async::Task<void> NetworkDriver::WaitUntilWritable(NGIN::Async::TaskContext&      ctx,
                                                              SocketHandle&                  handle,
                                                              NGIN::Async::CancellationToken token)
     {
-        return m_impl->WaitUntilWritable(ctx, handle, token);
+        return Impl::WaitUntilWritable(ctx, *m_impl, handle, token);
     }
 
 #if defined(NGIN_PLATFORM_WINDOWS)
