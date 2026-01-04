@@ -589,4 +589,209 @@ namespace NGIN::Net
 
         client.Close();
     }
+
+    TEST_CASE("Net.Tcp.AsyncAcceptCloseWhilePending")
+    {
+        NGIN::Execution::CooperativeScheduler scheduler;
+        NGIN::Async::TaskContext              ctx(scheduler);
+        auto                                  driver = NetworkDriver::Create({.workerThreads = 0});
+
+        TcpListener listener;
+        REQUIRE(listener.Open(AddressFamily::V4));
+        REQUIRE(listener.Bind({IpAddress::AnyV4(), 0}));
+        REQUIRE(listener.Listen(8));
+
+        NGIN::Async::CancellationSource cancel;
+        auto acceptTask = listener.AcceptAsync(ctx, *driver, cancel.GetToken());
+        acceptTask.Start(ctx);
+
+        driver->PollOnce();
+        scheduler.RunUntilIdle();
+
+        listener.Close();
+        cancel.Cancel();
+
+        REQUIRE(PumpUntil(scheduler, *driver, [&]() { return acceptTask.IsCompleted(); }));
+
+        bool failed = false;
+        try
+        {
+            auto socket = acceptTask.Get();
+            (void)socket;
+        }
+        catch (...)
+        {
+            failed = true;
+        }
+        REQUIRE(failed);
+    }
+
+    TEST_CASE("Net.Tcp.AsyncReceiveCloseWhilePending")
+    {
+        NGIN::Execution::CooperativeScheduler scheduler;
+        NGIN::Async::TaskContext              ctx(scheduler);
+        auto                                  driver = NetworkDriver::Create({.workerThreads = 0});
+
+        TcpListener listener;
+        REQUIRE(listener.Open(AddressFamily::V4));
+        REQUIRE(listener.Bind({IpAddress::AnyV4(), 0}));
+        REQUIRE(listener.Listen(8));
+
+        const auto port = GetBoundPort(listener.Handle());
+        REQUIRE(port != 0);
+
+        TcpSocket client;
+        REQUIRE(client.Open(AddressFamily::V4));
+        REQUIRE(client.ConnectBlocking({IpAddress::LoopbackV4(), port}));
+
+        TcpSocket server;
+        bool accepted = false;
+        for (int attempt = 0; attempt < 128; ++attempt)
+        {
+            auto acceptResult = listener.TryAccept();
+            if (acceptResult)
+            {
+                server = std::move(*acceptResult);
+                accepted = true;
+                break;
+            }
+            REQUIRE(acceptResult.error().code == NetErrc::WouldBlock);
+            SleepBrief();
+        }
+        REQUIRE(accepted);
+
+        std::array<NGIN::Byte, 64> recvBuffer {};
+        NGIN::Async::CancellationSource cancel;
+
+        auto recvTask = server.ReceiveAsync(ctx,
+                                            *driver,
+                                            ByteSpan {recvBuffer.data(), recvBuffer.size()},
+                                            cancel.GetToken());
+        recvTask.Start(ctx);
+
+        driver->PollOnce();
+        scheduler.RunUntilIdle();
+
+        server.Close();
+        cancel.Cancel();
+
+        REQUIRE(PumpUntil(scheduler, *driver, [&]() { return recvTask.IsCompleted(); }));
+
+        bool failed = false;
+        try
+        {
+            (void)recvTask.Get();
+        }
+        catch (...)
+        {
+            failed = true;
+        }
+        REQUIRE(failed);
+
+        client.Close();
+        listener.Close();
+    }
+
+    TEST_CASE("Net.Tcp.DualStackV6ListenerV4Client")
+    {
+        TcpListener listener;
+        auto openResult = listener.Open(AddressFamily::DualStack);
+        if (!openResult)
+        {
+            SUCCEED("DualStack not supported");
+            return;
+        }
+
+        auto bindResult = listener.Bind({IpAddress::AnyV6(), 0});
+        if (!bindResult)
+        {
+            SUCCEED("V6 bind not available");
+            return;
+        }
+        REQUIRE(listener.Listen(8));
+
+        const auto port = GetBoundPort(listener.Handle());
+        REQUIRE(port != 0);
+
+        TcpSocket client;
+        REQUIRE(client.Open(AddressFamily::V4));
+        REQUIRE(client.ConnectBlocking({IpAddress::LoopbackV4(), port}));
+
+        TcpSocket server;
+        bool accepted = false;
+        for (int attempt = 0; attempt < 128; ++attempt)
+        {
+            auto acceptResult = listener.TryAccept();
+            if (acceptResult)
+            {
+                server = std::move(*acceptResult);
+                accepted = true;
+                break;
+            }
+            REQUIRE(acceptResult.error().code == NetErrc::WouldBlock);
+            SleepBrief();
+        }
+        REQUIRE(accepted);
+
+        const char payload[] = "v4-to-v6";
+        REQUIRE(client.TrySend(ConstByteSpan {reinterpret_cast<const NGIN::Byte*>(payload), sizeof(payload)}));
+
+        std::array<NGIN::Byte, 64> recvBuffer {};
+        bool received = false;
+        for (int attempt = 0; attempt < 128; ++attempt)
+        {
+            auto recvResult = server.TryReceive(ByteSpan {recvBuffer.data(), recvBuffer.size()});
+            if (recvResult)
+            {
+                REQUIRE(*recvResult == sizeof(payload));
+                REQUIRE(std::memcmp(recvBuffer.data(), payload, sizeof(payload)) == 0);
+                received = true;
+                break;
+            }
+            REQUIRE(recvResult.error().code == NetErrc::WouldBlock);
+            SleepBrief();
+        }
+        REQUIRE(received);
+
+        client.Close();
+        server.Close();
+        listener.Close();
+    }
+
+    TEST_CASE("Net.Tcp.AsyncConnectRefused")
+    {
+        NGIN::Execution::CooperativeScheduler scheduler;
+        NGIN::Async::TaskContext              ctx(scheduler);
+        auto                                  driver = NetworkDriver::Create({.workerThreads = 0});
+
+        TcpListener listener;
+        REQUIRE(listener.Open(AddressFamily::V4));
+        REQUIRE(listener.Bind({IpAddress::AnyV4(), 0}));
+        REQUIRE(listener.Listen(8));
+
+        const auto port = GetBoundPort(listener.Handle());
+        REQUIRE(port != 0);
+        listener.Close();
+
+        TcpSocket client;
+        REQUIRE(client.Open(AddressFamily::V4));
+
+        auto connectTask = client.ConnectAsync(ctx, *driver, {IpAddress::LoopbackV4(), port}, ctx.GetCancellationToken());
+        connectTask.Start(ctx);
+
+        REQUIRE(PumpUntil(scheduler, *driver, [&]() { return connectTask.IsCompleted(); }));
+
+        bool failed = false;
+        try
+        {
+            connectTask.Get();
+        }
+        catch (...)
+        {
+            failed = true;
+        }
+        REQUIRE(failed);
+
+        client.Close();
+    }
 }// namespace NGIN::Net
