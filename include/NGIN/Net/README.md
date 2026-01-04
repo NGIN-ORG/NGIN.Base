@@ -10,6 +10,7 @@ Key Types:
 - Buffers: Buffer, BufferPool<Allocator>, IOVec.
 - Runtime: NetworkDriver.
 - Sockets: TcpSocket, TcpListener, UdpSocket.
+- Transport: IByteStream, IDatagramChannel, TcpByteStream, UdpDatagramChannel, ByteStreamBuilder, DatagramBuilder.
 
 Usage Notes:
 - Try* APIs are non-blocking and report errors via NetExpected.
