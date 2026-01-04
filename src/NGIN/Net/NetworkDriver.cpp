@@ -34,6 +34,12 @@
 #include <unistd.h>
 #endif
 
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
+#include <sys/event.h>
+#include <sys/time.h>
+#include <unistd.h>
+#endif
+
 namespace NGIN::Net
 {
     struct NetworkDriver::Impl final
@@ -78,6 +84,9 @@ namespace NGIN::Net
 #if defined(__linux__)
             m_epollFd = ::epoll_create1(EPOLL_CLOEXEC);
 #endif
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
+            m_kqueueFd = ::kqueue();
+#endif
         }
 
         ~Impl()
@@ -96,6 +105,13 @@ namespace NGIN::Net
                 m_epollFd = -1;
             }
 #endif
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
+            if (m_kqueueFd >= 0)
+            {
+                ::close(m_kqueueFd);
+                m_kqueueFd = -1;
+            }
+#endif
         }
 
         void RegisterWaiter(Waiter* waiter)
@@ -104,6 +120,9 @@ namespace NGIN::Net
             m_waiters.push_back(waiter);
 #if defined(__linux__)
             UpdateEpollOnRegisterLocked(waiter);
+#endif
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
+            UpdateKqueueOnRegisterLocked(waiter);
 #endif
         }
 
@@ -118,6 +137,9 @@ namespace NGIN::Net
             }
 #if defined(__linux__)
             UpdateEpollOnUnregisterLocked(waiter);
+#endif
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
+            UpdateKqueueOnUnregisterLocked(waiter);
 #endif
         }
 
@@ -344,6 +366,96 @@ namespace NGIN::Net
             }
 #endif
 
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
+            if (m_kqueueFd >= 0)
+            {
+                std::array<kevent, 64> events {};
+                const timespec         timeout {0, 0};
+                const int              ready = ::kevent(m_kqueueFd,
+                                            nullptr,
+                                            0,
+                                            events.data(),
+                                            static_cast<int>(events.size()),
+                                            &timeout);
+                if (ready <= 0)
+                {
+                    return;
+                }
+
+                struct KqueueReady final
+                {
+                    bool read {false};
+                    bool write {false};
+                };
+
+                std::unordered_map<int, KqueueReady> readyEvents {};
+                readyEvents.reserve(static_cast<std::size_t>(ready));
+                for (int i = 0; i < ready; ++i)
+                {
+                    const auto fd = static_cast<int>(events[i].ident);
+                    auto& entry = readyEvents[fd];
+                    if (events[i].filter == EVFILT_READ)
+                    {
+                        entry.read = true;
+                    }
+                    if (events[i].filter == EVFILT_WRITE)
+                    {
+                        entry.write = true;
+                    }
+                    if (events[i].flags & (EV_EOF | EV_ERROR))
+                    {
+                        entry.read = true;
+                        entry.write = true;
+                    }
+                }
+
+                for (auto* waiter: waiters)
+                {
+                    if (!waiter || !waiter->handle)
+                    {
+                        continue;
+                    }
+                    const auto sock = detail::ToNative(*waiter->handle);
+                    if (sock == detail::InvalidNativeSocket)
+                    {
+                        continue;
+                    }
+
+                    const auto it = readyEvents.find(sock);
+                    if (it == readyEvents.end())
+                    {
+                        continue;
+                    }
+
+                    const bool readyRead = waiter->wantRead && it->second.read;
+                    const bool readyWrite = waiter->wantWrite && it->second.write;
+                    if (!readyRead && !readyWrite)
+                    {
+                        continue;
+                    }
+
+                    bool expected = false;
+                    if (!waiter->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
+                    {
+                        continue;
+                    }
+
+                    UnregisterWaiter(waiter);
+                    waiter->cancellation.Reset();
+
+                    if (waiter->exec.IsValid())
+                    {
+                        waiter->exec.Execute(waiter->continuation);
+                    }
+                    else if (waiter->continuation)
+                    {
+                        waiter->continuation.resume();
+                    }
+                }
+                return;
+            }
+#endif
+
             fd_set readSet {};
             fd_set writeSet {};
             FD_ZERO(&readSet);
@@ -481,6 +593,16 @@ namespace NGIN::Net
         int                                 m_epollFd {-1};
         std::unordered_map<int, EpollWatch> m_epollWatches {};
 #endif
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
+        struct KqueueWatch final
+        {
+            int readers {0};
+            int writers {0};
+        };
+
+        int                                   m_kqueueFd {-1};
+        std::unordered_map<int, KqueueWatch>  m_kqueueWatches {};
+#endif
 
     private:
 #if defined(__linux__)
@@ -588,6 +710,124 @@ namespace NGIN::Net
             ev.events  = events;
             ev.data.fd = fd;
             ::epoll_ctl(m_epollFd, EPOLL_CTL_MOD, fd, &ev);
+        }
+#endif
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
+        void UpdateKqueueOnRegisterLocked(Waiter* waiter) noexcept
+        {
+            if (m_kqueueFd < 0 || !waiter || !waiter->handle)
+            {
+                return;
+            }
+
+            const int fd = detail::ToNative(*waiter->handle);
+            if (fd == detail::InvalidNativeSocket)
+            {
+                return;
+            }
+
+            auto& watch        = m_kqueueWatches[fd];
+            const int prevRead = watch.readers;
+            const int prevWrite = watch.writers;
+
+            if (waiter->wantRead)
+            {
+                ++watch.readers;
+            }
+            if (waiter->wantWrite)
+            {
+                ++watch.writers;
+            }
+
+            if (prevRead == 0 && watch.readers > 0)
+            {
+                kevent ev {};
+                EV_SET(&ev,
+                       static_cast<uintptr_t>(fd),
+                       EVFILT_READ,
+                       EV_ADD | EV_ENABLE,
+                       0,
+                       0,
+                       nullptr);
+                ::kevent(m_kqueueFd, &ev, 1, nullptr, 0, nullptr);
+            }
+
+            if (prevWrite == 0 && watch.writers > 0)
+            {
+                kevent ev {};
+                EV_SET(&ev,
+                       static_cast<uintptr_t>(fd),
+                       EVFILT_WRITE,
+                       EV_ADD | EV_ENABLE,
+                       0,
+                       0,
+                       nullptr);
+                ::kevent(m_kqueueFd, &ev, 1, nullptr, 0, nullptr);
+            }
+        }
+
+        void UpdateKqueueOnUnregisterLocked(Waiter* waiter) noexcept
+        {
+            if (m_kqueueFd < 0 || !waiter || !waiter->handle)
+            {
+                return;
+            }
+
+            const int fd = detail::ToNative(*waiter->handle);
+            if (fd == detail::InvalidNativeSocket)
+            {
+                return;
+            }
+
+            auto it = m_kqueueWatches.find(fd);
+            if (it == m_kqueueWatches.end())
+            {
+                return;
+            }
+
+            auto& watch        = it->second;
+            const int prevRead = watch.readers;
+            const int prevWrite = watch.writers;
+
+            if (waiter->wantRead && watch.readers > 0)
+            {
+                --watch.readers;
+            }
+            if (waiter->wantWrite && watch.writers > 0)
+            {
+                --watch.writers;
+            }
+
+            if (prevRead > 0 && watch.readers == 0)
+            {
+                kevent ev {};
+                EV_SET(&ev,
+                       static_cast<uintptr_t>(fd),
+                       EVFILT_READ,
+                       EV_DELETE,
+                       0,
+                       0,
+                       nullptr);
+                ::kevent(m_kqueueFd, &ev, 1, nullptr, 0, nullptr);
+            }
+
+            if (prevWrite > 0 && watch.writers == 0)
+            {
+                kevent ev {};
+                EV_SET(&ev,
+                       static_cast<uintptr_t>(fd),
+                       EVFILT_WRITE,
+                       EV_DELETE,
+                       0,
+                       0,
+                       nullptr);
+                ::kevent(m_kqueueFd, &ev, 1, nullptr, 0, nullptr);
+            }
+
+            if (watch.readers == 0 && watch.writers == 0)
+            {
+                m_kqueueWatches.erase(it);
+            }
         }
 #endif
         struct WaiterAwaiter final
