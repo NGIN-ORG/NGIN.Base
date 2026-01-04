@@ -9,10 +9,10 @@
 #include <NGIN/Execution/Thread.hpp>
 #include <NGIN/Execution/ThreadName.hpp>
 #include <NGIN/Execution/ThisThread.hpp>
-#include <ioapiset.h>
 
 #if defined(NGIN_PLATFORM_WINDOWS)
 #include <Windows.h>
+#include <ioapiset.h>
 #include <NGIN/Net/Sockets/UdpSocket.hpp>
 #endif
 
