@@ -7,6 +7,7 @@
 #include <NGIN/Net/Types/Buffer.hpp>
 #include <NGIN/Net/Types/Endpoint.hpp>
 #include <NGIN/Net/Types/NetError.hpp>
+#include <NGIN/Net/Types/SocketOptions.hpp>
 
 namespace NGIN::Async
 {
@@ -31,7 +32,14 @@ namespace NGIN::Net
     class UdpSocket final
     {
     public:
-        NetExpected<void> Open(AddressFamily family = AddressFamily::DualStack) noexcept;
+        UdpSocket() noexcept = default;
+        UdpSocket(const UdpSocket&)            = delete;
+        UdpSocket& operator=(const UdpSocket&) = delete;
+        UdpSocket(UdpSocket&&) noexcept        = default;
+        UdpSocket& operator=(UdpSocket&&) noexcept = default;
+
+        NetExpected<void> Open(AddressFamily family = AddressFamily::DualStack,
+                               SocketOptions options = {}) noexcept;
         NetExpected<void> Bind(Endpoint localEndpoint) noexcept;
         NetExpected<void> Connect(Endpoint remoteEndpoint) noexcept;
         void Close() noexcept;

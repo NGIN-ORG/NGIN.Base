@@ -6,7 +6,17 @@
 
 namespace NGIN::Net
 {
-    /// @brief Lightweight, non-owning socket handle wrapper.
+    class SocketHandle;
+}
+
+namespace NGIN::Net::detail
+{
+    [[nodiscard]] bool CloseSocket(SocketHandle& handle) noexcept;
+}
+
+namespace NGIN::Net
+{
+    /// @brief Lightweight socket handle wrapper with RAII lifetime.
     class SocketHandle final
     {
     public:
@@ -18,6 +28,28 @@ namespace NGIN::Net
         {
         }
 
+        SocketHandle(const SocketHandle&)            = delete;
+        SocketHandle& operator=(const SocketHandle&) = delete;
+
+        SocketHandle(SocketHandle&& other) noexcept
+            : m_handle(other.m_handle)
+        {
+            other.Reset();
+        }
+
+        SocketHandle& operator=(SocketHandle&& other) noexcept
+        {
+            if (this != &other)
+            {
+                (void)detail::CloseSocket(*this);
+                m_handle = other.m_handle;
+                other.Reset();
+            }
+            return *this;
+        }
+
+        ~SocketHandle() { Close(); }
+
         [[nodiscard]] constexpr bool IsOpen() const noexcept { return m_handle != InvalidHandle(); }
 
         [[nodiscard]] constexpr NativeHandle Native() const noexcept { return m_handle; }
@@ -25,7 +57,11 @@ namespace NGIN::Net
         void Close() noexcept;
 
     private:
+        friend bool detail::CloseSocket(SocketHandle& handle) noexcept;
+
         static constexpr NativeHandle InvalidHandle() noexcept { return static_cast<NativeHandle>(-1); }
+
+        void Reset() noexcept { m_handle = InvalidHandle(); }
 
         NativeHandle m_handle {InvalidHandle()};
     };

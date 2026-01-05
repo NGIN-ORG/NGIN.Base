@@ -18,14 +18,21 @@
 
 namespace NGIN::Net
 {
-    NetExpected<void> UdpSocket::Open(AddressFamily family) noexcept
+    NetExpected<void> UdpSocket::Open(AddressFamily family, SocketOptions options) noexcept
     {
+        m_handle.Close();
         NetError error {};
-        const bool dualStack = family == AddressFamily::DualStack;
-        m_handle = detail::CreateSocket(family, SOCK_DGRAM, IPPROTO_UDP, dualStack, error);
+        m_handle = detail::CreateSocket(family, SOCK_DGRAM, IPPROTO_UDP, options.nonBlocking, error);
         if (error.code != NetErrc::Ok)
         {
             return std::unexpected(error);
+        }
+
+        auto optionResult = detail::ApplySocketOptions(m_handle, family, options, false, true);
+        if (!optionResult)
+        {
+            m_handle.Close();
+            return std::unexpected(optionResult.error());
         }
         return {};
     }
@@ -329,7 +336,7 @@ namespace NGIN::Net
 
             if (result.error().code != NetErrc::WouldBlock)
             {
-                throw std::runtime_error("UdpSocket::SendToAsync failed");
+                throw std::system_error(ToErrorCode(result.error()), "UdpSocket::SendToAsync failed");
             }
 
             co_await driver.WaitUntilWritable(ctx, m_handle, token);
@@ -355,7 +362,7 @@ namespace NGIN::Net
 
             if (result.error().code != NetErrc::WouldBlock)
             {
-                throw std::runtime_error("UdpSocket::ReceiveFromAsync failed");
+                throw std::system_error(ToErrorCode(result.error()), "UdpSocket::ReceiveFromAsync failed");
             }
 
             co_await driver.WaitUntilReadable(ctx, m_handle, token);

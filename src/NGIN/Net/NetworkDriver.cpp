@@ -24,6 +24,7 @@
 #include <limits>
 #include <mutex>
 #include <stdexcept>
+#include <utility>
 #include <unordered_map>
 #include <string>
 #include <string_view>
@@ -254,27 +255,40 @@ namespace NGIN::Net
             }
         }
 
-        void PumpIocp() noexcept
+        void PumpIocp(DWORD timeoutMs) noexcept
         {
             if (!m_iocp)
             {
                 return;
             }
 
-            for (int i = 0; i < 64; ++i)
+            DWORD        bytes      = 0;
+            ULONG_PTR    key        = 0;
+            LPOVERLAPPED overlapped = nullptr;
+            const BOOL   ok         = ::GetQueuedCompletionStatus(m_iocp, &bytes, &key, &overlapped, timeoutMs);
+            if (!overlapped)
             {
-                DWORD        bytes      = 0;
-                ULONG_PTR    key        = 0;
-                LPOVERLAPPED overlapped = nullptr;
-                const BOOL   ok         = ::GetQueuedCompletionStatus(m_iocp, &bytes, &key, &overlapped, 0);
+                return;
+            }
+
+            DWORD error = ok ? 0 : ::GetLastError();
+            if (auto* op = reinterpret_cast<IocpOperation*>(overlapped))
+            {
+                CompleteOperation(*op, bytes, error);
+            }
+
+            for (int i = 0; i < 63; ++i)
+            {
+                bytes = 0;
+                key = 0;
+                overlapped = nullptr;
+                const BOOL drainOk = ::GetQueuedCompletionStatus(m_iocp, &bytes, &key, &overlapped, 0);
                 if (!overlapped)
                 {
                     break;
                 }
-
-                const DWORD error = ok ? 0 : ::GetLastError();
-                auto*       op    = reinterpret_cast<IocpOperation*>(overlapped);
-                if (op)
+                error = drainOk ? 0 : ::GetLastError();
+                if (auto* op = reinterpret_cast<IocpOperation*>(overlapped))
                 {
                     CompleteOperation(*op, bytes, error);
                 }
@@ -282,35 +296,108 @@ namespace NGIN::Net
         }
 #endif
 
-        void PollOnce()
+        void CompleteWaiter(Waiter* waiter) noexcept
+        {
+            if (!waiter)
+            {
+                return;
+            }
+
+            bool expected = false;
+            if (!waiter->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
+            {
+                return;
+            }
+
+            UnregisterWaiter(waiter);
+            waiter->cancellation.Reset();
+
+            if (waiter->exec.IsValid())
+            {
+                waiter->exec.Execute(waiter->continuation);
+            }
+            else if (waiter->continuation)
+            {
+                waiter->continuation.resume();
+            }
+        }
+
+        void PollOnce(int timeoutMs)
         {
 #if defined(NGIN_PLATFORM_WINDOWS)
-            PumpIocp();
+            const DWORD waitMs = timeoutMs > 0 ? static_cast<DWORD>(timeoutMs) : 0;
 #endif
-            std::vector<Waiter*> waiters;
+            thread_local std::vector<Waiter*> waiters {};
             {
                 std::lock_guard guard(m_mutex);
-                if (m_waiters.empty())
+                if (!m_waiters.empty())
                 {
-                    return;
+                    waiters.clear();
+                    waiters.reserve(m_waiters.size());
+                    waiters.insert(waiters.end(), m_waiters.begin(), m_waiters.end());
                 }
-                waiters = m_waiters;
+                else
+                {
+                    waiters.clear();
+                }
             }
+
+            std::size_t validCount = 0;
+            for (auto* waiter: waiters)
+            {
+                if (!waiter || !waiter->handle)
+                {
+                    CompleteWaiter(waiter);
+                    continue;
+                }
+
+                const auto sock = detail::ToNative(*waiter->handle);
+                if (sock == detail::InvalidNativeSocket)
+                {
+                    CompleteWaiter(waiter);
+                    continue;
+                }
+
+                waiters[validCount++] = waiter;
+            }
+            waiters.resize(validCount);
+
+#if defined(NGIN_PLATFORM_WINDOWS)
+            if (waiters.empty())
+            {
+                PumpIocp(waitMs);
+                return;
+            }
+
+            PumpIocp(0);
+#else
+            if (waiters.empty())
+            {
+                if (timeoutMs > 0)
+                {
+                    NGIN::Execution::ThisThread::SleepFor(
+                            NGIN::Units::Milliseconds(static_cast<double>(timeoutMs)));
+                }
+                return;
+            }
+#endif
 
 #if defined(__linux__)
             if (m_epollFd >= 0)
             {
                 std::array<epoll_event, 64> events {};
-                const int                   ready = ::epoll_wait(m_epollFd,
-                                                                 events.data(),
-                                                                 static_cast<int>(events.size()),
-                                                                 0);
+                const int timeout = timeoutMs > 0 ? timeoutMs : 0;
+                const int ready = ::epoll_wait(m_epollFd,
+                                               events.data(),
+                                               static_cast<int>(events.size()),
+                                               timeout);
                 if (ready <= 0)
                 {
                     return;
                 }
 
-                std::unordered_map<int, std::uint32_t> readyEvents {};
+                thread_local std::unordered_map<int, std::uint32_t> readyEvents {};
+                readyEvents.clear();
                 readyEvents.reserve(static_cast<std::size_t>(ready));
                 for (int i = 0; i < ready; ++i)
                 {
@@ -321,11 +408,13 @@ namespace NGIN::Net
                 {
                     if (!waiter || !waiter->handle)
                     {
+                        CompleteWaiter(waiter);
                         continue;
                     }
                     const auto sock = detail::ToNative(*waiter->handle);
                     if (sock == detail::InvalidNativeSocket)
                     {
+                        CompleteWaiter(waiter);
                         continue;
                     }
 
@@ -344,23 +433,7 @@ namespace NGIN::Net
                         continue;
                     }
 
-                    bool expected = false;
-                    if (!waiter->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
-                    {
-                        continue;
-                    }
-
-                    UnregisterWaiter(waiter);
-                    waiter->cancellation.Reset();
-
-                    if (waiter->exec.IsValid())
-                    {
-                        waiter->exec.Execute(waiter->continuation);
-                    }
-                    else if (waiter->continuation)
-                    {
-                        waiter->continuation.resume();
-                    }
+                    CompleteWaiter(waiter);
                 }
                 return;
             }
@@ -370,7 +443,12 @@ namespace NGIN::Net
             if (m_kqueueFd >= 0)
             {
                 std::array<kevent, 64> events {};
-                const timespec         timeout {0, 0};
+                timespec timeout {};
+                if (timeoutMs > 0)
+                {
+                    timeout.tv_sec = timeoutMs / 1000;
+                    timeout.tv_nsec = (timeoutMs % 1000) * 1000000L;
+                }
                 const int              ready = ::kevent(m_kqueueFd,
                                             nullptr,
                                             0,
@@ -388,7 +466,8 @@ namespace NGIN::Net
                     bool write {false};
                 };
 
-                std::unordered_map<int, KqueueReady> readyEvents {};
+                thread_local std::unordered_map<int, KqueueReady> readyEvents {};
+                readyEvents.clear();
                 readyEvents.reserve(static_cast<std::size_t>(ready));
                 for (int i = 0; i < ready; ++i)
                 {
@@ -413,11 +492,13 @@ namespace NGIN::Net
                 {
                     if (!waiter || !waiter->handle)
                     {
+                        CompleteWaiter(waiter);
                         continue;
                     }
                     const auto sock = detail::ToNative(*waiter->handle);
                     if (sock == detail::InvalidNativeSocket)
                     {
+                        CompleteWaiter(waiter);
                         continue;
                     }
 
@@ -434,23 +515,7 @@ namespace NGIN::Net
                         continue;
                     }
 
-                    bool expected = false;
-                    if (!waiter->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
-                    {
-                        continue;
-                    }
-
-                    UnregisterWaiter(waiter);
-                    waiter->cancellation.Reset();
-
-                    if (waiter->exec.IsValid())
-                    {
-                        waiter->exec.Execute(waiter->continuation);
-                    }
-                    else if (waiter->continuation)
-                    {
-                        waiter->continuation.resume();
-                    }
+                    CompleteWaiter(waiter);
                 }
                 return;
             }
@@ -492,8 +557,11 @@ namespace NGIN::Net
             }
 
             timeval timeout {};
-            timeout.tv_sec  = 0;
-            timeout.tv_usec = 0;
+            if (timeoutMs > 0)
+            {
+                timeout.tv_sec = timeoutMs / 1000;
+                timeout.tv_usec = (timeoutMs % 1000) * 1000;
+            }
 
 #if defined(NGIN_PLATFORM_WINDOWS)
             const int ready = ::select(0, &readSet, &writeSet, nullptr, &timeout);
@@ -509,11 +577,13 @@ namespace NGIN::Net
             {
                 if (!waiter || !waiter->handle)
                 {
+                    CompleteWaiter(waiter);
                     continue;
                 }
                 const auto sock = detail::ToNative(*waiter->handle);
                 if (sock == detail::InvalidNativeSocket)
                 {
+                    CompleteWaiter(waiter);
                     continue;
                 }
 
@@ -524,37 +594,18 @@ namespace NGIN::Net
                     continue;
                 }
 
-                bool expected = false;
-                if (!waiter->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
-                {
-                    continue;
-                }
-
-                UnregisterWaiter(waiter);
-                waiter->cancellation.Reset();
-
-                if (waiter->exec.IsValid())
-                {
-                    waiter->exec.Execute(waiter->continuation);
-                }
-                else if (waiter->continuation)
-                {
-                    waiter->continuation.resume();
-                }
+                CompleteWaiter(waiter);
             }
         }
 
         void Run()
         {
+            const int timeoutMs = GetPollTimeoutMs();
             if (m_options.workerThreads == 0)
             {
                 while (!m_stop.load(std::memory_order_acquire))
                 {
-                    PollOnce();
-                    if (!m_options.busyPoll)
-                    {
-                        NGIN::Execution::ThisThread::SleepFor(m_options.pollInterval);
-                    }
+                    PollOnce(timeoutMs);
                 }
                 return;
             }
@@ -842,7 +893,15 @@ namespace NGIN::Net
 
             bool await_ready() const noexcept
             {
-                return owner == nullptr || token.IsCancellationRequested();
+                if (owner == nullptr || token.IsCancellationRequested())
+                {
+                    return true;
+                }
+                if (!handle)
+                {
+                    return true;
+                }
+                return detail::ToNative(*handle) == detail::InvalidNativeSocket;
             }
 
             void await_suspend(std::coroutine_handle<> continuation) noexcept
@@ -985,7 +1044,7 @@ namespace NGIN::Net
                 }
                 if (op.error.code != NetErrc::Ok)
                 {
-                    throw std::runtime_error("NetworkDriver IOCP send failed: " + std::to_string(op.error.native));
+                    throw std::system_error(ToErrorCode(op.error), "NetworkDriver IOCP send failed");
                 }
                 return static_cast<NGIN::UInt32>(op.bytes);
             }
@@ -1085,7 +1144,7 @@ namespace NGIN::Net
                 }
                 if (op.error.code != NetErrc::Ok)
                 {
-                    throw std::runtime_error("NetworkDriver IOCP receive failed");
+                    throw std::system_error(ToErrorCode(op.error), "NetworkDriver IOCP receive failed");
                 }
                 return static_cast<NGIN::UInt32>(op.bytes);
             }
@@ -1195,7 +1254,7 @@ namespace NGIN::Net
                 }
                 if (op.error.code != NetErrc::Ok)
                 {
-                    throw std::runtime_error("NetworkDriver IOCP send-to failed");
+                    throw std::system_error(ToErrorCode(op.error), "NetworkDriver IOCP send-to failed");
                 }
                 if (op.bytes == 0 && op.buffer.len > 0)
                 {
@@ -1302,7 +1361,7 @@ namespace NGIN::Net
                 }
                 if (op.error.code != NetErrc::Ok)
                 {
-                    throw std::runtime_error("NetworkDriver IOCP receive-from failed");
+                    throw std::system_error(ToErrorCode(op.error), "NetworkDriver IOCP receive-from failed");
                 }
 
                 DatagramReceiveResult result {};
@@ -1410,14 +1469,15 @@ namespace NGIN::Net
                 }
                 if (op.error.code != NetErrc::Ok)
                 {
-                    throw std::runtime_error("NetworkDriver IOCP connect failed");
+                    throw std::system_error(ToErrorCode(op.error), "NetworkDriver IOCP connect failed");
                 }
 
                 const auto sock   = detail::ToNative(*handle);
                 const int  result = ::setsockopt(sock, SOL_SOCKET, SO_UPDATE_CONNECT_CONTEXT, nullptr, 0);
                 if (result != 0)
                 {
-                    throw std::runtime_error("NetworkDriver IOCP connect context update failed");
+                    throw std::system_error(ToErrorCode(detail::LastError()),
+                                            "NetworkDriver IOCP connect context update failed");
                 }
             }
         };
@@ -1473,14 +1533,9 @@ namespace NGIN::Net
                     return;
                 }
 
-                const AddressFamily family    = detail::GetSocketFamily(*listenHandle);
-                bool                dualStack = false;
-                if (family == AddressFamily::V6)
-                {
-                    dualStack = !detail::IsV6Only(*listenHandle);
-                }
+                const AddressFamily family = detail::GetSocketFamily(*listenHandle);
                 NetError createError {};
-                accepted = detail::CreateSocket(family, SOCK_STREAM, IPPROTO_TCP, dualStack, createError);
+                accepted = detail::CreateSocket(family, SOCK_STREAM, IPPROTO_TCP, true, createError);
                 if (createError.code != NetErrc::Ok)
                 {
                     owner->CompleteOperationWithError(op, 0, createError);
@@ -1537,7 +1592,7 @@ namespace NGIN::Net
                 if (op.error.code != NetErrc::Ok)
                 {
                     accepted.Close();
-                    throw std::runtime_error("NetworkDriver IOCP accept failed");
+                    throw std::system_error(ToErrorCode(op.error), "NetworkDriver IOCP accept failed");
                 }
 
                 const auto listenSock = detail::ToNative(*listenHandle);
@@ -1550,16 +1605,18 @@ namespace NGIN::Net
                 if (update != 0)
                 {
                     accepted.Close();
-                    throw std::runtime_error("NetworkDriver IOCP accept context update failed");
+                    throw std::system_error(ToErrorCode(detail::LastError()),
+                                            "NetworkDriver IOCP accept context update failed");
                 }
 
                 if (!owner->EnsureAssociated(accepted))
                 {
                     accepted.Close();
-                    throw std::runtime_error("NetworkDriver IOCP accept association failed");
+                    throw std::system_error(ToErrorCode(detail::LastError()),
+                                            "NetworkDriver IOCP accept association failed");
                 }
 
-                return accepted;
+                return std::move(accepted);
             }
         };
 #endif
@@ -1571,19 +1628,16 @@ namespace NGIN::Net
                 return;
             }
 
+            const int timeoutMs = GetPollTimeoutMs();
             m_workers.reserve(m_options.workerThreads);
             for (NGIN::UInt32 i = 0; i < m_options.workerThreads; ++i)
             {
                 NGIN::Execution::Thread::Options options {};
                 options.name = MakeIndexedThreadName("NGIN.NetW", i);
-                m_workers.emplace_back([this]() {
+                m_workers.emplace_back([this, timeoutMs]() {
                     while (!m_stop.load(std::memory_order_acquire))
                     {
-                        PollOnce();
-                        if (!m_options.busyPoll)
-                        {
-                            NGIN::Execution::ThisThread::SleepFor(m_options.pollInterval);
-                        }
+                        PollOnce(timeoutMs);
                     }
                 },
                                        options);
@@ -1632,6 +1686,28 @@ namespace NGIN::Net
             buffer[pos] = '\0';
 
             return NGIN::Execution::ThreadName(std::string_view(buffer.data(), pos));
+        }
+
+        int GetPollTimeoutMs() const noexcept
+        {
+            if (m_options.busyPoll)
+            {
+                return 0;
+            }
+
+            const auto value = m_options.pollInterval.GetValue();
+            if (value <= 0.0)
+            {
+                return 0;
+            }
+
+            const auto maxMs = static_cast<double>(std::numeric_limits<int>::max());
+            if (value > maxMs)
+            {
+                return std::numeric_limits<int>::max();
+            }
+
+            return static_cast<int>(value);
         }
 
     public:
@@ -1788,7 +1864,7 @@ namespace NGIN::Net
     {
         if (m_impl)
         {
-            m_impl->PollOnce();
+            m_impl->PollOnce(0);
         }
     }
 

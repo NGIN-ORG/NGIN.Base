@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <utility>
 
+#include <NGIN/Net/Transport/Filters/LengthPrefixedMessageStream.hpp>
 #include <NGIN/Net/Transport/TcpByteStream.hpp>
 
 namespace NGIN::Net::Transport
@@ -28,9 +29,25 @@ namespace NGIN::Net::Transport
         {
             if (!m_hasSocket || !m_driver)
             {
-                throw std::runtime_error("ByteStreamBuilder requires a TcpSocket and NetworkDriver");
+                throw std::logic_error("ByteStreamBuilder requires a TcpSocket and NetworkDriver");
             }
-            return std::make_unique<TcpByteStream>(std::move(m_socket), *m_driver);
+            auto stream = std::make_unique<TcpByteStream>(std::move(m_socket), *m_driver);
+            m_hasSocket = false;
+            m_driver = nullptr;
+            return stream;
+        }
+
+        [[nodiscard]] std::unique_ptr<Filters::LengthPrefixedMessageStream> BuildLengthPrefixed()
+        {
+            if (!m_hasSocket || !m_driver)
+            {
+                throw std::logic_error("ByteStreamBuilder requires a TcpSocket and NetworkDriver");
+            }
+            auto base = std::make_unique<TcpByteStream>(std::move(m_socket), *m_driver);
+            auto stream = std::make_unique<Filters::LengthPrefixedMessageStream>(std::move(base));
+            m_hasSocket = false;
+            m_driver = nullptr;
+            return stream;
         }
 
     private:

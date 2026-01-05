@@ -50,7 +50,7 @@ namespace NGIN::Net::Transport
         {
             if (!driver)
             {
-                throw std::runtime_error("UdpDatagramChannel missing NetworkDriver");
+                throw std::logic_error("UdpDatagramChannel missing NetworkDriver");
             }
             auto task = socket.SendToAsync(ctx, *driver, remoteEndpoint, payload, token);
             task.Start(ctx);
@@ -65,11 +65,11 @@ namespace NGIN::Net::Transport
         {
             if (!driver)
             {
-                throw std::runtime_error("UdpDatagramChannel missing NetworkDriver");
+                throw std::logic_error("UdpDatagramChannel missing NetworkDriver");
             }
             if (!receiveBuffer.data || receiveBuffer.capacity == 0)
             {
-                throw std::runtime_error("UdpDatagramChannel requires a valid receive buffer");
+                throw std::invalid_argument("UdpDatagramChannel requires a valid receive buffer");
             }
 
             auto task = socket.ReceiveFromAsync(ctx,

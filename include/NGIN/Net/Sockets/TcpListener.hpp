@@ -7,6 +7,7 @@
 #include <NGIN/Net/Types/AddressFamily.hpp>
 #include <NGIN/Net/Types/Endpoint.hpp>
 #include <NGIN/Net/Types/NetError.hpp>
+#include <NGIN/Net/Types/SocketOptions.hpp>
 #include <NGIN/Primitives.hpp>
 
 namespace NGIN::Async
@@ -25,7 +26,14 @@ namespace NGIN::Net
     class TcpListener final
     {
     public:
-        NetExpected<void> Open(AddressFamily family = AddressFamily::DualStack) noexcept;
+        TcpListener() noexcept = default;
+        TcpListener(const TcpListener&)            = delete;
+        TcpListener& operator=(const TcpListener&) = delete;
+        TcpListener(TcpListener&&) noexcept        = default;
+        TcpListener& operator=(TcpListener&&) noexcept = default;
+
+        NetExpected<void> Open(AddressFamily family = AddressFamily::DualStack,
+                               SocketOptions options = {}) noexcept;
         NetExpected<void> Bind(Endpoint localEndpoint) noexcept;
         NetExpected<void> Listen(NGIN::Int32 backlog = 128) noexcept;
         NetExpected<TcpSocket> TryAccept() noexcept;

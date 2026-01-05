@@ -50,7 +50,7 @@ namespace NGIN::Net::detail
     [[nodiscard]] SocketHandle CreateSocket(AddressFamily family,
                                             int type,
                                             int protocol,
-                                            bool dualStack,
+                                            bool nonBlocking,
                                             NetError& error) noexcept;
 
     [[nodiscard]] bool SetNonBlocking(SocketHandle& handle, bool value) noexcept;
@@ -59,6 +59,12 @@ namespace NGIN::Net::detail
     [[nodiscard]] bool SetNoDelay(SocketHandle& handle, bool value) noexcept;
     [[nodiscard]] bool SetBroadcast(SocketHandle& handle, bool value) noexcept;
     [[nodiscard]] bool SetV6Only(SocketHandle& handle, bool value) noexcept;
+
+    [[nodiscard]] NetExpected<void> ApplySocketOptions(SocketHandle& handle,
+                                                       AddressFamily family,
+                                                       const SocketOptions& options,
+                                                       bool isTcp,
+                                                       bool isUdp) noexcept;
 
     [[nodiscard]] NetExpected<void> Shutdown(SocketHandle& handle, ShutdownMode mode) noexcept;
     [[nodiscard]] bool CloseSocket(SocketHandle& handle) noexcept;

@@ -54,7 +54,7 @@ namespace NGIN::Net::Transport
         {
             if (!driver)
             {
-                throw std::runtime_error("TcpByteStream missing NetworkDriver");
+                throw std::logic_error("TcpByteStream missing NetworkDriver");
             }
             auto task = socket.ReceiveAsync(ctx, *driver, destination, token);
             task.Start(ctx);
@@ -69,7 +69,7 @@ namespace NGIN::Net::Transport
         {
             if (!driver)
             {
-                throw std::runtime_error("TcpByteStream missing NetworkDriver");
+                throw std::logic_error("TcpByteStream missing NetworkDriver");
             }
             auto task = socket.SendAsync(ctx, *driver, source, token);
             task.Start(ctx);

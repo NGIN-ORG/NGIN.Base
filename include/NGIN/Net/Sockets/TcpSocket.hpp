@@ -9,6 +9,9 @@
 #include <NGIN/Net/Types/NetError.hpp>
 #include <NGIN/Net/Types/ShutdownMode.hpp>
 
+#include <utility>
+#include <NGIN/Net/Types/SocketOptions.hpp>
+
 namespace NGIN::Async
 {
     class TaskContext;
@@ -27,7 +30,13 @@ namespace NGIN::Net
     public:
         TcpSocket() noexcept = default;
 
-        NetExpected<void> Open(AddressFamily family = AddressFamily::DualStack) noexcept;
+        TcpSocket(const TcpSocket&)            = delete;
+        TcpSocket& operator=(const TcpSocket&) = delete;
+        TcpSocket(TcpSocket&&) noexcept        = default;
+        TcpSocket& operator=(TcpSocket&&) noexcept = default;
+
+        NetExpected<void> Open(AddressFamily family = AddressFamily::DualStack,
+                               SocketOptions options = {}) noexcept;
 
         NetExpected<bool> TryConnect(Endpoint remoteEndpoint) noexcept;
         NGIN::Async::Task<void> ConnectAsync(NGIN::Async::TaskContext& ctx,
@@ -58,8 +67,8 @@ namespace NGIN::Net
         [[nodiscard]] const SocketHandle& Handle() const noexcept { return m_handle; }
 
     private:
-        explicit TcpSocket(SocketHandle handle) noexcept
-            : m_handle(handle)
+        explicit TcpSocket(SocketHandle&& handle) noexcept
+            : m_handle(std::move(handle))
         {
         }
 

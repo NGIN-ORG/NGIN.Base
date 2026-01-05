@@ -153,7 +153,7 @@ namespace NGIN::Net::detail
     SocketHandle CreateSocket(AddressFamily family,
                               int type,
                               int protocol,
-                              bool dualStack,
+                              bool nonBlocking,
                               NetError& error) noexcept
     {
         if (!EnsureInitialized())
@@ -181,16 +181,11 @@ namespace NGIN::Net::detail
         }
 
         SocketHandle handle = FromNative(sock);
-        if (!SetNonBlocking(handle, true))
+        if (!SetNonBlocking(handle, nonBlocking))
         {
             error = LastError();
             static_cast<void>(CloseSocket(handle));
             return {};
-        }
-
-        if (af == AF_INET6 && dualStack)
-        {
-            (void)SetV6Only(handle, false);
         }
 
         error = NetError {NetErrc::Ok, 0};
@@ -255,6 +250,46 @@ namespace NGIN::Net::detail
         return ::setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, reinterpret_cast<const char*>(&opt), sizeof(opt)) == 0;
     }
 
+    NetExpected<void> ApplySocketOptions(SocketHandle& handle,
+                                         AddressFamily family,
+                                         const SocketOptions& options,
+                                         bool isTcp,
+                                         bool isUdp) noexcept
+    {
+        if (options.reuseAddress && !SetReuseAddress(handle, true))
+        {
+            return std::unexpected(LastError());
+        }
+        if (options.reusePort && !SetReusePort(handle, true))
+        {
+            return std::unexpected(LastError());
+        }
+        if (isTcp && options.noDelay && !SetNoDelay(handle, true))
+        {
+            return std::unexpected(LastError());
+        }
+        if (isUdp && options.broadcast && !SetBroadcast(handle, true))
+        {
+            return std::unexpected(LastError());
+        }
+
+        if (family != AddressFamily::V4)
+        {
+            bool v6Only = options.v6Only;
+            if (family == AddressFamily::V6)
+            {
+                v6Only = true;
+            }
+
+            if (!SetV6Only(handle, v6Only))
+            {
+                return std::unexpected(LastError());
+            }
+        }
+
+        return {};
+    }
+
     NetExpected<void> Shutdown(SocketHandle& handle, ShutdownMode mode) noexcept
     {
         const NativeSocket sock = ToNative(handle);
@@ -291,6 +326,7 @@ namespace NGIN::Net::detail
         const NativeSocket sock = ToNative(handle);
         if (sock == InvalidNativeSocket)
         {
+            handle.Reset();
             return true;
         }
 #if defined(NGIN_PLATFORM_WINDOWS)
@@ -298,7 +334,7 @@ namespace NGIN::Net::detail
 #else
         const int result = ::close(sock);
 #endif
-        handle = SocketHandle();
+        handle.Reset();
         return result == 0;
     }
 

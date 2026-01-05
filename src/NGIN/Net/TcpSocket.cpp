@@ -18,14 +18,21 @@
 
 namespace NGIN::Net
 {
-    NetExpected<void> TcpSocket::Open(AddressFamily family) noexcept
+    NetExpected<void> TcpSocket::Open(AddressFamily family, SocketOptions options) noexcept
     {
+        m_handle.Close();
         NetError error {};
-        const bool dualStack = family == AddressFamily::DualStack;
-        m_handle = detail::CreateSocket(family, SOCK_STREAM, IPPROTO_TCP, dualStack, error);
+        m_handle = detail::CreateSocket(family, SOCK_STREAM, IPPROTO_TCP, options.nonBlocking, error);
         if (error.code != NetErrc::Ok)
         {
             return std::unexpected(error);
+        }
+
+        auto optionResult = detail::ApplySocketOptions(m_handle, family, options, true, false);
+        if (!optionResult)
+        {
+            m_handle.Close();
+            return std::unexpected(optionResult.error());
         }
         return {};
     }
@@ -62,7 +69,8 @@ namespace NGIN::Net
 #if defined(NGIN_PLATFORM_WINDOWS)
         if (!detail::EnsureBoundForConnectEx(m_handle, remoteEndpoint))
         {
-            throw std::runtime_error("TcpSocket::ConnectAsync failed to bind for ConnectEx");
+            throw std::system_error(ToErrorCode(detail::LastError()),
+                                    "TcpSocket::ConnectAsync failed to bind for ConnectEx");
         }
 
         co_await driver.SubmitConnect(ctx, m_handle, remoteEndpoint, token);
@@ -78,7 +86,7 @@ namespace NGIN::Net
 
             if (result.error().code != NetErrc::WouldBlock)
             {
-                throw std::runtime_error("TcpSocket::ConnectAsync failed");
+                throw std::system_error(ToErrorCode(result.error()), "TcpSocket::ConnectAsync failed");
             }
 
             co_await driver.WaitUntilWritable(ctx, m_handle, token);
@@ -90,7 +98,7 @@ namespace NGIN::Net
 
             if (connectResult.error().code != NetErrc::WouldBlock)
             {
-                throw std::runtime_error("TcpSocket::ConnectAsync failed");
+                throw std::system_error(ToErrorCode(connectResult.error()), "TcpSocket::ConnectAsync failed");
             }
         }
 #endif
@@ -328,7 +336,7 @@ namespace NGIN::Net
 
             if (result.error().code != NetErrc::WouldBlock)
             {
-                throw std::runtime_error("TcpSocket::SendAsync failed");
+                throw std::system_error(ToErrorCode(result.error()), "TcpSocket::SendAsync failed");
             }
 
             co_await driver.WaitUntilWritable(ctx, m_handle, token);
@@ -354,7 +362,7 @@ namespace NGIN::Net
 
             if (result.error().code != NetErrc::WouldBlock)
             {
-                throw std::runtime_error("TcpSocket::ReceiveAsync failed");
+                throw std::system_error(ToErrorCode(result.error()), "TcpSocket::ReceiveAsync failed");
             }
 
             co_await driver.WaitUntilReadable(ctx, m_handle, token);

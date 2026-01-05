@@ -12,14 +12,21 @@
 
 namespace NGIN::Net
 {
-    NetExpected<void> TcpListener::Open(AddressFamily family) noexcept
+    NetExpected<void> TcpListener::Open(AddressFamily family, SocketOptions options) noexcept
     {
+        m_handle.Close();
         NetError error {};
-        const bool dualStack = family == AddressFamily::DualStack;
-        m_handle = detail::CreateSocket(family, SOCK_STREAM, IPPROTO_TCP, dualStack, error);
+        m_handle = detail::CreateSocket(family, SOCK_STREAM, IPPROTO_TCP, options.nonBlocking, error);
         if (error.code != NetErrc::Ok)
         {
             return std::unexpected(error);
+        }
+
+        auto optionResult = detail::ApplySocketOptions(m_handle, family, options, true, false);
+        if (!optionResult)
+        {
+            m_handle.Close();
+            return std::unexpected(optionResult.error());
         }
         return {};
     }
@@ -59,7 +66,7 @@ namespace NGIN::Net
             return std::unexpected(detail::LastError());
         }
 
-        TcpSocket socket(detail::FromNative(sock));
+        TcpSocket socket(std::move(detail::FromNative(sock)));
         (void)detail::SetNonBlocking(socket.Handle(), true);
         return socket;
     }
@@ -70,7 +77,7 @@ namespace NGIN::Net
     {
 #if defined(NGIN_PLATFORM_WINDOWS)
         auto handle = co_await driver.SubmitAccept(ctx, m_handle, token);
-        co_return TcpSocket(handle);
+        co_return TcpSocket(std::move(handle));
 #else
         for (;;)
         {
@@ -82,7 +89,7 @@ namespace NGIN::Net
 
             if (result.error().code != NetErrc::WouldBlock)
             {
-                throw std::runtime_error("TcpListener::AcceptAsync failed");
+                throw std::system_error(ToErrorCode(result.error()), "TcpListener::AcceptAsync failed");
             }
 
             co_await driver.WaitUntilReadable(ctx, m_handle, token);

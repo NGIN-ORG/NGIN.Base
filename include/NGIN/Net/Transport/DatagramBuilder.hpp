@@ -28,9 +28,12 @@ namespace NGIN::Net::Transport
         {
             if (!m_hasSocket || !m_driver)
             {
-                throw std::runtime_error("DatagramBuilder requires a UdpSocket and NetworkDriver");
+                throw std::logic_error("DatagramBuilder requires a UdpSocket and NetworkDriver");
             }
-            return std::make_unique<UdpDatagramChannel>(std::move(m_socket), *m_driver);
+            auto channel = std::make_unique<UdpDatagramChannel>(std::move(m_socket), *m_driver);
+            m_hasSocket = false;
+            m_driver = nullptr;
+            return channel;
         }
 
     private:

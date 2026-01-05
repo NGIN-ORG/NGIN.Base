@@ -67,7 +67,7 @@ namespace NGIN::Net
         {
             for (const auto& block: m_free)
             {
-            m_allocator.Deallocate(block.data, block.capacity, BufferAlignment);
+                m_allocator.Deallocate(block.data, block.capacity, BufferAlignment);
             }
             m_free.clear();
         }
@@ -88,7 +88,14 @@ namespace NGIN::Net
             {
                 return;
             }
-            pool->m_free.push_back(Block {buffer.data, buffer.capacity});
+            try
+            {
+                pool->m_free.push_back(Block {buffer.data, buffer.capacity});
+            }
+            catch (...)
+            {
+                pool->m_allocator.Deallocate(buffer.data, buffer.capacity, BufferAlignment);
+            }
         }
 
         Buffer MakeBuffer(const Block& block) noexcept

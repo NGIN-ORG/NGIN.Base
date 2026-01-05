@@ -24,6 +24,7 @@
 #include <NGIN/Net/Sockets/UdpSocket.hpp>
 #include <NGIN/Net/Transport/ByteStreamBuilder.hpp>
 #include <NGIN/Net/Transport/DatagramBuilder.hpp>
+#include <NGIN/Net/Transport/Filters/LengthPrefixedMessageStream.hpp>
 #include <NGIN/Net/Transport/TcpByteStream.hpp>
 #include <NGIN/Net/Transport/UdpDatagramChannel.hpp>
 #include <NGIN/Net/Types/BufferPool.hpp>
@@ -505,6 +506,74 @@ namespace NGIN::Net
 
         static_cast<Transport::TcpByteStream*>(clientStream.get())->Socket().Close();
         static_cast<Transport::TcpByteStream*>(serverStream.get())->Socket().Close();
+        listener.Close();
+    }
+
+    TEST_CASE("Net.Transport.LengthPrefixedMessageStream.Loopback")
+    {
+        NGIN::Execution::CooperativeScheduler scheduler;
+        NGIN::Async::TaskContext              ctx(scheduler);
+        auto                                  driver = NetworkDriver::Create({.workerThreads = 0});
+
+        TcpListener listener;
+        REQUIRE(listener.Open(AddressFamily::V4));
+        REQUIRE(listener.Bind({IpAddress::AnyV4(), 0}));
+        REQUIRE(listener.Listen(16));
+
+        const auto port = GetBoundPort(listener.Handle());
+        REQUIRE(port != 0);
+
+        TcpSocket client;
+        REQUIRE(client.Open(AddressFamily::V4));
+        REQUIRE(client.ConnectBlocking({IpAddress::LoopbackV4(), port}));
+
+        TcpSocket server;
+        bool      accepted = false;
+        for (int attempt = 0; attempt < 128; ++attempt)
+        {
+            auto acceptResult = listener.TryAccept();
+            if (acceptResult)
+            {
+                server   = std::move(*acceptResult);
+                accepted = true;
+                break;
+            }
+            REQUIRE(acceptResult.error().code == NetErrc::WouldBlock);
+            SleepBrief();
+        }
+        REQUIRE(accepted);
+
+        auto clientStream = Transport::ByteStreamBuilder()
+                                    .FromTcpSocket(std::move(client), *driver)
+                                    .BuildLengthPrefixed();
+        auto serverStream = Transport::ByteStreamBuilder()
+                                    .FromTcpSocket(std::move(server), *driver)
+                                    .BuildLengthPrefixed();
+
+        BufferPool<> pool;
+        auto         buffer = pool.Rent(256);
+        REQUIRE(buffer.IsValid());
+
+        const char payload[] = "framed-ping";
+
+        auto readTask = serverStream->ReadMessageAsync(ctx, buffer, ctx.GetCancellationToken());
+        readTask.Start(ctx);
+
+        auto writeTask = clientStream->WriteMessageAsync(ctx,
+                                                         ConstByteSpan {reinterpret_cast<const NGIN::Byte*>(payload),
+                                                                        sizeof(payload)},
+                                                         ctx.GetCancellationToken());
+        writeTask.Start(ctx);
+
+        REQUIRE(PumpUntil(scheduler, *driver, [&]() { return readTask.IsCompleted() && writeTask.IsCompleted(); }));
+
+        writeTask.Get();
+        const auto message = readTask.Get();
+        REQUIRE(message.size() == sizeof(payload));
+        REQUIRE(std::memcmp(message.data(), payload, sizeof(payload)) == 0);
+
+        REQUIRE(clientStream->Close());
+        REQUIRE(serverStream->Close());
         listener.Close();
     }
 
