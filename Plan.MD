@@ -22,7 +22,7 @@
 - Public API in headers; platform backends implemented in `src/NGIN/Net` and wired via small `detail` helpers.
 - Async operations must take `NGIN::Async::TaskContext&` (or use it internally) so Tasks have an executor before awaiting.
 - Use C++23 `std::expected` for error-return paths with `NetError` (alias in `NGIN::Net`).
-- Non-blocking by default; blocking behavior is explicit via `ConnectBlocking` or options.
+- Non-blocking by default; blocking behavior is explicit via `Connect` or options.
 - Use NGIN primitives and naming: `NGIN::UInt16`, `NGIN::UInt32`, `NGIN::Byte`.
 - Define Try* contract now (partial progress, EOF rules, WouldBlock mapping) to prevent churn.
 - Socket moves are allowed only when no driver registration is active (or use stable internal state); this must be explicit.
@@ -276,7 +276,7 @@ namespace NGIN::Net {
                                              NGIN::Async::CancellationToken token);
 
         // Explicit blocking helper (optional, separate from core API)
-        NetExpected<void> ConnectBlocking(Endpoint remoteEndpoint);
+        NetExpected<void> Connect(Endpoint remoteEndpoint);
 
         NetExpected<NGIN::UInt32> TrySend(ConstByteSpan data) noexcept;
         NetExpected<NGIN::UInt32> TryReceive(ByteSpan destination) noexcept;

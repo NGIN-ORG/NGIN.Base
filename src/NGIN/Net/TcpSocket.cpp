@@ -27,6 +27,7 @@ namespace NGIN::Net
         {
             return std::unexpected(error);
         }
+        m_nonBlocking = options.nonBlocking;
 
         auto optionResult = detail::ApplySocketOptions(m_handle, family, options, true, false);
         if (!optionResult)
@@ -104,25 +105,26 @@ namespace NGIN::Net
 #endif
     }
 
-    NetExpected<void> TcpSocket::ConnectBlocking(Endpoint remoteEndpoint)
+    NetExpected<void> TcpSocket::Connect(Endpoint remoteEndpoint)
     {
+        const bool restoreNonBlocking = m_nonBlocking;
         static_cast<void>(detail::SetNonBlocking(m_handle, false));
         sockaddr_storage storage {};
         socklen_t length = 0;
         if (!detail::ToSockAddr(remoteEndpoint, storage, length))
         {
-            static_cast<void>(detail::SetNonBlocking(m_handle, true));
+            static_cast<void>(detail::SetNonBlocking(m_handle, restoreNonBlocking));
             return std::unexpected(NetError {NetErrc::Unknown, 0});
         }
 
         if (::connect(detail::ToNative(m_handle), reinterpret_cast<sockaddr*>(&storage), length) != 0)
         {
             auto error = detail::LastError();
-            static_cast<void>(detail::SetNonBlocking(m_handle, true));
+            static_cast<void>(detail::SetNonBlocking(m_handle, restoreNonBlocking));
             return std::unexpected(error);
         }
 
-        static_cast<void>(detail::SetNonBlocking(m_handle, true));
+        static_cast<void>(detail::SetNonBlocking(m_handle, restoreNonBlocking));
         return {};
     }
 

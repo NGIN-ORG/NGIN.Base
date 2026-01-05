@@ -194,7 +194,7 @@ namespace NGIN::Net
 
         TcpSocket client;
         REQUIRE(client.Open(AddressFamily::V4));
-        REQUIRE(client.ConnectBlocking({IpAddress::LoopbackV4(), port}));
+        REQUIRE(client.Connect({IpAddress::LoopbackV4(), port}));
 
         TcpSocket server;
         bool      accepted = false;
@@ -350,7 +350,7 @@ namespace NGIN::Net
 
         TcpSocket client;
         REQUIRE(client.Open(AddressFamily::V4));
-        REQUIRE(client.ConnectBlocking({IpAddress::LoopbackV4(), port}));
+        REQUIRE(client.Connect({IpAddress::LoopbackV4(), port}));
 
         TcpSocket server;
         bool accepted = false;
@@ -459,7 +459,7 @@ namespace NGIN::Net
 
         TcpSocket client;
         REQUIRE(client.Open(AddressFamily::V4));
-        REQUIRE(client.ConnectBlocking({IpAddress::LoopbackV4(), port}));
+        REQUIRE(client.Connect({IpAddress::LoopbackV4(), port}));
 
         TcpSocket server;
         bool      accepted = false;
@@ -525,7 +525,7 @@ namespace NGIN::Net
 
         TcpSocket client;
         REQUIRE(client.Open(AddressFamily::V4));
-        REQUIRE(client.ConnectBlocking({IpAddress::LoopbackV4(), port}));
+        REQUIRE(client.Connect({IpAddress::LoopbackV4(), port}));
 
         TcpSocket server;
         bool      accepted = false;
@@ -766,7 +766,7 @@ namespace NGIN::Net
 
         TcpSocket client;
         REQUIRE(client.Open(AddressFamily::V4));
-        REQUIRE(client.ConnectBlocking({IpAddress::LoopbackV4(), port}));
+        REQUIRE(client.Connect({IpAddress::LoopbackV4(), port}));
 
         TcpSocket server;
         bool      accepted = false;
@@ -822,7 +822,7 @@ namespace NGIN::Net
 
         TcpSocket client;
         REQUIRE(client.Open(AddressFamily::V4));
-        REQUIRE(client.ConnectBlocking({IpAddress::LoopbackV4(), port}));
+        REQUIRE(client.Connect({IpAddress::LoopbackV4(), port}));
 
         TcpSocket server;
         bool      accepted = false;
@@ -875,7 +875,7 @@ namespace NGIN::Net
 
         TcpSocket client;
         REQUIRE(client.Open(AddressFamily::V4));
-        REQUIRE(client.ConnectBlocking({IpAddress::LoopbackV4(), port}));
+        REQUIRE(client.Connect({IpAddress::LoopbackV4(), port}));
 
         TcpSocket server;
         bool      accepted = false;
@@ -930,7 +930,7 @@ namespace NGIN::Net
         listener.Close();
     }
 
-    TEST_CASE("Net.Tcp.ConnectBlockingRefused")
+    TEST_CASE("Net.Tcp.ConnectRefused")
     {
         TcpListener listener;
         REQUIRE(listener.Open(AddressFamily::V4));
@@ -943,7 +943,7 @@ namespace NGIN::Net
 
         TcpSocket client;
         REQUIRE(client.Open(AddressFamily::V4));
-        auto result = client.ConnectBlocking({IpAddress::LoopbackV4(), port});
+        auto result = client.Connect({IpAddress::LoopbackV4(), port});
         REQUIRE_FALSE(result);
         const bool refused = result.error().code == NetErrc::Disconnected ||
                              result.error().code == NetErrc::ConnectionReset;
@@ -1003,7 +1003,7 @@ namespace NGIN::Net
 
         TcpSocket client;
         REQUIRE(client.Open(AddressFamily::V4));
-        REQUIRE(client.ConnectBlocking({IpAddress::LoopbackV4(), port}));
+        REQUIRE(client.Connect({IpAddress::LoopbackV4(), port}));
 
         TcpSocket server;
         bool      accepted = false;
@@ -1075,7 +1075,7 @@ namespace NGIN::Net
 
         TcpSocket client;
         REQUIRE(client.Open(AddressFamily::V4));
-        REQUIRE(client.ConnectBlocking({IpAddress::LoopbackV4(), port}));
+        REQUIRE(client.Connect({IpAddress::LoopbackV4(), port}));
 
         TcpSocket server;
         bool      accepted = false;

@@ -225,7 +225,7 @@ namespace NGIN::Net::detail
 #else
         (void)handle;
         (void)value;
-        return false;
+        return true;
 #endif
     }
 

@@ -324,10 +324,23 @@ namespace NGIN::Net
 
         void PollOnce(int timeoutMs)
         {
+            thread_local int s_pollDepth = 0;
+            struct DepthGuard final
+            {
+                int& depth;
+                ~DepthGuard() { --depth; }
+            };
+
+            const bool useThreadLocal = (s_pollDepth == 0);
+            ++s_pollDepth;
+            DepthGuard depthGuard {s_pollDepth};
+
 #if defined(NGIN_PLATFORM_WINDOWS)
             const DWORD waitMs = timeoutMs > 0 ? static_cast<DWORD>(timeoutMs) : 0;
 #endif
-            thread_local std::vector<Waiter*> waiters {};
+            thread_local std::vector<Waiter*> tlsWaiters {};
+            std::vector<Waiter*>              localWaiters {};
+            auto&                             waiters = useThreadLocal ? tlsWaiters : localWaiters;
             {
                 std::lock_guard guard(m_mutex);
                 if (!m_waiters.empty())
@@ -396,7 +409,9 @@ namespace NGIN::Net
                     return;
                 }
 
-                thread_local std::unordered_map<int, std::uint32_t> readyEvents {};
+                thread_local std::unordered_map<int, std::uint32_t> tlsReadyEvents {};
+                std::unordered_map<int, std::uint32_t>              localReadyEvents {};
+                auto&                                               readyEvents = useThreadLocal ? tlsReadyEvents : localReadyEvents;
                 readyEvents.clear();
                 readyEvents.reserve(static_cast<std::size_t>(ready));
                 for (int i = 0; i < ready; ++i)
@@ -466,7 +481,9 @@ namespace NGIN::Net
                     bool write {false};
                 };
 
-                thread_local std::unordered_map<int, KqueueReady> readyEvents {};
+                thread_local std::unordered_map<int, KqueueReady> tlsReadyEvents {};
+                std::unordered_map<int, KqueueReady>              localReadyEvents {};
+                auto&                                            readyEvents = useThreadLocal ? tlsReadyEvents : localReadyEvents;
                 readyEvents.clear();
                 readyEvents.reserve(static_cast<std::size_t>(ready));
                 for (int i = 0; i < ready; ++i)

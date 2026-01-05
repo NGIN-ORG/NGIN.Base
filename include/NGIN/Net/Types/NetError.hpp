@@ -49,10 +49,10 @@ namespace NGIN::Net
             case NetErrc::MessageTooLarge: return std::make_error_code(std::errc::message_size);
             case NetErrc::PermissionDenied: return std::make_error_code(std::errc::permission_denied);
             case NetErrc::Unknown: return std::make_error_code(std::errc::io_error);
-            case NetErrc::Ok: break;
+            case NetErrc::Ok: return {};
         }
 
-        return std::make_error_code(std::errc::io_error);
+        return {};
     }
 
     template<typename T>

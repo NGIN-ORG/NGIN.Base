@@ -66,7 +66,7 @@ namespace NGIN::Net
             return std::unexpected(detail::LastError());
         }
 
-        TcpSocket socket(std::move(detail::FromNative(sock)));
+        TcpSocket socket(std::move(detail::FromNative(sock)), true);
         (void)detail::SetNonBlocking(socket.Handle(), true);
         return socket;
     }
@@ -77,7 +77,7 @@ namespace NGIN::Net
     {
 #if defined(NGIN_PLATFORM_WINDOWS)
         auto handle = co_await driver.SubmitAccept(ctx, m_handle, token);
-        co_return TcpSocket(std::move(handle));
+        co_return TcpSocket(std::move(handle), true);
 #else
         for (;;)
         {

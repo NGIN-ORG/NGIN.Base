@@ -44,7 +44,7 @@ namespace NGIN::Net
                                              Endpoint remoteEndpoint,
                                              NGIN::Async::CancellationToken token);
 
-        NetExpected<void> ConnectBlocking(Endpoint remoteEndpoint);
+        NetExpected<void> Connect(Endpoint remoteEndpoint);
 
         NetExpected<NGIN::UInt32> TrySend(ConstByteSpan data) noexcept;
         NetExpected<NGIN::UInt32> TryReceive(ByteSpan destination) noexcept;
@@ -67,13 +67,15 @@ namespace NGIN::Net
         [[nodiscard]] const SocketHandle& Handle() const noexcept { return m_handle; }
 
     private:
-        explicit TcpSocket(SocketHandle&& handle) noexcept
+        explicit TcpSocket(SocketHandle&& handle, bool nonBlocking) noexcept
             : m_handle(std::move(handle))
+            , m_nonBlocking(nonBlocking)
         {
         }
 
         friend class TcpListener;
 
         SocketHandle m_handle {};
+        bool         m_nonBlocking {true};
     };
 }// namespace NGIN::Net
