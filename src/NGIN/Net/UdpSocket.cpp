@@ -90,7 +90,7 @@ namespace NGIN::Net
 
         const int bytes = ::sendto(detail::ToNative(m_handle),
                                    reinterpret_cast<const char*>(payload.data()),
-                                   static_cast<int>(payload.size()),
+                                   payload.size(),
                                    0,
                                    reinterpret_cast<const sockaddr*>(&storage),
                                    length);
@@ -113,7 +113,7 @@ namespace NGIN::Net
         socklen_t length = static_cast<socklen_t>(sizeof(storage));
         const int bytes = ::recvfrom(detail::ToNative(m_handle),
                                      reinterpret_cast<char*>(destination.data()),
-                                     static_cast<int>(destination.size()),
+                                     destination.size(),
                                      0,
                                      reinterpret_cast<sockaddr*>(&storage),
                                      &length);

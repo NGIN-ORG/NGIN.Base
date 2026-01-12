@@ -9,6 +9,8 @@
 #include <type_traits>
 #include <utility>
 
+#include <NGIN/Meta/TypeTraits.hpp>
+
 namespace NGIN::Async
 {
     /// @brief A synchronous pull generator that yields values via `co_yield`.
@@ -39,7 +41,7 @@ namespace NGIN::Async
                 return {};
             }
 
-            std::suspend_always yield_value(T value) noexcept(std::is_nothrow_move_constructible_v<T>)
+            std::suspend_always yield_value(T value) noexcept(Meta::TypeTraits<T>::IsNothrowMoveConstructible())
             {
                 current = std::move(value);
                 return {};
