@@ -42,7 +42,7 @@
 
 namespace NGIN::Net
 {
-    [[nodiscard]] static NGIN::Async::AsyncError ToAsyncError(NetError error) noexcept
+    [[maybe_unused]] [[nodiscard]] static NGIN::Async::AsyncError ToAsyncError(NetError error) noexcept
     {
         if (error.code == NetErrorCode::Ok)
         {
