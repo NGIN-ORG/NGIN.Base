@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <NGIN/Execution/ExecutorRef.hpp>
+#include <NGIN/Memory/SmartPointers.hpp>
 #include <NGIN/Sync/LockGuard.hpp>
 #include <NGIN/Sync/SpinLock.hpp>
 #include <NGIN/Time/MonotonicClock.hpp>
@@ -67,7 +68,7 @@ namespace NGIN::Async
 
         [[nodiscard]] bool IsValid() const noexcept
         {
-            return m_state != nullptr;
+            return m_state.Get() != nullptr;
         }
 
     private:
@@ -95,17 +96,17 @@ namespace NGIN::Async
             other.m_handle      = {};
             other.m_callback    = nullptr;
             other.m_callbackCtx = nullptr;
-            other.m_index       = static_cast<std::size_t>(-1);
+            other.m_index       = static_cast<UIntSize>(-1);
             other.m_armed.store(false, std::memory_order_relaxed);
-            other.m_state.reset();
+            other.m_state.Reset();
         }
 
-        std::shared_ptr<detail::CancellationState> m_state {};
+        Memory::Shared<detail::CancellationState> m_state {};
         NGIN::Execution::ExecutorRef               m_exec {};
         std::coroutine_handle<>                   m_handle {};
         CancellationCallback                      m_callback {nullptr};
         void*                                     m_callbackCtx {nullptr};
-        std::size_t                               m_index {static_cast<std::size_t>(-1)};
+        UIntSize                               m_index {static_cast<UIntSize>(-1)};
         std::atomic<bool>                         m_armed {false};
     };
 
@@ -114,7 +115,7 @@ namespace NGIN::Async
     {
     public:
         CancellationToken() = default;
-        explicit CancellationToken(std::shared_ptr<detail::CancellationState> state) noexcept
+        explicit CancellationToken(Memory::Shared<detail::CancellationState> state) noexcept
             : m_state(std::move(state))
         {
         }
@@ -138,7 +139,7 @@ namespace NGIN::Async
                       void* callbackCtx = nullptr) const noexcept;
 
     private:
-        std::shared_ptr<detail::CancellationState> m_state {};
+        Memory::Shared<detail::CancellationState> m_state {};
         friend class CancellationSource;
     };
 
@@ -186,7 +187,7 @@ namespace NGIN::Async
                     return;
                 }
 
-                for (std::size_t i = 0; i < registrations.size(); ++i)
+                for (UIntSize i = 0; i < registrations.size(); ++i)
                 {
                     if (registrations[i] == registration)
                     {
@@ -232,7 +233,7 @@ namespace NGIN::Async
     {
     public:
         CancellationSource()
-            : m_state(std::make_shared<detail::CancellationState>())
+            : m_state(Memory::MakeShared<detail::CancellationState>())
         {
         }
 
@@ -288,7 +289,7 @@ namespace NGIN::Async
         }
 
     private:
-        std::shared_ptr<detail::CancellationState> m_state;
+        Memory::Shared<detail::CancellationState> m_state;
     };
 
     inline bool CancellationToken::IsCancellationRequested() const noexcept
@@ -361,7 +362,7 @@ namespace NGIN::Async
             {
                 registrations.resize(tokens.size());
 
-                std::size_t index = 0;
+                UIntSize index = 0;
                 for (const auto& token: tokens)
                 {
                     if (token.IsCancellationRequested())
@@ -384,7 +385,7 @@ namespace NGIN::Async
         LinkedCancellationSource() = default;
 
         explicit LinkedCancellationSource(std::initializer_list<CancellationToken> tokens)
-            : m_state(std::make_shared<detail::LinkedCancellationState>())
+            : m_state(Memory::MakeShared<detail::LinkedCancellationState>())
         {
             m_state->Link(tokens);
         }
@@ -419,7 +420,7 @@ namespace NGIN::Async
         }
 
     private:
-        std::shared_ptr<detail::LinkedCancellationState> m_state {};
+        Memory::Shared<detail::LinkedCancellationState> m_state {};
     };
 
     /// @brief Convenience helper to create a linked cancellation source.
@@ -436,12 +437,12 @@ namespace NGIN::Async
         }
         m_armed.store(false, std::memory_order_relaxed);
         m_state->Unregister(this);
-        m_state.reset();
+        m_state.Reset();
         m_exec           = {};
         m_handle         = {};
         m_callback       = nullptr;
         m_callbackCtx    = nullptr;
-        m_index          = static_cast<std::size_t>(-1);
+        m_index          = static_cast<UIntSize>(-1);
     }
 
     inline void CancellationRegistration::Fire() noexcept
