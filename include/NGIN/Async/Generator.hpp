@@ -10,6 +10,7 @@
 #include <utility>
 
 #include <NGIN/Async/AsyncError.hpp>
+#include <NGIN/Meta/TypeTraits.hpp>
 
 namespace NGIN::Async
 {
@@ -41,7 +42,7 @@ namespace NGIN::Async
                 return {};
             }
 
-            std::suspend_always yield_value(T value) noexcept(std::is_nothrow_move_constructible_v<T>)
+            std::suspend_always yield_value(T value) noexcept(Meta::TypeTraits<T>::IsNothrowMoveConstructible())
             {
                 current = std::move(value);
                 return {};

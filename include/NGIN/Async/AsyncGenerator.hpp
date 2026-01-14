@@ -12,6 +12,7 @@
 #include <NGIN/Async/Cancellation.hpp>
 #include <NGIN/Async/TaskContext.hpp>
 #include <NGIN/Execution/ExecutorRef.hpp>
+#include <NGIN/Meta/TypeTraits.hpp>
 #include <NGIN/Sync/LockGuard.hpp>
 #include <NGIN/Sync/SpinLock.hpp>
 
@@ -146,7 +147,7 @@ namespace NGIN::Async
                 return {};
             }
 
-            YieldAwaiter yield_value(T value) noexcept(std::is_nothrow_move_constructible_v<T>)
+            YieldAwaiter yield_value(T value) noexcept(NGIN::Meta::TypeTraits<T>::IsNothrowMoveConstructible())
             {
                 {
                     NGIN::Sync::LockGuard guard(lock);
