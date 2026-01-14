@@ -6,8 +6,6 @@
 #include <cstddef>
 #include <limits>
 #include <memory>
-#include <stdexcept>
-#include <system_error>
 
 #include <NGIN/Async/Task.hpp>
 #include <NGIN/Net/Transport/IByteStream.hpp>
@@ -36,22 +34,37 @@ namespace NGIN::Net::Transport::Filters
         {
             if (!m_inner)
             {
-                throw std::logic_error("LengthPrefixedMessageStream missing inner stream");
+                co_await NGIN::Async::Task<void>::ReturnError(
+                        NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::InvalidState));
+                co_return;
             }
 
             if (message.size() > std::numeric_limits<NGIN::UInt32>::max())
             {
-                throw std::length_error("LengthPrefixedMessageStream message too large");
+                co_await NGIN::Async::Task<void>::ReturnError(
+                        NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::InvalidArgument));
+                co_return;
             }
 
             std::array<NGIN::Byte, LengthBytes> header {};
             EncodeLength(static_cast<NGIN::UInt32>(message.size()), header);
 
-            co_await WriteAll(ctx,
-                              *m_inner,
-                              NGIN::Net::ConstByteSpan {header.data(), header.size()},
-                              token);
-            co_await WriteAll(ctx, *m_inner, message, token);
+            auto headerResult = co_await WriteAll(ctx,
+                                                  *m_inner,
+                                                  NGIN::Net::ConstByteSpan {header.data(), header.size()},
+                                                  token);
+            if (!headerResult)
+            {
+                co_await NGIN::Async::Task<void>::ReturnError(headerResult.error());
+                co_return;
+            }
+            auto bodyResult = co_await WriteAll(ctx, *m_inner, message, token);
+            if (!bodyResult)
+            {
+                co_await NGIN::Async::Task<void>::ReturnError(bodyResult.error());
+                co_return;
+            }
+            co_return;
         }
 
         NGIN::Async::Task<NGIN::Net::ConstByteSpan> ReadMessageAsync(NGIN::Async::TaskContext& ctx,
@@ -60,14 +73,18 @@ namespace NGIN::Net::Transport::Filters
         {
             if (!m_inner)
             {
-                throw std::logic_error("LengthPrefixedMessageStream missing inner stream");
+                co_return std::unexpected(NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::InvalidState));
             }
 
             std::array<NGIN::Byte, LengthBytes> header {};
-            co_await ReadExact(ctx,
-                               *m_inner,
-                               NGIN::Net::ByteSpan {header.data(), header.size()},
-                               token);
+            auto headerResult = co_await ReadExact(ctx,
+                                                   *m_inner,
+                                                   NGIN::Net::ByteSpan {header.data(), header.size()},
+                                                   token);
+            if (!headerResult)
+            {
+                co_return std::unexpected(headerResult.error());
+            }
 
             const auto messageSize = DecodeLength(header);
             if (messageSize == 0)
@@ -78,13 +95,17 @@ namespace NGIN::Net::Transport::Filters
 
             if (!messageBuffer.data || messageBuffer.capacity < messageSize)
             {
-                throw std::length_error("LengthPrefixedMessageStream buffer too small");
+                co_return std::unexpected(NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::InvalidArgument));
             }
 
-            co_await ReadExact(ctx,
-                               *m_inner,
-                               NGIN::Net::ByteSpan {messageBuffer.data, messageSize},
-                               token);
+            auto payloadResult = co_await ReadExact(ctx,
+                                                    *m_inner,
+                                                    NGIN::Net::ByteSpan {messageBuffer.data, messageSize},
+                                                    token);
+            if (!payloadResult)
+            {
+                co_return std::unexpected(payloadResult.error());
+            }
             messageBuffer.size = messageSize;
             co_return NGIN::Net::ConstByteSpan {messageBuffer.data, messageSize};
         }
@@ -93,7 +114,7 @@ namespace NGIN::Net::Transport::Filters
         {
             if (!m_inner)
             {
-                return std::unexpected(NGIN::Net::NetError {NGIN::Net::NetErrc::Unknown, 0});
+                return std::unexpected(NGIN::Net::NetError {NGIN::Net::NetErrorCode::Unknown, 0});
             }
             return m_inner->Close();
         }
@@ -127,13 +148,21 @@ namespace NGIN::Net::Transport::Filters
                 auto task = stream.WriteAsync(ctx, data.subspan(offset), token);
                 task.Start(ctx);
                 const auto bytes = co_await task;
-                if (bytes == 0)
+                if (!bytes)
                 {
-                    throw std::system_error(ToErrorCode(NetError {NetErrc::Disconnected, 0}),
-                                            "LengthPrefixedMessageStream write made no progress");
+                    co_await NGIN::Async::Task<void>::ReturnError(bytes.error());
+                    co_return;
                 }
-                offset += bytes;
+                if (*bytes == 0)
+                {
+                    co_await NGIN::Async::Task<void>::ReturnError(
+                            NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::Fault,
+                                                        static_cast<int>(NetErrorCode::Disconnected)));
+                    co_return;
+                }
+                offset += *bytes;
             }
+            co_return;
         }
 
         static NGIN::Async::Task<void> ReadExact(NGIN::Async::TaskContext& ctx,
@@ -147,15 +176,24 @@ namespace NGIN::Net::Transport::Filters
                 auto task = stream.ReadAsync(ctx, destination.subspan(offset), token);
                 task.Start(ctx);
                 const auto bytes = co_await task;
-                if (bytes == 0)
+                if (!bytes)
                 {
-                    throw std::system_error(ToErrorCode(NetError {NetErrc::Disconnected, 0}),
-                                            "LengthPrefixedMessageStream unexpected EOF");
+                    co_await NGIN::Async::Task<void>::ReturnError(bytes.error());
+                    co_return;
                 }
-                offset += bytes;
+                if (*bytes == 0)
+                {
+                    co_await NGIN::Async::Task<void>::ReturnError(
+                            NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::Fault,
+                                                        static_cast<int>(NetErrorCode::Disconnected)));
+                    co_return;
+                }
+                offset += *bytes;
             }
+            co_return;
         }
 
         std::unique_ptr<IByteStream> m_inner {};
     };
 }// namespace NGIN::Net::Transport::Filters
+

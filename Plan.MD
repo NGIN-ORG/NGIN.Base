@@ -107,7 +107,7 @@ namespace NGIN::Net {
 
 ```cpp
 namespace NGIN::Net {
-    enum class NetErrc : NGIN::UInt8 {
+    enum class NetErrorCode : NGIN::UInt8 {
         Ok,
         WouldBlock,
         TimedOut,
@@ -120,7 +120,7 @@ namespace NGIN::Net {
     };
 
     struct NetError {
-        NetErrc code {NetErrc::Ok};
+        NetErrorCode code {NetErrorCode::Ok};
         int native {0};
     };
 
@@ -307,12 +307,12 @@ Naming notes:
 
 ## API contract (lock semantics now)
 
-- Try* never throws; it returns `NetExpected` with `NetErrc::WouldBlock` for non-ready sockets.
+- Try* never throws; it returns `NetExpected` with `NetErrorCode::WouldBlock` for non-ready sockets.
 - TrySend/TryReceive may return partial progress; `Ok` with `bytes > 0` means progress.
 - TCP EOF: `TryReceive` returns `Ok` with `bytes == 0` (not `Disconnected`). `Disconnected` is for hard errors.
 - UDP: zero-length payload is allowed; `TryReceiveFrom` returns `bytesReceived == 0` only if the datagram is empty.
 - `WouldBlock` is the only signal that it is safe to wait and retry without treating it as an error.
-- Cancellation: async APIs propagate `TaskCanceled` from `TaskContext` (do not map to `NetErrc`).
+- Cancellation: async APIs propagate `TaskCanceled` from `TaskContext` (do not map to `NetErrorCode`).
 - Socket moves: not allowed while registered with a `NetworkDriver` unless registration is tied to stable internal state.
 
 ## Optional transport layer (composition, testability, features)
@@ -440,7 +440,7 @@ auto buffer = pool.Rent(2048);
 while (running) {
     for (;;) {
         auto result = socket.TryReceiveFrom({buffer.data, buffer.capacity});
-        if (!result || result.error().code == NetErrc::WouldBlock) {
+        if (!result || result.error().code == NetErrorCode::WouldBlock) {
             break;
         }
         HandleDatagram(result->remoteEndpoint, {buffer.data, result->bytesReceived});
@@ -499,3 +499,4 @@ auto payload = co_await byteStream.ReadMessageAsync(ctx, msg, token);
 - Cancellation tests for WaitUntilReadable/WaitUntilWritable and async send/receive.
 - Loopback-only integration tests (TCP and UDP) to avoid external network dependencies.
 - Benchmarks if performance is a focus: TrySend/TryReceive and async latency.
+

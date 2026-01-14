@@ -2,7 +2,6 @@
 
 #include "FiberPlatform.hpp"
 
-#include <stdexcept>
 #include <utility>
 
 namespace NGIN::Execution
@@ -68,7 +67,7 @@ namespace NGIN::Execution
     {
         if (!job)
         {
-            throw std::invalid_argument("NGIN::Execution::Fiber::Assign requires a callable job");
+            std::terminate();
         }
         if (m_state == nullptr)
         {
@@ -92,13 +91,7 @@ namespace NGIN::Execution
             return false;
         }
 
-        try
-        {
-            detail::AssignJob(m_state, std::move(job));
-        } catch (...)
-        {
-            std::terminate();
-        }
+        detail::AssignJob(m_state, std::move(job));
 
         return true;
     }
@@ -110,13 +103,7 @@ namespace NGIN::Execution
             std::terminate();
         }
 
-        try
-        {
-            detail::ResumeFiber(m_state);
-        } catch (...)
-        {
-            std::terminate();
-        }
+        detail::ResumeFiber(m_state);
 
         if (detail::FiberHasException(m_state))
         {
@@ -162,12 +149,6 @@ namespace NGIN::Execution
 
     void Fiber::YieldNow() noexcept
     {
-        try
-        {
-            detail::YieldFiber();
-        } catch (...)
-        {
-            std::terminate();
-        }
+        detail::YieldFiber();
     }
 }// namespace NGIN::Execution

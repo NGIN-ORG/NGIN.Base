@@ -4,12 +4,14 @@
 #pragma once
 
 #include <coroutine>
-#include <exception>
 #include <utility>
 #include <atomic>
 #include <cassert>
 #include <type_traits>
 
+#include <exception>
+
+#include <NGIN/Async/AsyncError.hpp>
 #include <NGIN/Async/Cancellation.hpp>
 #include <NGIN/Async/TaskContext.hpp>
 #include <NGIN/Sync/AtomicCondition.hpp>
@@ -17,27 +19,6 @@
 
 namespace NGIN::Async
 {
-    namespace detail
-    {
-        [[nodiscard]] inline bool IsTaskCanceled(const std::exception_ptr& error) noexcept
-        {
-            if (!error)
-            {
-                return false;
-            }
-            try
-            {
-                std::rethrow_exception(error);
-            } catch (const TaskCanceled&)
-            {
-                return true;
-            } catch (...)
-            {
-                return false;
-            }
-        }
-    }// namespace detail
-
     class BaseTask
     {
     };
@@ -51,9 +32,22 @@ namespace NGIN::Async
     public:
         struct promise_type
         {
-            T                       m_value;
-            std::exception_ptr      m_error;
-            bool                    m_canceled {false};
+            T                       m_value {};
+            AsyncError              m_error {};
+            bool                    m_hasError {false};
+#if NGIN_ASYNC_CAPTURE_EXCEPTIONS
+            std::exception_ptr      m_exception {};
+            using ExceptionPropagator = void (*)(std::exception_ptr, std::coroutine_handle<>) noexcept;
+            ExceptionPropagator      m_setChildException {};
+
+            void SetChildException(std::exception_ptr ex) noexcept
+            {
+                if (!m_exception)
+                {
+                    m_exception = ex;
+                }
+            }
+#endif
             std::atomic<bool>       m_finished {false};
             NGIN::Sync::AtomicCondition m_finishedCondition {};
             std::coroutine_handle<> m_continuation {};
@@ -96,6 +90,12 @@ namespace NGIN::Async
                     auto& p = h.promise();
                     p.m_finished.store(true, std::memory_order_release);
                     p.m_finishedCondition.NotifyAll();
+#if NGIN_ASYNC_CAPTURE_EXCEPTIONS
+                    if (p.m_continuation && p.m_setChildException && p.m_exception)
+                    {
+                        p.m_setChildException(p.m_exception, p.m_continuation);
+                    }
+#endif
                     if (p.m_continuation)
                     {
                         if (p.m_executor.IsValid())
@@ -115,10 +115,34 @@ namespace NGIN::Async
             {
                 m_value = std::move(value);
             }
+            void return_value(AsyncExpected<T> result) noexcept
+            {
+                if (!result)
+                {
+                    m_error = result.error();
+                    m_hasError = true;
+                    return;
+                }
+                m_value = std::move(*result);
+            }
+
+            void return_value(std::unexpected<AsyncError> error) noexcept
+            {
+                m_error = error.error();
+                m_hasError = true;
+            }
+
             void unhandled_exception() noexcept
             {
-                m_error = std::current_exception();
-                m_canceled = detail::IsTaskCanceled(m_error);
+#if NGIN_ASYNC_HAS_EXCEPTIONS
+                m_error = AsyncError {AsyncErrorCode::Fault, 0};
+                m_hasError = true;
+#if NGIN_ASYNC_CAPTURE_EXCEPTIONS
+                m_exception = std::current_exception();
+#endif
+#else
+                std::terminate();
+#endif
             }
         };
 
@@ -171,10 +195,14 @@ namespace NGIN::Async
             return !m_handle || m_handle.done();
         }
 
-        void await_suspend(std::coroutine_handle<> awaiting) noexcept
+        template<typename Promise>
+        void await_suspend(std::coroutine_handle<Promise> awaiting) noexcept
         {
             auto& prom          = m_handle.promise();
             prom.m_continuation = awaiting;
+#if NGIN_ASYNC_CAPTURE_EXCEPTIONS
+            prom.m_setChildException = &Task::template PropagateChildException<Promise>;
+#endif
             if (m_executor.IsValid())
             {
                 prom.m_executor = m_executor;
@@ -199,11 +227,13 @@ namespace NGIN::Async
             // else: already scheduled, just attach continuation
         }
 
-        T await_resume()
+        AsyncExpected<T> await_resume() noexcept
         {
             auto& p = m_handle.promise();
-            if (p.m_error)
-                std::rethrow_exception(p.m_error);
+            if (p.m_hasError)
+            {
+                return std::unexpected(p.m_error);
+            }
             return std::move(p.m_value);
         }
 
@@ -234,12 +264,14 @@ namespace NGIN::Async
             }
         }
 
-        T Get()
+        AsyncExpected<T> Get()
         {
             Wait();
             auto& p = m_handle.promise();
-            if (p.m_error)
-                std::rethrow_exception(p.m_error);
+            if (p.m_hasError)
+            {
+                return std::unexpected(p.m_error);
+            }
             return std::move(p.m_value);
         }
 
@@ -258,7 +290,7 @@ namespace NGIN::Async
         [[nodiscard]] bool IsFaulted() const noexcept
         {
             auto&           p = m_handle.promise();
-            return p.m_error != nullptr;
+            return p.m_hasError;
         }
 
         [[nodiscard]] bool IsCanceled() const noexcept
@@ -267,7 +299,39 @@ namespace NGIN::Async
             {
                 return false;
             }
-            return m_handle.promise().m_canceled;
+            auto& p = m_handle.promise();
+            return p.m_hasError && p.m_error.code == AsyncErrorCode::Canceled;
+        }
+
+#if NGIN_ASYNC_CAPTURE_EXCEPTIONS
+        [[nodiscard]] std::exception_ptr GetException() const noexcept
+        {
+            if (!m_handle)
+            {
+                return {};
+            }
+            return m_handle.promise().m_exception;
+        }
+#endif
+
+        struct ReturnErrorAwaiter final
+        {
+            AsyncError error {};
+
+            bool await_ready() const noexcept { return false; }
+            bool await_suspend(std::coroutine_handle<promise_type> h) const noexcept
+            {
+                auto& p = h.promise();
+                p.m_error = error;
+                p.m_hasError = true;
+                return false;
+            }
+            void await_resume() const noexcept {}
+        };
+
+        [[nodiscard]] static ReturnErrorAwaiter ReturnError(AsyncError error) noexcept
+        {
+            return ReturnErrorAwaiter {error};
         }
 
         handle_type Handle() const noexcept
@@ -287,7 +351,8 @@ namespace NGIN::Async
                 NGIN::Execution::ExecutorRef    exec {};
                 std::coroutine_handle<>         awaiting {};
                 CancellationRegistration        cancellationRegistration {};
-                std::exception_ptr              error {};
+                AsyncError                      error {};
+                bool                            hasError {false};
             };
 
             struct Awaiter
@@ -368,7 +433,8 @@ namespace NGIN::Async
                                     return false;
                                 }
 
-                                state->error = std::make_exception_ptr(TaskCanceled());
+                                state->error = MakeAsyncError(AsyncErrorCode::Canceled);
+                                state->hasError = true;
                                 return true;
                             },
                             state.get());
@@ -377,26 +443,46 @@ namespace NGIN::Async
                                     TaskContext& ctx,
                                     std::shared_ptr<SharedState> state,
                                     Func func) -> Detached {
-                        std::exception_ptr error {};
-                        try
-                        {
-                            ctx.ThrowIfCancellationRequested();
-                            parent.Start(ctx);
-                            auto value = co_await parent;
-                            ctx.ThrowIfCancellationRequested();
+                        AsyncError error {};
+                        bool       hasError = false;
 
-                            auto nextTask = func(std::move(value));
-                            nextTask.Start(ctx);
-                            co_await nextTask;
-                        } catch (...)
+                        if (ctx.IsCancellationRequested())
                         {
-                            error = std::current_exception();
+                            error = MakeAsyncError(AsyncErrorCode::Canceled);
+                            hasError = true;
+                        }
+                        else
+                        {
+                            parent.Start(ctx);
+                            auto parentResult = co_await parent;
+                            if (!parentResult)
+                            {
+                                error = parentResult.error();
+                                hasError = true;
+                            }
+                            else if (ctx.IsCancellationRequested())
+                            {
+                                error = MakeAsyncError(AsyncErrorCode::Canceled);
+                                hasError = true;
+                            }
+                            else
+                            {
+                                auto nextTask = func(std::move(*parentResult));
+                                nextTask.Start(ctx);
+                                auto nextResult = co_await nextTask;
+                                if (!nextResult)
+                                {
+                                    error = nextResult.error();
+                                    hasError = true;
+                                }
+                            }
                         }
 
                         bool expected = false;
                         if (state->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
                         {
-                            state->error = std::move(error);
+                            state->error = error;
+                            state->hasError = hasError;
                             if (state->awaiting)
                             {
                                 state->exec.Execute(state->awaiting);
@@ -408,17 +494,18 @@ namespace NGIN::Async
                     return std::coroutine_handle<>::from_address(chain.handle.address());
                 }
 
-                void await_resume()
+                AsyncExpected<void> await_resume() noexcept
                 {
+                    if (state && state->hasError)
+                    {
+                        return std::unexpected(state->error);
+                    }
                     auto* ctx = parent.m_scheduler_ctx;
-                    if (ctx && ctx->IsCancellationRequested() && (!state || !state->error))
+                    if (ctx && ctx->IsCancellationRequested())
                     {
-                        throw TaskCanceled();
+                        return std::unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
                     }
-                    if (state && state->error)
-                    {
-                        std::rethrow_exception(state->error);
-                    }
+                    return {};
                 }
             };
             struct ContTask
@@ -438,6 +525,26 @@ namespace NGIN::Async
         // For continuation support
         friend class TaskContext;
         TaskContext* m_scheduler_ctx {nullptr};
+
+#if NGIN_ASYNC_CAPTURE_EXCEPTIONS
+        template<typename Promise>
+        static void PropagateChildException(std::exception_ptr ex, std::coroutine_handle<> cont) noexcept
+        {
+            if (!ex || !cont)
+            {
+                return;
+            }
+            if constexpr (requires(Promise& p) { p.SetChildException(ex); })
+            {
+                auto typed = std::coroutine_handle<Promise>::from_address(cont.address());
+                typed.promise().SetChildException(ex);
+            }
+            else
+            {
+                (void)cont;
+            }
+        }
+#endif
     };
 
     //------------------------------------------------------------------------
@@ -449,8 +556,22 @@ namespace NGIN::Async
     public:
         struct promise_type
         {
-            std::exception_ptr      m_error;
-            bool                    m_canceled {false};
+            AsyncError              m_error {};
+            bool                    m_hasError {false};
+#if NGIN_ASYNC_CAPTURE_EXCEPTIONS
+            std::exception_ptr      m_exception {};
+            using ExceptionPropagator = void (*)(std::exception_ptr, std::coroutine_handle<>) noexcept;
+            ExceptionPropagator      m_setChildException {};
+
+            void SetChildException(std::exception_ptr ex) noexcept
+            {
+                if (!m_exception)
+                {
+                    m_exception = ex;
+                }
+            }
+#endif
+
             std::atomic<bool>       m_finished {false};
             NGIN::Sync::AtomicCondition m_finishedCondition {};
             std::coroutine_handle<> m_continuation {};
@@ -493,6 +614,12 @@ namespace NGIN::Async
                     auto& p = h.promise();
                     p.m_finished.store(true, std::memory_order_release);
                     p.m_finishedCondition.NotifyAll();
+#if NGIN_ASYNC_CAPTURE_EXCEPTIONS
+                    if (p.m_continuation && p.m_setChildException && p.m_exception)
+                    {
+                        p.m_setChildException(p.m_exception, p.m_continuation);
+                    }
+#endif
                     if (p.m_continuation)
                     {
                         if (p.m_executor.IsValid())
@@ -509,10 +636,18 @@ namespace NGIN::Async
             }
 
             void return_void() noexcept {}
+
             void unhandled_exception() noexcept
             {
-                m_error = std::current_exception();
-                m_canceled = detail::IsTaskCanceled(m_error);
+#if NGIN_ASYNC_HAS_EXCEPTIONS
+                m_error = AsyncError {AsyncErrorCode::Fault, 0};
+                m_hasError = true;
+#if NGIN_ASYNC_CAPTURE_EXCEPTIONS
+                m_exception = std::current_exception();
+#endif
+#else
+                std::terminate();
+#endif
             }
         };
 
@@ -565,10 +700,14 @@ namespace NGIN::Async
             return !m_handle || m_handle.done();
         }
 
-        void await_suspend(std::coroutine_handle<> awaiting) noexcept
+        template<typename Promise>
+        void await_suspend(std::coroutine_handle<Promise> awaiting) noexcept
         {
             auto& prom          = m_handle.promise();
             prom.m_continuation = awaiting;
+#if NGIN_ASYNC_CAPTURE_EXCEPTIONS
+            prom.m_setChildException = &Task::template PropagateChildException<Promise>;
+#endif
             if (m_executor.IsValid())
             {
                 prom.m_executor = m_executor;
@@ -591,10 +730,14 @@ namespace NGIN::Async
             }
         }
 
-        void await_resume()
+        AsyncExpected<void> await_resume() noexcept
         {
-            if (m_handle.promise().m_error)
-                std::rethrow_exception(m_handle.promise().m_error);
+            auto& p = m_handle.promise();
+            if (p.m_hasError)
+            {
+                return std::unexpected(p.m_error);
+            }
+            return {};
         }
 
         void Start(TaskContext& ctx) noexcept
@@ -623,12 +766,15 @@ namespace NGIN::Async
             }
         }
 
-        void Get()
+        AsyncExpected<void> Get()
         {
             Wait();
             auto& p = m_handle.promise();
-            if (p.m_error)
-                std::rethrow_exception(p.m_error);
+            if (p.m_hasError)
+            {
+                return std::unexpected(p.m_error);
+            }
+            return {};
         }
 
         bool IsCompleted() const noexcept
@@ -646,7 +792,7 @@ namespace NGIN::Async
         bool IsFaulted() const noexcept
         {
             auto&           p = m_handle.promise();
-            return p.m_error != nullptr;
+            return p.m_hasError;
         }
 
         bool IsCanceled() const noexcept
@@ -655,8 +801,41 @@ namespace NGIN::Async
             {
                 return false;
             }
-            return m_handle.promise().m_canceled;
+            auto& p = m_handle.promise();
+            return p.m_hasError && p.m_error.code == AsyncErrorCode::Canceled;
         }
+
+#if NGIN_ASYNC_CAPTURE_EXCEPTIONS
+        [[nodiscard]] std::exception_ptr GetException() const noexcept
+        {
+            if (!m_handle)
+            {
+                return {};
+            }
+            return m_handle.promise().m_exception;
+        }
+#endif
+
+        struct ReturnErrorAwaiter final
+        {
+            AsyncError error {};
+
+            bool await_ready() const noexcept { return false; }
+            bool await_suspend(std::coroutine_handle<promise_type> h) const noexcept
+            {
+                auto& p = h.promise();
+                p.m_error = error;
+                p.m_hasError = true;
+                return false;
+            }
+            void await_resume() const noexcept {}
+        };
+
+        [[nodiscard]] static ReturnErrorAwaiter ReturnError(AsyncError error) noexcept
+        {
+            return ReturnErrorAwaiter {error};
+        }
+
 
         handle_type Handle() const noexcept
         {
@@ -675,7 +854,8 @@ namespace NGIN::Async
                 NGIN::Execution::ExecutorRef    exec {};
                 std::coroutine_handle<>         awaiting {};
                 CancellationRegistration        cancellationRegistration {};
-                std::exception_ptr              error {};
+                AsyncError                      error {};
+                bool                            hasError {false};
             };
 
             struct Awaiter
@@ -756,7 +936,8 @@ namespace NGIN::Async
                                     return false;
                                 }
 
-                                state->error = std::make_exception_ptr(TaskCanceled());
+                                state->error = MakeAsyncError(AsyncErrorCode::Canceled);
+                                state->hasError = true;
                                 return true;
                             },
                             state.get());
@@ -765,26 +946,46 @@ namespace NGIN::Async
                                     TaskContext& ctx,
                                     std::shared_ptr<SharedState> state,
                                     Func func) -> Detached {
-                        std::exception_ptr error {};
-                        try
-                        {
-                            ctx.ThrowIfCancellationRequested();
-                            parent.Start(ctx);
-                            co_await parent;
-                            ctx.ThrowIfCancellationRequested();
+                        AsyncError error {};
+                        bool       hasError = false;
 
-                            auto nextTask = func();
-                            nextTask.Start(ctx);
-                            co_await nextTask;
-                        } catch (...)
+                        if (ctx.IsCancellationRequested())
                         {
-                            error = std::current_exception();
+                            error = MakeAsyncError(AsyncErrorCode::Canceled);
+                            hasError = true;
+                        }
+                        else
+                        {
+                            parent.Start(ctx);
+                            auto parentResult = co_await parent;
+                            if (!parentResult)
+                            {
+                                error = parentResult.error();
+                                hasError = true;
+                            }
+                            else if (ctx.IsCancellationRequested())
+                            {
+                                error = MakeAsyncError(AsyncErrorCode::Canceled);
+                                hasError = true;
+                            }
+                            else
+                            {
+                                auto nextTask = func();
+                                nextTask.Start(ctx);
+                                auto nextResult = co_await nextTask;
+                                if (!nextResult)
+                                {
+                                    error = nextResult.error();
+                                    hasError = true;
+                                }
+                            }
                         }
 
                         bool expected = false;
                         if (state->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
                         {
-                            state->error = std::move(error);
+                            state->error = error;
+                            state->hasError = hasError;
                             if (state->awaiting)
                             {
                                 state->exec.Execute(state->awaiting);
@@ -796,17 +997,18 @@ namespace NGIN::Async
                     return std::coroutine_handle<>::from_address(chain.handle.address());
                 }
 
-                void await_resume()
+                AsyncExpected<void> await_resume() noexcept
                 {
+                    if (state && state->hasError)
+                    {
+                        return std::unexpected(state->error);
+                    }
                     auto* ctx = parent.m_scheduler_ctx;
-                    if (ctx && ctx->IsCancellationRequested() && (!state || !state->error))
+                    if (ctx && ctx->IsCancellationRequested())
                     {
-                        throw TaskCanceled();
+                        return std::unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
                     }
-                    if (state && state->error)
-                    {
-                        std::rethrow_exception(state->error);
-                    }
+                    return {};
                 }
             };
             struct ContTask
@@ -833,8 +1035,35 @@ namespace NGIN::Async
             requires NGIN::Units::QuantityOf<NGIN::Units::TIME, TUnit>
         static Task<void> Delay(TaskContext& ctx, const TUnit& duration)
         {
-            co_await ctx.Delay(duration);
+            auto result = co_await ctx.Delay(duration);
+            if (!result)
+            {
+                co_await ReturnError(result.error());
+                co_return;
+            }
+            co_return;
         }
+
+#if NGIN_ASYNC_CAPTURE_EXCEPTIONS
+    private:
+        template<typename Promise>
+        static void PropagateChildException(std::exception_ptr ex, std::coroutine_handle<> cont) noexcept
+        {
+            if (!ex || !cont)
+            {
+                return;
+            }
+            if constexpr (requires(Promise& p) { p.SetChildException(ex); })
+            {
+                auto typed = std::coroutine_handle<Promise>::from_address(cont.address());
+                typed.promise().SetChildException(ex);
+            }
+            else
+            {
+                (void)cont;
+            }
+        }
+#endif
     };
 
 }// namespace NGIN::Async

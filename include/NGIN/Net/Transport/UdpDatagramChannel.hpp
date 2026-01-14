@@ -2,7 +2,6 @@
 /// @brief IDatagramChannel adapter over UdpSocket.
 #pragma once
 
-#include <stdexcept>
 #include <utility>
 
 #include <NGIN/Async/Task.hpp>
@@ -50,11 +49,19 @@ namespace NGIN::Net::Transport
         {
             if (!driver)
             {
-                throw std::logic_error("UdpDatagramChannel missing NetworkDriver");
+                co_await NGIN::Async::Task<void>::ReturnError(
+                        NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::InvalidState));
+                co_return;
             }
             auto task = socket.SendToAsync(ctx, *driver, remoteEndpoint, payload, token);
             task.Start(ctx);
-            (void)co_await task;
+            auto result = co_await task;
+            if (!result)
+            {
+                co_await NGIN::Async::Task<void>::ReturnError(result.error());
+                co_return;
+            }
+            co_return;
         }
 
         static NGIN::Async::Task<ReceivedDatagram> ReceiveImpl(NGIN::Async::TaskContext& ctx,
@@ -65,11 +72,11 @@ namespace NGIN::Net::Transport
         {
             if (!driver)
             {
-                throw std::logic_error("UdpDatagramChannel missing NetworkDriver");
+                co_return std::unexpected(NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::InvalidState));
             }
             if (!receiveBuffer.data || receiveBuffer.capacity == 0)
             {
-                throw std::invalid_argument("UdpDatagramChannel requires a valid receive buffer");
+                co_return std::unexpected(NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::InvalidArgument));
             }
 
             auto task = socket.ReceiveFromAsync(ctx,
@@ -79,13 +86,17 @@ namespace NGIN::Net::Transport
                                                 token);
             task.Start(ctx);
             auto result = co_await task;
+            if (!result)
+            {
+                co_return std::unexpected(result.error());
+            }
 
-            receiveBuffer.size = result.bytesReceived;
+            receiveBuffer.size = result->bytesReceived;
 
             ReceivedDatagram datagram {};
-            datagram.remoteEndpoint = result.remoteEndpoint;
-            datagram.bytesReceived = result.bytesReceived;
-            datagram.payload = NGIN::Net::ConstByteSpan {receiveBuffer.data, result.bytesReceived};
+            datagram.remoteEndpoint = result->remoteEndpoint;
+            datagram.bytesReceived = result->bytesReceived;
+            datagram.payload = NGIN::Net::ConstByteSpan {receiveBuffer.data, result->bytesReceived};
             co_return datagram;
         }
 

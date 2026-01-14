@@ -4,12 +4,12 @@
 
 #include <atomic>
 #include <coroutine>
-#include <exception>
 #include <memory>
 #include <tuple>
 #include <type_traits>
 #include <utility>
 
+#include <NGIN/Async/AsyncError.hpp>
 #include <NGIN/Async/Cancellation.hpp>
 #include <NGIN/Async/Task.hpp>
 #include <NGIN/Primitives.hpp>
@@ -29,7 +29,8 @@ namespace NGIN::Async
             CancellationRegistration        cancellationRegistration {};
 
             NGIN::Sync::SpinLock            errorLock {};
-            std::exception_ptr              firstError {};
+            AsyncError                      firstError {};
+            bool                            hasError {false};
         };
 
         [[nodiscard]] inline bool CancelWhenAll(void* ctx) noexcept
@@ -39,6 +40,12 @@ namespace NGIN::Async
             if (!state->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
             {
                 return false;
+            }
+            NGIN::Sync::LockGuard guard(state->errorLock);
+            if (!state->hasError)
+            {
+                state->firstError = MakeAsyncError(AsyncErrorCode::Canceled);
+                state->hasError = true;
             }
             return true;
         }
@@ -87,17 +94,15 @@ namespace NGIN::Async
         template<typename TTask>
         [[nodiscard]] inline Detached WatchTask(std::weak_ptr<WhenAllSharedState> weakState, TTask& task)
         {
-            try
-            {
-                co_await task;
-            } catch (...)
+            if (auto result = co_await task; !result)
             {
                 if (auto state = weakState.lock())
                 {
                     NGIN::Sync::LockGuard guard(state->errorLock);
-                    if (!state->firstError)
+                    if (!state->hasError)
                     {
-                        state->firstError = std::current_exception();
+                        state->firstError = result.error();
+                        state->hasError = true;
                     }
                 }
             }
@@ -174,16 +179,17 @@ namespace NGIN::Async
                 return true;
             }
 
-            void await_resume() const
+            AsyncExpected<void> await_resume() const noexcept
             {
                 if (ctx.IsCancellationRequested())
                 {
-                    throw TaskCanceled();
+                    return std::unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
                 }
-                if (state->firstError)
+                if (state->hasError)
                 {
-                    std::rethrow_exception(state->firstError);
+                    return std::unexpected(state->firstError);
                 }
+                return {};
             }
         };
     }// namespace detail::when_all
@@ -193,12 +199,30 @@ namespace NGIN::Async
         requires(sizeof...(TTasks) > 0) && (std::is_same_v<std::remove_reference_t<TTasks>, Task<void>> && ...)
     [[nodiscard]] inline Task<void> WhenAll(TaskContext& ctx, TTasks&... tasks)
     {
-        ctx.ThrowIfCancellationRequested();
+        if (ctx.IsCancellationRequested())
+        {
+            co_await Task<void>::ReturnError(MakeAsyncError(AsyncErrorCode::Canceled));
+            co_return;
+        }
         auto state = std::make_shared<detail::when_all::WhenAllSharedState>();
-        co_await detail::when_all::WhenAllAwaiter<TTasks...> {ctx, state, std::tuple<TTasks&...>(tasks...)};
+        auto waitResult =
+                co_await detail::when_all::WhenAllAwaiter<TTasks...> {ctx, state, std::tuple<TTasks&...>(tasks...)};
+        if (!waitResult)
+        {
+            co_await Task<void>::ReturnError(waitResult.error());
+            co_return;
+        }
 
         // Surface faults from individual tasks (first error wins, .NET-like aggregation can be added later).
-        (tasks.Get(), ...);
+        for (auto* taskPtr: std::initializer_list<Task<void>*> {&tasks...})
+        {
+            auto result = taskPtr->Get();
+            if (!result)
+            {
+                co_await Task<void>::ReturnError(result.error());
+                co_return;
+            }
+        }
         co_return;
     }
 
@@ -207,10 +231,44 @@ namespace NGIN::Async
         requires(sizeof...(T) > 0) && ((!std::is_void_v<T>) && ...)
     [[nodiscard]] inline Task<std::tuple<T...>> WhenAll(TaskContext& ctx, Task<T>&... tasks)
     {
-        ctx.ThrowIfCancellationRequested();
+        if (ctx.IsCancellationRequested())
+        {
+            co_return std::unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
+        }
         auto state = std::make_shared<detail::when_all::WhenAllSharedState>();
-        co_await detail::when_all::WhenAllAwaiter<Task<T>...> {ctx, state, std::tuple<Task<T>&...>(tasks...)};
+        auto waitResult = co_await detail::when_all::WhenAllAwaiter<Task<T>...> {ctx,
+                                                                               state,
+                                                                               std::tuple<Task<T>&...>(tasks...)};
+        if (!waitResult)
+        {
+            co_return std::unexpected(waitResult.error());
+        }
 
-        co_return std::tuple<T...> {tasks.Get()...};
+        auto results = std::tuple<AsyncExpected<T>...> {tasks.Get()...};
+        AsyncError firstError {};
+        bool       failed = false;
+        std::apply(
+                [&](auto&... r) {
+                    (([&] {
+                         if (!failed && !r)
+                         {
+                             firstError = r.error();
+                             failed = true;
+                         }
+                     }()),
+                     ...);
+                },
+                results);
+
+        if (failed)
+        {
+            co_return std::unexpected(firstError);
+        }
+
+        auto output = [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+            return std::tuple<T...> {std::move(*std::get<Is>(results))...};
+        }(std::make_index_sequence<sizeof...(T)> {});
+
+        co_return output;
     }
 }// namespace NGIN::Async

@@ -2,7 +2,6 @@
 /// @brief IByteStream adapter over TcpSocket.
 #pragma once
 
-#include <stdexcept>
 #include <utility>
 
 #include <NGIN/Async/Task.hpp>
@@ -54,11 +53,16 @@ namespace NGIN::Net::Transport
         {
             if (!driver)
             {
-                throw std::logic_error("TcpByteStream missing NetworkDriver");
+                co_return std::unexpected(NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::InvalidState));
             }
             auto task = socket.ReceiveAsync(ctx, *driver, destination, token);
             task.Start(ctx);
-            co_return co_await task;
+            auto result = co_await task;
+            if (!result)
+            {
+                co_return std::unexpected(result.error());
+            }
+            co_return *result;
         }
 
         static NGIN::Async::Task<NGIN::UInt32> WriteImpl(NGIN::Async::TaskContext& ctx,
@@ -69,11 +73,16 @@ namespace NGIN::Net::Transport
         {
             if (!driver)
             {
-                throw std::logic_error("TcpByteStream missing NetworkDriver");
+                co_return std::unexpected(NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::InvalidState));
             }
             auto task = socket.SendAsync(ctx, *driver, source, token);
             task.Start(ctx);
-            co_return co_await task;
+            auto result = co_await task;
+            if (!result)
+            {
+                co_return std::unexpected(result.error());
+            }
+            co_return *result;
         }
 
         TcpSocket      m_socket {};

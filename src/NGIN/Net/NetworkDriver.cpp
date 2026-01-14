@@ -23,7 +23,6 @@
 #include <cstring>
 #include <limits>
 #include <mutex>
-#include <stdexcept>
 #include <utility>
 #include <unordered_map>
 #include <string>
@@ -43,6 +42,21 @@
 
 namespace NGIN::Net
 {
+    [[nodiscard]] static NGIN::Async::AsyncError ToAsyncError(NetError error) noexcept
+    {
+        if (error.code == NetErrorCode::Ok)
+        {
+            return NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::Ok);
+        }
+        const int native = (error.native != 0) ? error.native : static_cast<int>(error.code);
+        return NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::Fault, native);
+    }
+
+    [[nodiscard]] NGIN::Async::AsyncError MakeCanceledError() noexcept
+    {
+        return NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::Canceled);
+    }
+
     struct NetworkDriver::Impl final
     {
         struct Waiter final
@@ -215,7 +229,7 @@ namespace NGIN::Net
             op.bytes = bytes;
             if (error == 0)
             {
-                op.error = NetError {NetErrc::Ok, 0};
+                op.error = NetError {NetErrorCode::Ok, 0};
             }
             else
             {
@@ -959,12 +973,13 @@ namespace NGIN::Net
                                    return true; }, &waiter);
             }
 
-            void await_resume()
+            NGIN::Async::AsyncExpected<void> await_resume() noexcept
             {
                 if (token.IsCancellationRequested())
                 {
-                    throw NGIN::Async::TaskCanceled();
+                    return std::unexpected(MakeCanceledError());
                 }
+                return {};
             }
         };
 
@@ -1003,7 +1018,7 @@ namespace NGIN::Net
                 op.exec         = exec;
                 op.continuation = continuation;
                 op.done.store(false, std::memory_order_release);
-                op.error         = NetError {NetErrc::Ok, 0};
+                op.error         = NetError {NetErrorCode::Ok, 0};
                 op.bytes         = 0;
                 op.flags         = 0;
                 op.addressLength = 0;
@@ -1011,7 +1026,7 @@ namespace NGIN::Net
 
                 if (!owner->EnsureAssociated(*handle))
                 {
-                    owner->CompleteOperationWithError(op, 0, NetError {NetErrc::Unknown, static_cast<int>(::GetLastError())});
+                    owner->CompleteOperationWithError(op, 0, NetError {NetErrorCode::Unknown, static_cast<int>(::GetLastError())});
                     return;
                 }
 
@@ -1019,7 +1034,7 @@ namespace NGIN::Net
 
                 if (data.size() > std::numeric_limits<ULONG>::max())
                 {
-                    owner->CompleteOperationWithError(op, 0, NetError {NetErrc::MessageTooLarge, 0});
+                    owner->CompleteOperationWithError(op, 0, NetError {NetErrorCode::MessageTooLarge, 0});
                     return;
                 }
 
@@ -1053,15 +1068,15 @@ namespace NGIN::Net
                 }
             }
 
-            NGIN::UInt32 await_resume()
+            NGIN::Async::AsyncExpected<NGIN::UInt32> await_resume() noexcept
             {
                 if (token.IsCancellationRequested() || op.error.native == ERROR_OPERATION_ABORTED)
                 {
-                    throw NGIN::Async::TaskCanceled();
+                    return std::unexpected(MakeCanceledError());
                 }
-                if (op.error.code != NetErrc::Ok)
+                if (op.error.code != NetErrorCode::Ok)
                 {
-                    throw std::system_error(ToErrorCode(op.error), "NetworkDriver IOCP send failed");
+                    return std::unexpected(ToAsyncError(op.error));
                 }
                 return static_cast<NGIN::UInt32>(op.bytes);
             }
@@ -1101,7 +1116,7 @@ namespace NGIN::Net
                 op.exec         = exec;
                 op.continuation = continuation;
                 op.done.store(false, std::memory_order_release);
-                op.error         = NetError {NetErrc::Ok, 0};
+                op.error         = NetError {NetErrorCode::Ok, 0};
                 op.bytes         = 0;
                 op.flags         = 0;
                 op.addressLength = 0;
@@ -1109,7 +1124,7 @@ namespace NGIN::Net
 
                 if (!owner->EnsureAssociated(*handle))
                 {
-                    owner->CompleteOperationWithError(op, 0, NetError {NetErrc::Unknown, static_cast<int>(::GetLastError())});
+                    owner->CompleteOperationWithError(op, 0, NetError {NetErrorCode::Unknown, static_cast<int>(::GetLastError())});
                     return;
                 }
 
@@ -1117,7 +1132,7 @@ namespace NGIN::Net
 
                 if (destination.size() > std::numeric_limits<ULONG>::max())
                 {
-                    owner->CompleteOperationWithError(op, 0, NetError {NetErrc::MessageTooLarge, 0});
+                    owner->CompleteOperationWithError(op, 0, NetError {NetErrorCode::MessageTooLarge, 0});
                     return;
                 }
 
@@ -1153,15 +1168,15 @@ namespace NGIN::Net
                 }
             }
 
-            NGIN::UInt32 await_resume()
+            NGIN::Async::AsyncExpected<NGIN::UInt32> await_resume() noexcept
             {
                 if (token.IsCancellationRequested() || op.error.native == ERROR_OPERATION_ABORTED)
                 {
-                    throw NGIN::Async::TaskCanceled();
+                    return std::unexpected(MakeCanceledError());
                 }
-                if (op.error.code != NetErrc::Ok)
+                if (op.error.code != NetErrorCode::Ok)
                 {
-                    throw std::system_error(ToErrorCode(op.error), "NetworkDriver IOCP receive failed");
+                    return std::unexpected(ToAsyncError(op.error));
                 }
                 return static_cast<NGIN::UInt32>(op.bytes);
             }
@@ -1202,7 +1217,7 @@ namespace NGIN::Net
                 op.exec         = exec;
                 op.continuation = continuation;
                 op.done.store(false, std::memory_order_release);
-                op.error         = NetError {NetErrc::Ok, 0};
+                op.error         = NetError {NetErrorCode::Ok, 0};
                 op.bytes         = 0;
                 op.flags         = 0;
                 op.addressLength = 0;
@@ -1211,7 +1226,7 @@ namespace NGIN::Net
 
                 if (!owner->EnsureAssociated(*handle))
                 {
-                    owner->CompleteOperationWithError(op, 0, NetError {NetErrc::Unknown, static_cast<int>(::GetLastError())});
+                    owner->CompleteOperationWithError(op, 0, NetError {NetErrorCode::Unknown, static_cast<int>(::GetLastError())});
                     return;
                 }
 
@@ -1219,14 +1234,14 @@ namespace NGIN::Net
 
                 if (data.size() > std::numeric_limits<ULONG>::max())
                 {
-                    owner->CompleteOperationWithError(op, 0, NetError {NetErrc::MessageTooLarge, 0});
+                    owner->CompleteOperationWithError(op, 0, NetError {NetErrorCode::MessageTooLarge, 0});
                     return;
                 }
 
                 socklen_t length = 0;
                 if (!detail::ToSockAddr(remoteEndpoint, op.address, length))
                 {
-                    owner->CompleteOperationWithError(op, 0, NetError {NetErrc::Unknown, 0});
+                    owner->CompleteOperationWithError(op, 0, NetError {NetErrorCode::Unknown, 0});
                     return;
                 }
                 op.addressLength = static_cast<int>(length);
@@ -1263,15 +1278,15 @@ namespace NGIN::Net
                 }
             }
 
-            NGIN::UInt32 await_resume()
+            NGIN::Async::AsyncExpected<NGIN::UInt32> await_resume() noexcept
             {
                 if (token.IsCancellationRequested() || op.error.native == ERROR_OPERATION_ABORTED)
                 {
-                    throw NGIN::Async::TaskCanceled();
+                    return std::unexpected(MakeCanceledError());
                 }
-                if (op.error.code != NetErrc::Ok)
+                if (op.error.code != NetErrorCode::Ok)
                 {
-                    throw std::system_error(ToErrorCode(op.error), "NetworkDriver IOCP send-to failed");
+                    return std::unexpected(ToAsyncError(op.error));
                 }
                 if (op.bytes == 0 && op.buffer.len > 0)
                 {
@@ -1315,7 +1330,7 @@ namespace NGIN::Net
                 op.exec         = exec;
                 op.continuation = continuation;
                 op.done.store(false, std::memory_order_release);
-                op.error         = NetError {NetErrc::Ok, 0};
+                op.error         = NetError {NetErrorCode::Ok, 0};
                 op.bytes         = 0;
                 op.flags         = 0;
                 op.addressLength = static_cast<int>(sizeof(op.address));
@@ -1324,7 +1339,7 @@ namespace NGIN::Net
 
                 if (!owner->EnsureAssociated(*handle))
                 {
-                    owner->CompleteOperationWithError(op, 0, NetError {NetErrc::Unknown, static_cast<int>(::GetLastError())});
+                    owner->CompleteOperationWithError(op, 0, NetError {NetErrorCode::Unknown, static_cast<int>(::GetLastError())});
                     return;
                 }
 
@@ -1332,7 +1347,7 @@ namespace NGIN::Net
 
                 if (destination.size() > std::numeric_limits<ULONG>::max())
                 {
-                    owner->CompleteOperationWithError(op, 0, NetError {NetErrc::MessageTooLarge, 0});
+                    owner->CompleteOperationWithError(op, 0, NetError {NetErrorCode::MessageTooLarge, 0});
                     return;
                 }
 
@@ -1370,15 +1385,15 @@ namespace NGIN::Net
                 }
             }
 
-            DatagramReceiveResult await_resume()
+            NGIN::Async::AsyncExpected<DatagramReceiveResult> await_resume() noexcept
             {
                 if (token.IsCancellationRequested() || op.error.native == ERROR_OPERATION_ABORTED)
                 {
-                    throw NGIN::Async::TaskCanceled();
+                    return std::unexpected(MakeCanceledError());
                 }
-                if (op.error.code != NetErrc::Ok)
+                if (op.error.code != NetErrorCode::Ok)
                 {
-                    throw std::system_error(ToErrorCode(op.error), "NetworkDriver IOCP receive-from failed");
+                    return std::unexpected(ToAsyncError(op.error));
                 }
 
                 DatagramReceiveResult result {};
@@ -1422,7 +1437,7 @@ namespace NGIN::Net
                 op.exec         = exec;
                 op.continuation = continuation;
                 op.done.store(false, std::memory_order_release);
-                op.error         = NetError {NetErrc::Ok, 0};
+                op.error         = NetError {NetErrorCode::Ok, 0};
                 op.bytes         = 0;
                 op.flags         = 0;
                 op.addressLength = 0;
@@ -1432,13 +1447,13 @@ namespace NGIN::Net
                 auto connectEx = detail::GetConnectEx();
                 if (!connectEx)
                 {
-                    owner->CompleteOperationWithError(op, 0, NetError {NetErrc::Unknown, 0});
+                    owner->CompleteOperationWithError(op, 0, NetError {NetErrorCode::Unknown, 0});
                     return;
                 }
 
                 if (!owner->EnsureAssociated(*handle))
                 {
-                    owner->CompleteOperationWithError(op, 0, NetError {NetErrc::Unknown, static_cast<int>(::GetLastError())});
+                    owner->CompleteOperationWithError(op, 0, NetError {NetErrorCode::Unknown, static_cast<int>(::GetLastError())});
                     return;
                 }
 
@@ -1447,7 +1462,7 @@ namespace NGIN::Net
                 socklen_t length = 0;
                 if (!detail::ToSockAddr(remoteEndpoint, op.address, length))
                 {
-                    owner->CompleteOperationWithError(op, 0, NetError {NetErrc::Unknown, 0});
+                    owner->CompleteOperationWithError(op, 0, NetError {NetErrorCode::Unknown, 0});
                     return;
                 }
                 op.addressLength = static_cast<int>(length);
@@ -1478,24 +1493,24 @@ namespace NGIN::Net
                 }
             }
 
-            void await_resume()
+            NGIN::Async::AsyncExpected<void> await_resume() noexcept
             {
                 if (token.IsCancellationRequested() || op.error.native == ERROR_OPERATION_ABORTED)
                 {
-                    throw NGIN::Async::TaskCanceled();
+                    return std::unexpected(MakeCanceledError());
                 }
-                if (op.error.code != NetErrc::Ok)
+                if (op.error.code != NetErrorCode::Ok)
                 {
-                    throw std::system_error(ToErrorCode(op.error), "NetworkDriver IOCP connect failed");
+                    return std::unexpected(ToAsyncError(op.error));
                 }
 
                 const auto sock   = detail::ToNative(*handle);
                 const int  result = ::setsockopt(sock, SOL_SOCKET, SO_UPDATE_CONNECT_CONTEXT, nullptr, 0);
                 if (result != 0)
                 {
-                    throw std::system_error(ToErrorCode(detail::LastError()),
-                                            "NetworkDriver IOCP connect context update failed");
+                    return std::unexpected(ToAsyncError(detail::LastError()));
                 }
+                return {};
             }
         };
 
@@ -1537,7 +1552,7 @@ namespace NGIN::Net
                 op.exec         = exec;
                 op.continuation = continuation;
                 op.done.store(false, std::memory_order_release);
-                op.error         = NetError {NetErrc::Ok, 0};
+                op.error         = NetError {NetErrorCode::Ok, 0};
                 op.bytes         = 0;
                 op.flags         = 0;
                 op.addressLength = 0;
@@ -1546,14 +1561,14 @@ namespace NGIN::Net
                 auto acceptEx = detail::GetAcceptEx();
                 if (!acceptEx)
                 {
-                    owner->CompleteOperationWithError(op, 0, NetError {NetErrc::Unknown, 0});
+                    owner->CompleteOperationWithError(op, 0, NetError {NetErrorCode::Unknown, 0});
                     return;
                 }
 
                 const AddressFamily family = detail::GetSocketFamily(*listenHandle);
                 NetError createError {};
                 accepted = detail::CreateSocket(family, SOCK_STREAM, IPPROTO_TCP, true, createError);
-                if (createError.code != NetErrc::Ok)
+                if (createError.code != NetErrorCode::Ok)
                 {
                     owner->CompleteOperationWithError(op, 0, createError);
                     return;
@@ -1562,7 +1577,7 @@ namespace NGIN::Net
                 if (!owner->EnsureAssociated(*listenHandle))
                 {
                     accepted.Close();
-                    owner->CompleteOperationWithError(op, 0, NetError {NetErrc::Unknown, static_cast<int>(::GetLastError())});
+                    owner->CompleteOperationWithError(op, 0, NetError {NetErrorCode::Unknown, static_cast<int>(::GetLastError())});
                     return;
                 }
 
@@ -1599,17 +1614,17 @@ namespace NGIN::Net
                 }
             }
 
-            SocketHandle await_resume()
+            NGIN::Async::AsyncExpected<SocketHandle> await_resume() noexcept
             {
                 if (token.IsCancellationRequested() || op.error.native == ERROR_OPERATION_ABORTED)
                 {
                     accepted.Close();
-                    throw NGIN::Async::TaskCanceled();
+                    return std::unexpected(MakeCanceledError());
                 }
-                if (op.error.code != NetErrc::Ok)
+                if (op.error.code != NetErrorCode::Ok)
                 {
                     accepted.Close();
-                    throw std::system_error(ToErrorCode(op.error), "NetworkDriver IOCP accept failed");
+                    return std::unexpected(ToAsyncError(op.error));
                 }
 
                 const auto listenSock = detail::ToNative(*listenHandle);
@@ -1622,15 +1637,13 @@ namespace NGIN::Net
                 if (update != 0)
                 {
                     accepted.Close();
-                    throw std::system_error(ToErrorCode(detail::LastError()),
-                                            "NetworkDriver IOCP accept context update failed");
+                    return std::unexpected(ToAsyncError(detail::LastError()));
                 }
 
                 if (!owner->EnsureAssociated(accepted))
                 {
                     accepted.Close();
-                    throw std::system_error(ToErrorCode(detail::LastError()),
-                                            "NetworkDriver IOCP accept association failed");
+                    return std::unexpected(ToAsyncError(detail::LastError()));
                 }
 
                 return std::move(accepted);
@@ -1739,7 +1752,13 @@ namespace NGIN::Net
             awaiter.wantRead = true;
             awaiter.exec     = ctx.GetExecutor();
             awaiter.token    = token;
-            co_await awaiter;
+            auto result = co_await awaiter;
+            if (!result)
+            {
+                co_await NGIN::Async::Task<void>::ReturnError(result.error());
+                co_return;
+            }
+            co_return;
         }
 
         static NGIN::Async::Task<void> WaitUntilWritable(NGIN::Async::TaskContext&      ctx,
@@ -1753,7 +1772,13 @@ namespace NGIN::Net
             awaiter.wantWrite = true;
             awaiter.exec      = ctx.GetExecutor();
             awaiter.token     = token;
-            co_await awaiter;
+            auto result = co_await awaiter;
+            if (!result)
+            {
+                co_await NGIN::Async::Task<void>::ReturnError(result.error());
+                co_return;
+            }
+            co_return;
         }
 
 #if defined(NGIN_PLATFORM_WINDOWS)
@@ -1831,7 +1856,13 @@ namespace NGIN::Net
             awaiter.remoteEndpoint = remoteEndpoint;
             awaiter.exec           = ctx.GetExecutor();
             awaiter.token          = token;
-            co_await awaiter;
+            auto result = co_await awaiter;
+            if (!result)
+            {
+                co_await NGIN::Async::Task<void>::ReturnError(result.error());
+                co_return;
+            }
+            co_return;
         }
 
         static NGIN::Async::Task<SocketHandle> SubmitAccept(NGIN::Async::TaskContext&      ctx,
@@ -1957,3 +1988,4 @@ namespace NGIN::Net
     }
 #endif
 }// namespace NGIN::Net
+

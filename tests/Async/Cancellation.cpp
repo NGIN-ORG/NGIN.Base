@@ -55,7 +55,12 @@ namespace
 
     NGIN::Async::Task<void> DelayForever(NGIN::Async::TaskContext& ctx)
     {
-        co_await ctx.Delay(NGIN::Units::Seconds(60.0));
+        auto delayResult = co_await ctx.Delay(NGIN::Units::Seconds(60.0));
+        if (!delayResult)
+        {
+            co_await NGIN::Async::Task<void>::ReturnError(delayResult.error());
+            co_return;
+        }
         co_return;
     }
 }// namespace
@@ -93,7 +98,9 @@ TEST_CASE("Linked cancellation token wakes Delay")
 
     REQUIRE(task.IsCompleted());
     REQUIRE(task.IsCanceled());
-    REQUIRE_THROWS_AS(task.Get(), NGIN::Async::TaskCanceled);
+    auto result = task.Get();
+    REQUIRE_FALSE(result);
+    REQUIRE(result.error().code == NGIN::Async::AsyncErrorCode::Canceled);
 }
 
 TEST_CASE("CancelAfter schedules cancellation via executor")

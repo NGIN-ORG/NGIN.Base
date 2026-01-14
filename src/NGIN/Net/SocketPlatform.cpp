@@ -74,18 +74,18 @@ namespace NGIN::Net::detail
 
     NetError MapError(int native) noexcept
     {
-        NetErrc code = NetErrc::Unknown;
+        NetErrorCode code = NetErrorCode::Unknown;
 #if defined(NGIN_PLATFORM_WINDOWS)
         switch (native)
         {
-            case WSAEWOULDBLOCK: code = NetErrc::WouldBlock; break;
-            case WSAETIMEDOUT: code = NetErrc::TimedOut; break;
-            case WSAECONNRESET: code = NetErrc::ConnectionReset; break;
-            case WSAECONNABORTED: code = NetErrc::Disconnected; break;
-            case WSAENETUNREACH: code = NetErrc::HostUnreachable; break;
-            case WSAEMSGSIZE: code = NetErrc::MessageTooLarge; break;
-            case WSAEACCES: code = NetErrc::PermissionDenied; break;
-            case WSAECONNREFUSED: code = NetErrc::Disconnected; break;
+            case WSAEWOULDBLOCK: code = NetErrorCode::WouldBlock; break;
+            case WSAETIMEDOUT: code = NetErrorCode::TimedOut; break;
+            case WSAECONNRESET: code = NetErrorCode::ConnectionReset; break;
+            case WSAECONNABORTED: code = NetErrorCode::Disconnected; break;
+            case WSAENETUNREACH: code = NetErrorCode::HostUnreachable; break;
+            case WSAEMSGSIZE: code = NetErrorCode::MessageTooLarge; break;
+            case WSAEACCES: code = NetErrorCode::PermissionDenied; break;
+            case WSAECONNREFUSED: code = NetErrorCode::Disconnected; break;
             default: break;
         }
 #else
@@ -95,22 +95,22 @@ namespace NGIN::Net::detail
 #if defined(EAGAIN) && EAGAIN != EWOULDBLOCK
             case EAGAIN:
 #endif
-                code = NetErrc::WouldBlock; break;
-            case ETIMEDOUT: code = NetErrc::TimedOut; break;
-            case ECONNRESET: code = NetErrc::ConnectionReset; break;
-            case ECONNABORTED: code = NetErrc::Disconnected; break;
+                code = NetErrorCode::WouldBlock; break;
+            case ETIMEDOUT: code = NetErrorCode::TimedOut; break;
+            case ECONNRESET: code = NetErrorCode::ConnectionReset; break;
+            case ECONNABORTED: code = NetErrorCode::Disconnected; break;
             case ENETUNREACH:
 #if defined(EHOSTUNREACH)
             case EHOSTUNREACH:
 #endif
-                code = NetErrc::HostUnreachable; break;
-            case EMSGSIZE: code = NetErrc::MessageTooLarge; break;
+                code = NetErrorCode::HostUnreachable; break;
+            case EMSGSIZE: code = NetErrorCode::MessageTooLarge; break;
             case EACCES:
 #if defined(EPERM)
             case EPERM:
 #endif
-                code = NetErrc::PermissionDenied; break;
-            case ECONNREFUSED: code = NetErrc::Disconnected; break;
+                code = NetErrorCode::PermissionDenied; break;
+            case ECONNREFUSED: code = NetErrorCode::Disconnected; break;
             default: break;
         }
 #endif
@@ -128,7 +128,7 @@ namespace NGIN::Net::detail
 
     bool IsWouldBlock(const NetError& error) noexcept
     {
-        return error.code == NetErrc::WouldBlock;
+        return error.code == NetErrorCode::WouldBlock;
     }
 
     bool IsInProgress(const NetError& error) noexcept
@@ -158,7 +158,7 @@ namespace NGIN::Net::detail
     {
         if (!EnsureInitialized())
         {
-            error = NetError {NetErrc::Unknown, 0};
+            error = NetError {NetErrorCode::Unknown, 0};
             return {};
         }
 
@@ -188,7 +188,7 @@ namespace NGIN::Net::detail
             return {};
         }
 
-        error = NetError {NetErrc::Ok, 0};
+        error = NetError {NetErrorCode::Ok, 0};
         return handle;
     }
 
@@ -506,3 +506,4 @@ namespace NGIN::Net
         (void)detail::CloseSocket(*this);
     }
 }
+

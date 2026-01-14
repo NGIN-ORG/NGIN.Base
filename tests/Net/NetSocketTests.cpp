@@ -107,7 +107,7 @@ namespace NGIN::Net
         std::array<NGIN::Byte, 256> storage {};
         auto                        recvResult = socket.TryReceiveFrom(ByteSpan {storage.data(), storage.size()});
         REQUIRE_FALSE(recvResult);
-        REQUIRE(recvResult.error().code == NetErrc::WouldBlock);
+        REQUIRE(recvResult.error().code == NetErrorCode::WouldBlock);
 
         socket.Close();
     }
@@ -127,7 +127,7 @@ namespace NGIN::Net
 
         auto acceptResult = listener.TryAccept();
         REQUIRE_FALSE(acceptResult);
-        REQUIRE(acceptResult.error().code == NetErrc::WouldBlock);
+        REQUIRE(acceptResult.error().code == NetErrorCode::WouldBlock);
 
         listener.Close();
     }
@@ -172,7 +172,7 @@ namespace NGIN::Net
                 received = true;
                 break;
             }
-            REQUIRE(recvResult.error().code == NetErrc::WouldBlock);
+            REQUIRE(recvResult.error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
 
@@ -207,7 +207,7 @@ namespace NGIN::Net
                 accepted = true;
                 break;
             }
-            REQUIRE(acceptResult.error().code == NetErrc::WouldBlock);
+            REQUIRE(acceptResult.error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(accepted);
@@ -229,7 +229,7 @@ namespace NGIN::Net
                 received = true;
                 break;
             }
-            REQUIRE(recvResult.error().code == NetErrc::WouldBlock);
+            REQUIRE(recvResult.error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(received);
@@ -274,9 +274,12 @@ namespace NGIN::Net
 
         REQUIRE(PumpUntil(scheduler, *driver, [&]() { return recvTask.IsCompleted() && sendTask.IsCompleted(); }));
 
-        REQUIRE(sendTask.Get() == sizeof(payload));
-        const auto result = recvTask.Get();
-        REQUIRE(result.bytesReceived == sizeof(payload));
+        auto sendResult = sendTask.Get();
+        REQUIRE(sendResult);
+        REQUIRE(*sendResult == sizeof(payload));
+        auto recvResult = recvTask.Get();
+        REQUIRE(recvResult);
+        REQUIRE(recvResult->bytesReceived == sizeof(payload));
         REQUIRE(std::memcmp(recvBuffer.data(), payload, sizeof(payload)) == 0);
 
         sender.Close();
@@ -308,8 +311,11 @@ namespace NGIN::Net
 
         REQUIRE(PumpUntil(scheduler, *driver, [&]() { return acceptTask.IsCompleted() && connectTask.IsCompleted(); }));
 
-        connectTask.Get();
-        TcpSocket server = acceptTask.Get();
+        auto connectResult = connectTask.Get();
+        REQUIRE(connectResult);
+        auto acceptResult = acceptTask.Get();
+        REQUIRE(acceptResult);
+        TcpSocket server = std::move(*acceptResult);
 
         const char                 payload[] = "tcp-async";
         std::array<NGIN::Byte, 64> recvBuffer {};
@@ -329,8 +335,12 @@ namespace NGIN::Net
 
         REQUIRE(PumpUntil(scheduler, *driver, [&]() { return recvTask.IsCompleted() && sendTask.IsCompleted(); }));
 
-        REQUIRE(sendTask.Get() == sizeof(payload));
-        REQUIRE(recvTask.Get() == sizeof(payload));
+        auto sendResult = sendTask.Get();
+        REQUIRE(sendResult);
+        REQUIRE(*sendResult == sizeof(payload));
+        auto recvResult = recvTask.Get();
+        REQUIRE(recvResult);
+        REQUIRE(*recvResult == sizeof(payload));
         REQUIRE(std::memcmp(recvBuffer.data(), payload, sizeof(payload)) == 0);
 
         client.Close();
@@ -363,7 +373,7 @@ namespace NGIN::Net
                 accepted = true;
                 break;
             }
-            REQUIRE(acceptResult.error().code == NetErrc::WouldBlock);
+            REQUIRE(acceptResult.error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(accepted);
@@ -395,7 +405,7 @@ namespace NGIN::Net
             auto sendResult = client.TrySendSegments(BufferSegmentSpan {iovecs.data(), count});
             if (!sendResult)
             {
-                REQUIRE(sendResult.error().code == NetErrc::WouldBlock);
+                REQUIRE(sendResult.error().code == NetErrorCode::WouldBlock);
                 SleepBrief();
                 continue;
             }
@@ -428,7 +438,7 @@ namespace NGIN::Net
             auto recvResult = server.TryReceiveSegments(MutableBufferSegmentSpan {iovecs.data(), count});
             if (!recvResult)
             {
-                REQUIRE(recvResult.error().code == NetErrc::WouldBlock);
+                REQUIRE(recvResult.error().code == NetErrorCode::WouldBlock);
                 SleepBrief();
                 continue;
             }
@@ -472,17 +482,21 @@ namespace NGIN::Net
                 accepted = true;
                 break;
             }
-            REQUIRE(acceptResult.error().code == NetErrc::WouldBlock);
+            REQUIRE(acceptResult.error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(accepted);
 
-        auto clientStream = Transport::ByteStreamBuilder()
-                                    .FromTcpSocket(std::move(client), *driver)
-                                    .Build();
-        auto serverStream = Transport::ByteStreamBuilder()
-                                    .FromTcpSocket(std::move(server), *driver)
-                                    .Build();
+        auto clientStreamResult = Transport::ByteStreamBuilder()
+                                          .FromTcpSocket(std::move(client), *driver)
+                                          .Build();
+        REQUIRE(clientStreamResult);
+        auto clientStream = std::move(*clientStreamResult);
+        auto serverStreamResult = Transport::ByteStreamBuilder()
+                                          .FromTcpSocket(std::move(server), *driver)
+                                          .Build();
+        REQUIRE(serverStreamResult);
+        auto serverStream = std::move(*serverStreamResult);
 
         const char                 payload[] = "stream-ping";
         std::array<NGIN::Byte, 64> recvBuffer {};
@@ -500,8 +514,12 @@ namespace NGIN::Net
 
         REQUIRE(PumpUntil(scheduler, *driver, [&]() { return readTask.IsCompleted() && writeTask.IsCompleted(); }));
 
-        REQUIRE(writeTask.Get() == sizeof(payload));
-        REQUIRE(readTask.Get() == sizeof(payload));
+        auto writeResult = writeTask.Get();
+        REQUIRE(writeResult);
+        REQUIRE(*writeResult == sizeof(payload));
+        auto readResult = readTask.Get();
+        REQUIRE(readResult);
+        REQUIRE(*readResult == sizeof(payload));
         REQUIRE(std::memcmp(recvBuffer.data(), payload, sizeof(payload)) == 0);
 
         static_cast<Transport::TcpByteStream*>(clientStream.get())->Socket().Close();
@@ -538,17 +556,21 @@ namespace NGIN::Net
                 accepted = true;
                 break;
             }
-            REQUIRE(acceptResult.error().code == NetErrc::WouldBlock);
+            REQUIRE(acceptResult.error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(accepted);
 
-        auto clientStream = Transport::ByteStreamBuilder()
-                                    .FromTcpSocket(std::move(client), *driver)
-                                    .BuildLengthPrefixed();
-        auto serverStream = Transport::ByteStreamBuilder()
-                                    .FromTcpSocket(std::move(server), *driver)
-                                    .BuildLengthPrefixed();
+        auto clientStreamResult = Transport::ByteStreamBuilder()
+                                          .FromTcpSocket(std::move(client), *driver)
+                                          .BuildLengthPrefixed();
+        REQUIRE(clientStreamResult);
+        auto clientStream = std::move(*clientStreamResult);
+        auto serverStreamResult = Transport::ByteStreamBuilder()
+                                          .FromTcpSocket(std::move(server), *driver)
+                                          .BuildLengthPrefixed();
+        REQUIRE(serverStreamResult);
+        auto serverStream = std::move(*serverStreamResult);
 
         BufferPool<> pool;
         auto         buffer = pool.Rent(256);
@@ -567,8 +589,11 @@ namespace NGIN::Net
 
         REQUIRE(PumpUntil(scheduler, *driver, [&]() { return readTask.IsCompleted() && writeTask.IsCompleted(); }));
 
-        writeTask.Get();
-        const auto message = readTask.Get();
+        auto writeResult = writeTask.Get();
+        REQUIRE(writeResult);
+        auto messageResult = readTask.Get();
+        REQUIRE(messageResult);
+        const auto message = *messageResult;
         REQUIRE(message.size() == sizeof(payload));
         REQUIRE(std::memcmp(message.data(), payload, sizeof(payload)) == 0);
 
@@ -610,7 +635,7 @@ namespace NGIN::Net
                 sent = true;
                 break;
             }
-            REQUIRE(sendResult.error().code == NetErrc::WouldBlock);
+            REQUIRE(sendResult.error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(sent);
@@ -633,7 +658,7 @@ namespace NGIN::Net
                 received = true;
                 break;
             }
-            REQUIRE(recvResult.error().code == NetErrc::WouldBlock);
+            REQUIRE(recvResult.error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(received);
@@ -658,12 +683,16 @@ namespace NGIN::Net
         UdpSocket sender;
         REQUIRE(sender.Open(AddressFamily::V4));
 
-        auto recvChannel = Transport::DatagramBuilder()
-                                   .FromUdpSocket(std::move(receiver), *driver)
-                                   .Build();
-        auto sendChannel = Transport::DatagramBuilder()
-                                   .FromUdpSocket(std::move(sender), *driver)
-                                   .Build();
+        auto recvChannelResult = Transport::DatagramBuilder()
+                                         .FromUdpSocket(std::move(receiver), *driver)
+                                         .Build();
+        REQUIRE(recvChannelResult);
+        auto recvChannel = std::move(*recvChannelResult);
+        auto sendChannelResult = Transport::DatagramBuilder()
+                                         .FromUdpSocket(std::move(sender), *driver)
+                                         .Build();
+        REQUIRE(sendChannelResult);
+        auto sendChannel = std::move(*sendChannelResult);
 
         BufferPool<> pool;
         auto         buffer = pool.Rent(256);
@@ -683,8 +712,11 @@ namespace NGIN::Net
 
         REQUIRE(PumpUntil(scheduler, *driver, [&]() { return recvTask.IsCompleted(); }));
 
-        sendTask.Get();
-        const auto received = recvTask.Get();
+        auto sendResult = sendTask.Get();
+        REQUIRE(sendResult);
+        auto recvResult = recvTask.Get();
+        REQUIRE(recvResult);
+        const auto received = *recvResult;
 
         REQUIRE(received.bytesReceived == sizeof(payload));
         REQUIRE(received.payload.size() == sizeof(payload));
@@ -719,7 +751,9 @@ namespace NGIN::Net
         cancel.Cancel();
 
         REQUIRE(PumpUntil(scheduler, *driver, [&]() { return recvTask.IsCompleted(); }));
-        REQUIRE_THROWS_AS(recvTask.Get(), NGIN::Async::TaskCanceled);
+        auto recvResult = recvTask.Get();
+        REQUIRE_FALSE(recvResult);
+        REQUIRE(recvResult.error().code == NGIN::Async::AsyncErrorCode::Canceled);
 
         socket.Close();
     }
@@ -745,7 +779,9 @@ namespace NGIN::Net
         cancel.Cancel();
 
         REQUIRE(PumpUntil(scheduler, *driver, [&]() { return acceptTask.IsCompleted(); }));
-        REQUIRE_THROWS_AS(acceptTask.Get(), NGIN::Async::TaskCanceled);
+        auto acceptResult = acceptTask.Get();
+        REQUIRE_FALSE(acceptResult);
+        REQUIRE(acceptResult.error().code == NGIN::Async::AsyncErrorCode::Canceled);
 
         listener.Close();
     }
@@ -779,7 +815,7 @@ namespace NGIN::Net
                 accepted = true;
                 break;
             }
-            REQUIRE(acceptResult.error().code == NetErrc::WouldBlock);
+            REQUIRE(acceptResult.error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(accepted);
@@ -799,7 +835,9 @@ namespace NGIN::Net
         cancel.Cancel();
 
         REQUIRE(PumpUntil(scheduler, *driver, [&]() { return recvTask.IsCompleted(); }));
-        REQUIRE_THROWS_AS(recvTask.Get(), NGIN::Async::TaskCanceled);
+        auto recvResult = recvTask.Get();
+        REQUIRE_FALSE(recvResult);
+        REQUIRE(recvResult.error().code == NGIN::Async::AsyncErrorCode::Canceled);
 
         client.Close();
         server.Close();
@@ -835,7 +873,7 @@ namespace NGIN::Net
                 accepted = true;
                 break;
             }
-            REQUIRE(acceptResult.error().code == NetErrc::WouldBlock);
+            REQUIRE(acceptResult.error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(accepted);
@@ -853,7 +891,9 @@ namespace NGIN::Net
         server.Close();
 
         REQUIRE(PumpUntil(scheduler, *driver, [&]() { return recvTask.IsCompleted(); }));
-        REQUIRE(recvTask.Get() == 0);
+        auto recvResult = recvTask.Get();
+        REQUIRE(recvResult);
+        REQUIRE(*recvResult == 0);
 
         client.Close();
         listener.Close();
@@ -888,7 +928,7 @@ namespace NGIN::Net
                 accepted = true;
                 break;
             }
-            REQUIRE(acceptResult.error().code == NetErrc::WouldBlock);
+            REQUIRE(acceptResult.error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(accepted);
@@ -916,14 +956,18 @@ namespace NGIN::Net
             recvTask.Start(ctx);
 
             REQUIRE(PumpUntil(scheduler, *driver, [&]() { return recvTask.IsCompleted(); }));
-            const auto bytes = recvTask.Get();
+            auto bytesResult = recvTask.Get();
+            REQUIRE(bytesResult);
+            const auto bytes = *bytesResult;
             REQUIRE(bytes > 0);
             REQUIRE(std::memcmp(recvBuffer.data(), payload.data() + totalReceived, bytes) == 0);
             totalReceived += bytes;
         }
 
         REQUIRE(PumpUntil(scheduler, *driver, [&]() { return sendTask.IsCompleted(); }));
-        REQUIRE(sendTask.Get() == payload.size());
+        auto sendResult = sendTask.Get();
+        REQUIRE(sendResult);
+        REQUIRE(*sendResult == payload.size());
 
         client.Close();
         server.Close();
@@ -945,8 +989,8 @@ namespace NGIN::Net
         REQUIRE(client.Open(AddressFamily::V4));
         auto result = client.Connect({IpAddress::LoopbackV4(), port});
         REQUIRE_FALSE(result);
-        const bool refused = result.error().code == NetErrc::Disconnected ||
-                             result.error().code == NetErrc::ConnectionReset;
+        const bool refused = result.error().code == NetErrorCode::Disconnected ||
+                             result.error().code == NetErrorCode::ConnectionReset;
         REQUIRE(refused);
 
         client.Close();
@@ -974,17 +1018,8 @@ namespace NGIN::Net
         cancel.Cancel();
 
         REQUIRE(PumpUntil(scheduler, *driver, [&]() { return acceptTask.IsCompleted(); }));
-
-        bool failed = false;
-        try
-        {
-            auto socket = acceptTask.Get();
-            (void) socket;
-        } catch (...)
-        {
-            failed = true;
-        }
-        REQUIRE(failed);
+        auto acceptResult = acceptTask.Get();
+        REQUIRE_FALSE(acceptResult);
     }
 
     TEST_CASE("Net.Tcp.AsyncReceiveCloseWhilePending")
@@ -1016,7 +1051,7 @@ namespace NGIN::Net
                 accepted = true;
                 break;
             }
-            REQUIRE(acceptResult.error().code == NetErrc::WouldBlock);
+            REQUIRE(acceptResult.error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(accepted);
@@ -1037,16 +1072,8 @@ namespace NGIN::Net
         cancel.Cancel();
 
         REQUIRE(PumpUntil(scheduler, *driver, [&]() { return recvTask.IsCompleted(); }));
-
-        bool failed = false;
-        try
-        {
-            (void) recvTask.Get();
-        } catch (...)
-        {
-            failed = true;
-        }
-        REQUIRE(failed);
+        auto recvResult = recvTask.Get();
+        REQUIRE_FALSE(recvResult);
 
         client.Close();
         listener.Close();
@@ -1088,7 +1115,7 @@ namespace NGIN::Net
                 accepted = true;
                 break;
             }
-            REQUIRE(acceptResult.error().code == NetErrc::WouldBlock);
+            REQUIRE(acceptResult.error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(accepted);
@@ -1108,7 +1135,7 @@ namespace NGIN::Net
                 received = true;
                 break;
             }
-            REQUIRE(recvResult.error().code == NetErrc::WouldBlock);
+            REQUIRE(recvResult.error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(received);
@@ -1140,17 +1167,11 @@ namespace NGIN::Net
         connectTask.Start(ctx);
 
         REQUIRE(PumpUntil(scheduler, *driver, [&]() { return connectTask.IsCompleted(); }));
-
-        bool failed = false;
-        try
-        {
-            connectTask.Get();
-        } catch (...)
-        {
-            failed = true;
-        }
-        REQUIRE(failed);
+        auto connectResult = connectTask.Get();
+        REQUIRE_FALSE(connectResult);
+        REQUIRE(connectResult.error().code == NGIN::Async::AsyncErrorCode::Fault);
 
         client.Close();
     }
 }// namespace NGIN::Net
+

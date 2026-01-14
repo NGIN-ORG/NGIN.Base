@@ -4,12 +4,12 @@
 
 #include <atomic>
 #include <cstddef>
-#include <exception>
 #include <memory>
 #include <tuple>
 #include <type_traits>
 #include <utility>
 
+#include <NGIN/Async/AsyncError.hpp>
 #include <NGIN/Async/Cancellation.hpp>
 #include <NGIN/Async/Task.hpp>
 #include <NGIN/Primitives.hpp>
@@ -83,12 +83,7 @@ namespace NGIN::Async
         template<typename T>
         [[nodiscard]] inline Detached WatchTask(std::shared_ptr<WhenAnySharedState> state, Task<T>& task, NGIN::UIntSize index)
         {
-            try
-            {
-                co_await task;
-            } catch (...)
-            {
-            }
+            (void)co_await task;
 
             bool expected = false;
             if (state->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
@@ -154,11 +149,11 @@ namespace NGIN::Async
                         rest);
             }
 
-            NGIN::UIntSize await_resume() const
+            AsyncExpected<NGIN::UIntSize> await_resume() const noexcept
             {
                 if (ctx.IsCancellationRequested())
                 {
-                    throw TaskCanceled();
+                    return std::unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
                 }
 
                 const auto signaled = state->index.load(std::memory_order_acquire);
@@ -204,11 +199,21 @@ namespace NGIN::Async
         requires(sizeof...(Rest) >= 1) && (std::is_same_v<std::remove_reference_t<Rest>, Task<T>> && ...)
     [[nodiscard]] inline Task<NGIN::UIntSize> WhenAny(TaskContext& ctx, Task<T>& first, Rest&... rest)
     {
-        ctx.ThrowIfCancellationRequested();
+        if (ctx.IsCancellationRequested())
+        {
+            co_return std::unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
+        }
 
         auto state  = std::make_shared<detail::WhenAnySharedState>();
         state->exec = ctx.GetExecutor();
 
-        co_return co_await detail::WhenAnyAwaiter<T, Rest...> {ctx, std::move(state), first, std::tuple<Rest&...>(rest...)};
+        auto result =
+                co_await detail::WhenAnyAwaiter<T, Rest...> {ctx, std::move(state), first, std::tuple<Rest&...>(rest...)};
+        if (!result)
+        {
+            co_return std::unexpected(result.error());
+        }
+
+        co_return *result;
     }
 }// namespace NGIN::Async

@@ -15,11 +15,13 @@ namespace
         }
     }
 
+#if NGIN_ASYNC_HAS_EXCEPTIONS
     NGIN::Async::Generator<int> YieldThenThrow()
     {
         co_yield 1;
         throw std::runtime_error("boom");
     }
+#endif
 }// namespace
 
 TEST_CASE("Generator yields a sequence of values")
@@ -38,6 +40,7 @@ TEST_CASE("Generator yields a sequence of values")
     REQUIRE(values[4] == 4);
 }
 
+#if NGIN_ASYNC_HAS_EXCEPTIONS
 TEST_CASE("Generator propagates exceptions on resume")
 {
     auto gen = YieldThenThrow();
@@ -48,4 +51,5 @@ TEST_CASE("Generator propagates exceptions on resume")
 
     REQUIRE_THROWS_AS(++it, std::runtime_error);
 }
+#endif
 

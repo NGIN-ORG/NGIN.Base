@@ -6,7 +6,7 @@ Purpose & Scope:
 
 Key Types:
 - Addressing: AddressFamily, IpAddress, Endpoint.
-- Errors: NetErrc, NetError, NetExpected.
+- Errors: NetErrorCode, NetError, NetExpected.
 - Buffers: Buffer, BufferPool<Allocator>, BufferSegment.
 - Runtime: NetworkDriver.
 - Sockets: TcpSocket, TcpListener, UdpSocket.
@@ -15,11 +15,11 @@ Key Types:
 
 Usage Notes:
 - Try* APIs are non-blocking and report errors via NetExpected.
-- Async APIs throw std::system_error on failure (error_code carries native or mapped NetErrc).
+- Async APIs return AsyncExpected from `co_await`/`Get()`; cancellation uses AsyncErrorCode::Canceled.
 - Async methods require TaskContext and NetworkDriver.
 - Filters wrap transports to add semantics like framing, TLS, compression, or metrics.
 - Length-prefixed framing uses a 32-bit big-endian size prefix per message.
-- ByteStreamBuilder::BuildLengthPrefixed() returns a LengthPrefixedMessageStream.
+- ByteStreamBuilder::BuildLengthPrefixed() returns NetExpected<std::unique_ptr<LengthPrefixedMessageStream>>.
 
 Performance Notes:
 - No hidden threads; worker threads are explicit.
@@ -28,3 +28,4 @@ Performance Notes:
 Testing Guidance:
 - Loopback-only tests for TCP/UDP.
 - Validate WouldBlock, EOF, and cancellation behavior.
+

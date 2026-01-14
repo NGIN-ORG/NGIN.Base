@@ -1,10 +1,12 @@
 /// @file FiberTest.cpp
 /// @brief Tests for NGIN::Execution::Fiber.
 
+#include <NGIN/Async/AsyncError.hpp>
 #include <NGIN/Execution/Fiber.hpp>
 #include <NGIN/Execution/Config.hpp>
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
+#include <exception>
 #include <functional>
 #include <stdexcept>
 
@@ -142,6 +144,7 @@ TEST_CASE("Fiber respects configured stack size", "[Execution][Fiber]")
     CHECK(fiber.Resume() == FiberResumeResult::Completed);
 }
 
+#if NGIN_ASYNC_HAS_EXCEPTIONS
 TEST_CASE("Fiber forwards exceptions", "[Execution][Fiber]")
 {
     Fiber fiber(
@@ -154,6 +157,7 @@ TEST_CASE("Fiber forwards exceptions", "[Execution][Fiber]")
     REQUIRE(ex != nullptr);
     REQUIRE_THROWS_AS(std::rethrow_exception(ex), std::runtime_error);
 }
+#endif
 
 #if defined(__linux__) && defined(__x86_64__) && (NGIN_EXECUTION_FIBER_BACKEND == NGIN_EXECUTION_FIBER_BACKEND_CUSTOM_ASM)
 TEST_CASE("Fiber CUSTOM_ASM preserves mxcsr and x87 control word across Yield/Resume", "[Execution][Fiber]")

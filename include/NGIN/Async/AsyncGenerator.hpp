@@ -4,11 +4,11 @@
 
 #include <cassert>
 #include <coroutine>
-#include <exception>
 #include <optional>
 #include <type_traits>
 #include <utility>
 
+#include <NGIN/Async/AsyncError.hpp>
 #include <NGIN/Async/Cancellation.hpp>
 #include <NGIN/Async/TaskContext.hpp>
 #include <NGIN/Execution/ExecutorRef.hpp>
@@ -23,7 +23,8 @@ namespace NGIN::Async
     /// over time, resuming on the provided `TaskContext` executor and observing cancellation cooperatively.
     ///
     /// Usage:
-    /// `while (auto v = co_await gen.Next(ctx)) { ... use *v ... }`
+    /// `for (;;) { auto next = co_await gen.Next(ctx); if (!next) { ... } if (!*next) break; ... **next ... }`
+    /// To report a fault without exceptions, `co_await AsyncGenerator<T>::ReturnError(MakeAsyncError(...)); co_return;`.
     template<typename T>
     class AsyncGenerator final
     {
@@ -34,7 +35,11 @@ namespace NGIN::Async
             NGIN::Execution::ExecutorRef   exec {};
             std::coroutine_handle<>        consumer {};
             std::optional<T>               current {};
-            std::exception_ptr             error {};
+            AsyncError                     error {};
+            bool                           hasError {false};
+#if NGIN_ASYNC_CAPTURE_EXCEPTIONS
+            std::exception_ptr             exception {};
+#endif
             bool                           completed {false};
 
             promise_type() = default;
@@ -154,7 +159,15 @@ namespace NGIN::Async
 
             void unhandled_exception() noexcept
             {
-                error = std::current_exception();
+#if NGIN_ASYNC_HAS_EXCEPTIONS
+                error = AsyncError {AsyncErrorCode::Fault, 0};
+                hasError = true;
+#if NGIN_ASYNC_CAPTURE_EXCEPTIONS
+                exception = std::current_exception();
+#endif
+#else
+                std::terminate();
+#endif
             }
         };
 
@@ -215,10 +228,11 @@ namespace NGIN::Async
 
                 auto& p = m_gen.m_handle.promise();
                 NGIN::Sync::LockGuard guard(p.lock);
-                return p.error != nullptr || p.current.has_value() || p.completed;
+                return p.current.has_value() || p.completed;
             }
 
-            std::coroutine_handle<> await_suspend(std::coroutine_handle<> awaiting) noexcept
+            template<typename Promise>
+            std::coroutine_handle<> await_suspend(std::coroutine_handle<Promise> awaiting) noexcept
             {
                 if (m_ctx.IsCancellationRequested())
                 {
@@ -230,11 +244,16 @@ namespace NGIN::Async
                     return awaiting;
                 }
 
+#if NGIN_ASYNC_CAPTURE_EXCEPTIONS
+                m_awaiting = awaiting;
+                m_propagateException = &AsyncGenerator::template PropagateChildException<Promise>;
+#endif
+
                 auto& p = m_gen.m_handle.promise();
 
                 {
                     NGIN::Sync::LockGuard guard(p.lock);
-                    if (p.error || p.current.has_value() || p.completed)
+                    if (p.hasError || p.current.has_value() || p.completed)
                     {
                         return awaiting;
                     }
@@ -291,21 +310,31 @@ namespace NGIN::Async
                 return m_gen.m_handle;
             }
 
-            std::optional<T> await_resume()
+            AsyncExpected<std::optional<T>> await_resume() noexcept
             {
-                m_ctx.ThrowIfCancellationRequested();
+                if (m_ctx.IsCancellationRequested())
+                {
+                    return std::unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
+                }
 
                 if (!m_gen.m_handle)
                 {
-                    return std::nullopt;
+                    return std::optional<T> {};
                 }
 
                 auto& p = m_gen.m_handle.promise();
                 NGIN::Sync::LockGuard guard(p.lock);
 
-                if (p.error)
+#if NGIN_ASYNC_CAPTURE_EXCEPTIONS
+                if (p.hasError && p.exception && m_propagateException && m_awaiting)
                 {
-                    std::rethrow_exception(p.error);
+                    m_propagateException(p.exception, m_awaiting);
+                }
+#endif
+
+                if (p.hasError)
+                {
+                    return std::unexpected(p.error);
                 }
 
                 if (p.current.has_value())
@@ -317,21 +346,46 @@ namespace NGIN::Async
 
                 if (p.completed)
                 {
-                    return std::nullopt;
+                    return std::optional<T> {};
                 }
 
-                return std::nullopt;
+                return std::optional<T> {};
             }
 
         private:
             AsyncGenerator&                   m_gen;
             TaskContext&                      m_ctx;
             mutable CancellationRegistration  m_cancellationRegistration {};
+#if NGIN_ASYNC_CAPTURE_EXCEPTIONS
+            std::coroutine_handle<>           m_awaiting {};
+            using ExceptionPropagator = void (*)(std::exception_ptr, std::coroutine_handle<>) noexcept;
+            ExceptionPropagator               m_propagateException {};
+#endif
         };
 
         [[nodiscard]] auto Next(TaskContext& ctx) noexcept
         {
             return NextAwaiter(*this, ctx);
+        }
+
+        struct ReturnErrorAwaiter final
+        {
+            AsyncError error {};
+
+            bool await_ready() const noexcept { return false; }
+            bool await_suspend(std::coroutine_handle<promise_type> h) const noexcept
+            {
+                auto& p = h.promise();
+                p.error = error;
+                p.hasError = true;
+                return false;
+            }
+            void await_resume() const noexcept {}
+        };
+
+        [[nodiscard]] static ReturnErrorAwaiter ReturnError(AsyncError error) noexcept
+        {
+            return ReturnErrorAwaiter {error};
         }
 
     private:
@@ -343,6 +397,26 @@ namespace NGIN::Async
                 m_handle = {};
             }
         }
+
+#if NGIN_ASYNC_CAPTURE_EXCEPTIONS
+        template<typename Promise>
+        static void PropagateChildException(std::exception_ptr ex, std::coroutine_handle<> cont) noexcept
+        {
+            if (!ex || !cont)
+            {
+                return;
+            }
+            if constexpr (requires(Promise& p) { p.SetChildException(ex); })
+            {
+                auto typed = std::coroutine_handle<Promise>::from_address(cont.address());
+                typed.promise().SetChildException(ex);
+            }
+            else
+            {
+                (void)cont;
+            }
+        }
+#endif
 
         handle_type m_handle {};
     };

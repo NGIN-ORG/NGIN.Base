@@ -74,6 +74,7 @@ namespace NGIN::Execution::detail
                     continue;
                 }
 
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
                 try
                 {
                     state->job();
@@ -82,6 +83,10 @@ namespace NGIN::Execution::detail
                 {
                     state->exception = std::current_exception();
                 }
+#else
+                state->job();
+                state->exception = nullptr;
+#endif
 
                 state->job = {};
                 YieldFiber();
@@ -90,8 +95,8 @@ namespace NGIN::Execution::detail
 
         [[noreturn]] void ThrowErrno(const char* message)
         {
-            const int err = errno;
-            throw std::system_error(err, std::generic_category(), message);
+            (void)message;
+            std::terminate();
         }
     }// namespace
 
@@ -107,7 +112,7 @@ namespace NGIN::Execution::detail
         void* stateMem = options.allocator.Allocate(sizeof(FiberState), alignof(FiberState));
         if (!stateMem)
         {
-            throw std::bad_alloc();
+            std::terminate();
         }
         auto* state = ::new (stateMem) FiberState {};
         state->allocator      = options.allocator;
@@ -161,7 +166,7 @@ namespace NGIN::Execution::detail
             {
                 state->~FiberState();
                 state->allocator.Deallocate(stateMem, sizeof(FiberState), alignof(FiberState));
-                throw std::bad_alloc();
+                std::terminate();
             }
             state->stackAllocationBase = state->stackBase;
             state->stackAllocationSize = state->stackSize;

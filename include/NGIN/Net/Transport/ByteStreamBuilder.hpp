@@ -3,7 +3,6 @@
 #pragma once
 
 #include <memory>
-#include <stdexcept>
 #include <utility>
 
 #include <NGIN/Net/Transport/Filters/LengthPrefixedMessageStream.hpp>
@@ -25,11 +24,11 @@ namespace NGIN::Net::Transport
             return *this;
         }
 
-        [[nodiscard]] std::unique_ptr<IByteStream> Build()
+        [[nodiscard]] NGIN::Net::NetExpected<std::unique_ptr<IByteStream>> Build()
         {
             if (!m_hasSocket || !m_driver)
             {
-                throw std::logic_error("ByteStreamBuilder requires a TcpSocket and NetworkDriver");
+                return std::unexpected(NGIN::Net::NetError {NGIN::Net::NetErrorCode::Unknown, 0});
             }
             auto stream = std::make_unique<TcpByteStream>(std::move(m_socket), *m_driver);
             m_hasSocket = false;
@@ -37,11 +36,11 @@ namespace NGIN::Net::Transport
             return stream;
         }
 
-        [[nodiscard]] std::unique_ptr<Filters::LengthPrefixedMessageStream> BuildLengthPrefixed()
+        [[nodiscard]] NGIN::Net::NetExpected<std::unique_ptr<Filters::LengthPrefixedMessageStream>> BuildLengthPrefixed()
         {
             if (!m_hasSocket || !m_driver)
             {
-                throw std::logic_error("ByteStreamBuilder requires a TcpSocket and NetworkDriver");
+                return std::unexpected(NGIN::Net::NetError {NGIN::Net::NetErrorCode::Unknown, 0});
             }
             auto base = std::make_unique<TcpByteStream>(std::move(m_socket), *m_driver);
             auto stream = std::make_unique<Filters::LengthPrefixedMessageStream>(std::move(base));
@@ -56,3 +55,4 @@ namespace NGIN::Net::Transport
         bool           m_hasSocket {false};
     };
 }// namespace NGIN::Net::Transport
+

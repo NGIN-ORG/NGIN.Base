@@ -6,7 +6,6 @@
 
 #include <exception>
 #include <new>
-#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -33,24 +32,8 @@ namespace NGIN::Execution::detail
 
         [[noreturn]] void ThrowLastError(const char* message)
         {
-            DWORD       error        = ::GetLastError();
-            LPSTR       buffer       = nullptr;
-            const DWORD flags        = FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS;
-            DWORD       charsWritten = ::FormatMessageA(flags, nullptr, error, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-                                                        reinterpret_cast<LPSTR>(&buffer), 0, nullptr);
-
-            std::string fullMessage = message;
-            if (charsWritten != 0 && buffer != nullptr)
-            {
-                fullMessage.append(": ");
-                fullMessage.append(buffer, buffer + charsWritten);
-                ::LocalFree(buffer);
-            }
-            else
-            {
-                fullMessage.append(" (error code: ").append(std::to_string(error)).append(")");
-            }
-            throw std::runtime_error(fullMessage);
+            (void)message;
+            std::terminate();
         }
 
         void SwitchToMain()
@@ -73,6 +56,7 @@ namespace NGIN::Execution::detail
                     continue;
                 }
 
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
                 try
                 {
                     state->job();
@@ -81,6 +65,10 @@ namespace NGIN::Execution::detail
                 {
                     state->exception = std::current_exception();
                 }
+#else
+                state->job();
+                state->exception = nullptr;
+#endif
 
                 state->job = {};
                 YieldFiber();
@@ -100,7 +88,7 @@ namespace NGIN::Execution::detail
         void* stateMem = options.allocator.Allocate(sizeof(FiberState), alignof(FiberState));
         if (!stateMem)
         {
-            throw std::bad_alloc();
+            std::terminate();
         }
         auto* state = ::new (stateMem) FiberState {};
         state->ownerThreadId = NGIN::Execution::ThisThread::GetId();

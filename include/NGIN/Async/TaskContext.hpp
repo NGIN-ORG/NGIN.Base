@@ -7,6 +7,7 @@
 #include <utility>
 #include <memory>
 
+#include <NGIN/Async/AsyncError.hpp>
 #include <NGIN/Async/Cancellation.hpp>
 #include <NGIN/Execution/ExecutorRef.hpp>
 #include <NGIN/Time/MonotonicClock.hpp>
@@ -115,12 +116,13 @@ namespace NGIN::Async
             return m_cancellation.IsCancellationRequested();
         }
 
-        void ThrowIfCancellationRequested() const
+        [[nodiscard]] AsyncExpected<void> CheckCancellation() const noexcept
         {
             if (m_cancellation.IsCancellationRequested())
             {
-                throw TaskCanceled();
+                return std::unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
             }
+            return {};
         }
 
         auto YieldNow() const noexcept
@@ -137,12 +139,13 @@ namespace NGIN::Async
                 {
                     exec.Schedule(h);
                 }
-                void await_resume() const
+                AsyncExpected<void> await_resume() const noexcept
                 {
                     if (cancellation.IsCancellationRequested())
                     {
-                        throw TaskCanceled();
+                        return std::unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
                     }
+                    return {};
                 }
             };
             return Awaiter {m_executor, m_cancellation};
@@ -191,12 +194,13 @@ namespace NGIN::Async
                     cancellation.Register(cancellationRegistration, exec, handle);
                     exec.ScheduleAt(handle, until);
                 }
-                void await_resume() const
+                AsyncExpected<void> await_resume() const noexcept
                 {
                     if (cancellation.IsCancellationRequested())
                     {
-                        throw TaskCanceled();
+                        return std::unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
                     }
+                    return {};
                 }
             };
             return DelayAwaiter {m_executor, m_cancellation, dur};

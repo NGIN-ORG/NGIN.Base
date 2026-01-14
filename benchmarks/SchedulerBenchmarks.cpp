@@ -101,7 +101,12 @@ int main()
             auto taskYieldMany = [](NGIN::Async::TaskContext& ctx, std::atomic<int>& completed) -> NGIN::Async::Task<void> {
                 for (int i = 0; i < yieldsPerYieldMany; ++i)
                 {
-                    co_await ctx.Yield();
+                    auto yieldResult = co_await ctx.YieldNow();
+                    if (!yieldResult)
+                    {
+                        co_await NGIN::Async::Task<void>::ReturnError(yieldResult.error());
+                        co_return;
+                    }
                 }
                 completed.fetch_add(1, std::memory_order_release);
                 completed.notify_one();
@@ -377,7 +382,12 @@ int main()
             NGIN::Async::TaskContext taskCtx(scheduler);
 
             auto taskYield = [](NGIN::Async::TaskContext& ctx, std::atomic<int>& completed) -> NGIN::Async::Task<void> {
-                co_await ctx.Yield();
+                auto yieldResult = co_await ctx.YieldNow();
+                if (!yieldResult)
+                {
+                    co_await NGIN::Async::Task<void>::ReturnError(yieldResult.error());
+                    co_return;
+                }
                 completed.fetch_add(1, std::memory_order_release);
                 completed.notify_one();
                 co_return;
@@ -412,7 +422,12 @@ int main()
             auto taskYieldMany = [](NGIN::Async::TaskContext& ctx, std::atomic<int>& completed) -> NGIN::Async::Task<void> {
                 for (int i = 0; i < yieldsPerYieldMany; ++i)
                 {
-                    co_await ctx.Yield();
+                    auto yieldResult = co_await ctx.YieldNow();
+                    if (!yieldResult)
+                    {
+                        co_await NGIN::Async::Task<void>::ReturnError(yieldResult.error());
+                        co_return;
+                    }
                 }
                 completed.fetch_add(1, std::memory_order_release);
                 completed.notify_one();
@@ -446,11 +461,11 @@ int main()
             std::atomic<int>                     completed {0};
 
             auto delayCanceled = [](NGIN::Async::TaskContext& ctx, std::atomic<int>& completed) -> NGIN::Async::Task<void> {
-                try
+                auto delayResult = co_await ctx.Delay(NGIN::Units::Milliseconds(100.0));
+                if (!delayResult && delayResult.error().code != NGIN::Async::AsyncErrorCode::Canceled)
                 {
-                    co_await ctx.Delay(NGIN::Units::Milliseconds(100.0));
-                } catch (const NGIN::Async::TaskCanceled&)
-                {
+                    co_await NGIN::Async::Task<void>::ReturnError(delayResult.error());
+                    co_return;
                 }
                 completed.fetch_add(1, std::memory_order_release);
                 completed.notify_one();
@@ -485,7 +500,12 @@ int main()
             std::atomic<int>                     completed {0};
 
             auto leaf = [](NGIN::Async::TaskContext& ctx) -> NGIN::Async::Task<void> {
-                co_await ctx.Yield();
+                auto yieldResult = co_await ctx.YieldNow();
+                if (!yieldResult)
+                {
+                    co_await NGIN::Async::Task<void>::ReturnError(yieldResult.error());
+                    co_return;
+                }
                 co_return;
             };
 
@@ -494,7 +514,12 @@ int main()
                 auto b = leaf(ctx);
                 a.Start(ctx);
                 b.Start(ctx);
-                co_await NGIN::Async::WhenAll(ctx, a, b);
+                auto allResult = co_await NGIN::Async::WhenAll(ctx, a, b);
+                if (!allResult)
+                {
+                    co_await NGIN::Async::Task<void>::ReturnError(allResult.error());
+                    co_return;
+                }
                 completed.fetch_add(1, std::memory_order_release);
                 completed.notify_one();
                 co_return;
@@ -550,7 +575,12 @@ int main()
             NGIN::Async::TaskContext taskCtx(scheduler);
 
             auto taskYield = [](NGIN::Async::TaskContext& ctx, std::atomic<int>& completed) -> NGIN::Async::Task<void> {
-                co_await ctx.Yield();
+                auto yieldResult = co_await ctx.YieldNow();
+                if (!yieldResult)
+                {
+                    co_await NGIN::Async::Task<void>::ReturnError(yieldResult.error());
+                    co_return;
+                }
                 completed.fetch_add(1, std::memory_order_relaxed);
                 co_return;
             };
@@ -580,7 +610,12 @@ int main()
             auto taskYieldMany = [](NGIN::Async::TaskContext& ctx, std::atomic<int>& completed) -> NGIN::Async::Task<void> {
                 for (int i = 0; i < yieldsPerYieldMany; ++i)
                 {
-                    co_await ctx.Yield();
+                    auto yieldResult = co_await ctx.YieldNow();
+                    if (!yieldResult)
+                    {
+                        co_await NGIN::Async::Task<void>::ReturnError(yieldResult.error());
+                        co_return;
+                    }
                 }
                 completed.fetch_add(1, std::memory_order_relaxed);
                 co_return;
@@ -610,11 +645,11 @@ int main()
             std::atomic<int>                     completed {0};
 
             auto delayCanceled = [](NGIN::Async::TaskContext& ctx, std::atomic<int>& completed) -> NGIN::Async::Task<void> {
-                try
+                auto delayResult = co_await ctx.Delay(NGIN::Units::Milliseconds(100.0));
+                if (!delayResult && delayResult.error().code != NGIN::Async::AsyncErrorCode::Canceled)
                 {
-                    co_await ctx.Delay(NGIN::Units::Milliseconds(100.0));
-                } catch (const NGIN::Async::TaskCanceled&)
-                {
+                    co_await NGIN::Async::Task<void>::ReturnError(delayResult.error());
+                    co_return;
                 }
                 completed.fetch_add(1, std::memory_order_relaxed);
                 co_return;
@@ -645,7 +680,12 @@ int main()
             std::atomic<int>                     completed {0};
 
             auto leaf = [](NGIN::Async::TaskContext& ctx) -> NGIN::Async::Task<void> {
-                co_await ctx.Yield();
+                auto yieldResult = co_await ctx.YieldNow();
+                if (!yieldResult)
+                {
+                    co_await NGIN::Async::Task<void>::ReturnError(yieldResult.error());
+                    co_return;
+                }
                 co_return;
             };
 
@@ -654,7 +694,12 @@ int main()
                 auto b = leaf(ctx);
                 a.Start(ctx);
                 b.Start(ctx);
-                co_await NGIN::Async::WhenAll(ctx, a, b);
+                auto allResult = co_await NGIN::Async::WhenAll(ctx, a, b);
+                if (!allResult)
+                {
+                    co_await NGIN::Async::Task<void>::ReturnError(allResult.error());
+                    co_return;
+                }
                 completed.fetch_add(1, std::memory_order_relaxed);
                 co_return;
             };

@@ -16,7 +16,12 @@ using namespace NGIN::Units;
 Task<void> SimpleTask(TaskContext& ctx, int id)
 {
     std::cout << "[SimpleTask " << id << "] starting\n";
-    co_await ctx.Yield();
+    auto yieldResult = co_await ctx.YieldNow();
+    if (!yieldResult)
+    {
+        co_await NGIN::Async::Task<void>::ReturnError(yieldResult.error());
+        co_return;
+    }
     std::cout << "[SimpleTask " << id << "] resumed after Yield\n";
 }
 
@@ -24,7 +29,11 @@ Task<void> SimpleTask(TaskContext& ctx, int id)
 Task<int> DelayedValue(TaskContext& ctx, int value, Milliseconds delay)
 {
     std::cout << "[DelayedValue] waiting " << delay.GetValue() << "ms for value " << value << "\n";
-    co_await ctx.Delay(delay);
+    auto delayResult = co_await ctx.Delay(delay);
+    if (!delayResult)
+    {
+        co_return std::unexpected(delayResult.error());
+    }
     std::cout << "[DelayedValue] done: " << value << "\n";
     co_return value;
 }
@@ -37,11 +46,26 @@ Task<void> WhenAllCombinator(TaskContext& ctx)
     auto t2 = ctx.Run(&DelayedValue, 2, Milliseconds {1000.0});
     auto t3 = ctx.Run(&DelayedValue, 3, Milliseconds {1500.0});
 
-    int r1 = co_await t1;
-    int r2 = co_await t2;
-    int r3 = co_await t3;
+    auto r1Result = co_await t1;
+    if (!r1Result)
+    {
+        co_await NGIN::Async::Task<void>::ReturnError(r1Result.error());
+        co_return;
+    }
+    auto r2Result = co_await t2;
+    if (!r2Result)
+    {
+        co_await NGIN::Async::Task<void>::ReturnError(r2Result.error());
+        co_return;
+    }
+    auto r3Result = co_await t3;
+    if (!r3Result)
+    {
+        co_await NGIN::Async::Task<void>::ReturnError(r3Result.error());
+        co_return;
+    }
 
-    std::cout << "[WhenAllCombinator] results = {" << r1 << ", " << r2 << ", " << r3 << "}\n";
+    std::cout << "[WhenAllCombinator] results = {" << *r1Result << ", " << *r2Result << ", " << *r3Result << "}\n";
     co_return;
 }
 
@@ -64,33 +88,67 @@ void RunAllSchedulerTests(const char* schedulerName, int numThreadsOrFibers = 2)
     std::cout << "-- Test: SimpleTask with Then() --\n";
     auto s2 = SimpleTask(ctx, 99);
     s2.Start(ctx);
-    auto cont = s2.Then([&ctx]() -> Task<void> {
-        std::cout << "[Continuation] SimpleTask finished, running continuation!\n";
-        co_await ctx.Delay(Milliseconds {500.0});
-        std::cout << "[Continuation] Done after delay.\n";
+    auto contTask = [&]() -> Task<void> {
+        auto thenResult = co_await s2.Then([&ctx]() -> Task<void> {
+            std::cout << "[Continuation] SimpleTask finished, running continuation!\n";
+            auto delayResult = co_await ctx.Delay(Milliseconds {500.0});
+            if (!delayResult)
+            {
+                co_await NGIN::Async::Task<void>::ReturnError(delayResult.error());
+                co_return;
+            }
+            std::cout << "[Continuation] Done after delay.\n";
+            co_return;
+        });
+        if (!thenResult)
+        {
+            co_await NGIN::Async::Task<void>::ReturnError(thenResult.error());
+            co_return;
+        }
         co_return;
-    });
-    cont.parent.Start(ctx);// Start the original task if not already started
-    cont.parent.Wait();    // Wait for the original task
+    }();
+    contTask.Start(ctx);
+    contTask.Wait();
     std::cout << "-- SimpleTask with Then() Done --\n\n";
 
     // --- Test: DelayedValue ---
     std::cout << "-- Test: DelayedValue --\n";
     auto d  = ctx.Run(DelayedValue(ctx, 123, Milliseconds {1500.0}));
-    int val = d.Get();
-    std::cout << "-- DelayedValue Result: " << val << "\n\n";
+    auto valResult = d.Get();
+    if (valResult)
+    {
+        std::cout << "-- DelayedValue Result: " << *valResult << "\n\n";
+    }
+    else
+    {
+        std::cout << "-- DelayedValue failed with error code " << static_cast<int>(valResult.error().code) << "\n\n";
+    }
 
     // --- Test: Task<int>::Then() ---
     std::cout << "-- Test: DelayedValue with Then() --\n";
     auto d2    = ctx.Run(DelayedValue(ctx, 456, Milliseconds {1000.0}));
-    auto cont2 = d2.Then([&ctx](int result) -> Task<void> {
-        std::cout << "[Continuation] DelayedValue result: " << result << ", running continuation!\n";
-        co_await ctx.Delay(Milliseconds {300.0});
-        std::cout << "[Continuation] Done after delay.\n";
+    d2.Start(ctx);
+    auto contTask2 = [&]() -> Task<void> {
+        auto thenResult = co_await d2.Then([&ctx](int result) -> Task<void> {
+            std::cout << "[Continuation] DelayedValue result: " << result << ", running continuation!\n";
+            auto delayResult = co_await ctx.Delay(Milliseconds {300.0});
+            if (!delayResult)
+            {
+                co_await NGIN::Async::Task<void>::ReturnError(delayResult.error());
+                co_return;
+            }
+            std::cout << "[Continuation] Done after delay.\n";
+            co_return;
+        });
+        if (!thenResult)
+        {
+            co_await NGIN::Async::Task<void>::ReturnError(thenResult.error());
+            co_return;
+        }
         co_return;
-    });
-    cont2.parent.Start(ctx);
-    cont2.parent.Wait();
+    }();
+    contTask2.Start(ctx);
+    contTask2.Wait();
     std::cout << "-- DelayedValue with Then() Done --\n\n";
 
     // --- Test: WhenAllCombinator ---

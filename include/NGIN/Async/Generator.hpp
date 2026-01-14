@@ -9,6 +9,8 @@
 #include <type_traits>
 #include <utility>
 
+#include <NGIN/Async/AsyncError.hpp>
+
 namespace NGIN::Async
 {
     /// @brief A synchronous pull generator that yields values via `co_yield`.
@@ -49,7 +51,11 @@ namespace NGIN::Async
 
             void unhandled_exception() noexcept
             {
+#if NGIN_ASYNC_HAS_EXCEPTIONS
                 error = std::current_exception();
+#else
+                std::terminate();
+#endif
             }
         };
 
@@ -105,7 +111,11 @@ namespace NGIN::Async
                 auto& promise = m_handle.promise();
                 if (promise.error)
                 {
+#if NGIN_ASYNC_HAS_EXCEPTIONS
                     std::rethrow_exception(promise.error);
+#else
+                    std::terminate();
+#endif
                 }
                 return *promise.current;
             }
@@ -133,7 +143,11 @@ namespace NGIN::Async
                 auto& promise = m_handle.promise();
                 if (promise.error)
                 {
+#if NGIN_ASYNC_HAS_EXCEPTIONS
                     std::rethrow_exception(promise.error);
+#else
+                    std::terminate();
+#endif
                 }
             }
 
@@ -155,7 +169,11 @@ namespace NGIN::Async
             auto& promise = m_handle.promise();
             if (promise.error)
             {
+#if NGIN_ASYNC_HAS_EXCEPTIONS
                 std::rethrow_exception(promise.error);
+#else
+                std::terminate();
+#endif
             }
 
             if (m_handle.done())

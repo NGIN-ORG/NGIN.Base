@@ -14,16 +14,32 @@
 #include <array>
 #include <limits>
 #include <vector>
-#include <stdexcept>
 
 namespace NGIN::Net
 {
+    [[nodiscard]] static NGIN::Async::AsyncError ToAsyncError(NetError error) noexcept
+    {
+        using NGIN::Async::AsyncErrorCode;
+        AsyncErrorCode code = AsyncErrorCode::Fault;
+        switch (error.code)
+        {
+            case NetErrorCode::TimedOut: code = AsyncErrorCode::TimedOut; break;
+            case NetErrorCode::MessageTooLarge: code = AsyncErrorCode::InvalidArgument; break;
+            case NetErrorCode::WouldBlock: code = AsyncErrorCode::InvalidState; break;
+            case NetErrorCode::Ok: code = AsyncErrorCode::Ok; break;
+            default: break;
+        }
+
+        const int native = (error.native != 0) ? error.native : static_cast<int>(error.code);
+        return NGIN::Async::MakeAsyncError(code, native);
+    }
+
     NetExpected<void> UdpSocket::Open(AddressFamily family, SocketOptions options) noexcept
     {
         m_handle.Close();
         NetError error {};
         m_handle = detail::CreateSocket(family, SOCK_DGRAM, IPPROTO_UDP, options.nonBlocking, error);
-        if (error.code != NetErrc::Ok)
+        if (error.code != NetErrorCode::Ok)
         {
             return std::unexpected(error);
         }
@@ -43,7 +59,7 @@ namespace NGIN::Net
         socklen_t length = 0;
         if (!detail::ToSockAddr(localEndpoint, storage, length))
         {
-            return std::unexpected(NetError {NetErrc::Unknown, 0});
+            return std::unexpected(NetError {NetErrorCode::Unknown, 0});
         }
 
         if (::bind(detail::ToNative(m_handle), reinterpret_cast<sockaddr*>(&storage), length) != 0)
@@ -59,7 +75,7 @@ namespace NGIN::Net
         socklen_t length = 0;
         if (!detail::ToSockAddr(remoteEndpoint, storage, length))
         {
-            return std::unexpected(NetError {NetErrc::Unknown, 0});
+            return std::unexpected(NetError {NetErrorCode::Unknown, 0});
         }
 
         if (::connect(detail::ToNative(m_handle), reinterpret_cast<sockaddr*>(&storage), length) != 0)
@@ -78,14 +94,14 @@ namespace NGIN::Net
     {
         if (payload.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
         {
-            return std::unexpected(NetError {NetErrc::MessageTooLarge, 0});
+            return std::unexpected(NetError {NetErrorCode::MessageTooLarge, 0});
         }
 
         sockaddr_storage storage {};
         socklen_t length = 0;
         if (!detail::ToSockAddr(remoteEndpoint, storage, length))
         {
-            return std::unexpected(NetError {NetErrc::Unknown, 0});
+            return std::unexpected(NetError {NetErrorCode::Unknown, 0});
         }
 
         const int bytes = ::sendto(detail::ToNative(m_handle),
@@ -106,7 +122,7 @@ namespace NGIN::Net
     {
         if (destination.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
         {
-            return std::unexpected(NetError {NetErrc::MessageTooLarge, 0});
+            return std::unexpected(NetError {NetErrorCode::MessageTooLarge, 0});
         }
 
         sockaddr_storage storage {};
@@ -139,14 +155,14 @@ namespace NGIN::Net
         socklen_t length = 0;
         if (!detail::ToSockAddr(remoteEndpoint, storage, length))
         {
-            return std::unexpected(NetError {NetErrc::Unknown, 0});
+            return std::unexpected(NetError {NetErrorCode::Unknown, 0});
         }
 
 #if defined(NGIN_PLATFORM_WINDOWS)
         constexpr std::size_t kStackBuffers = 16;
         if (payload.size() > std::numeric_limits<DWORD>::max())
         {
-            return std::unexpected(NetError {NetErrc::MessageTooLarge, 0});
+            return std::unexpected(NetError {NetErrorCode::MessageTooLarge, 0});
         }
 
         std::array<WSABUF, kStackBuffers> stackBuffers {};
@@ -162,7 +178,7 @@ namespace NGIN::Net
         {
             if (payload[i].size > std::numeric_limits<ULONG>::max())
             {
-                return std::unexpected(NetError {NetErrc::MessageTooLarge, 0});
+                return std::unexpected(NetError {NetErrorCode::MessageTooLarge, 0});
             }
             buffers[i].buf = reinterpret_cast<char*>(const_cast<NGIN::Byte*>(payload[i].data));
             buffers[i].len = static_cast<ULONG>(payload[i].size);
@@ -189,7 +205,7 @@ namespace NGIN::Net
         const auto maxIov = static_cast<std::size_t>(IOV_MAX);
         if (payload.size() > maxIov)
         {
-            return std::unexpected(NetError {NetErrc::MessageTooLarge, 0});
+            return std::unexpected(NetError {NetErrorCode::MessageTooLarge, 0});
         }
 
         std::array<iovec, kStackBuffers> stackBuffers {};
@@ -237,7 +253,7 @@ namespace NGIN::Net
         constexpr std::size_t kStackBuffers = 16;
         if (destination.size() > std::numeric_limits<DWORD>::max())
         {
-            return std::unexpected(NetError {NetErrc::MessageTooLarge, 0});
+            return std::unexpected(NetError {NetErrorCode::MessageTooLarge, 0});
         }
 
         std::array<WSABUF, kStackBuffers> stackBuffers {};
@@ -253,7 +269,7 @@ namespace NGIN::Net
         {
             if (destination[i].size > std::numeric_limits<ULONG>::max())
             {
-                return std::unexpected(NetError {NetErrc::MessageTooLarge, 0});
+                return std::unexpected(NetError {NetErrorCode::MessageTooLarge, 0});
             }
             buffers[i].buf = reinterpret_cast<char*>(destination[i].data);
             buffers[i].len = static_cast<ULONG>(destination[i].size);
@@ -282,7 +298,7 @@ namespace NGIN::Net
         const auto maxIov = static_cast<std::size_t>(IOV_MAX);
         if (destination.size() > maxIov)
         {
-            return std::unexpected(NetError {NetErrc::MessageTooLarge, 0});
+            return std::unexpected(NetError {NetErrorCode::MessageTooLarge, 0});
         }
 
         std::array<iovec, kStackBuffers> stackBuffers {};
@@ -334,12 +350,16 @@ namespace NGIN::Net
                 co_return *result;
             }
 
-            if (result.error().code != NetErrc::WouldBlock)
+            if (result.error().code != NetErrorCode::WouldBlock)
             {
-                throw std::system_error(ToErrorCode(result.error()), "UdpSocket::SendToAsync failed");
+                co_return std::unexpected(ToAsyncError(result.error()));
             }
 
-            co_await driver.WaitUntilWritable(ctx, m_handle, token);
+            auto waitResult = co_await driver.WaitUntilWritable(ctx, m_handle, token);
+            if (!waitResult)
+            {
+                co_return std::unexpected(waitResult.error());
+            }
         }
 #endif
     }
@@ -360,13 +380,18 @@ namespace NGIN::Net
                 co_return *result;
             }
 
-            if (result.error().code != NetErrc::WouldBlock)
+            if (result.error().code != NetErrorCode::WouldBlock)
             {
-                throw std::system_error(ToErrorCode(result.error()), "UdpSocket::ReceiveFromAsync failed");
+                co_return std::unexpected(ToAsyncError(result.error()));
             }
 
-            co_await driver.WaitUntilReadable(ctx, m_handle, token);
+            auto waitResult = co_await driver.WaitUntilReadable(ctx, m_handle, token);
+            if (!waitResult)
+            {
+                co_return std::unexpected(waitResult.error());
+            }
         }
 #endif
     }
 }
+

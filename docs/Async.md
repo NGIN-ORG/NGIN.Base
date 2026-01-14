@@ -8,7 +8,7 @@ The design is performance-first and explicit:
 
 - No hidden global runtime: you choose an executor/scheduler.
 - No implicit thread usage: some executors are cooperative (you “pump” them), others run background workers.
-- Cancellation is cooperative: code must observe it (`ThrowIfCancellationRequested`, `Yield`, `Delay`).
+- Cancellation is cooperative: code must observe it (`CheckCancellation`, `YieldNow`, `Delay`).
 
 ## Architecture
 
@@ -36,7 +36,7 @@ If you are familiar with C#/.NET:
 
 - `NGIN::Async::Task<T>` / `NGIN::Async::Task<void>`
   - Single-result coroutine type (similar to .NET `Task<T>`).
-  - `co_return` produces the result; exceptions propagate to awaiters (`Get()`/`co_await`).
+  - `co_return` produces the result; `Get()`/`co_await` return `AsyncExpected<T>` for explicit error handling.
   - `Task` is intentionally *not* a generator; `co_yield` is not part of `Task`.
   - `Task<T>` instances are **cold by default**:
     - Constructing a task does not start execution.
@@ -45,13 +45,13 @@ If you are familiar with C#/.NET:
 
 - `NGIN::Async::TaskContext`
   - Holds an `NGIN::Execution::ExecutorRef` and a `CancellationToken`.
-  - Provides awaitables: `Yield()` and `Delay(duration)` (duration is an NGIN Units time quantity).
+  - Provides awaitables: `YieldNow()` and `Delay(duration)` (duration is an NGIN Units time quantity).
   - Tasks scheduled through a context share its executor and cancellation scope.
   - Typical usage is long-lived and reused across many tasks. Avoid mutating (`Bind(...)`) while tasks are concurrently
     using the context.
 
 - `NGIN::Async::CancellationSource` / `CancellationToken`
-  - Cooperative cancellation. `TaskContext::ThrowIfCancellationRequested()` throws `TaskCanceled`.
+  - Cooperative cancellation. `TaskContext::CheckCancellation()` returns `AsyncErrorCode::Canceled`.
 
 - `NGIN::Async::WhenAll` / `WhenAny`
   - Combinators for awaiting multiple tasks with .NET-like behavior.
@@ -60,7 +60,7 @@ If you are familiar with C#/.NET:
   - Synchronous pull generator (`co_yield`) for sequences in non-async code.
 
 - `NGIN::Async::AsyncGenerator<T>`
-  - Cooperative async pull generator advanced via `co_await gen.Next(ctx)` returning `std::optional<T>`.
+  - Cooperative async pull generator advanced via `co_await gen.Next(ctx)` returning `AsyncExpected<std::optional<T>>`.
 
 ## Getting Started
 
@@ -73,7 +73,11 @@ Typical “root task” pattern:
 
 NGIN::Async::Task<int> Compute(NGIN::Async::TaskContext& ctx)
 {
-    co_await ctx.Yield();
+    auto yielded = co_await ctx.YieldNow();
+    if (!yielded)
+    {
+        co_return std::unexpected(yielded.error());
+    }
     co_return 123;
 }
 
@@ -85,9 +89,13 @@ int main()
     auto t = Compute(ctx);
     t.Start(ctx);
     scheduler.RunUntilIdle();
-    return t.Get();
-}
-```
+    auto result = t.Get();
+    if (!result)
+    {
+        return 1;
+    }
+    return *result;
+}```
 
 Notes:
 
@@ -99,7 +107,7 @@ Execution flow:
 1. `Compute(ctx)` constructs a `Task<int>` (no coroutine body runs yet).
 2. `t.Start(ctx)` schedules the coroutine on the executor inside `ctx`.
 3. `scheduler.RunUntilIdle()` drives execution until no runnable work remains.
-4. `t.Get()` retrieves the result (or throws if the task faulted/canceled).
+4. `t.Get()` retrieves an `AsyncExpected<int>`; check for errors or cancellation.
 
 ### `TaskContext::Run`
 
@@ -107,7 +115,11 @@ Execution flow:
 
 ```cpp
 auto task = ctx.Run([](NGIN::Async::TaskContext& ctx) -> NGIN::Async::Task<int> {
-    co_await ctx.Yield();
+    auto yielded = co_await ctx.YieldNow();
+    if (!yielded)
+    {
+        co_return std::unexpected(yielded.error());
+    }
     co_return 7;
 });
 // task already started
@@ -117,44 +129,54 @@ Use `Run` for top-level entry points where you don’t need to control the start
 
 ## Error Handling
 
-- Exceptions thrown inside a `Task` are captured.
-- They are rethrown when:
-  - `co_await`’ing the task, or
-  - calling `Get()`.
+- Tasks do not throw; failures are returned as `AsyncExpected<T>`.
+- Unhandled exceptions (when enabled) are converted to `AsyncErrorCode::Fault`.
+- `co_await` and `Get()` always return `AsyncExpected<T>` so callers can branch explicitly.
 
 ```cpp
 NGIN::Async::Task<void> Fails(NGIN::Async::TaskContext&)
 {
-    throw std::runtime_error("boom");
+    co_await NGIN::Async::Task<void>::ReturnError(
+            NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::Fault));
+    co_return;
 }
 ```
 
-If you schedule and run `Fails`, `Get()` will rethrow the `std::runtime_error`.
-
+If you schedule and run `Fails`, `Get()` will return `AsyncExpected<void>` with `AsyncErrorCode::Fault`.
 ## Cancellation Model
 
 Cancellation is cooperative:
 
-- `TaskContext::Yield()` and `Delay(...)` throw `TaskCanceled` when cancellation is observed.
-- Use `ctx.ThrowIfCancellationRequested()` at well-defined points in long-running tasks.
+- `TaskContext::YieldNow()` and `Delay(...)` return `AsyncErrorCode::Canceled` when cancellation is observed.
+- Use `ctx.CheckCancellation()` at well-defined points in long-running tasks.
 
 ```cpp
 NGIN::Async::Task<void> Work(NGIN::Async::TaskContext& ctx)
 {
     for (;;)
     {
-        ctx.ThrowIfCancellationRequested();
-        co_await ctx.Yield();
+        auto cancel = ctx.CheckCancellation();
+        if (!cancel)
+        {
+            co_await NGIN::Async::Task<void>::ReturnError(cancel.error());
+            co_return;
+        }
+
+        auto yielded = co_await ctx.YieldNow();
+        if (!yielded)
+        {
+            co_await NGIN::Async::Task<void>::ReturnError(yielded.error());
+            co_return;
+        }
     }
 }
 ```
 
 Cancellation notes:
 
-- Cancellation is **cooperative**: if your task never checks the token, it will not stop “by itself”.
-- Child tasks run under whatever `TaskContext` you pass to them (same context ⇒ same token).
+- Cancellation is **cooperative**: if your task never checks the token, it will not stop �?oby itself�??.
+- Child tasks run under whatever `TaskContext` you pass to them (same context ��' same token).
 - `WhenAll`/`WhenAny` observe cancellation from the `TaskContext` they are awaited with, not from any implicit global.
-
 ## Combinators
 
 ### `WhenAll`
@@ -173,7 +195,7 @@ co_await all; // or all.Get() after completion
 Failure behavior:
 
 - If any child task faults, the combined task faults (first error wins).
-- If the context is canceled, the combined task throws `TaskCanceled`.
+- If the context is canceled, the combined task returns `AsyncErrorCode::Canceled`.
 - Remaining tasks continue executing unless canceled via the context.
 
 ### `WhenAny`
@@ -185,7 +207,7 @@ Failure behavior:
 
 - `WhenAny` completes when any input completes, even if that task faulted or was canceled.
 - `WhenAny` itself faults/cancels only if the *context* is canceled.
-- After `WhenAny` returns an index, call `Get()` on the corresponding task to observe its result/exception.
+- After `WhenAny` returns an index, call `Get()` on the corresponding task to observe its `AsyncExpected` result.
 
 ## Generators
 
@@ -212,13 +234,18 @@ for (int v : Range(3)) { /* 0,1,2 */ }
 
 ### `AsyncGenerator<T>` (async)
 
-`Next(ctx)` is an awaitable that returns `std::optional<T>`. `nullopt` means the sequence is complete.
+`Next(ctx)` is an awaitable that returns `AsyncExpected<std::optional<T>>`. `nullopt` means the sequence is complete.
 
 ```cpp
 NGIN::Async::AsyncGenerator<int> Produce(NGIN::Async::TaskContext& ctx)
 {
     co_yield 1;
-    co_await ctx.Yield();
+    auto yielded = co_await ctx.YieldNow();
+    if (!yielded)
+    {
+        co_await NGIN::Async::AsyncGenerator<int>::ReturnError(yielded.error());
+        co_return;
+    }
     co_yield 2;
 }
 
@@ -226,13 +253,21 @@ NGIN::Async::Task<int> Consume(NGIN::Async::TaskContext& ctx)
 {
     auto gen = Produce(ctx);
     int sum = 0;
-    while (auto v = co_await gen.Next(ctx))
+    for (;;)
     {
-        sum += *v;
+        auto next = co_await gen.Next(ctx);
+        if (!next)
+        {
+            co_return std::unexpected(next.error());
+        }
+        if (!*next)
+        {
+            break;
+        }
+        sum += **next;
     }
     co_return sum;
 }
-```
 
 ## Design Notes / Invariants
 
@@ -247,3 +282,13 @@ NGIN::Async::Task<int> Consume(NGIN::Async::TaskContext& ctx)
 - Calling `Get()`/`Wait()` without driving the executor (e.g. not pumping `CooperativeScheduler`).
 - Using `AsyncGenerator` from multiple consumers concurrently.
 - Forgetting to observe cancellation in long-running loops.
+
+
+
+
+
+
+
+
+
+
