@@ -6,6 +6,15 @@ Below is a **pseudo implementation plan / requirements doc** for building `Optio
 
 ## Global policies and conventions
 
+## Design decisions baked in (no forks)
+
+* Checked access is always **contract-fatal** (assert in debug, abort in release) even when exceptions are enabled.
+   * If a throwing accessor is ever desired, it must be explicitly added later (e.g. `ValueOrThrow()`), never by changing `Value()`.
+* `Variant` is **never valueless**.
+   * In exception-enabled builds, if an operation would otherwise risk leaving the object without a valid active alternative (due to an exception during construction), the library **aborts**.
+* Triviality preservation is a hard requirement for `Optional` / `Expected` / `Variant` where the underlying types allow it.
+   * This requires `StorageFor<T>` itself to be trivially copyable/movable when `T` is trivially copyable/movable (details below).
+
 ### Build / config knobs (recommend)
 
 * `NGIN_NO_EXCEPTIONS` (or `NGIN_EXCEPTIONS=0/1`)
@@ -14,9 +23,17 @@ Below is a **pseudo implementation plan / requirements doc** for building `Optio
     * Checked accessors (`Value()`, `Error()`, `Get<I>()`) assert in debug, abort in release.
     * Unsafe accessors (`ValueUnsafe()`, `ErrorUnsafe()`, `GetUnsafe<I>()`) are UB if misused.
   * If exceptions are enabled, keep the same contract by default (no mixed throw behavior).
-* `NGIN_ASSERT(expr)` contract macro (debug) + `NGIN_ABORT(msg)` (release-fatal)
-* `NGIN_LIKELY/UNLIKELY` branch hints (optional)
-* `NGIN_FORCEINLINE` (optional)
+* Required contract/hint helpers (define these in `include/NGIN/Defines.hpp`):
+
+   * `NGIN_ASSERT(expr)`
+      * Debug: `assert(expr)`
+      * Release: compiled out
+   * `NGIN_ABORT(msg)`
+      * Always terminates (e.g. `std::abort()`), `msg` is for diagnostics/logging.
+   * `NGIN_UNREACHABLE()`
+      * Uses existing `NGIN::Unreachable()` under the hood (and/or compiler builtins) so switches optimize tightly.
+   * `NGIN_LIKELY(x)` / `NGIN_UNLIKELY(x)`
+   * `NGIN_FORCEINLINE`
 
 ### Placement & namespace
 
@@ -25,7 +42,7 @@ Below is a **pseudo implementation plan / requirements doc** for building `Optio
 
 ### Type traits
 
-Don't use std type_traits header, use NGIN/Meta/TypeTraits.hpp
+Prefer `include/NGIN/Meta/TypeTraits.hpp` (and friends). These wrappers may internally use the standard library, but the value types should consistently use NGIN traits for readability and portability.
 
 ### Storage rule (core invariant)
 
@@ -34,13 +51,26 @@ Don't use std type_traits header, use NGIN/Meta/TypeTraits.hpp
 
   * “alive state” variables (`bool engaged`, `uint32 index`, etc.)
   * when `StorageFor<T>::Construct/Destroy` is called
-* `StorageFor<T>` is non-copyable; wrappers implement copy/move by constructing from `Ref()`/`Ptr()` as needed
+* `StorageFor<T>` is a raw aligned buffer with helpers (`Construct`, `Destroy`, `Ptr`, `Ref`):
+
+   * It remains **state-free** (no “alive” flag) and its destructor does nothing.
+   * It must support **trivial wrappers**:
+
+      * If `T` is trivially copyable/movable, `StorageFor<T>` must be trivially copyable/movable too (defaulted special members).
+      * If `T` is not trivially copyable/movable, `StorageFor<T>` must be non-copyable/non-movable to prevent accidental byte-copy of a live non-trivial object.
+
+   This design keeps misuse hard while still enabling `Optional<T>` / `Expected<T,E>` / `Variant<Ts...>` to be trivial when they logically can be.
 
 ### Triviality preservation (required)
 
 * Optional/Expected/Variant should remain trivially destructible/copyable/movable when the contained types allow it.
 * Use partial specialization or `requires` to default special members where possible.
 * Avoid user-defined destructors when `T` is trivially destructible.
+
+Concretely:
+
+* Prefer a `detail::OptionalStorage<T, /*TrivialDtor*/>` base (and same for `Expected` / `Variant`) where the trivially-destructible specialization uses `~Type() = default;`.
+* For non-trivial destructors, provide a destructor that calls `Reset()` / `DestroyActive()`.
 
 ### Traits checklist (gate before implementation)
 
@@ -52,6 +82,11 @@ Ensure `NGIN/Meta/TypeTraits.hpp` provides:
 * `IsNothrow*` where you use `noexcept`
 * `EnableIf` or `Requires` helpers used by the implementations
 
+Additionally required for the best-solution design above:
+
+* `IsTriviallyCopyable` (or equivalent)
+* `IsTriviallyMoveConstructible` / `IsTriviallyMoveAssignable` where needed to select defaulted special members
+
 ---
 
 # 1) Optional<T>
@@ -62,13 +97,15 @@ Inline “maybe a T”, no allocations. Minimal overhead. Fast access with check
 
 ## Data layout
 
-* `bool hasValue;`
 * `StorageFor<T> m_value;`
+* `bool m_hasValue;`
+
+Rationale: placing the flag after the aligned storage typically reduces internal padding when `T` has large alignment.
 
 ## Invariants
 
-* `hasValue == true` ⇒ `m_value` contains a live `T`
-* `hasValue == false` ⇒ no `T` alive in `m_value`
+* `m_hasValue == true` ⇒ `m_value` contains a live `T`
+* `m_hasValue == false` ⇒ no `T` alive in `m_value`
 
 ## API requirements (v1)
 
@@ -76,7 +113,7 @@ Construction:
 
 * `Optional()` empty
 * `Optional(nullopt)`
-* `Optional(const T&)`, `Optional(T&&)` (optional; can be explicit)
+* `explicit Optional(const T&)`, `explicit Optional(T&&)`
 * `InPlace` constructor: `Optional(InPlaceType<T>, args...)`
 
 Observers:
@@ -86,6 +123,10 @@ Observers:
 * `T& Value()` / `const T& Value()` (checked; assert/abort if empty)
 * `T& ValueUnsafe()` / `const T& ValueUnsafe()`
 * `T* Ptr()` / `const T* Ptr()` (nullable)
+* Pointer-style sugar (unsafe/UB if empty, for perf/ergonomics):
+
+   * `T& operator*()` / `const T& operator*() const`
+   * `T* operator->()` / `const T* operator->() const`
 * `const T& ValueOr(const T& fallback) const &` (zero-copy; fallback lifetime is caller-owned)
 * `T ValueOr(T fallback) &&` (move-friendly for rvalues)
 
@@ -93,7 +134,12 @@ Modifiers:
 
 * `void Reset()`
 * `template<class...Args> T& Emplace(Args&&...)`
-* `void Swap(Optional&)` (nice later)
+* `void Swap(Optional&)` (later)
+
+## Supporting tag types
+
+* Define `NGIN::Utilities::nullopt_t` and `inline constexpr nullopt` (do not use std).
+* Define `NGIN::Utilities::InPlaceType<T>` and `NGIN::Utilities::InPlaceIndex<I>` tags (do not use std).
 
 ## Correctness requirements
 
@@ -102,7 +148,11 @@ Modifiers:
   * preserve optional-ness
   * destroy old value on assignment if needed
   * handle self-assignment safely
-  * when both engaged and `T` is not assignable, destroy+reconstruct if constructible; otherwise disable assignment
+   * when both engaged:
+
+      * if assignable: assign
+      * else if constructible: destroy+reconstruct
+      * else: disable the operator via `requires`
 * Destructor must call `Reset()`
 
 ## Performance requirements
@@ -113,23 +163,23 @@ Modifiers:
 
 ## Implementation steps
 
-1. Implement `Reset()`: if `hasValue`, `m_value.Destroy(); hasValue=false;`
+1. Implement `Reset()`: if `m_hasValue`, `m_value.Destroy(); m_hasValue=false;`
 2. Implement `Emplace()`:
 
    * `Reset()`
    * `m_value.Construct(...)`
-   * `hasValue=true`
+   * `m_hasValue=true`
 3. Implement copy/move ctor:
 
-   * if `other.hasValue`: `m_value.Construct(other.ValueUnsafe())`; `hasValue=true`
+   * if `other.m_hasValue`: `m_value.Construct(other.ValueUnsafe())`; `m_hasValue=true`
 4. Implement copy/move assignment:
 
    * cases:
 
-     * both empty → no-op
-     * this engaged, other empty → destroy this
-     * this empty, other engaged → construct into this
-     * both engaged → assign `Ref() = other.Ref()` (or destroy+reconstruct if not assignable)
+   * both empty → no-op
+   * this engaged, other empty → destroy this
+   * this empty, other engaged → construct into this
+   * both engaged → assign if assignable, else destroy+reconstruct if constructible, else disable
 5. Add pointer/ref accessors (checked + unsafe)
 6. Add `ValueOr` overloads for lvalue/rvalue qualifiers
 
@@ -143,14 +193,14 @@ Return either a value or an error *inline*, no exceptions required. Great for en
 
 ## Data layout
 
-* `bool hasValue;`
 * `StorageFor<T> m_value;`
 * `StorageFor<E> m_error;`
+* `bool m_hasValue;`
 
 ## Invariants
 
-* `hasValue == true` ⇒ `m_value` alive, `m_error` not alive
-* `hasValue == false` ⇒ `m_error` alive, `m_value` not alive
+* `m_hasValue == true` ⇒ `m_value` alive, `m_error` not alive
+* `m_hasValue == false` ⇒ `m_error` alive, `m_value` not alive
 
 ## API requirements (v1)
 
@@ -162,7 +212,10 @@ Types/helpers:
 Construction:
 
 * `Expected(T)` / `Expected(InPlaceType<T>, ...)`
-* `Expected(Unexpected<E>)` / `Expected(InPlaceType<E>, ...)` (error path)
+* Error construction must be explicit and unambiguous:
+
+   * `Expected(Unexpected<E>)` / `Expected(InPlaceType<E>, ...)` (error path)
+   * Do not provide a raw-`E` constructor to avoid accidental selection of the error path.
 
 Observers:
 
@@ -175,8 +228,8 @@ Observers:
 
 Modifiers:
 
-* `void ResetToValue(args...)`
-* `void ResetToError(args...)`
+* `void EmplaceValue(args...)`
+* `void EmplaceError(args...)`
 * `template<class F> Transform(...)` (later)
 * `AndThen/OrElse` (later)
 
@@ -193,15 +246,15 @@ Special case requirements
 1. Define `Unexpected<E>` (move-only is fine)
 2. Implement constructors:
 
-   * value ctor sets `hasValue=true`, constructs `m_value`
-   * error ctor sets `hasValue=false`, constructs `m_error`
+   * value ctor sets `m_hasValue=true`, constructs `m_value`
+   * error ctor sets `m_hasValue=false`, constructs `m_error`
 3. Destructor:
 
-   * if `hasValue`: `m_value.Destroy()`
+   * if `m_hasValue`: `m_value.Destroy()`
    * else: `m_error.Destroy()`
 4. Copy/move constructors:
 
-   * branch on `other.hasValue` and construct matching storage
+   * branch on `other.m_hasValue` and construct matching storage
 5. Assignments:
 
    * if same state: assign active member (or destroy+reconstruct if not assignable but constructible)
@@ -226,8 +279,8 @@ Inline tagged union: exactly one alternative alive at a time. Used heavily in en
 
 ## Data layout (recommended)
 
-* `IndexType index;` (size chosen by number of alternatives)
-* `StorageFor<MaxSizedAlignedType>` m_storage;
+* `NGIN::Memory::AlignedBuffer<maxSize, maxAlign> m_storage;`
+* `IndexType m_index;` (size chosen by number of alternatives)
 
 Where `MaxSizedAlignedType` is a compile-time computed “largest” buffer type:
 
@@ -235,8 +288,8 @@ Where `MaxSizedAlignedType` is a compile-time computed “largest” buffer type
 
 ## Invariants
 
-* `index` is always a valid alternative index [0..N-1]
-* the object stored in `m_storage` is exactly the type at `index`
+* `m_index` is always a valid alternative index [0..N-1]
+* the object stored in `m_storage` is exactly the type at `m_index`
 
 ## API requirements (v1)
 
@@ -244,14 +297,14 @@ Construction:
 
 * default constructs alternative 0 (engine-friendly, never-valueless)
 * `Variant(InPlaceIndex<I>, args...)`
-* `Variant(InPlaceType<T>, args...)` (optional)
+* No implicit converting constructors in v1. Construction uses default alt-0 or explicit `InPlaceIndex`/`Emplace<I>`.
 
 Observers:
 
 * `IndexType Index() const`
 * `bool HoldsAlternative<I>()`
 * `T& Get<I>()` (checked) + `T* GetIf<I>()` (nullable)
-* `T& GetUnsafe<I>()` (optional)
+* `T& GetUnsafe<I>()` (unsafe/UB if wrong alternative)
 * `Visit(visitor)` (v1: switch-based)
 
 Modifiers:
@@ -265,12 +318,17 @@ Semantics policy choices (recommend for engine)
 * Keep converting constructors minimal (prefer explicit `Emplace`)
 * `Variant` is default-constructible iff `T0` is default-constructible
 
+## Exception-enabled builds (required behavior)
+
+* `Variant` must never become valueless.
+* Any exception that occurs during construction of a new active alternative must result in `NGIN_ABORT(...)`.
+   * This preserves the RT/engine invariant and avoids `valueless_by_exception`.
+
 ## Implementation steps
 
 1. Metaprogramming utilities:
 
    * `TypeAt<I, Ts...>`
-   * `IndexOf<T, Ts...>` (optional)
    * `MaxSize`, `MaxAlign`
    * `IndexType` selection:
      * `N <= 0xFF` ⇒ `uint8`
@@ -278,27 +336,30 @@ Semantics policy choices (recommend for engine)
      * else ⇒ `uint32`
 2. Storage:
 
-   * `StorageFor<AlignedBuffer<maxSize, maxAlign>>` (or just raw member)
+   * Store `AlignedBuffer` directly and placement-new into it.
 3. Core operations:
 
-   * `DestroyActive()`:
+    * Use an internal `Dispatch(m_index, lambda<I>)` helper that compiles down to a tight switch.
+    * `DestroyActive()`:
 
-     * `switch(index)` call destructor of active type via `reinterpret_cast`
-   * `Construct<I>(args...)`:
+       * `Dispatch(m_index, lambda<I>)` calls the destructor of `TypeAt<I>`.
+       * After the switch, use `NGIN_UNREACHABLE()`.
+    * `Construct<I>(args...)`:
 
-     * placement-new into buffer as `TypeAt<I>`
-     * set `index=I`
+       * In exception-enabled builds: wrap placement-new in `try/catch (...) { NGIN_ABORT(...) }`.
+       * Placement-new into buffer as `TypeAt<I>`.
+       * Set `m_index=I` only after successful construction.
 4. Copy/move constructors:
 
-   * `switch(other.index)` construct same type from other
+   * `Dispatch(other.m_index, ...)` construct same type from other
 5. Assignment:
 
-   * If same `index`: assign active value (or destroy+reconstruct if not assignable but constructible)
+   * If same `m_index`: assign active value (or destroy+reconstruct if not assignable but constructible)
    * Else: destroy current, construct new, update index
    * if required construction is not possible, disable the assignment operator via `requires`
 6. Visit:
 
-   * `switch(index)` call `visitor(Get<I>())`
+   * `Dispatch(m_index, ...)` call `visitor(Get<I>())`
    * For multiple variants later, you can extend, but start single-variant.
 
 ## Performance requirements
@@ -343,15 +404,15 @@ Access:
 Utilities:
 
 * `Apply(f, tuple)` (very useful)
-* `ForwardAsTuple(...)` (optional)
-* `Tie(...)` (optional)
+* `ForwardAsTuple(...)` (later)
+* `Tie(...)` (later)
 
 ## Implementation steps
 
 1. Implement `TupleLeaf<I, T, UseEbo>`
 2. Implement `TupleImpl<Indices..., Ts...> : TupleLeaf<I, Ts>...`
 3. Implement `Tuple<Ts...> : TupleImpl<...>`
-4. Implement `Get<I>` via `static_cast<TupleLeaf<I, TypeAt<I>> &>(tuple).Get()`
+4. Implement `Get<I>` as free functions with correct cv/ref qualifiers (`Tuple&`, `const Tuple&`, `Tuple&&`, `const Tuple&&`).
 5. Implement `Apply` using `std::index_sequence_for<Ts...>`
 
 ## Performance requirements
@@ -367,7 +428,7 @@ Utilities:
 
 * `CountingType` (counts ctor/move/copy/dtor)
 * `MoveOnlyType`
-* `NonMovableType` (optional)
+* `NonMovableType` (as-needed)
 * `ThrowingType` (test build with exceptions enabled)
 
 ## Core test scenarios
