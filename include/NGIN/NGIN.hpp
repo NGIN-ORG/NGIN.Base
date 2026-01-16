@@ -21,6 +21,7 @@
 #include <NGIN/Utilities/Callable.hpp>
 #include <NGIN/Utilities/LSBFlag.hpp>
 #include <NGIN/Utilities/MSBFlag.hpp>
+#include <NGIN/Utilities/Optional.hpp>
 #include <NGIN/Utilities/StringInterner.hpp>
 
 

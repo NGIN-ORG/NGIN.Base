@@ -118,6 +118,24 @@ namespace NGIN::Meta
         static constexpr bool IsTriviallyMoveAssignable() noexcept { return std::is_trivially_move_assignable_v<Self>; }
         static constexpr bool IsTriviallyCopyAssignable() noexcept { return std::is_trivially_copy_assignable_v<Self>; }
 
+        // Constructibility / assignability
+        static constexpr bool IsCopyConstructible() noexcept { return std::is_copy_constructible_v<Self>; }
+        static constexpr bool IsMoveConstructible() noexcept { return std::is_move_constructible_v<Self>; }
+        static constexpr bool IsCopyAssignable() noexcept { return std::is_copy_assignable_v<Self>; }
+        static constexpr bool IsMoveAssignable() noexcept { return std::is_move_assignable_v<Self>; }
+
+        template<typename... Args>
+        static constexpr bool IsConstructible() noexcept
+        {
+            return std::is_constructible_v<Self, Args...>;
+        }
+
+        template<typename... Args>
+        static constexpr bool IsNothrowConstructible() noexcept
+        {
+            return std::is_nothrow_constructible_v<Self, Args...>;
+        }
+
         // Nothrow guarantees
         static constexpr bool IsNothrowDefaultConstructible() noexcept { return std::is_nothrow_default_constructible_v<Self>; }
         static constexpr bool IsNothrowMoveConstructible() noexcept { return std::is_nothrow_move_constructible_v<Self>; }

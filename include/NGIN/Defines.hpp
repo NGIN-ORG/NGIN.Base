@@ -1,5 +1,8 @@
 #pragma once
 
+#include <cassert>
+#include <cstdlib>
+
 #if defined(_MSC_VER)
 #include <intrin.h>
 #elif defined(__has_include)
@@ -14,6 +17,20 @@
 #define NGIN_ALWAYS_INLINE inline __attribute__((always_inline))
 #else
 #define NGIN_ALWAYS_INLINE inline
+#endif
+
+#ifndef NGIN_FORCEINLINE
+#define NGIN_FORCEINLINE NGIN_ALWAYS_INLINE
+#endif
+
+#ifndef NGIN_LIKELY
+#if defined(__GNUC__) || defined(__clang__)
+#define NGIN_LIKELY(x) __builtin_expect(!!(x), 1)
+#define NGIN_UNLIKELY(x) __builtin_expect(!!(x), 0)
+#else
+#define NGIN_LIKELY(x) (x)
+#define NGIN_UNLIKELY(x) (x)
+#endif
 #endif
 
 #ifndef NGIN_BASE_API
@@ -76,6 +93,24 @@
 namespace NGIN
 {
 
+    namespace detail
+    {
+        [[noreturn]] inline void Abort([[maybe_unused]] const char* msg) noexcept
+        {
+            (void)msg;
+            std::abort();
+        }
+    }
+
+// Contract helpers
+#ifndef NGIN_ASSERT
+#define NGIN_ASSERT(expr) assert(expr)
+#endif
+
+#ifndef NGIN_ABORT
+#define NGIN_ABORT(msg) ::NGIN::detail::Abort(msg)
+#endif
+
     [[noreturn]] inline void Unreachable()
     {
 #if defined(_MSC_VER) && !defined(__clang__)// MSVC
@@ -84,5 +119,9 @@ namespace NGIN
         __builtin_unreachable();
 #endif
     }
+
+#ifndef NGIN_UNREACHABLE
+#define NGIN_UNREACHABLE() ::NGIN::Unreachable()
+#endif
 
 }// namespace NGIN
