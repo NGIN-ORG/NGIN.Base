@@ -6,6 +6,8 @@
 #include <type_traits>
 #include <string_view>
 
+#include <utility>
+
 namespace NGIN::Meta
 {
     // Name reflection helpers moved to <NGIN/Meta/TypeName.hpp>
@@ -136,6 +138,9 @@ namespace NGIN::Meta
             return std::is_nothrow_constructible_v<Self, Args...>;
         }
 
+        // Destructability
+        static constexpr bool IsDestructible() noexcept { return std::is_destructible_v<Self>; }
+
         // Nothrow guarantees
         static constexpr bool IsNothrowDefaultConstructible() noexcept { return std::is_nothrow_default_constructible_v<Self>; }
         static constexpr bool IsNothrowMoveConstructible() noexcept { return std::is_nothrow_move_constructible_v<Self>; }
@@ -161,6 +166,12 @@ namespace NGIN::Meta
         static constexpr bool IsVoid() noexcept { return std::is_void_v<Self>; }
         static constexpr bool IsEmpty() noexcept { return std::is_empty_v<Self>; }
         static constexpr bool IsStandardLayout() noexcept { return std::is_standard_layout_v<Self>; }
+
+        template<typename U>
+        static constexpr bool IsSame() noexcept
+        {
+            return std::is_same_v<Self, std::remove_cvref_t<U>>;
+        }
     };
 
 
