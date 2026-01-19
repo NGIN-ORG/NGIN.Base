@@ -4,6 +4,7 @@
 
 #include <NGIN/Defines.hpp>
 #include <NGIN/Memory/StorageFor.hpp>
+#include <NGIN/Memory/UnionStorageFor.hpp>
 #include <NGIN/Meta/TypeTraits.hpp>
 #include <NGIN/Primitives.hpp>
 #include <NGIN/Utilities/Tags.hpp>
@@ -106,41 +107,37 @@ namespace NGIN::Utilities
         constexpr explicit Expected(InPlaceType<T>, Args&&... args)
             noexcept(NGIN::Meta::TypeTraits<T>::template IsNothrowConstructible<Args...>())
             requires(NGIN::Meta::TypeTraits<T>::template IsConstructible<Args...>())
-            : m_value {}
-            , m_error {}
+            : m_storage {}
             , m_hasValue {1}
         {
-            detail::WithExceptionsAbortOnThrow([&]() { m_value.Construct(std::forward<Args>(args)...); });
+            detail::WithExceptionsAbortOnThrow([&]() { m_storage.template Construct<T>(std::forward<Args>(args)...); });
         }
 
         /// @brief Constructs an `Expected` holding a value by copying `value`.
         constexpr explicit Expected(const T& value) noexcept(NGIN::Meta::TypeTraits<T>::IsNothrowCopyConstructible())
             requires(NGIN::Meta::TypeTraits<T>::IsCopyConstructible())
-            : m_value {}
-            , m_error {}
+            : m_storage {}
             , m_hasValue {1}
         {
-            detail::WithExceptionsAbortOnThrow([&]() { m_value.Construct(value); });
+            detail::WithExceptionsAbortOnThrow([&]() { m_storage.template Construct<T>(value); });
         }
 
         /// @brief Constructs an `Expected` holding a value by moving `value`.
         constexpr explicit Expected(T&& value) noexcept(NGIN::Meta::TypeTraits<T>::IsNothrowMoveConstructible())
             requires(NGIN::Meta::TypeTraits<T>::IsMoveConstructible())
-            : m_value {}
-            , m_error {}
+            : m_storage {}
             , m_hasValue {1}
         {
-            detail::WithExceptionsAbortOnThrow([&]() { m_value.Construct(std::move(value)); });
+            detail::WithExceptionsAbortOnThrow([&]() { m_storage.template Construct<T>(std::move(value)); });
         }
 
         /// @brief Constructs an `Expected` holding an error from `Unexpected<E>`.
         constexpr explicit Expected(Unexpected<E>&& unexpected) noexcept(NGIN::Meta::TypeTraits<E>::IsNothrowMoveConstructible())
             requires(NGIN::Meta::TypeTraits<E>::IsMoveConstructible())
-            : m_value {}
-            , m_error {}
+            : m_storage {}
             , m_hasValue {0}
         {
-            detail::WithExceptionsAbortOnThrow([&]() { m_error.Construct(std::move(unexpected).Error()); });
+            detail::WithExceptionsAbortOnThrow([&]() { m_storage.template Construct<E>(std::move(unexpected).Error()); });
         }
 
         /// @brief Constructs an `Expected` holding an error in-place.
@@ -152,11 +149,10 @@ namespace NGIN::Utilities
             requires(
                 !NGIN::Meta::TypeTraits<T>::template IsSame<E>() &&
                 NGIN::Meta::TypeTraits<E>::template IsConstructible<Args...>())
-            : m_value {}
-            , m_error {}
+            : m_storage {}
             , m_hasValue {0}
         {
-            detail::WithExceptionsAbortOnThrow([&]() { m_error.Construct(std::forward<Args>(args)...); });
+            detail::WithExceptionsAbortOnThrow([&]() { m_storage.template Construct<E>(std::forward<Args>(args)...); });
         }
 
         /// @brief Copy-constructs.
@@ -174,18 +170,17 @@ namespace NGIN::Utilities
             requires(
                 !(NGIN::Meta::TypeTraits<T>::IsTriviallyCopyable() && NGIN::Meta::TypeTraits<E>::IsTriviallyCopyable()) &&
                 NGIN::Meta::TypeTraits<T>::IsCopyConstructible() && NGIN::Meta::TypeTraits<E>::IsCopyConstructible())
-            : m_value {}
-            , m_error {}
+            : m_storage {}
             , m_hasValue {0}
         {
             if (other.m_hasValue)
             {
-                detail::WithExceptionsAbortOnThrow([&]() { m_value.Construct(other.m_value.Ref()); });
+                detail::WithExceptionsAbortOnThrow([&]() { m_storage.template Construct<T>(other.ValueRef()); });
                 m_hasValue = 1;
             }
             else
             {
-                detail::WithExceptionsAbortOnThrow([&]() { m_error.Construct(other.m_error.Ref()); });
+                detail::WithExceptionsAbortOnThrow([&]() { m_storage.template Construct<E>(other.ErrorRef()); });
                 m_hasValue = 0;
             }
         }
@@ -206,18 +201,17 @@ namespace NGIN::Utilities
             requires(
                 !(NGIN::Meta::TypeTraits<T>::IsTriviallyCopyable() && NGIN::Meta::TypeTraits<E>::IsTriviallyCopyable()) &&
                 NGIN::Meta::TypeTraits<T>::IsMoveConstructible() && NGIN::Meta::TypeTraits<E>::IsMoveConstructible())
-            : m_value {}
-            , m_error {}
+            : m_storage {}
             , m_hasValue {0}
         {
             if (other.m_hasValue)
             {
-                detail::WithExceptionsAbortOnThrow([&]() { m_value.Construct(std::move(other.m_value.Ref())); });
+                detail::WithExceptionsAbortOnThrow([&]() { m_storage.template Construct<T>(std::move(other.ValueRef())); });
                 m_hasValue = 1;
             }
             else
             {
-                detail::WithExceptionsAbortOnThrow([&]() { m_error.Construct(std::move(other.m_error.Ref())); });
+                detail::WithExceptionsAbortOnThrow([&]() { m_storage.template Construct<E>(std::move(other.ErrorRef())); });
                 m_hasValue = 0;
             }
         }
@@ -251,12 +245,12 @@ namespace NGIN::Utilities
             {
                 if constexpr (NGIN::Meta::TypeTraits<T>::IsCopyAssignable())
                 {
-                    m_value.Ref() = other.m_value.Ref();
+                    ValueRef() = other.ValueRef();
                 }
                 else
                 {
                     DestroyActive();
-                    detail::WithExceptionsAbortOnThrow([&]() { m_value.Construct(other.m_value.Ref()); });
+                    detail::WithExceptionsAbortOnThrow([&]() { m_storage.template Construct<T>(other.ValueRef()); });
                     m_hasValue = 1;
                 }
                 return *this;
@@ -266,12 +260,12 @@ namespace NGIN::Utilities
             {
                 if constexpr (NGIN::Meta::TypeTraits<E>::IsCopyAssignable())
                 {
-                    m_error.Ref() = other.m_error.Ref();
+                    ErrorRef() = other.ErrorRef();
                 }
                 else
                 {
                     DestroyActive();
-                    detail::WithExceptionsAbortOnThrow([&]() { m_error.Construct(other.m_error.Ref()); });
+                    detail::WithExceptionsAbortOnThrow([&]() { m_storage.template Construct<E>(other.ErrorRef()); });
                     m_hasValue = 0;
                 }
                 return *this;
@@ -281,12 +275,12 @@ namespace NGIN::Utilities
             DestroyActive();
             if (other.m_hasValue)
             {
-                detail::WithExceptionsAbortOnThrow([&]() { m_value.Construct(other.m_value.Ref()); });
+                detail::WithExceptionsAbortOnThrow([&]() { m_storage.template Construct<T>(other.ValueRef()); });
                 m_hasValue = 1;
             }
             else
             {
-                detail::WithExceptionsAbortOnThrow([&]() { m_error.Construct(other.m_error.Ref()); });
+                detail::WithExceptionsAbortOnThrow([&]() { m_storage.template Construct<E>(other.ErrorRef()); });
                 m_hasValue = 0;
             }
 
@@ -323,12 +317,12 @@ namespace NGIN::Utilities
             {
                 if constexpr (NGIN::Meta::TypeTraits<T>::IsMoveAssignable())
                 {
-                    m_value.Ref() = std::move(other.m_value.Ref());
+                    ValueRef() = std::move(other.ValueRef());
                 }
                 else
                 {
                     DestroyActive();
-                    detail::WithExceptionsAbortOnThrow([&]() { m_value.Construct(std::move(other.m_value.Ref())); });
+                    detail::WithExceptionsAbortOnThrow([&]() { m_storage.template Construct<T>(std::move(other.ValueRef())); });
                     m_hasValue = 1;
                 }
                 return *this;
@@ -338,12 +332,12 @@ namespace NGIN::Utilities
             {
                 if constexpr (NGIN::Meta::TypeTraits<E>::IsMoveAssignable())
                 {
-                    m_error.Ref() = std::move(other.m_error.Ref());
+                    ErrorRef() = std::move(other.ErrorRef());
                 }
                 else
                 {
                     DestroyActive();
-                    detail::WithExceptionsAbortOnThrow([&]() { m_error.Construct(std::move(other.m_error.Ref())); });
+                    detail::WithExceptionsAbortOnThrow([&]() { m_storage.template Construct<E>(std::move(other.ErrorRef())); });
                     m_hasValue = 0;
                 }
                 return *this;
@@ -353,12 +347,12 @@ namespace NGIN::Utilities
             DestroyActive();
             if (other.m_hasValue)
             {
-                detail::WithExceptionsAbortOnThrow([&]() { m_value.Construct(std::move(other.m_value.Ref())); });
+                detail::WithExceptionsAbortOnThrow([&]() { m_storage.template Construct<T>(std::move(other.ValueRef())); });
                 m_hasValue = 1;
             }
             else
             {
-                detail::WithExceptionsAbortOnThrow([&]() { m_error.Construct(std::move(other.m_error.Ref())); });
+                detail::WithExceptionsAbortOnThrow([&]() { m_storage.template Construct<E>(std::move(other.ErrorRef())); });
                 m_hasValue = 0;
             }
 
@@ -394,7 +388,7 @@ namespace NGIN::Utilities
             {
                 detail::ExpectedFailNoValue();
             }
-            return m_value.Ref();
+            return ValueRef();
         }
 
         /// @brief Returns the contained value (const).
@@ -406,7 +400,7 @@ namespace NGIN::Utilities
             {
                 detail::ExpectedFailNoValue();
             }
-            return m_value.Ref();
+            return ValueRef();
         }
 
         /// @brief Returns the contained value (rvalue).
@@ -418,7 +412,7 @@ namespace NGIN::Utilities
             {
                 detail::ExpectedFailNoValue();
             }
-            return std::move(m_value.Ref());
+            return std::move(ValueRef());
         }
 
         /// @brief Returns the contained value (const rvalue).
@@ -430,7 +424,7 @@ namespace NGIN::Utilities
             {
                 detail::ExpectedFailNoValue();
             }
-            return std::move(m_value.Ref());
+            return std::move(ValueRef());
         }
 
         /// @brief Returns the contained error.
@@ -442,7 +436,7 @@ namespace NGIN::Utilities
             {
                 detail::ExpectedFailNoError();
             }
-            return m_error.Ref();
+            return ErrorRef();
         }
 
         /// @brief Returns the contained error (const).
@@ -454,7 +448,7 @@ namespace NGIN::Utilities
             {
                 detail::ExpectedFailNoError();
             }
-            return m_error.Ref();
+            return ErrorRef();
         }
 
         /// @brief Returns the contained error (rvalue).
@@ -466,7 +460,7 @@ namespace NGIN::Utilities
             {
                 detail::ExpectedFailNoError();
             }
-            return std::move(m_error.Ref());
+            return std::move(ErrorRef());
         }
 
         /// @brief Returns the contained error (const rvalue).
@@ -478,48 +472,48 @@ namespace NGIN::Utilities
             {
                 detail::ExpectedFailNoError();
             }
-            return std::move(m_error.Ref());
+            return std::move(ErrorRef());
         }
 
         /// @brief Returns the contained value without checking.
         ///
         /// @warning Undefined behavior if holding an error.
-        [[nodiscard]] constexpr T& ValueUnsafe() & noexcept { return m_value.Ref(); }
+        [[nodiscard]] constexpr T& ValueUnsafe() & noexcept { return ValueRef(); }
 
         /// @brief Returns the contained value without checking (const).
         ///
         /// @warning Undefined behavior if holding an error.
-        [[nodiscard]] constexpr const T& ValueUnsafe() const& noexcept { return m_value.Ref(); }
+        [[nodiscard]] constexpr const T& ValueUnsafe() const& noexcept { return ValueRef(); }
 
         /// @brief Returns the contained value without checking (rvalue).
         ///
         /// @warning Undefined behavior if holding an error.
-        [[nodiscard]] constexpr T&& ValueUnsafe() && noexcept { return std::move(m_value.Ref()); }
+        [[nodiscard]] constexpr T&& ValueUnsafe() && noexcept { return std::move(ValueRef()); }
 
         /// @brief Returns the contained value without checking (const rvalue).
         ///
         /// @warning Undefined behavior if holding an error.
-        [[nodiscard]] constexpr const T&& ValueUnsafe() const&& noexcept { return std::move(m_value.Ref()); }
+        [[nodiscard]] constexpr const T&& ValueUnsafe() const&& noexcept { return std::move(ValueRef()); }
 
         /// @brief Returns the contained error without checking.
         ///
         /// @warning Undefined behavior if holding a value.
-        [[nodiscard]] constexpr E& ErrorUnsafe() & noexcept { return m_error.Ref(); }
+        [[nodiscard]] constexpr E& ErrorUnsafe() & noexcept { return ErrorRef(); }
 
         /// @brief Returns the contained error without checking (const).
         ///
         /// @warning Undefined behavior if holding a value.
-        [[nodiscard]] constexpr const E& ErrorUnsafe() const& noexcept { return m_error.Ref(); }
+        [[nodiscard]] constexpr const E& ErrorUnsafe() const& noexcept { return ErrorRef(); }
 
         /// @brief Returns the contained error without checking (rvalue).
         ///
         /// @warning Undefined behavior if holding a value.
-        [[nodiscard]] constexpr E&& ErrorUnsafe() && noexcept { return std::move(m_error.Ref()); }
+        [[nodiscard]] constexpr E&& ErrorUnsafe() && noexcept { return std::move(ErrorRef()); }
 
         /// @brief Returns the contained error without checking (const rvalue).
         ///
         /// @warning Undefined behavior if holding a value.
-        [[nodiscard]] constexpr const E&& ErrorUnsafe() const&& noexcept { return std::move(m_error.Ref()); }
+        [[nodiscard]] constexpr const E&& ErrorUnsafe() const&& noexcept { return std::move(ErrorRef()); }
 
         /// @brief Returns the contained value if present, otherwise returns `fallback`.
         [[nodiscard]] constexpr const T& ValueOr(const T& fallback) const& noexcept
@@ -567,25 +561,25 @@ namespace NGIN::Utilities
 
             if (m_hasValue && other.m_hasValue)
             {
-                auto tempValue = std::move(m_value.Ref());
+                auto tempValue = std::move(ValueRef());
 
-                m_value.Destroy();
-                detail::WithExceptionsAbortOnThrow([&]() { m_value.Construct(std::move(other.m_value.Ref())); });
+                m_storage.template Destroy<T>();
+                detail::WithExceptionsAbortOnThrow([&]() { m_storage.template Construct<T>(std::move(other.ValueRef())); });
 
-                other.m_value.Destroy();
-                detail::WithExceptionsAbortOnThrow([&]() { other.m_value.Construct(std::move(tempValue)); });
+                other.m_storage.template Destroy<T>();
+                detail::WithExceptionsAbortOnThrow([&]() { other.m_storage.template Construct<T>(std::move(tempValue)); });
                 return;
             }
 
             if (!m_hasValue && !other.m_hasValue)
             {
-                auto tempError = std::move(m_error.Ref());
+                auto tempError = std::move(ErrorRef());
 
-                m_error.Destroy();
-                detail::WithExceptionsAbortOnThrow([&]() { m_error.Construct(std::move(other.m_error.Ref())); });
+                m_storage.template Destroy<E>();
+                detail::WithExceptionsAbortOnThrow([&]() { m_storage.template Construct<E>(std::move(other.ErrorRef())); });
 
-                other.m_error.Destroy();
-                detail::WithExceptionsAbortOnThrow([&]() { other.m_error.Construct(std::move(tempError)); });
+                other.m_storage.template Destroy<E>();
+                detail::WithExceptionsAbortOnThrow([&]() { other.m_storage.template Construct<E>(std::move(tempError)); });
                 return;
             }
 
@@ -593,25 +587,25 @@ namespace NGIN::Utilities
             if (m_hasValue)
             {
                 // this: value, other: error
-                auto tempValue = std::move(m_value.Ref());
+                auto tempValue = std::move(ValueRef());
                 DestroyActive();
-                detail::WithExceptionsAbortOnThrow([&]() { m_error.Construct(std::move(other.m_error.Ref())); });
+                detail::WithExceptionsAbortOnThrow([&]() { m_storage.template Construct<E>(std::move(other.ErrorRef())); });
                 m_hasValue = 0;
 
                 other.DestroyActive();
-                detail::WithExceptionsAbortOnThrow([&]() { other.m_value.Construct(std::move(tempValue)); });
+                detail::WithExceptionsAbortOnThrow([&]() { other.m_storage.template Construct<T>(std::move(tempValue)); });
                 other.m_hasValue = 1;
             }
             else
             {
                 // this: error, other: value
-                auto tempError = std::move(m_error.Ref());
+                auto tempError = std::move(ErrorRef());
                 DestroyActive();
-                detail::WithExceptionsAbortOnThrow([&]() { m_value.Construct(std::move(other.m_value.Ref())); });
+                detail::WithExceptionsAbortOnThrow([&]() { m_storage.template Construct<T>(std::move(other.ValueRef())); });
                 m_hasValue = 1;
 
                 other.DestroyActive();
-                detail::WithExceptionsAbortOnThrow([&]() { other.m_error.Construct(std::move(tempError)); });
+                detail::WithExceptionsAbortOnThrow([&]() { other.m_storage.template Construct<E>(std::move(tempError)); });
                 other.m_hasValue = 0;
             }
         }
@@ -626,9 +620,9 @@ namespace NGIN::Utilities
             requires(NGIN::Meta::TypeTraits<T>::template IsConstructible<Args...>())
         {
             DestroyActive();
-            detail::WithExceptionsAbortOnThrow([&]() { m_value.Construct(std::forward<Args>(args)...); });
+            detail::WithExceptionsAbortOnThrow([&]() { m_storage.template Construct<T>(std::forward<Args>(args)...); });
             m_hasValue = 1;
-            return m_value.Ref();
+            return ValueRef();
         }
 
         /// @brief Constructs/replaces the contained error.
@@ -641,32 +635,36 @@ namespace NGIN::Utilities
             requires(NGIN::Meta::TypeTraits<E>::template IsConstructible<Args...>())
         {
             DestroyActive();
-            detail::WithExceptionsAbortOnThrow([&]() { m_error.Construct(std::forward<Args>(args)...); });
+            detail::WithExceptionsAbortOnThrow([&]() { m_storage.template Construct<E>(std::forward<Args>(args)...); });
             m_hasValue = 0;
-            return m_error.Ref();
+            return ErrorRef();
         }
 
     private:
+        [[nodiscard]] constexpr T& ValueRef() noexcept { return m_storage.template Ref<T>(); }
+        [[nodiscard]] constexpr const T& ValueRef() const noexcept { return m_storage.template Ref<T>(); }
+        [[nodiscard]] constexpr E& ErrorRef() noexcept { return m_storage.template Ref<E>(); }
+        [[nodiscard]] constexpr const E& ErrorRef() const noexcept { return m_storage.template Ref<E>(); }
+
         constexpr void DestroyActive() noexcept
         {
             if (m_hasValue)
             {
                 if constexpr (!NGIN::Meta::TypeTraits<T>::IsTriviallyDestructible())
                 {
-                    m_value.Destroy();
+                    m_storage.template Destroy<T>();
                 }
             }
             else
             {
                 if constexpr (!NGIN::Meta::TypeTraits<E>::IsTriviallyDestructible())
                 {
-                    m_error.Destroy();
+                    m_storage.template Destroy<E>();
                 }
             }
         }
 
-        [[no_unique_address]] NGIN::Memory::StorageFor<T> m_value {};
-        [[no_unique_address]] NGIN::Memory::StorageFor<E> m_error {};
+        [[no_unique_address]] NGIN::Memory::UnionStorageFor<T, E> m_storage {};
         NGIN::UInt8 m_hasValue {0};
     };
 
