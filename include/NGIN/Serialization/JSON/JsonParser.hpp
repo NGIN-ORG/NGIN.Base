@@ -18,6 +18,8 @@ namespace NGIN::Serialization
         bool     allowTrailingCommas {false};
         bool     trackLocation {false};
         bool     inSitu {false};
+        bool     precomputeContainerSizes {true};
+        bool     internKeys {false};
         UIntSize maxDepth {256};
         UIntSize arenaBytes {0};
     };

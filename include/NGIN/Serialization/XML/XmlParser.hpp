@@ -14,11 +14,14 @@ namespace NGIN::Serialization
     /// @brief XML parsing configuration.
     struct XmlParseOptions
     {
-        bool     preserveWhitespace {false};
+        bool     normalizeWhitespace {false};
         bool     trackLocation {false};
-        bool     decodeEntities {true};
+        bool     decodeEntities {false};
         bool     allowComments {true};
         bool     allowProcessingInstructions {true};
+        bool     inSitu {false};
+        bool     precomputeContainerSizes {true};
+        bool     internNames {false};
         UIntSize maxDepth {256};
         UIntSize arenaBytes {0};
     };
@@ -44,6 +47,9 @@ namespace NGIN::Serialization
         Parse(std::span<const NGIN::Byte> input, const XmlParseOptions& options = {});
 
         static NGIN::Utilities::Expected<XmlDocument, ParseError>
+        Parse(std::span<NGIN::Byte> input, const XmlParseOptions& options = {});
+
+        static NGIN::Utilities::Expected<XmlDocument, ParseError>
         Parse(std::string_view input, const XmlParseOptions& options = {});
 
         static NGIN::Utilities::Expected<XmlDocument, ParseError>
@@ -51,5 +57,17 @@ namespace NGIN::Serialization
 
         static NGIN::Utilities::Expected<void, ParseError>
         Parse(XmlReader& reader, std::span<const NGIN::Byte> input, const XmlParseOptions& options = {});
+
+        /// @brief Decode XML entities using the document arena.
+        static NGIN::Utilities::Expected<std::string_view, ParseError>
+        DecodeEntities(XmlDocument& document, std::string_view input);
+
+        /// @brief Normalize XML whitespace using the document arena.
+        static NGIN::Utilities::Expected<std::string_view, ParseError>
+        NormalizeWhitespace(XmlDocument& document, std::string_view input);
+
+        /// @brief Decode entities (and optionally normalize whitespace) using the document arena.
+        static NGIN::Utilities::Expected<std::string_view, ParseError>
+        DecodeText(XmlDocument& document, std::string_view input, bool normalizeWhitespace = false);
     };
 }// namespace NGIN::Serialization

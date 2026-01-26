@@ -42,6 +42,19 @@ namespace NGIN::SIMD
         const auto* bytes  = reinterpret_cast<const std::uint8_t*>(data);
         const auto  needle = detail::ToU8(value);
 
+        constexpr std::size_t kSimdScanMinBytes = 128;
+        if (length < kSimdScanMinBytes)
+        {
+            for (std::size_t index = 0; index < length; ++index)
+            {
+                if (bytes[index] == needle)
+                {
+                    return index;
+                }
+            }
+            return length;
+        }
+
         using VecType              = Vec<std::uint8_t, Backend>;
         constexpr int lanes        = VecType::lanes;
         const auto    needleVector = VecType(needle);
@@ -87,6 +100,20 @@ namespace NGIN::SIMD
         const auto* bytes = reinterpret_cast<const std::uint8_t*>(data);
         const auto  va    = detail::ToU8(a);
         const auto  vb    = detail::ToU8(b);
+
+        constexpr std::size_t kSimdScanMinBytes = 128;
+        if (length < kSimdScanMinBytes)
+        {
+            for (std::size_t index = 0; index < length; ++index)
+            {
+                const auto value = bytes[index];
+                if (value == va || value == vb)
+                {
+                    return index;
+                }
+            }
+            return length;
+        }
 
         using VecType       = Vec<std::uint8_t, Backend>;
         constexpr int lanes = VecType::lanes;
@@ -140,6 +167,20 @@ namespace NGIN::SIMD
         const auto  va    = detail::ToU8(a);
         const auto  vb    = detail::ToU8(b);
         const auto  vc    = detail::ToU8(c);
+
+        constexpr std::size_t kSimdScanMinBytes = 128;
+        if (length < kSimdScanMinBytes)
+        {
+            for (std::size_t index = 0; index < length; ++index)
+            {
+                const auto value = bytes[index];
+                if (value == va || value == vb || value == vc)
+                {
+                    return index;
+                }
+            }
+            return length;
+        }
 
         using VecType       = Vec<std::uint8_t, Backend>;
         constexpr int lanes = VecType::lanes;
@@ -196,6 +237,20 @@ namespace NGIN::SIMD
         const auto  vb    = detail::ToU8(b);
         const auto  vc    = detail::ToU8(c);
         const auto  vd    = detail::ToU8(d);
+
+        constexpr std::size_t kSimdScanMinBytes = 128;
+        if (length < kSimdScanMinBytes)
+        {
+            for (std::size_t index = 0; index < length; ++index)
+            {
+                const auto value = bytes[index];
+                if (value == va || value == vb || value == vc || value == vd)
+                {
+                    return index;
+                }
+            }
+            return length;
+        }
 
         using VecType       = Vec<std::uint8_t, Backend>;
         constexpr int lanes = VecType::lanes;

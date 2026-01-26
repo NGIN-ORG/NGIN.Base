@@ -8,6 +8,7 @@
 #include <NGIN/Primitives.hpp>
 
 #include <functional>
+#include <cstring>
 #include <string_view>
 
 namespace NGIN::Serialization
@@ -172,10 +173,18 @@ namespace NGIN::Serialization
         [[nodiscard]] JsonAllocator Allocator() noexcept { return JsonAllocator {m_arena}; }
         [[nodiscard]] JsonArena&    Arena() noexcept { return m_arena; }
         void                        AdoptInput(NGIN::Containers::Vector<NGIN::Byte>&& input) noexcept { m_inputStorage = std::move(input); }
+        [[nodiscard]] JsonStringView InternString(JsonStringView value) noexcept;
 
     private:
+        using InternMap = NGIN::Containers::FlatHashMap<JsonStringView,
+                                                       JsonStringView,
+                                                       std::hash<JsonStringView>,
+                                                       std::equal_to<JsonStringView>,
+                                                       JsonAllocator>;
+
         JsonArena                            m_arena;
         JsonValue                            m_root {};
         NGIN::Containers::Vector<NGIN::Byte> m_inputStorage {};
+        InternMap*                           m_interner {nullptr};
     };
 }// namespace NGIN::Serialization

@@ -1,11 +1,14 @@
 #pragma once
 
+#include <NGIN/Containers/HashMap.hpp>
 #include <NGIN/Containers/Vector.hpp>
 #include <NGIN/Defines.hpp>
 #include <NGIN/Memory/AllocatorRef.hpp>
 #include <NGIN/Memory/LinearAllocator.hpp>
 #include <NGIN/Primitives.hpp>
 
+#include <cstring>
+#include <functional>
 #include <string_view>
 
 namespace NGIN::Serialization
@@ -68,7 +71,7 @@ namespace NGIN::Serialization
     struct XmlElement
     {
         explicit XmlElement(XmlAllocator allocator)
-            : attributes(0, allocator), children(0, allocator)
+            : attributes(0, allocator), children(0, allocator), m_allocator(allocator)
         {
         }
 
@@ -77,6 +80,17 @@ namespace NGIN::Serialization
         NGIN::Containers::Vector<XmlNode, XmlAllocator>      children;
 
         [[nodiscard]] const XmlAttribute* FindAttribute(std::string_view key) const noexcept;
+        bool                             BuildAttributeIndex() noexcept;
+
+    private:
+        using AttributeIndex = NGIN::Containers::FlatHashMap<std::string_view,
+                                                            UIntSize,
+                                                            std::hash<std::string_view>,
+                                                            std::equal_to<std::string_view>,
+                                                            XmlAllocator>;
+
+        XmlAllocator   m_allocator;
+        AttributeIndex* m_index {nullptr};
     };
 
     /// @brief XML document owning an arena for parsed nodes.
@@ -98,10 +112,18 @@ namespace NGIN::Serialization
 
         void SetRoot(XmlElement* root) noexcept { m_root = root; }
         void AdoptInput(NGIN::Containers::Vector<NGIN::Byte>&& input) noexcept { m_inputStorage = std::move(input); }
+        [[nodiscard]] std::string_view InternString(std::string_view value) noexcept;
 
     private:
+        using InternMap = NGIN::Containers::FlatHashMap<std::string_view,
+                                                        std::string_view,
+                                                        std::hash<std::string_view>,
+                                                        std::equal_to<std::string_view>,
+                                                        XmlAllocator>;
+
         XmlArena                             m_arena;
         XmlElement*                          m_root {nullptr};
         NGIN::Containers::Vector<NGIN::Byte> m_inputStorage {};
+        InternMap*                           m_interner {nullptr};
     };
 }// namespace NGIN::Serialization

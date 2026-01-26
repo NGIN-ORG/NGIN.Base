@@ -931,7 +931,7 @@ namespace NGIN::SIMD::detail
             return mask;
         }
 
-        static constexpr auto Load(const std::uint8_t* pointer) noexcept -> Storage
+        static auto Load(const std::uint8_t* pointer) noexcept -> Storage
         {
             Storage result;
             _mm_storeu_si128(reinterpret_cast<__m128i*>(result.Data()),
@@ -939,7 +939,7 @@ namespace NGIN::SIMD::detail
             return result;
         }
 
-        static constexpr auto LoadAligned(const std::uint8_t* pointer) noexcept -> Storage
+        static auto LoadAligned(const std::uint8_t* pointer) noexcept -> Storage
         {
             Storage result;
             _mm_store_si128(reinterpret_cast<__m128i*>(result.Data()),
@@ -947,19 +947,19 @@ namespace NGIN::SIMD::detail
             return result;
         }
 
-        static constexpr void Store(const Storage& storage, std::uint8_t* pointer) noexcept
+        static void Store(const Storage& storage, std::uint8_t* pointer) noexcept
         {
             _mm_storeu_si128(reinterpret_cast<__m128i*>(pointer),
                              _mm_loadu_si128(reinterpret_cast<const __m128i*>(storage.Data())));
         }
 
-        static constexpr void StoreAligned(const Storage& storage, std::uint8_t* pointer) noexcept
+        static void StoreAligned(const Storage& storage, std::uint8_t* pointer) noexcept
         {
             _mm_store_si128(reinterpret_cast<__m128i*>(pointer),
                             _mm_loadu_si128(reinterpret_cast<const __m128i*>(storage.Data())));
         }
 
-        static constexpr auto BitwiseAnd(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        static auto BitwiseAnd(const Storage& lhs, const Storage& rhs) noexcept -> Storage
         {
             Storage       result;
             const __m128i blended = _mm_and_si128(_mm_loadu_si128(reinterpret_cast<const __m128i*>(lhs.Data())),
@@ -968,7 +968,7 @@ namespace NGIN::SIMD::detail
             return result;
         }
 
-        static constexpr auto BitwiseOr(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        static auto BitwiseOr(const Storage& lhs, const Storage& rhs) noexcept -> Storage
         {
             Storage       result;
             const __m128i blended = _mm_or_si128(_mm_loadu_si128(reinterpret_cast<const __m128i*>(lhs.Data())),
@@ -977,7 +977,7 @@ namespace NGIN::SIMD::detail
             return result;
         }
 
-        static constexpr auto BitwiseXor(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        static auto BitwiseXor(const Storage& lhs, const Storage& rhs) noexcept -> Storage
         {
             Storage       result;
             const __m128i blended = _mm_xor_si128(_mm_loadu_si128(reinterpret_cast<const __m128i*>(lhs.Data())),
@@ -986,7 +986,7 @@ namespace NGIN::SIMD::detail
             return result;
         }
 
-        static constexpr auto AndNot(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        static auto AndNot(const Storage& lhs, const Storage& rhs) noexcept -> Storage
         {
             Storage       result;
             const __m128i blended = _mm_andnot_si128(_mm_loadu_si128(reinterpret_cast<const __m128i*>(rhs.Data())),
@@ -1061,7 +1061,7 @@ namespace NGIN::SIMD::detail
             return mask;
         }
 
-        static constexpr auto Load(const std::int8_t* pointer) noexcept -> Storage
+        static auto Load(const std::int8_t* pointer) noexcept -> Storage
         {
             Storage result;
             _mm_storeu_si128(reinterpret_cast<__m128i*>(result.Data()),
@@ -1069,7 +1069,7 @@ namespace NGIN::SIMD::detail
             return result;
         }
 
-        static constexpr auto LoadAligned(const std::int8_t* pointer) noexcept -> Storage
+        static auto LoadAligned(const std::int8_t* pointer) noexcept -> Storage
         {
             Storage result;
             _mm_store_si128(reinterpret_cast<__m128i*>(result.Data()),
@@ -1077,19 +1077,19 @@ namespace NGIN::SIMD::detail
             return result;
         }
 
-        static constexpr void Store(const Storage& storage, std::int8_t* pointer) noexcept
+        static void Store(const Storage& storage, std::int8_t* pointer) noexcept
         {
             _mm_storeu_si128(reinterpret_cast<__m128i*>(pointer),
                              _mm_loadu_si128(reinterpret_cast<const __m128i*>(storage.Data())));
         }
 
-        static constexpr void StoreAligned(const Storage& storage, std::int8_t* pointer) noexcept
+        static void StoreAligned(const Storage& storage, std::int8_t* pointer) noexcept
         {
             _mm_store_si128(reinterpret_cast<__m128i*>(pointer),
                             _mm_loadu_si128(reinterpret_cast<const __m128i*>(storage.Data())));
         }
 
-        static constexpr auto BitwiseAnd(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        static auto BitwiseAnd(const Storage& lhs, const Storage& rhs) noexcept -> Storage
         {
             Storage       result;
             const __m128i blended = _mm_and_si128(_mm_loadu_si128(reinterpret_cast<const __m128i*>(lhs.Data())),
@@ -1098,7 +1098,7 @@ namespace NGIN::SIMD::detail
             return result;
         }
 
-        static constexpr auto BitwiseOr(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        static auto BitwiseOr(const Storage& lhs, const Storage& rhs) noexcept -> Storage
         {
             Storage       result;
             const __m128i blended = _mm_or_si128(_mm_loadu_si128(reinterpret_cast<const __m128i*>(lhs.Data())),
@@ -1107,7 +1107,7 @@ namespace NGIN::SIMD::detail
             return result;
         }
 
-        static constexpr auto BitwiseXor(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        static auto BitwiseXor(const Storage& lhs, const Storage& rhs) noexcept -> Storage
         {
             Storage       result;
             const __m128i blended = _mm_xor_si128(_mm_loadu_si128(reinterpret_cast<const __m128i*>(lhs.Data())),
@@ -1116,7 +1116,7 @@ namespace NGIN::SIMD::detail
             return result;
         }
 
-        static constexpr auto AndNot(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        static auto AndNot(const Storage& lhs, const Storage& rhs) noexcept -> Storage
         {
             Storage       result;
             const __m128i blended = _mm_andnot_si128(_mm_loadu_si128(reinterpret_cast<const __m128i*>(rhs.Data())),
@@ -1703,7 +1703,7 @@ namespace NGIN::SIMD::detail
             return mask;
         }
 
-        static constexpr auto Load(const std::uint8_t* pointer) noexcept -> Storage
+        static auto Load(const std::uint8_t* pointer) noexcept -> Storage
         {
             Storage result;
             _mm256_storeu_si256(reinterpret_cast<__m256i*>(result.Data()),
@@ -1711,7 +1711,7 @@ namespace NGIN::SIMD::detail
             return result;
         }
 
-        static constexpr auto LoadAligned(const std::uint8_t* pointer) noexcept -> Storage
+        static auto LoadAligned(const std::uint8_t* pointer) noexcept -> Storage
         {
             Storage result;
             _mm256_storeu_si256(reinterpret_cast<__m256i*>(result.Data()),
@@ -1719,19 +1719,19 @@ namespace NGIN::SIMD::detail
             return result;
         }
 
-        static constexpr void Store(const Storage& storage, std::uint8_t* pointer) noexcept
+        static void Store(const Storage& storage, std::uint8_t* pointer) noexcept
         {
             _mm256_storeu_si256(reinterpret_cast<__m256i*>(pointer),
                                 _mm256_loadu_si256(reinterpret_cast<const __m256i*>(storage.Data())));
         }
 
-        static constexpr void StoreAligned(const Storage& storage, std::uint8_t* pointer) noexcept
+        static void StoreAligned(const Storage& storage, std::uint8_t* pointer) noexcept
         {
             _mm256_store_si256(reinterpret_cast<__m256i*>(pointer),
                                _mm256_loadu_si256(reinterpret_cast<const __m256i*>(storage.Data())));
         }
 
-        static constexpr auto BitwiseAnd(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        static auto BitwiseAnd(const Storage& lhs, const Storage& rhs) noexcept -> Storage
         {
             Storage       result;
             const __m256i blended = _mm256_and_si256(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(lhs.Data())),
@@ -1740,7 +1740,7 @@ namespace NGIN::SIMD::detail
             return result;
         }
 
-        static constexpr auto BitwiseOr(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        static auto BitwiseOr(const Storage& lhs, const Storage& rhs) noexcept -> Storage
         {
             Storage       result;
             const __m256i blended = _mm256_or_si256(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(lhs.Data())),
@@ -1749,7 +1749,7 @@ namespace NGIN::SIMD::detail
             return result;
         }
 
-        static constexpr auto BitwiseXor(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        static auto BitwiseXor(const Storage& lhs, const Storage& rhs) noexcept -> Storage
         {
             Storage       result;
             const __m256i blended = _mm256_xor_si256(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(lhs.Data())),
@@ -1758,7 +1758,7 @@ namespace NGIN::SIMD::detail
             return result;
         }
 
-        static constexpr auto AndNot(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        static auto AndNot(const Storage& lhs, const Storage& rhs) noexcept -> Storage
         {
             Storage       result;
             const __m256i blended = _mm256_andnot_si256(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(rhs.Data())),
@@ -1833,7 +1833,7 @@ namespace NGIN::SIMD::detail
             return mask;
         }
 
-        static constexpr auto Load(const std::int8_t* pointer) noexcept -> Storage
+        static auto Load(const std::int8_t* pointer) noexcept -> Storage
         {
             Storage result;
             _mm256_storeu_si256(reinterpret_cast<__m256i*>(result.Data()),
@@ -1841,7 +1841,7 @@ namespace NGIN::SIMD::detail
             return result;
         }
 
-        static constexpr auto LoadAligned(const std::int8_t* pointer) noexcept -> Storage
+        static auto LoadAligned(const std::int8_t* pointer) noexcept -> Storage
         {
             Storage result;
             _mm256_storeu_si256(reinterpret_cast<__m256i*>(result.Data()),
@@ -1849,19 +1849,19 @@ namespace NGIN::SIMD::detail
             return result;
         }
 
-        static constexpr void Store(const Storage& storage, std::int8_t* pointer) noexcept
+        static void Store(const Storage& storage, std::int8_t* pointer) noexcept
         {
             _mm256_storeu_si256(reinterpret_cast<__m256i*>(pointer),
                                 _mm256_loadu_si256(reinterpret_cast<const __m256i*>(storage.Data())));
         }
 
-        static constexpr void StoreAligned(const Storage& storage, std::int8_t* pointer) noexcept
+        static void StoreAligned(const Storage& storage, std::int8_t* pointer) noexcept
         {
             _mm256_store_si256(reinterpret_cast<__m256i*>(pointer),
                                _mm256_loadu_si256(reinterpret_cast<const __m256i*>(storage.Data())));
         }
 
-        static constexpr auto BitwiseAnd(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        static auto BitwiseAnd(const Storage& lhs, const Storage& rhs) noexcept -> Storage
         {
             Storage       result;
             const __m256i blended = _mm256_and_si256(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(lhs.Data())),
@@ -1870,7 +1870,7 @@ namespace NGIN::SIMD::detail
             return result;
         }
 
-        static constexpr auto BitwiseOr(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        static auto BitwiseOr(const Storage& lhs, const Storage& rhs) noexcept -> Storage
         {
             Storage       result;
             const __m256i blended = _mm256_or_si256(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(lhs.Data())),
@@ -1879,7 +1879,7 @@ namespace NGIN::SIMD::detail
             return result;
         }
 
-        static constexpr auto BitwiseXor(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        static auto BitwiseXor(const Storage& lhs, const Storage& rhs) noexcept -> Storage
         {
             Storage       result;
             const __m256i blended = _mm256_xor_si256(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(lhs.Data())),
@@ -1888,7 +1888,7 @@ namespace NGIN::SIMD::detail
             return result;
         }
 
-        static constexpr auto AndNot(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        static auto AndNot(const Storage& lhs, const Storage& rhs) noexcept -> Storage
         {
             Storage       result;
             const __m256i blended = _mm256_andnot_si256(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(rhs.Data())),

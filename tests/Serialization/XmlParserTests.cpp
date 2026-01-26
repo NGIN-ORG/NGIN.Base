@@ -34,7 +34,9 @@ TEST_CASE("XmlParser decodes entities", "[serialization][xml]")
     using namespace NGIN::Serialization;
 
     const char* input  = R"(<root>Tom &amp; Jerry</root>)";
-    auto        result = XmlParser::Parse(std::string_view {input});
+    XmlParseOptions options;
+    options.decodeEntities = true;
+    auto result = XmlParser::Parse(std::string_view {input}, options);
     REQUIRE(result.HasValue());
 
     const XmlElement* root = result.ValueUnsafe().Root();
