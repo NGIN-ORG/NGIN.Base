@@ -28,14 +28,14 @@ namespace NGIN::Exceptions
 
         /// @brief Constructor with a String message.
         /// @param message The exception message.
-        NotSupportedException(const NGIN::Containers::String& message) noexcept
+        NotSupportedException(const NGIN::Text::String& message) noexcept
             : Exception(message)
         {
         }
 
         /// @brief Constructor with an rvalue-ref String message.
         /// @param message The exception message.
-        NotSupportedException(NGIN::Containers::String&& message) noexcept
+        NotSupportedException(NGIN::Text::String&& message) noexcept
             : Exception(std::move(message))
         {
         }
@@ -61,4 +61,4 @@ namespace NGIN::Exceptions
         /// @brief Destructor.
         virtual ~NotSupportedException() noexcept = default;
     };
-} // namespace NGIN::Exceptions
+}// namespace NGIN::Exceptions

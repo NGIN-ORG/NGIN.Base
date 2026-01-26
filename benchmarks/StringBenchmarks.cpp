@@ -1,20 +1,20 @@
 #include <NGIN/Benchmark.hpp>
-#include <NGIN/Containers/String.hpp>
+#include <NGIN/Text/String.hpp>
 #include <string>
 #include <iostream>
 #include <random>
 
 using NGIN::Benchmark;
 using NGIN::BenchmarkContext;
-using NGIN::Containers::String;
+using NGIN::Text::String;
 using NGIN::Units::Milliseconds;
 
 // Helper to generate random strings
 template<typename StrType>
 void fill_random_strings(std::vector<StrType>& vec, size_t count, size_t len)
 {
-    static const char charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    static std::mt19937 rng(123);
+    static const char                            charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    static std::mt19937                          rng(123);
     static std::uniform_int_distribution<size_t> char_dist(0, sizeof(charset) - 2);
     vec.resize(count);
     for (size_t i = 0; i < count; ++i)
@@ -224,7 +224,7 @@ int main()
     // --- CStr Access ---
     Benchmark::Register([](BenchmarkContext& ctx) {
         std::vector<std::string> vec(N, "shortstr");
-        size_t sum = 0;
+        size_t                   sum = 0;
         ctx.start();
         for (size_t i = 0; i < N; ++i)
         {
@@ -237,7 +237,7 @@ int main()
 
     Benchmark::Register([](BenchmarkContext& ctx) {
         std::vector<String> vec(N, String("shortstr"));
-        size_t sum = 0;
+        size_t              sum = 0;
         ctx.start();
         for (size_t i = 0; i < N; ++i)
         {
@@ -303,7 +303,7 @@ int main()
     // --- Move Assignment ---
     Benchmark::Register([](BenchmarkContext& ctx) {
         std::vector<std::string> src(N, "shortstr");
-        std::string s;
+        std::string              s;
         ctx.start();
         for (size_t i = 0; i < N; ++i)
         {
@@ -316,7 +316,7 @@ int main()
 
     Benchmark::Register([](BenchmarkContext& ctx) {
         std::vector<String> src(N, String("shortstr"));
-        String s;
+        String              s;
         ctx.start();
         for (size_t i = 0; i < N; ++i)
         {

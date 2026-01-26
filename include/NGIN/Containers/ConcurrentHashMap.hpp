@@ -34,7 +34,7 @@ namespace NGIN::Containers
             Tombstone,
         };
 
-        constexpr bool IsPowerOfTwo(std::size_t value) noexcept
+        constexpr bool IsPowerOfTwoTemp(std::size_t value) noexcept
         {
             return value && ((value & (value - 1)) == 0);
         }
@@ -203,7 +203,7 @@ namespace NGIN::Containers
              std::size_t              GroupSize = 16>
     class ConcurrentHashMap
     {
-        static_assert(detail::IsPowerOfTwo(GroupSize), "GroupSize must be a power of two.");
+        static_assert(detail::IsPowerOfTwoTemp(GroupSize), "GroupSize must be a power of two.");
 
     public:
         using key_type                         = Key;
@@ -441,8 +441,8 @@ namespace NGIN::Containers
 
         bool TryGet(const Key& key, Value& outValue) const
         {
-            const std::size_t hash = ComputeHash(key);
-            ViewToken token = const_cast<ConcurrentHashMap*>(this)->AcquireGuardedView();
+            const std::size_t hash  = ComputeHash(key);
+            ViewToken         token = const_cast<ConcurrentHashMap*>(this)->AcquireGuardedView();
             if (TryCopyValueInView(token.view, key, hash, outValue))
             {
                 const_cast<ConcurrentHashMap*>(this)->ReleaseGuard(token, false);
@@ -1226,7 +1226,7 @@ namespace NGIN::Containers
                     // No slot found under current probe budget; assist remaining migration work then retry.
                     HelpMigration(state, 1);
                     backoff.Pause();
-                    continue; // Retry until slot acquired (capacity chosen at migration start should have space)
+                    continue;// Retry until slot acquired (capacity chosen at migration start should have space)
                 }
 
                 if (!probe.isNew)

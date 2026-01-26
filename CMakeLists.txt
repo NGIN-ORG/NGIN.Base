@@ -192,6 +192,13 @@ list(APPEND NGIN_BASE_CORE_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/TcpListener.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/UdpSocket.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/PollerIocp.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/File.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/FileView.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/Path.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Serialization/JSON/JsonParser.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Serialization/JSON/JsonArchive.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Serialization/XML/XmlParser.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Serialization/XML/XmlArchive.cpp
 )
 
 if(NGIN_BASE_BUILD_STATIC OR NGIN_BASE_BUILD_SHARED)

@@ -4,7 +4,7 @@
 #include <optional>
 #include <exception>
 
-#include <NGIN/Containers/String.hpp>
+#include <NGIN/Text/String.hpp>
 
 namespace NGIN::Exceptions
 {

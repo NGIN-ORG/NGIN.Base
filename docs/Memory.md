@@ -308,7 +308,7 @@ Allocator propagation follows `AllocatorPropagationTraits<Alloc>` (move-propagat
 - allocator-backed heap growth beyond SBO
 
 ```cpp
-using String = NGIN::Containers::String; // alias in String.hpp
+using String = NGIN::Text::String; // alias in String.hpp
 String s("hello");
 s += " world";
 ```

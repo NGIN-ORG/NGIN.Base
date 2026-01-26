@@ -308,6 +308,51 @@ TEST_CASE("Mask operations and predicates")
     CHECK(combined.GetLane(3));
 }
 
+TEST_CASE("MaskToBits encodes lane bits")
+{
+    const auto mask = MakeMaskFromInitializer<ScalarTag, 8>({true, false, true, true, false, false, false, true});
+    CHECK(MaskToBits(mask) == 0x8D);
+}
+
+TEST_CASE("SIMD byte scan helpers")
+{
+    constexpr std::array<std::uint8_t, 16> data {
+            static_cast<std::uint8_t>('a'),
+            static_cast<std::uint8_t>('b'),
+            static_cast<std::uint8_t>('c'),
+            static_cast<std::uint8_t>('d'),
+            static_cast<std::uint8_t>('e'),
+            static_cast<std::uint8_t>('f'),
+            static_cast<std::uint8_t>('g'),
+            static_cast<std::uint8_t>('h'),
+            static_cast<std::uint8_t>('i'),
+            static_cast<std::uint8_t>('j'),
+            static_cast<std::uint8_t>('k'),
+            static_cast<std::uint8_t>('l'),
+            static_cast<std::uint8_t>('m'),
+            static_cast<std::uint8_t>('n'),
+            static_cast<std::uint8_t>('o'),
+            static_cast<std::uint8_t>('p'),
+    };
+
+    CHECK(FindEqByte<ScalarTag>(data.data(), data.size(), static_cast<std::uint8_t>('a')) == 0);
+    CHECK(FindEqByte<ScalarTag>(data.data(), data.size(), static_cast<std::uint8_t>('m')) == 12);
+    CHECK(FindEqByte<ScalarTag>(data.data(), data.size(), static_cast<std::uint8_t>('z')) == data.size());
+
+    CHECK(FindAnyByte<ScalarTag>(data.data(), data.size(), static_cast<std::uint8_t>('q'), static_cast<std::uint8_t>('b')) == 1);
+    CHECK(FindAnyByte<ScalarTag>(data.data(), data.size(),
+                                 static_cast<std::uint8_t>('x'),
+                                 static_cast<std::uint8_t>('y'),
+                                 static_cast<std::uint8_t>('o'))
+          == 14);
+    CHECK(FindAnyByte<ScalarTag>(data.data(), data.size(),
+                                 static_cast<std::uint8_t>('x'),
+                                 static_cast<std::uint8_t>('y'),
+                                 static_cast<std::uint8_t>('z'),
+                                 static_cast<std::uint8_t>('p'))
+          == 15);
+}
+
 TEST_CASE("Vec utilities Select Reverse Zip")
 {
     using Vec4i     = Vec<int, ScalarTag, 4>;

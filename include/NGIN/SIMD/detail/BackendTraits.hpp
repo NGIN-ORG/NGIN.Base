@@ -876,6 +876,296 @@ namespace NGIN::SIMD::detail
     };
 
     template<>
+    struct BackendTraits<SSE2Tag, std::uint8_t> : BackendTraits<ScalarTag, std::uint8_t>
+    {
+        using Base = BackendTraits<ScalarTag, std::uint8_t>;
+
+        static constexpr int native_lanes = 16;
+
+        template<int Lanes>
+        using Storage = typename Base::template Storage<Lanes>;
+
+        template<int Lanes>
+        using MaskStorage = typename BackendTraits<SSE2Tag, bool>::template MaskStorage<Lanes>;
+
+        template<int Lanes>
+        struct Ops : Base::template Ops<Lanes>
+        {
+        };
+    };
+
+    template<>
+    struct BackendTraits<SSE2Tag, std::int8_t> : BackendTraits<ScalarTag, std::int8_t>
+    {
+        using Base = BackendTraits<ScalarTag, std::int8_t>;
+
+        static constexpr int native_lanes = 16;
+
+        template<int Lanes>
+        using Storage = typename Base::template Storage<Lanes>;
+
+        template<int Lanes>
+        using MaskStorage = typename BackendTraits<SSE2Tag, bool>::template MaskStorage<Lanes>;
+
+        template<int Lanes>
+        struct Ops : Base::template Ops<Lanes>
+        {
+        };
+    };
+
+    template<>
+    struct BackendTraits<SSE2Tag, std::uint8_t>::Ops<BackendTraits<SSE2Tag, std::uint8_t>::native_lanes>
+        : BackendTraits<SSE2Tag, std::uint8_t>::Base::template Ops<BackendTraits<SSE2Tag, std::uint8_t>::native_lanes>
+    {
+        using BaseOps  = BackendTraits<SSE2Tag, std::uint8_t>::Base::template Ops<BackendTraits<SSE2Tag, std::uint8_t>::native_lanes>;
+        using Storage  = BackendTraits<SSE2Tag, std::uint8_t>::template Storage<BackendTraits<SSE2Tag, std::uint8_t>::native_lanes>;
+        using MaskType = BackendTraits<SSE2Tag, bool>::template MaskStorage<BackendTraits<SSE2Tag, std::uint8_t>::native_lanes>;
+
+        static inline auto MaskFromBitmask(int bitmask) noexcept -> MaskType
+        {
+            MaskType mask {};
+            for (int lane = 0; lane < BackendTraits<SSE2Tag, std::uint8_t>::native_lanes; ++lane)
+            {
+                mask.Set(lane, ((bitmask >> lane) & 0x1) != 0);
+            }
+            return mask;
+        }
+
+        static constexpr auto Load(const std::uint8_t* pointer) noexcept -> Storage
+        {
+            Storage result;
+            _mm_storeu_si128(reinterpret_cast<__m128i*>(result.Data()),
+                             _mm_loadu_si128(reinterpret_cast<const __m128i*>(pointer)));
+            return result;
+        }
+
+        static constexpr auto LoadAligned(const std::uint8_t* pointer) noexcept -> Storage
+        {
+            Storage result;
+            _mm_store_si128(reinterpret_cast<__m128i*>(result.Data()),
+                            _mm_load_si128(reinterpret_cast<const __m128i*>(pointer)));
+            return result;
+        }
+
+        static constexpr void Store(const Storage& storage, std::uint8_t* pointer) noexcept
+        {
+            _mm_storeu_si128(reinterpret_cast<__m128i*>(pointer),
+                             _mm_loadu_si128(reinterpret_cast<const __m128i*>(storage.Data())));
+        }
+
+        static constexpr void StoreAligned(const Storage& storage, std::uint8_t* pointer) noexcept
+        {
+            _mm_store_si128(reinterpret_cast<__m128i*>(pointer),
+                            _mm_loadu_si128(reinterpret_cast<const __m128i*>(storage.Data())));
+        }
+
+        static constexpr auto BitwiseAnd(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        {
+            Storage       result;
+            const __m128i blended = _mm_and_si128(_mm_loadu_si128(reinterpret_cast<const __m128i*>(lhs.Data())),
+                                                  _mm_loadu_si128(reinterpret_cast<const __m128i*>(rhs.Data())));
+            _mm_storeu_si128(reinterpret_cast<__m128i*>(result.Data()), blended);
+            return result;
+        }
+
+        static constexpr auto BitwiseOr(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        {
+            Storage       result;
+            const __m128i blended = _mm_or_si128(_mm_loadu_si128(reinterpret_cast<const __m128i*>(lhs.Data())),
+                                                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(rhs.Data())));
+            _mm_storeu_si128(reinterpret_cast<__m128i*>(result.Data()), blended);
+            return result;
+        }
+
+        static constexpr auto BitwiseXor(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        {
+            Storage       result;
+            const __m128i blended = _mm_xor_si128(_mm_loadu_si128(reinterpret_cast<const __m128i*>(lhs.Data())),
+                                                  _mm_loadu_si128(reinterpret_cast<const __m128i*>(rhs.Data())));
+            _mm_storeu_si128(reinterpret_cast<__m128i*>(result.Data()), blended);
+            return result;
+        }
+
+        static constexpr auto AndNot(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        {
+            Storage       result;
+            const __m128i blended = _mm_andnot_si128(_mm_loadu_si128(reinterpret_cast<const __m128i*>(rhs.Data())),
+                                                     _mm_loadu_si128(reinterpret_cast<const __m128i*>(lhs.Data())));
+            _mm_storeu_si128(reinterpret_cast<__m128i*>(result.Data()), blended);
+            return result;
+        }
+
+        static auto CompareEq(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
+        {
+            const __m128i cmp = _mm_cmpeq_epi8(_mm_loadu_si128(reinterpret_cast<const __m128i*>(lhs.Data())),
+                                               _mm_loadu_si128(reinterpret_cast<const __m128i*>(rhs.Data())));
+            return MaskFromBitmask(_mm_movemask_epi8(cmp));
+        }
+
+        static auto CompareLt(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
+        {
+            const __m128i bias    = _mm_set1_epi8(static_cast<char>(0x80));
+            const __m128i lhsAdj  = _mm_xor_si128(_mm_loadu_si128(reinterpret_cast<const __m128i*>(lhs.Data())), bias);
+            const __m128i rhsAdj  = _mm_xor_si128(_mm_loadu_si128(reinterpret_cast<const __m128i*>(rhs.Data())), bias);
+            const __m128i cmpMask = _mm_cmplt_epi8(lhsAdj, rhsAdj);
+            return MaskFromBitmask(_mm_movemask_epi8(cmpMask));
+        }
+
+        static auto CompareLe(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
+        {
+            const __m128i eqMask = _mm_cmpeq_epi8(_mm_loadu_si128(reinterpret_cast<const __m128i*>(lhs.Data())),
+                                                  _mm_loadu_si128(reinterpret_cast<const __m128i*>(rhs.Data())));
+            const __m128i bias   = _mm_set1_epi8(static_cast<char>(0x80));
+            const __m128i lhsAdj = _mm_xor_si128(_mm_loadu_si128(reinterpret_cast<const __m128i*>(lhs.Data())), bias);
+            const __m128i rhsAdj = _mm_xor_si128(_mm_loadu_si128(reinterpret_cast<const __m128i*>(rhs.Data())), bias);
+            const __m128i ltMask = _mm_cmplt_epi8(lhsAdj, rhsAdj);
+            return MaskFromBitmask(_mm_movemask_epi8(_mm_or_si128(eqMask, ltMask)));
+        }
+
+        static auto CompareGt(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
+        {
+            const __m128i bias    = _mm_set1_epi8(static_cast<char>(0x80));
+            const __m128i lhsAdj  = _mm_xor_si128(_mm_loadu_si128(reinterpret_cast<const __m128i*>(lhs.Data())), bias);
+            const __m128i rhsAdj  = _mm_xor_si128(_mm_loadu_si128(reinterpret_cast<const __m128i*>(rhs.Data())), bias);
+            const __m128i cmpMask = _mm_cmpgt_epi8(lhsAdj, rhsAdj);
+            return MaskFromBitmask(_mm_movemask_epi8(cmpMask));
+        }
+
+        static auto CompareGe(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
+        {
+            const __m128i eqMask = _mm_cmpeq_epi8(_mm_loadu_si128(reinterpret_cast<const __m128i*>(lhs.Data())),
+                                                  _mm_loadu_si128(reinterpret_cast<const __m128i*>(rhs.Data())));
+            const __m128i bias   = _mm_set1_epi8(static_cast<char>(0x80));
+            const __m128i lhsAdj = _mm_xor_si128(_mm_loadu_si128(reinterpret_cast<const __m128i*>(lhs.Data())), bias);
+            const __m128i rhsAdj = _mm_xor_si128(_mm_loadu_si128(reinterpret_cast<const __m128i*>(rhs.Data())), bias);
+            const __m128i gtMask = _mm_cmpgt_epi8(lhsAdj, rhsAdj);
+            return MaskFromBitmask(_mm_movemask_epi8(_mm_or_si128(eqMask, gtMask)));
+        }
+    };
+
+    template<>
+    struct BackendTraits<SSE2Tag, std::int8_t>::Ops<BackendTraits<SSE2Tag, std::int8_t>::native_lanes>
+        : BackendTraits<SSE2Tag, std::int8_t>::Base::template Ops<BackendTraits<SSE2Tag, std::int8_t>::native_lanes>
+    {
+        using BaseOps  = BackendTraits<SSE2Tag, std::int8_t>::Base::template Ops<BackendTraits<SSE2Tag, std::int8_t>::native_lanes>;
+        using Storage  = BackendTraits<SSE2Tag, std::int8_t>::template Storage<BackendTraits<SSE2Tag, std::int8_t>::native_lanes>;
+        using MaskType = BackendTraits<SSE2Tag, bool>::template MaskStorage<BackendTraits<SSE2Tag, std::int8_t>::native_lanes>;
+
+        static inline auto MaskFromBitmask(int bitmask) noexcept -> MaskType
+        {
+            MaskType mask {};
+            for (int lane = 0; lane < BackendTraits<SSE2Tag, std::int8_t>::native_lanes; ++lane)
+            {
+                mask.Set(lane, ((bitmask >> lane) & 0x1) != 0);
+            }
+            return mask;
+        }
+
+        static constexpr auto Load(const std::int8_t* pointer) noexcept -> Storage
+        {
+            Storage result;
+            _mm_storeu_si128(reinterpret_cast<__m128i*>(result.Data()),
+                             _mm_loadu_si128(reinterpret_cast<const __m128i*>(pointer)));
+            return result;
+        }
+
+        static constexpr auto LoadAligned(const std::int8_t* pointer) noexcept -> Storage
+        {
+            Storage result;
+            _mm_store_si128(reinterpret_cast<__m128i*>(result.Data()),
+                            _mm_load_si128(reinterpret_cast<const __m128i*>(pointer)));
+            return result;
+        }
+
+        static constexpr void Store(const Storage& storage, std::int8_t* pointer) noexcept
+        {
+            _mm_storeu_si128(reinterpret_cast<__m128i*>(pointer),
+                             _mm_loadu_si128(reinterpret_cast<const __m128i*>(storage.Data())));
+        }
+
+        static constexpr void StoreAligned(const Storage& storage, std::int8_t* pointer) noexcept
+        {
+            _mm_store_si128(reinterpret_cast<__m128i*>(pointer),
+                            _mm_loadu_si128(reinterpret_cast<const __m128i*>(storage.Data())));
+        }
+
+        static constexpr auto BitwiseAnd(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        {
+            Storage       result;
+            const __m128i blended = _mm_and_si128(_mm_loadu_si128(reinterpret_cast<const __m128i*>(lhs.Data())),
+                                                  _mm_loadu_si128(reinterpret_cast<const __m128i*>(rhs.Data())));
+            _mm_storeu_si128(reinterpret_cast<__m128i*>(result.Data()), blended);
+            return result;
+        }
+
+        static constexpr auto BitwiseOr(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        {
+            Storage       result;
+            const __m128i blended = _mm_or_si128(_mm_loadu_si128(reinterpret_cast<const __m128i*>(lhs.Data())),
+                                                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(rhs.Data())));
+            _mm_storeu_si128(reinterpret_cast<__m128i*>(result.Data()), blended);
+            return result;
+        }
+
+        static constexpr auto BitwiseXor(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        {
+            Storage       result;
+            const __m128i blended = _mm_xor_si128(_mm_loadu_si128(reinterpret_cast<const __m128i*>(lhs.Data())),
+                                                  _mm_loadu_si128(reinterpret_cast<const __m128i*>(rhs.Data())));
+            _mm_storeu_si128(reinterpret_cast<__m128i*>(result.Data()), blended);
+            return result;
+        }
+
+        static constexpr auto AndNot(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        {
+            Storage       result;
+            const __m128i blended = _mm_andnot_si128(_mm_loadu_si128(reinterpret_cast<const __m128i*>(rhs.Data())),
+                                                     _mm_loadu_si128(reinterpret_cast<const __m128i*>(lhs.Data())));
+            _mm_storeu_si128(reinterpret_cast<__m128i*>(result.Data()), blended);
+            return result;
+        }
+
+        static auto CompareEq(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
+        {
+            const __m128i cmp = _mm_cmpeq_epi8(_mm_loadu_si128(reinterpret_cast<const __m128i*>(lhs.Data())),
+                                               _mm_loadu_si128(reinterpret_cast<const __m128i*>(rhs.Data())));
+            return MaskFromBitmask(_mm_movemask_epi8(cmp));
+        }
+
+        static auto CompareLt(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
+        {
+            const __m128i cmp = _mm_cmplt_epi8(_mm_loadu_si128(reinterpret_cast<const __m128i*>(lhs.Data())),
+                                               _mm_loadu_si128(reinterpret_cast<const __m128i*>(rhs.Data())));
+            return MaskFromBitmask(_mm_movemask_epi8(cmp));
+        }
+
+        static auto CompareLe(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
+        {
+            const __m128i eqMask = _mm_cmpeq_epi8(_mm_loadu_si128(reinterpret_cast<const __m128i*>(lhs.Data())),
+                                                  _mm_loadu_si128(reinterpret_cast<const __m128i*>(rhs.Data())));
+            const __m128i ltMask = _mm_cmplt_epi8(_mm_loadu_si128(reinterpret_cast<const __m128i*>(lhs.Data())),
+                                                  _mm_loadu_si128(reinterpret_cast<const __m128i*>(rhs.Data())));
+            return MaskFromBitmask(_mm_movemask_epi8(_mm_or_si128(eqMask, ltMask)));
+        }
+
+        static auto CompareGt(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
+        {
+            const __m128i cmp = _mm_cmpgt_epi8(_mm_loadu_si128(reinterpret_cast<const __m128i*>(lhs.Data())),
+                                               _mm_loadu_si128(reinterpret_cast<const __m128i*>(rhs.Data())));
+            return MaskFromBitmask(_mm_movemask_epi8(cmp));
+        }
+
+        static auto CompareGe(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
+        {
+            const __m128i eqMask = _mm_cmpeq_epi8(_mm_loadu_si128(reinterpret_cast<const __m128i*>(lhs.Data())),
+                                                  _mm_loadu_si128(reinterpret_cast<const __m128i*>(rhs.Data())));
+            const __m128i gtMask = _mm_cmpgt_epi8(_mm_loadu_si128(reinterpret_cast<const __m128i*>(lhs.Data())),
+                                                  _mm_loadu_si128(reinterpret_cast<const __m128i*>(rhs.Data())));
+            return MaskFromBitmask(_mm_movemask_epi8(_mm_or_si128(eqMask, gtMask)));
+        }
+    };
+
+    template<>
     struct BackendTraits<SSE2Tag, float>::Ops<BackendTraits<SSE2Tag, float>::native_lanes>
         : BackendTraits<SSE2Tag, float>::Base::template Ops<BackendTraits<SSE2Tag, float>::native_lanes>
     {
@@ -1355,6 +1645,296 @@ namespace NGIN::SIMD::detail
     template<>
     struct BackendTraits<AVX2Tag, bool> : BackendTraits<AVX2Tag, float>
     {
+    };
+
+    template<>
+    struct BackendTraits<AVX2Tag, std::uint8_t> : BackendTraits<SSE2Tag, std::uint8_t>
+    {
+        using Base = BackendTraits<SSE2Tag, std::uint8_t>;
+
+        static constexpr int native_lanes = 32;
+
+        template<int Lanes>
+        using Storage = typename Base::template Storage<Lanes>;
+
+        template<int Lanes>
+        using MaskStorage = typename BackendTraits<AVX2Tag, bool>::template MaskStorage<Lanes>;
+
+        template<int Lanes>
+        struct Ops : Base::template Ops<Lanes>
+        {
+        };
+    };
+
+    template<>
+    struct BackendTraits<AVX2Tag, std::int8_t> : BackendTraits<SSE2Tag, std::int8_t>
+    {
+        using Base = BackendTraits<SSE2Tag, std::int8_t>;
+
+        static constexpr int native_lanes = 32;
+
+        template<int Lanes>
+        using Storage = typename Base::template Storage<Lanes>;
+
+        template<int Lanes>
+        using MaskStorage = typename BackendTraits<AVX2Tag, bool>::template MaskStorage<Lanes>;
+
+        template<int Lanes>
+        struct Ops : Base::template Ops<Lanes>
+        {
+        };
+    };
+
+    template<>
+    struct BackendTraits<AVX2Tag, std::uint8_t>::Ops<BackendTraits<AVX2Tag, std::uint8_t>::native_lanes>
+        : BackendTraits<AVX2Tag, std::uint8_t>::Base::template Ops<BackendTraits<AVX2Tag, std::uint8_t>::native_lanes>
+    {
+        using BaseOps  = BackendTraits<AVX2Tag, std::uint8_t>::Base::template Ops<BackendTraits<AVX2Tag, std::uint8_t>::native_lanes>;
+        using Storage  = BackendTraits<AVX2Tag, std::uint8_t>::template Storage<BackendTraits<AVX2Tag, std::uint8_t>::native_lanes>;
+        using MaskType = BackendTraits<AVX2Tag, bool>::template MaskStorage<BackendTraits<AVX2Tag, std::uint8_t>::native_lanes>;
+
+        static inline auto MaskFromBitmask(int bitmask) noexcept -> MaskType
+        {
+            MaskType mask {};
+            for (int lane = 0; lane < BackendTraits<AVX2Tag, std::uint8_t>::native_lanes; ++lane)
+            {
+                mask.Set(lane, ((bitmask >> lane) & 0x1) != 0);
+            }
+            return mask;
+        }
+
+        static constexpr auto Load(const std::uint8_t* pointer) noexcept -> Storage
+        {
+            Storage result;
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(result.Data()),
+                                _mm256_loadu_si256(reinterpret_cast<const __m256i*>(pointer)));
+            return result;
+        }
+
+        static constexpr auto LoadAligned(const std::uint8_t* pointer) noexcept -> Storage
+        {
+            Storage result;
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(result.Data()),
+                                _mm256_load_si256(reinterpret_cast<const __m256i*>(pointer)));
+            return result;
+        }
+
+        static constexpr void Store(const Storage& storage, std::uint8_t* pointer) noexcept
+        {
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(pointer),
+                                _mm256_loadu_si256(reinterpret_cast<const __m256i*>(storage.Data())));
+        }
+
+        static constexpr void StoreAligned(const Storage& storage, std::uint8_t* pointer) noexcept
+        {
+            _mm256_store_si256(reinterpret_cast<__m256i*>(pointer),
+                               _mm256_loadu_si256(reinterpret_cast<const __m256i*>(storage.Data())));
+        }
+
+        static constexpr auto BitwiseAnd(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        {
+            Storage       result;
+            const __m256i blended = _mm256_and_si256(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(lhs.Data())),
+                                                     _mm256_loadu_si256(reinterpret_cast<const __m256i*>(rhs.Data())));
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(result.Data()), blended);
+            return result;
+        }
+
+        static constexpr auto BitwiseOr(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        {
+            Storage       result;
+            const __m256i blended = _mm256_or_si256(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(lhs.Data())),
+                                                    _mm256_loadu_si256(reinterpret_cast<const __m256i*>(rhs.Data())));
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(result.Data()), blended);
+            return result;
+        }
+
+        static constexpr auto BitwiseXor(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        {
+            Storage       result;
+            const __m256i blended = _mm256_xor_si256(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(lhs.Data())),
+                                                     _mm256_loadu_si256(reinterpret_cast<const __m256i*>(rhs.Data())));
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(result.Data()), blended);
+            return result;
+        }
+
+        static constexpr auto AndNot(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        {
+            Storage       result;
+            const __m256i blended = _mm256_andnot_si256(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(rhs.Data())),
+                                                        _mm256_loadu_si256(reinterpret_cast<const __m256i*>(lhs.Data())));
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(result.Data()), blended);
+            return result;
+        }
+
+        static auto CompareEq(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
+        {
+            const __m256i cmp = _mm256_cmpeq_epi8(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(lhs.Data())),
+                                                  _mm256_loadu_si256(reinterpret_cast<const __m256i*>(rhs.Data())));
+            return MaskFromBitmask(_mm256_movemask_epi8(cmp));
+        }
+
+        static auto CompareLt(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
+        {
+            const __m256i bias    = _mm256_set1_epi8(static_cast<char>(0x80));
+            const __m256i lhsAdj  = _mm256_xor_si256(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(lhs.Data())), bias);
+            const __m256i rhsAdj  = _mm256_xor_si256(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(rhs.Data())), bias);
+            const __m256i cmpMask = _mm256_cmpgt_epi8(rhsAdj, lhsAdj);
+            return MaskFromBitmask(_mm256_movemask_epi8(cmpMask));
+        }
+
+        static auto CompareLe(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
+        {
+            const __m256i eqMask = _mm256_cmpeq_epi8(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(lhs.Data())),
+                                                     _mm256_loadu_si256(reinterpret_cast<const __m256i*>(rhs.Data())));
+            const __m256i bias   = _mm256_set1_epi8(static_cast<char>(0x80));
+            const __m256i lhsAdj = _mm256_xor_si256(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(lhs.Data())), bias);
+            const __m256i rhsAdj = _mm256_xor_si256(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(rhs.Data())), bias);
+            const __m256i ltMask = _mm256_cmpgt_epi8(rhsAdj, lhsAdj);
+            return MaskFromBitmask(_mm256_movemask_epi8(_mm256_or_si256(eqMask, ltMask)));
+        }
+
+        static auto CompareGt(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
+        {
+            const __m256i bias    = _mm256_set1_epi8(static_cast<char>(0x80));
+            const __m256i lhsAdj  = _mm256_xor_si256(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(lhs.Data())), bias);
+            const __m256i rhsAdj  = _mm256_xor_si256(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(rhs.Data())), bias);
+            const __m256i cmpMask = _mm256_cmpgt_epi8(lhsAdj, rhsAdj);
+            return MaskFromBitmask(_mm256_movemask_epi8(cmpMask));
+        }
+
+        static auto CompareGe(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
+        {
+            const __m256i eqMask = _mm256_cmpeq_epi8(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(lhs.Data())),
+                                                     _mm256_loadu_si256(reinterpret_cast<const __m256i*>(rhs.Data())));
+            const __m256i bias   = _mm256_set1_epi8(static_cast<char>(0x80));
+            const __m256i lhsAdj = _mm256_xor_si256(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(lhs.Data())), bias);
+            const __m256i rhsAdj = _mm256_xor_si256(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(rhs.Data())), bias);
+            const __m256i gtMask = _mm256_cmpgt_epi8(lhsAdj, rhsAdj);
+            return MaskFromBitmask(_mm256_movemask_epi8(_mm256_or_si256(eqMask, gtMask)));
+        }
+    };
+
+    template<>
+    struct BackendTraits<AVX2Tag, std::int8_t>::Ops<BackendTraits<AVX2Tag, std::int8_t>::native_lanes>
+        : BackendTraits<AVX2Tag, std::int8_t>::Base::template Ops<BackendTraits<AVX2Tag, std::int8_t>::native_lanes>
+    {
+        using BaseOps  = BackendTraits<AVX2Tag, std::int8_t>::Base::template Ops<BackendTraits<AVX2Tag, std::int8_t>::native_lanes>;
+        using Storage  = BackendTraits<AVX2Tag, std::int8_t>::template Storage<BackendTraits<AVX2Tag, std::int8_t>::native_lanes>;
+        using MaskType = BackendTraits<AVX2Tag, bool>::template MaskStorage<BackendTraits<AVX2Tag, std::int8_t>::native_lanes>;
+
+        static inline auto MaskFromBitmask(int bitmask) noexcept -> MaskType
+        {
+            MaskType mask {};
+            for (int lane = 0; lane < BackendTraits<AVX2Tag, std::int8_t>::native_lanes; ++lane)
+            {
+                mask.Set(lane, ((bitmask >> lane) & 0x1) != 0);
+            }
+            return mask;
+        }
+
+        static constexpr auto Load(const std::int8_t* pointer) noexcept -> Storage
+        {
+            Storage result;
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(result.Data()),
+                                _mm256_loadu_si256(reinterpret_cast<const __m256i*>(pointer)));
+            return result;
+        }
+
+        static constexpr auto LoadAligned(const std::int8_t* pointer) noexcept -> Storage
+        {
+            Storage result;
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(result.Data()),
+                                _mm256_load_si256(reinterpret_cast<const __m256i*>(pointer)));
+            return result;
+        }
+
+        static constexpr void Store(const Storage& storage, std::int8_t* pointer) noexcept
+        {
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(pointer),
+                                _mm256_loadu_si256(reinterpret_cast<const __m256i*>(storage.Data())));
+        }
+
+        static constexpr void StoreAligned(const Storage& storage, std::int8_t* pointer) noexcept
+        {
+            _mm256_store_si256(reinterpret_cast<__m256i*>(pointer),
+                               _mm256_loadu_si256(reinterpret_cast<const __m256i*>(storage.Data())));
+        }
+
+        static constexpr auto BitwiseAnd(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        {
+            Storage       result;
+            const __m256i blended = _mm256_and_si256(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(lhs.Data())),
+                                                     _mm256_loadu_si256(reinterpret_cast<const __m256i*>(rhs.Data())));
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(result.Data()), blended);
+            return result;
+        }
+
+        static constexpr auto BitwiseOr(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        {
+            Storage       result;
+            const __m256i blended = _mm256_or_si256(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(lhs.Data())),
+                                                    _mm256_loadu_si256(reinterpret_cast<const __m256i*>(rhs.Data())));
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(result.Data()), blended);
+            return result;
+        }
+
+        static constexpr auto BitwiseXor(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        {
+            Storage       result;
+            const __m256i blended = _mm256_xor_si256(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(lhs.Data())),
+                                                     _mm256_loadu_si256(reinterpret_cast<const __m256i*>(rhs.Data())));
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(result.Data()), blended);
+            return result;
+        }
+
+        static constexpr auto AndNot(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        {
+            Storage       result;
+            const __m256i blended = _mm256_andnot_si256(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(rhs.Data())),
+                                                        _mm256_loadu_si256(reinterpret_cast<const __m256i*>(lhs.Data())));
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(result.Data()), blended);
+            return result;
+        }
+
+        static auto CompareEq(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
+        {
+            const __m256i cmp = _mm256_cmpeq_epi8(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(lhs.Data())),
+                                                  _mm256_loadu_si256(reinterpret_cast<const __m256i*>(rhs.Data())));
+            return MaskFromBitmask(_mm256_movemask_epi8(cmp));
+        }
+
+        static auto CompareLt(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
+        {
+            const __m256i cmp = _mm256_cmpgt_epi8(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(rhs.Data())),
+                                                  _mm256_loadu_si256(reinterpret_cast<const __m256i*>(lhs.Data())));
+            return MaskFromBitmask(_mm256_movemask_epi8(cmp));
+        }
+
+        static auto CompareLe(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
+        {
+            const __m256i eqMask = _mm256_cmpeq_epi8(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(lhs.Data())),
+                                                     _mm256_loadu_si256(reinterpret_cast<const __m256i*>(rhs.Data())));
+            const __m256i ltMask = _mm256_cmpgt_epi8(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(rhs.Data())),
+                                                     _mm256_loadu_si256(reinterpret_cast<const __m256i*>(lhs.Data())));
+            return MaskFromBitmask(_mm256_movemask_epi8(_mm256_or_si256(eqMask, ltMask)));
+        }
+
+        static auto CompareGt(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
+        {
+            const __m256i cmp = _mm256_cmpgt_epi8(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(lhs.Data())),
+                                                  _mm256_loadu_si256(reinterpret_cast<const __m256i*>(rhs.Data())));
+            return MaskFromBitmask(_mm256_movemask_epi8(cmp));
+        }
+
+        static auto CompareGe(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
+        {
+            const __m256i eqMask = _mm256_cmpeq_epi8(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(lhs.Data())),
+                                                     _mm256_loadu_si256(reinterpret_cast<const __m256i*>(rhs.Data())));
+            const __m256i gtMask = _mm256_cmpgt_epi8(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(lhs.Data())),
+                                                     _mm256_loadu_si256(reinterpret_cast<const __m256i*>(rhs.Data())));
+            return MaskFromBitmask(_mm256_movemask_epi8(_mm256_or_si256(eqMask, gtMask)));
+        }
     };
 #endif// defined(__AVX2__)
 
@@ -2581,6 +3161,256 @@ namespace NGIN::SIMD::detail
     template<>
     struct BackendTraits<NeonTag, bool> : BackendTraits<NeonTag, float>
     {
+    };
+
+    template<>
+    struct BackendTraits<NeonTag, std::uint8_t> : BackendTraits<ScalarTag, std::uint8_t>
+    {
+        using Base = BackendTraits<ScalarTag, std::uint8_t>;
+
+        static constexpr int native_lanes = 16;
+
+        template<int Lanes>
+        using Storage = typename Base::template Storage<Lanes>;
+
+        template<int Lanes>
+        using MaskStorage = typename BackendTraits<NeonTag, bool>::template MaskStorage<Lanes>;
+
+        template<int Lanes>
+        struct Ops : Base::template Ops<Lanes>
+        {
+        };
+    };
+
+    template<>
+    struct BackendTraits<NeonTag, std::int8_t> : BackendTraits<ScalarTag, std::int8_t>
+    {
+        using Base = BackendTraits<ScalarTag, std::int8_t>;
+
+        static constexpr int native_lanes = 16;
+
+        template<int Lanes>
+        using Storage = typename Base::template Storage<Lanes>;
+
+        template<int Lanes>
+        using MaskStorage = typename BackendTraits<NeonTag, bool>::template MaskStorage<Lanes>;
+
+        template<int Lanes>
+        struct Ops : Base::template Ops<Lanes>
+        {
+        };
+    };
+
+    template<>
+    struct BackendTraits<NeonTag, std::uint8_t>::Ops<BackendTraits<NeonTag, std::uint8_t>::native_lanes>
+        : BackendTraits<NeonTag, std::uint8_t>::Base::template Ops<BackendTraits<NeonTag, std::uint8_t>::native_lanes>
+    {
+        using BaseOps  = BackendTraits<NeonTag, std::uint8_t>::Base::template Ops<BackendTraits<NeonTag, std::uint8_t>::native_lanes>;
+        using Storage  = BackendTraits<NeonTag, std::uint8_t>::template Storage<BackendTraits<NeonTag, std::uint8_t>::native_lanes>;
+        using MaskType = BackendTraits<NeonTag, bool>::template MaskStorage<BackendTraits<NeonTag, std::uint8_t>::native_lanes>;
+
+        static inline auto MaskFromRegister(uint8x16_t reg) noexcept -> MaskType
+        {
+            alignas(16) std::uint8_t bits[BackendTraits<NeonTag, std::uint8_t>::native_lanes];
+            vst1q_u8(bits, reg);
+            MaskType mask {};
+            for (int lane = 0; lane < BackendTraits<NeonTag, std::uint8_t>::native_lanes; ++lane)
+            {
+                mask.Set(lane, bits[lane] != 0);
+            }
+            return mask;
+        }
+
+        static constexpr auto Load(const std::uint8_t* pointer) noexcept -> Storage
+        {
+            Storage result;
+            vst1q_u8(result.Data(), vld1q_u8(pointer));
+            return result;
+        }
+
+        static constexpr auto LoadAligned(const std::uint8_t* pointer) noexcept -> Storage
+        {
+            Storage result;
+            vst1q_u8(result.Data(), vld1q_u8(pointer));
+            return result;
+        }
+
+        static constexpr void Store(const Storage& storage, std::uint8_t* pointer) noexcept
+        {
+            vst1q_u8(pointer, vld1q_u8(storage.Data()));
+        }
+
+        static constexpr void StoreAligned(const Storage& storage, std::uint8_t* pointer) noexcept
+        {
+            vst1q_u8(pointer, vld1q_u8(storage.Data()));
+        }
+
+        static constexpr auto BitwiseAnd(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        {
+            Storage result;
+            vst1q_u8(result.Data(), vandq_u8(vld1q_u8(lhs.Data()), vld1q_u8(rhs.Data())));
+            return result;
+        }
+
+        static constexpr auto BitwiseOr(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        {
+            Storage result;
+            vst1q_u8(result.Data(), vorrq_u8(vld1q_u8(lhs.Data()), vld1q_u8(rhs.Data())));
+            return result;
+        }
+
+        static constexpr auto BitwiseXor(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        {
+            Storage result;
+            vst1q_u8(result.Data(), veorq_u8(vld1q_u8(lhs.Data()), vld1q_u8(rhs.Data())));
+            return result;
+        }
+
+        static constexpr auto AndNot(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        {
+            Storage result;
+            vst1q_u8(result.Data(), vbicq_u8(vld1q_u8(lhs.Data()), vld1q_u8(rhs.Data())));
+            return result;
+        }
+
+        static auto CompareEq(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
+        {
+            return MaskFromRegister(vceqq_u8(vld1q_u8(lhs.Data()), vld1q_u8(rhs.Data())));
+        }
+
+        static auto CompareLt(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
+        {
+            return MaskFromRegister(vcltq_u8(vld1q_u8(lhs.Data()), vld1q_u8(rhs.Data())));
+        }
+
+        static auto CompareLe(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
+        {
+            const auto eq = vceqq_u8(vld1q_u8(lhs.Data()), vld1q_u8(rhs.Data()));
+            const auto lt = vcltq_u8(vld1q_u8(lhs.Data()), vld1q_u8(rhs.Data()));
+            return MaskFromRegister(vorrq_u8(eq, lt));
+        }
+
+        static auto CompareGt(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
+        {
+            return MaskFromRegister(vcgtq_u8(vld1q_u8(lhs.Data()), vld1q_u8(rhs.Data())));
+        }
+
+        static auto CompareGe(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
+        {
+            const auto eq = vceqq_u8(vld1q_u8(lhs.Data()), vld1q_u8(rhs.Data()));
+            const auto gt = vcgtq_u8(vld1q_u8(lhs.Data()), vld1q_u8(rhs.Data()));
+            return MaskFromRegister(vorrq_u8(eq, gt));
+        }
+    };
+
+    template<>
+    struct BackendTraits<NeonTag, std::int8_t>::Ops<BackendTraits<NeonTag, std::int8_t>::native_lanes>
+        : BackendTraits<NeonTag, std::int8_t>::Base::template Ops<BackendTraits<NeonTag, std::int8_t>::native_lanes>
+    {
+        using BaseOps  = BackendTraits<NeonTag, std::int8_t>::Base::template Ops<BackendTraits<NeonTag, std::int8_t>::native_lanes>;
+        using Storage  = BackendTraits<NeonTag, std::int8_t>::template Storage<BackendTraits<NeonTag, std::int8_t>::native_lanes>;
+        using MaskType = BackendTraits<NeonTag, bool>::template MaskStorage<BackendTraits<NeonTag, std::int8_t>::native_lanes>;
+
+        static inline auto MaskFromRegister(uint8x16_t reg) noexcept -> MaskType
+        {
+            alignas(16) std::uint8_t bits[BackendTraits<NeonTag, std::int8_t>::native_lanes];
+            vst1q_u8(bits, reg);
+            MaskType mask {};
+            for (int lane = 0; lane < BackendTraits<NeonTag, std::int8_t>::native_lanes; ++lane)
+            {
+                mask.Set(lane, bits[lane] != 0);
+            }
+            return mask;
+        }
+
+        static constexpr auto Load(const std::int8_t* pointer) noexcept -> Storage
+        {
+            Storage result;
+            vst1q_s8(result.Data(), vld1q_s8(pointer));
+            return result;
+        }
+
+        static constexpr auto LoadAligned(const std::int8_t* pointer) noexcept -> Storage
+        {
+            Storage result;
+            vst1q_s8(result.Data(), vld1q_s8(pointer));
+            return result;
+        }
+
+        static constexpr void Store(const Storage& storage, std::int8_t* pointer) noexcept
+        {
+            vst1q_s8(pointer, vld1q_s8(storage.Data()));
+        }
+
+        static constexpr void StoreAligned(const Storage& storage, std::int8_t* pointer) noexcept
+        {
+            vst1q_s8(pointer, vld1q_s8(storage.Data()));
+        }
+
+        static constexpr auto BitwiseAnd(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        {
+            Storage result;
+            const auto lhsBits = vreinterpretq_u8_s8(vld1q_s8(lhs.Data()));
+            const auto rhsBits = vreinterpretq_u8_s8(vld1q_s8(rhs.Data()));
+            vst1q_s8(result.Data(), vreinterpretq_s8_u8(vandq_u8(lhsBits, rhsBits)));
+            return result;
+        }
+
+        static constexpr auto BitwiseOr(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        {
+            Storage result;
+            const auto lhsBits = vreinterpretq_u8_s8(vld1q_s8(lhs.Data()));
+            const auto rhsBits = vreinterpretq_u8_s8(vld1q_s8(rhs.Data()));
+            vst1q_s8(result.Data(), vreinterpretq_s8_u8(vorrq_u8(lhsBits, rhsBits)));
+            return result;
+        }
+
+        static constexpr auto BitwiseXor(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        {
+            Storage result;
+            const auto lhsBits = vreinterpretq_u8_s8(vld1q_s8(lhs.Data()));
+            const auto rhsBits = vreinterpretq_u8_s8(vld1q_s8(rhs.Data()));
+            vst1q_s8(result.Data(), vreinterpretq_s8_u8(veorq_u8(lhsBits, rhsBits)));
+            return result;
+        }
+
+        static constexpr auto AndNot(const Storage& lhs, const Storage& rhs) noexcept -> Storage
+        {
+            Storage result;
+            const auto lhsBits = vreinterpretq_u8_s8(vld1q_s8(lhs.Data()));
+            const auto rhsBits = vreinterpretq_u8_s8(vld1q_s8(rhs.Data()));
+            vst1q_s8(result.Data(), vreinterpretq_s8_u8(vbicq_u8(lhsBits, rhsBits)));
+            return result;
+        }
+
+        static auto CompareEq(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
+        {
+            return MaskFromRegister(vceqq_s8(vld1q_s8(lhs.Data()), vld1q_s8(rhs.Data())));
+        }
+
+        static auto CompareLt(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
+        {
+            return MaskFromRegister(vcltq_s8(vld1q_s8(lhs.Data()), vld1q_s8(rhs.Data())));
+        }
+
+        static auto CompareLe(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
+        {
+            const auto eq = vceqq_s8(vld1q_s8(lhs.Data()), vld1q_s8(rhs.Data()));
+            const auto lt = vcltq_s8(vld1q_s8(lhs.Data()), vld1q_s8(rhs.Data()));
+            return MaskFromRegister(vorrq_u8(eq, lt));
+        }
+
+        static auto CompareGt(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
+        {
+            return MaskFromRegister(vcgtq_s8(vld1q_s8(lhs.Data()), vld1q_s8(rhs.Data())));
+        }
+
+        static auto CompareGe(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
+        {
+            const auto eq = vceqq_s8(vld1q_s8(lhs.Data()), vld1q_s8(rhs.Data()));
+            const auto gt = vcgtq_s8(vld1q_s8(lhs.Data()), vld1q_s8(rhs.Data()));
+            return MaskFromRegister(vorrq_u8(eq, gt));
+        }
     };
 
     template<>

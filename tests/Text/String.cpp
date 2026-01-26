@@ -1,13 +1,13 @@
 /// @file StringTest.cpp
-/// @brief Tests for NGIN::Containers::String using Catch2.
+/// @brief Tests for NGIN::Text::String using Catch2.
 
-#include <NGIN/Containers/String.hpp>
+#include <NGIN/Text/String.hpp>
 #include <NGIN/Memory/TrackingAllocator.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <cstring>
 #include <string>
 
-using NGIN::Containers::String;
+using NGIN::Text::String;
 
 namespace
 {
@@ -71,14 +71,14 @@ namespace NGIN::Memory
     };
 }// namespace NGIN::Memory
 
-TEST_CASE("String default construction", "[Containers][String]")
+TEST_CASE("String default construction", "[Text][String]")
 {
     String s;
     CHECK(s.GetSize() == 0U);
     CHECK(CStrEqual(s.CStr(), ""));
 }
 
-TEST_CASE("String handles null pointer construction", "[Containers][String]")
+TEST_CASE("String handles null pointer construction", "[Text][String]")
 {
     const char* nullStr = nullptr;
     String      s(nullStr);
@@ -86,14 +86,14 @@ TEST_CASE("String handles null pointer construction", "[Containers][String]")
     CHECK(CStrEqual(s.CStr(), ""));
 }
 
-TEST_CASE("String constructs from small C string", "[Containers][String]")
+TEST_CASE("String constructs from small C string", "[Text][String]")
 {
     String s("Hello");
     CHECK(s.GetSize() == 5U);
     CHECK(CStrEqual(s.CStr(), "Hello"));
 }
 
-TEST_CASE("String constructs from large C string", "[Containers][String]")
+TEST_CASE("String constructs from large C string", "[Text][String]")
 {
     std::string large(60, 'A');
     String      s(large.c_str());
@@ -101,7 +101,7 @@ TEST_CASE("String constructs from large C string", "[Containers][String]")
     CHECK(CStrEqual(s.CStr(), large.c_str()));
 }
 
-TEST_CASE("String copy constructor", "[Containers][String]")
+TEST_CASE("String copy constructor", "[Text][String]")
 {
     SECTION("small buffer")
     {
@@ -122,7 +122,7 @@ TEST_CASE("String copy constructor", "[Containers][String]")
     }
 }
 
-TEST_CASE("String move constructor", "[Containers][String]")
+TEST_CASE("String move constructor", "[Text][String]")
 {
     SECTION("small buffer")
     {
@@ -146,7 +146,7 @@ TEST_CASE("String move constructor", "[Containers][String]")
     }
 }
 
-TEST_CASE("String copy assignment", "[Containers][String]")
+TEST_CASE("String copy assignment", "[Text][String]")
 {
     SECTION("small to small")
     {
@@ -170,7 +170,7 @@ TEST_CASE("String copy assignment", "[Containers][String]")
     }
 }
 
-TEST_CASE("String move assignment", "[Containers][String]")
+TEST_CASE("String move assignment", "[Text][String]")
 {
     SECTION("small buffer")
     {
@@ -196,7 +196,7 @@ TEST_CASE("String move assignment", "[Containers][String]")
     }
 }
 
-TEST_CASE("String append operations", "[Containers][String]")
+TEST_CASE("String append operations", "[Text][String]")
 {
     SECTION("SBO append")
     {
@@ -228,7 +228,7 @@ TEST_CASE("String append operations", "[Containers][String]")
     }
 }
 
-TEST_CASE("String self assignment", "[Containers][String]")
+TEST_CASE("String self assignment", "[Text][String]")
 {
     SECTION("operator=")
     {
@@ -247,7 +247,7 @@ TEST_CASE("String self assignment", "[Containers][String]")
     }
 }
 
-TEST_CASE("String clear and assignment", "[Containers][String]")
+TEST_CASE("String clear and assignment", "[Text][String]")
 {
     String value("Clear me");
     value.clear();
@@ -259,30 +259,30 @@ TEST_CASE("String clear and assignment", "[Containers][String]")
     CHECK(CStrEqual(value.CStr(), "Assigned"));
 }
 
-TEST_CASE("String assign handles overlapping views", "[Containers][String]")
+TEST_CASE("String assign handles overlapping views", "[Text][String]")
 {
-    String value("abcdef");
+    String            value("abcdef");
     String::view_type view = value;
     value.Assign(view.substr(2, 3));
     CHECK(value.GetSize() == 3U);
     CHECK(CStrEqual(value.CStr(), "cde"));
 }
 
-TEST_CASE("String append handles overlapping views", "[Containers][String]")
+TEST_CASE("String append handles overlapping views", "[Text][String]")
 {
-    String value("abcdef");
+    String            value("abcdef");
     String::view_type view = value;
     value.Append(view.substr(1, 4));
     CHECK(value.GetSize() == 10U);
     CHECK(CStrEqual(value.CStr(), "abcdefbcde"));
 }
 
-TEST_CASE("String shrink-to-fit releases heap to SBO", "[Containers][String]")
+TEST_CASE("String shrink-to-fit releases heap to SBO", "[Text][String]")
 {
     using Tracked  = NGIN::Memory::Tracking<NGIN::Memory::SystemAllocator>;
-    using SmallStr = NGIN::Containers::BasicString<char, 16, TrackingRef>;
+    using SmallStr = NGIN::Text::BasicString<char, 16, TrackingRef>;
 
-    Tracked  tracking {NGIN::Memory::SystemAllocator {}};
+    Tracked     tracking {NGIN::Memory::SystemAllocator {}};
     TrackingRef alloc(tracking);
 
     std::string large(40, 'x');
@@ -294,9 +294,9 @@ TEST_CASE("String shrink-to-fit releases heap to SBO", "[Containers][String]")
     CHECK(tracking.GetStats().currentBytes == 0);
 }
 
-TEST_CASE("String swap respects allocator propagation traits", "[Containers][String]")
+TEST_CASE("String swap respects allocator propagation traits", "[Text][String]")
 {
-    using SwapStr = NGIN::Containers::BasicString<char, 32, SwapAllocator>;
+    using SwapStr = NGIN::Text::BasicString<char, 32, SwapAllocator>;
 
     SwapStr left("Left", SwapAllocator {1});
     SwapStr right("Right", SwapAllocator {2});
@@ -308,9 +308,9 @@ TEST_CASE("String swap respects allocator propagation traits", "[Containers][Str
     CHECK(right.GetAllocator().Id() == 2);
 }
 
-TEST_CASE("String supports wide character SBO storage", "[Containers][String]")
+TEST_CASE("String supports wide character SBO storage", "[Text][String]")
 {
-    using WideStr = NGIN::Containers::BasicString<char16_t, 32>;
+    using WideStr = NGIN::Text::BasicString<char16_t, 32>;
     WideStr value(u"hi");
     CHECK(value.Size() == 2U);
     CHECK(value.Data()[0] == u'h');

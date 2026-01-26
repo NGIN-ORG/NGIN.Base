@@ -7,4 +7,5 @@
 #include "NGIN/SIMD/Config.hpp"
 #include "NGIN/SIMD/Tags.hpp"
 #include "NGIN/SIMD/Vec.hpp"
+#include "NGIN/SIMD/Scan.hpp"
 

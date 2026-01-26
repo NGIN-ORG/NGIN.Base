@@ -1540,6 +1540,21 @@ namespace NGIN::SIMD
         return !Mask<Lanes, Backend>::operations::MaskAny(mask.storage);
     }
 
+    template<int Lanes, class Backend>
+    [[nodiscard]] constexpr auto MaskToBits(const Mask<Lanes, Backend>& mask) noexcept -> std::uint64_t
+    {
+        static_assert(Lanes <= 64, "MaskToBits supports up to 64 lanes.");
+        std::uint64_t bits = 0;
+        for (int lane = 0; lane < Lanes; ++lane)
+        {
+            if (mask.GetLane(lane))
+            {
+                bits |= (std::uint64_t {1} << static_cast<unsigned>(lane));
+            }
+        }
+        return bits;
+    }
+
     template<int Lanes, class Backend, class T>
     [[nodiscard]] constexpr auto Select(const Mask<Lanes, Backend>&   mask,
                                         const Vec<T, Backend, Lanes>& a,

@@ -27,7 +27,11 @@
 #include <type_traits>
 #include <utility>
 
-namespace NGIN::Containers
+#ifdef small
+#undef small
+#endif
+
+namespace NGIN::Text
 {
     //--------------------------------------------------------------------------
     // Growth policy
@@ -618,7 +622,7 @@ namespace NGIN::Containers
         void Swap(ThisType& other) noexcept(
                 NGIN::Memory::AllocatorPropagationTraits<Alloc>::IsAlwaysEqual ||
                 (NGIN::Memory::AllocatorPropagationTraits<Alloc>::PropagateOnSwap &&
-                 std::is_nothrow_swappable_v<Alloc>))
+                 std::is_nothrow_swappable_v<Alloc>) )
         {
             using std::swap;
             if (this == &other)
@@ -1041,4 +1045,14 @@ namespace NGIN::Containers
     using AnsiString  = BasicString<char, 16, NGIN::Memory::SystemAllocator, DefaultGrowthPolicy>;
     using AsciiString = BasicString<char, 16, NGIN::Memory::SystemAllocator, DefaultGrowthPolicy>;
 
-}// namespace NGIN::Containers
+    using UTF8String  = BasicString<char, 48, NGIN::Memory::SystemAllocator, DefaultGrowthPolicy>;
+    using UTF16String = BasicString<char16_t, 48, NGIN::Memory::SystemAllocator, DefaultGrowthPolicy>;
+    using UTF32String = BasicString<char32_t, 48, NGIN::Memory::SystemAllocator, DefaultGrowthPolicy>;
+
+#if defined(NGIN_PLATFORM_WINDOWS) | defined(NGIN_PLATFORM_XBOX)
+    using NativeString = WString;
+#else
+    using NativeString = String;
+#endif
+
+}// namespace NGIN::Text
