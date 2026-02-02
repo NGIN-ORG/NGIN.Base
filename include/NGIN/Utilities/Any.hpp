@@ -83,7 +83,8 @@ namespace NGIN::Utilities
             using Storage    = AnyStorage<SboSize>;
             using Descriptor = AnyTypeDescriptor<SboSize, Allocator, TypeIdPolicy>;
 
-            static constexpr bool FitsInline = (sizeof(Stored) <= SboSize) && (alignof(Stored) <= alignof(std::max_align_t));
+            static constexpr bool FitsInline =
+                (sizeof(Stored) <= SboSize) && (alignof(Stored) <= alignof(std::max_align_t));
 
             static void Destroy(Storage& storage, Allocator& allocator) noexcept
             {
@@ -132,7 +133,9 @@ namespace NGIN::Utilities
                     }
                     else
                     {
-                        static_assert(std::is_move_constructible_v<Stored> || std::is_copy_constructible_v<Stored> || std::is_trivially_copyable_v<Stored>,
+                        static_assert(std::is_move_constructible_v<Stored> ||
+                                          std::is_copy_constructible_v<Stored> ||
+                                          std::is_trivially_copyable_v<Stored>,
                                       "Stored type must be movable, copyable, or trivially copyable to reside in Any.");
                     }
                     if constexpr (!std::is_trivially_destructible_v<Stored>)
@@ -243,6 +246,8 @@ namespace NGIN::Utilities
         public:
             using Descriptor = AnyDescriptorBase<SboSize, Allocator, TypeIdPolicy>;
 
+            constexpr AnyViewBase() noexcept = default;
+
             constexpr AnyViewBase(const void* data, const Descriptor* descriptor) noexcept
                 : m_data(data), m_descriptor(descriptor)
             {
@@ -290,6 +295,8 @@ namespace NGIN::Utilities
         using Base       = detail::AnyViewBase<SboSize, Allocator, TypeIdPolicy>;
         using Descriptor = typename Base::Descriptor;
 
+        constexpr AnyView() noexcept : Base(nullptr, nullptr) {}
+
         constexpr AnyView(void* data, const Descriptor* descriptor) noexcept
             : detail::AnyViewBase<SboSize, Allocator, TypeIdPolicy>(data, descriptor)
         {
@@ -321,6 +328,8 @@ namespace NGIN::Utilities
     public:
         using detail::AnyViewBase<SboSize, Allocator, TypeIdPolicy>::AnyViewBase;
 
+        constexpr ConstAnyView() noexcept : detail::AnyViewBase<SboSize, Allocator, TypeIdPolicy>(nullptr, nullptr) {}
+
         template<typename T>
         [[nodiscard]] const T* TryCast() const noexcept
         {
@@ -336,6 +345,7 @@ namespace NGIN::Utilities
 
     /// <summary>
     /// Small-buffer-optimized type-erased container with allocator and visit support.
+    /// Copying an Any that holds a non-copyable, non-trivially-copyable type will throw.
     /// </summary>
     template<std::size_t SboSize = 32,
              class Allocator     = NGIN::Memory::SystemAllocator,
@@ -433,7 +443,8 @@ namespace NGIN::Utilities
         T& Emplace(Args&&... args)
         {
             using Stored               = std::remove_cv_t<T>;
-            constexpr auto& descriptor = detail::AnyDescriptorProvider<Stored, SboSize, Allocator, TypeIdPolicy>::descriptor;
+            constexpr auto& descriptor =
+                detail::AnyDescriptorProvider<Stored, SboSize, Allocator, TypeIdPolicy>::descriptor;
             Reset();
             void* target = nullptr;
             if (descriptor.storesInline)
@@ -565,6 +576,26 @@ namespace NGIN::Utilities
             return std::invoke(std::forward<Fn>(fn), view);
         }
 
+        template<typename Fn>
+        bool TryVisit(Fn&& fn)
+        {
+            if (!m_descriptor)
+                return false;
+            View view {m_descriptor->access(m_storage), m_descriptor};
+            (void)std::invoke(std::forward<Fn>(fn), view);
+            return true;
+        }
+
+        template<typename Fn>
+        bool TryVisit(Fn&& fn) const
+        {
+            if (!m_descriptor)
+                return false;
+            ConstView view {m_descriptor->accessConst(m_storage), m_descriptor};
+            (void)std::invoke(std::forward<Fn>(fn), view);
+            return true;
+        }
+
         [[nodiscard]] View MakeView() noexcept
         {
             return View {m_descriptor ? m_descriptor->access(m_storage) : nullptr, m_descriptor};
@@ -599,6 +630,24 @@ namespace NGIN::Utilities
             if (m_descriptor == nullptr)
                 return nullptr;
             return m_descriptor->accessConst(m_storage);
+        }
+
+        template<typename T>
+        [[nodiscard]] static View FromRef(T& value) noexcept
+        {
+            using Base = std::remove_cv_t<std::remove_reference_t<T>>;
+            constexpr auto& descriptor =
+                detail::AnyDescriptorProvider<Base, SboSize, Allocator, TypeIdPolicy>::descriptor;
+            return View {static_cast<void*>(std::addressof(value)), &descriptor};
+        }
+
+        template<typename T>
+        [[nodiscard]] static ConstView FromConstRef(const T& value) noexcept
+        {
+            using Base = std::remove_cv_t<std::remove_reference_t<T>>;
+            constexpr auto& descriptor =
+                detail::AnyDescriptorProvider<Base, SboSize, Allocator, TypeIdPolicy>::descriptor;
+            return ConstView {static_cast<const void*>(std::addressof(value)), &descriptor};
         }
 
         static Any MakeVoid() noexcept
