@@ -10,6 +10,7 @@
 #include <type_traits>
 #include <functional>
 #include <memory>
+#include <optional>
 
 #include <exception>
 
@@ -40,7 +41,7 @@ namespace NGIN::Async
     public:
         struct promise_type
         {
-            T                       m_value {};
+            std::optional<T>        m_value {};
             AsyncError              m_error {};
             bool                    m_hasError {false};
 #if NGIN_ASYNC_CAPTURE_EXCEPTIONS
@@ -121,7 +122,7 @@ namespace NGIN::Async
 
             void return_value(T value) noexcept
             {
-                m_value = std::move(value);
+                m_value.emplace(std::move(value));
             }
             void return_value(AsyncExpected<T> result) noexcept
             {
@@ -131,10 +132,10 @@ namespace NGIN::Async
                     m_hasError = true;
                     return;
                 }
-                m_value = std::move(*result);
+                m_value.emplace(std::move(*result));
             }
 
-            void return_value(std::unexpected<AsyncError> error) noexcept
+            void return_value(NGIN::Utilities::Unexpected<AsyncError> error) noexcept
             {
                 m_error = error.error();
                 m_hasError = true;
@@ -241,14 +242,18 @@ namespace NGIN::Async
         {
             if (!m_handle)
             {
-                return std::unexpected(MakeAsyncError(AsyncErrorCode::InvalidState));
+                return NGIN::Utilities::Unexpected(MakeAsyncError(AsyncErrorCode::InvalidState));
             }
             auto& p = m_handle.promise();
             if (p.m_hasError)
             {
-                return std::unexpected(p.m_error);
+                return NGIN::Utilities::Unexpected(p.m_error);
             }
-            return std::move(p.m_value);
+            if (!p.m_value.has_value())
+            {
+                return NGIN::Utilities::Unexpected(MakeAsyncError(AsyncErrorCode::InvalidState));
+            }
+            return std::move(*p.m_value);
         }
 
         [[nodiscard]] bool TrySchedule(TaskContext& ctx) noexcept
@@ -309,15 +314,19 @@ namespace NGIN::Async
         {
             if (!m_handle)
             {
-                return std::unexpected(MakeAsyncError(AsyncErrorCode::InvalidState));
+                return NGIN::Utilities::Unexpected(MakeAsyncError(AsyncErrorCode::InvalidState));
             }
             Wait();
             auto& p = m_handle.promise();
             if (p.m_hasError)
             {
-                return std::unexpected(p.m_error);
+                return NGIN::Utilities::Unexpected(p.m_error);
             }
-            return std::move(p.m_value);
+            if (!p.m_value.has_value())
+            {
+                return NGIN::Utilities::Unexpected(MakeAsyncError(AsyncErrorCode::InvalidState));
+            }
+            return std::move(*p.m_value);
         }
 
         [[nodiscard]] bool IsCompleted() const noexcept
@@ -479,39 +488,39 @@ namespace NGIN::Async
                             state->exec,
                             awaiting,
                             +[](void* callbackContext) noexcept -> bool {
-                                auto* state = static_cast<SharedState*>(callbackContext);
+                                auto* sharedState = static_cast<SharedState*>(callbackContext);
                                 bool  expected = false;
-                                if (!state->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
+                                if (!sharedState->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
                                 {
                                     return false;
                                 }
 
-                                state->error = MakeAsyncError(AsyncErrorCode::Canceled);
-                                state->hasError = true;
+                                sharedState->error = MakeAsyncError(AsyncErrorCode::Canceled);
+                                sharedState->hasError = true;
                                 return true;
                             },
                             state.get());
 
                     auto chain =
-                            [](Task& parent, TaskContext& ctx, std::shared_ptr<SharedState> state, Func continuation) -> Detached {
+                            [](Task& parentTask, TaskContext& taskCtx, std::shared_ptr<SharedState> sharedState, Func continuation) -> Detached {
                         AsyncError error {};
                         bool       hasError = false;
 
-                        if (ctx.IsCancellationRequested())
+                        if (taskCtx.IsCancellationRequested())
                         {
                             error = MakeAsyncError(AsyncErrorCode::Canceled);
                             hasError = true;
                         }
                         else
                         {
-                            parent.Schedule(ctx);
-                            auto parentResult = co_await parent;
+                            parentTask.Schedule(taskCtx);
+                            auto parentResult = co_await parentTask;
                             if (!parentResult)
                             {
                                 error = parentResult.error();
                                 hasError = true;
                             }
-                            else if (ctx.IsCancellationRequested())
+                            else if (taskCtx.IsCancellationRequested())
                             {
                                 error = MakeAsyncError(AsyncErrorCode::Canceled);
                                 hasError = true;
@@ -519,7 +528,7 @@ namespace NGIN::Async
                             else
                             {
                                 auto nextTask = continuation(std::move(*parentResult));
-                                nextTask.Schedule(ctx);
+                                nextTask.Schedule(taskCtx);
                                 auto nextResult = co_await nextTask;
                                 if (!nextResult)
                                 {
@@ -530,13 +539,13 @@ namespace NGIN::Async
                         }
 
                         bool expected = false;
-                        if (state->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
+                        if (sharedState->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
                         {
-                            state->error = error;
-                            state->hasError = hasError;
-                            if (state->awaiting)
+                            sharedState->error = error;
+                            sharedState->hasError = hasError;
+                            if (sharedState->awaiting)
                             {
-                                state->exec.Execute(state->awaiting);
+                                sharedState->exec.Execute(sharedState->awaiting);
                             }
                         }
                         co_return;
@@ -549,11 +558,11 @@ namespace NGIN::Async
                 {
                     if (state && state->hasError)
                     {
-                        return std::unexpected(state->error);
+                        return NGIN::Utilities::Unexpected(state->error);
                     }
                     if (ctx.IsCancellationRequested())
                     {
-                        return std::unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
+                        return NGIN::Utilities::Unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
                     }
                     return {};
                 }
@@ -787,12 +796,12 @@ namespace NGIN::Async
         {
             if (!m_handle)
             {
-                return std::unexpected(MakeAsyncError(AsyncErrorCode::InvalidState));
+                return NGIN::Utilities::Unexpected(MakeAsyncError(AsyncErrorCode::InvalidState));
             }
             auto& p = m_handle.promise();
             if (p.m_hasError)
             {
-                return std::unexpected(p.m_error);
+                return NGIN::Utilities::Unexpected(p.m_error);
             }
             return {};
         }
@@ -855,13 +864,13 @@ namespace NGIN::Async
         {
             if (!m_handle)
             {
-                return std::unexpected(MakeAsyncError(AsyncErrorCode::InvalidState));
+                return NGIN::Utilities::Unexpected(MakeAsyncError(AsyncErrorCode::InvalidState));
             }
             Wait();
             auto& p = m_handle.promise();
             if (p.m_hasError)
             {
-                return std::unexpected(p.m_error);
+                return NGIN::Utilities::Unexpected(p.m_error);
             }
             return {};
         }
@@ -1026,39 +1035,39 @@ namespace NGIN::Async
                             state->exec,
                             awaiting,
                             +[](void* callbackContext) noexcept -> bool {
-                                auto* state = static_cast<SharedState*>(callbackContext);
+                                auto* sharedState = static_cast<SharedState*>(callbackContext);
                                 bool  expected = false;
-                                if (!state->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
+                                if (!sharedState->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
                                 {
                                     return false;
                                 }
 
-                                state->error = MakeAsyncError(AsyncErrorCode::Canceled);
-                                state->hasError = true;
+                                sharedState->error = MakeAsyncError(AsyncErrorCode::Canceled);
+                                sharedState->hasError = true;
                                 return true;
                             },
                             state.get());
 
                     auto chain =
-                            [](Task& parent, TaskContext& ctx, std::shared_ptr<SharedState> state, Func continuation) -> Detached {
+                            [](Task& parentTask, TaskContext& taskCtx, std::shared_ptr<SharedState> sharedState, Func continuation) -> Detached {
                         AsyncError error {};
                         bool       hasError = false;
 
-                        if (ctx.IsCancellationRequested())
+                        if (taskCtx.IsCancellationRequested())
                         {
                             error = MakeAsyncError(AsyncErrorCode::Canceled);
                             hasError = true;
                         }
                         else
                         {
-                            parent.Schedule(ctx);
-                            auto parentResult = co_await parent;
+                            parentTask.Schedule(taskCtx);
+                            auto parentResult = co_await parentTask;
                             if (!parentResult)
                             {
                                 error = parentResult.error();
                                 hasError = true;
                             }
-                            else if (ctx.IsCancellationRequested())
+                            else if (taskCtx.IsCancellationRequested())
                             {
                                 error = MakeAsyncError(AsyncErrorCode::Canceled);
                                 hasError = true;
@@ -1066,7 +1075,7 @@ namespace NGIN::Async
                             else
                             {
                                 auto nextTask = continuation();
-                                nextTask.Schedule(ctx);
+                                nextTask.Schedule(taskCtx);
                                 auto nextResult = co_await nextTask;
                                 if (!nextResult)
                                 {
@@ -1077,13 +1086,13 @@ namespace NGIN::Async
                         }
 
                         bool expected = false;
-                        if (state->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
+                        if (sharedState->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
                         {
-                            state->error = error;
-                            state->hasError = hasError;
-                            if (state->awaiting)
+                            sharedState->error = error;
+                            sharedState->hasError = hasError;
+                            if (sharedState->awaiting)
                             {
-                                state->exec.Execute(state->awaiting);
+                                sharedState->exec.Execute(sharedState->awaiting);
                             }
                         }
                         co_return;
@@ -1096,11 +1105,11 @@ namespace NGIN::Async
                 {
                     if (state && state->hasError)
                     {
-                        return std::unexpected(state->error);
+                        return NGIN::Utilities::Unexpected(state->error);
                     }
                     if (ctx.IsCancellationRequested())
                     {
-                        return std::unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
+                        return NGIN::Utilities::Unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
                     }
                     return {};
                 }

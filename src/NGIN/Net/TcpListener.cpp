@@ -35,14 +35,14 @@ namespace NGIN::Net
         m_handle = detail::CreateSocket(family, SOCK_STREAM, IPPROTO_TCP, options.nonBlocking, error);
         if (error.code != NetErrorCode::Ok)
         {
-            return std::unexpected(error);
+            return NGIN::Utilities::Unexpected(error);
         }
 
         auto optionResult = detail::ApplySocketOptions(m_handle, family, options, true, false);
         if (!optionResult)
         {
             m_handle.Close();
-            return std::unexpected(optionResult.error());
+            return NGIN::Utilities::Unexpected(optionResult.error());
         }
         return {};
     }
@@ -53,12 +53,12 @@ namespace NGIN::Net
         socklen_t length = 0;
         if (!detail::ToSockAddr(localEndpoint, storage, length))
         {
-            return std::unexpected(NetError {NetErrorCode::Unknown, 0});
+            return NGIN::Utilities::Unexpected(NetError {NetErrorCode::Unknown, 0});
         }
 
         if (::bind(detail::ToNative(m_handle), reinterpret_cast<sockaddr*>(&storage), length) != 0)
         {
-            return std::unexpected(detail::LastError());
+            return NGIN::Utilities::Unexpected(detail::LastError());
         }
         return {};
     }
@@ -67,7 +67,7 @@ namespace NGIN::Net
     {
         if (::listen(detail::ToNative(m_handle), backlog) != 0)
         {
-            return std::unexpected(detail::LastError());
+            return NGIN::Utilities::Unexpected(detail::LastError());
         }
         return {};
     }
@@ -79,7 +79,7 @@ namespace NGIN::Net
         const auto sock = ::accept(detail::ToNative(m_handle), reinterpret_cast<sockaddr*>(&storage), &length);
         if (sock == detail::InvalidNativeSocket)
         {
-            return std::unexpected(detail::LastError());
+            return NGIN::Utilities::Unexpected(detail::LastError());
         }
 
         TcpSocket socket(std::move(detail::FromNative(sock)), true);
@@ -95,7 +95,7 @@ namespace NGIN::Net
         auto handleResult = co_await driver.SubmitAccept(ctx, m_handle, token);
         if (!handleResult)
         {
-            co_return std::unexpected(handleResult.error());
+            co_return NGIN::Utilities::Unexpected(handleResult.error());
         }
         co_return TcpSocket(std::move(*handleResult), true);
 #else
@@ -109,13 +109,13 @@ namespace NGIN::Net
 
             if (result.error().code != NetErrorCode::WouldBlock)
             {
-                co_return std::unexpected(ToAsyncError(result.error()));
+                co_return NGIN::Utilities::Unexpected(ToAsyncError(result.error()));
             }
 
             auto waitResult = co_await driver.WaitUntilReadable(ctx, m_handle, token);
             if (!waitResult)
             {
-                co_return std::unexpected(waitResult.error());
+                co_return NGIN::Utilities::Unexpected(waitResult.error());
             }
         }
 #endif

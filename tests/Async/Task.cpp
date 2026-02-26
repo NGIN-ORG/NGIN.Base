@@ -69,7 +69,7 @@ namespace
         auto delayResult = co_await ctx.Delay(NGIN::Units::Milliseconds(1.0));
         if (!delayResult)
         {
-            co_return std::unexpected(delayResult.error());
+            co_return NGIN::Utilities::Unexpected(delayResult.error());
         }
         co_return 123;
     }
@@ -112,7 +112,7 @@ namespace
         auto yieldResult = co_await ctx.YieldNow();
         if (!yieldResult)
         {
-            co_return std::unexpected(yieldResult.error());
+            co_return NGIN::Utilities::Unexpected(yieldResult.error());
         }
         co_return a + b;
     }
@@ -123,16 +123,16 @@ namespace
         auto yieldResult = co_await ctx.YieldNow();
         if (!yieldResult)
         {
-            co_return std::unexpected(yieldResult.error());
+            co_return NGIN::Utilities::Unexpected(yieldResult.error());
         }
         throw std::runtime_error("boom");
 #else
         auto yieldResult = co_await ctx.YieldNow();
         if (!yieldResult)
         {
-            co_return std::unexpected(yieldResult.error());
+            co_return NGIN::Utilities::Unexpected(yieldResult.error());
         }
-        co_return std::unexpected(NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::Fault));
+        co_return NGIN::Utilities::Unexpected(NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::Fault));
 #endif
     }
 
@@ -142,7 +142,7 @@ namespace
         auto childResult = co_await child;
         if (!childResult)
         {
-            co_return std::unexpected(childResult.error());
+            co_return NGIN::Utilities::Unexpected(childResult.error());
         }
         co_return *childResult;
     }

@@ -32,7 +32,7 @@ Task<int> DelayedValue(TaskContext& ctx, int value, Milliseconds delay)
     auto delayResult = co_await ctx.Delay(delay);
     if (!delayResult)
     {
-        co_return std::unexpected(delayResult.error());
+        co_return NGIN::Utilities::Unexpected(delayResult.error());
     }
     std::cout << "[DelayedValue] done: " << value << "\n";
     co_return value;

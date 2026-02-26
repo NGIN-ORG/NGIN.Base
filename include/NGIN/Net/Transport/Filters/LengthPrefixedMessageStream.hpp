@@ -73,7 +73,7 @@ namespace NGIN::Net::Transport::Filters
         {
             if (!m_inner)
             {
-                co_return std::unexpected(NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::InvalidState));
+                co_return NGIN::Utilities::Unexpected(NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::InvalidState));
             }
 
             std::array<NGIN::Byte, LengthBytes> header {};
@@ -83,7 +83,7 @@ namespace NGIN::Net::Transport::Filters
                                                    token);
             if (!headerResult)
             {
-                co_return std::unexpected(headerResult.error());
+                co_return NGIN::Utilities::Unexpected(headerResult.error());
             }
 
             const auto messageSize = DecodeLength(header);
@@ -95,7 +95,7 @@ namespace NGIN::Net::Transport::Filters
 
             if (!messageBuffer.data || messageBuffer.capacity < messageSize)
             {
-                co_return std::unexpected(NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::InvalidArgument));
+                co_return NGIN::Utilities::Unexpected(NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::InvalidArgument));
             }
 
             auto payloadResult = co_await ReadExact(ctx,
@@ -104,7 +104,7 @@ namespace NGIN::Net::Transport::Filters
                                                     token);
             if (!payloadResult)
             {
-                co_return std::unexpected(payloadResult.error());
+                co_return NGIN::Utilities::Unexpected(payloadResult.error());
             }
             messageBuffer.size = messageSize;
             co_return NGIN::Net::ConstByteSpan {messageBuffer.data, messageSize};
@@ -114,7 +114,7 @@ namespace NGIN::Net::Transport::Filters
         {
             if (!m_inner)
             {
-                return std::unexpected(NGIN::Net::NetError {NGIN::Net::NetErrorCode::Unknown, 0});
+                return NGIN::Utilities::Unexpected(NGIN::Net::NetError {NGIN::Net::NetErrorCode::Unknown, 0});
             }
             return m_inner->Close();
         }

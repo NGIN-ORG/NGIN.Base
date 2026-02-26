@@ -2,10 +2,10 @@
 /// @brief Error codes for network operations.
 #pragma once
 
-#include <expected>
 #include <system_error>
 
 #include <NGIN/Primitives.hpp>
+#include <NGIN/Utilities/Expected.hpp>
 
 namespace NGIN::Net
 {
@@ -56,6 +56,5 @@ namespace NGIN::Net
     }
 
     template<typename T>
-    using NetExpected = std::expected<T, NetError>;
+    using NetExpected = NGIN::Utilities::Expected<T, NetError>;
 }// namespace NGIN::Net
-

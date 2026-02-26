@@ -27,12 +27,13 @@ namespace NGIN::Net::Transport
         {
             if (!m_hasSocket || !m_driver)
             {
-                return std::unexpected(NGIN::Net::NetError {NGIN::Net::NetErrorCode::Unknown, 0});
+                return NGIN::Utilities::Unexpected(NGIN::Net::NetError {NGIN::Net::NetErrorCode::Unknown, 0});
             }
             auto channel = std::make_unique<UdpDatagramChannel>(std::move(m_socket), *m_driver);
             m_hasSocket = false;
             m_driver = nullptr;
-            return channel;
+            std::unique_ptr<IDatagramChannel> out = std::move(channel);
+            return out;
         }
 
     private:
@@ -41,4 +42,3 @@ namespace NGIN::Net::Transport
         bool           m_hasSocket {false};
     };
 }// namespace NGIN::Net::Transport
-

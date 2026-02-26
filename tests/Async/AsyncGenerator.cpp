@@ -59,7 +59,7 @@ namespace
             auto nextResult = co_await gen.Next(ctx);
             if (!nextResult)
             {
-                co_return std::unexpected(nextResult.error());
+                co_return NGIN::Utilities::Unexpected(nextResult.error());
             }
             if (!*nextResult)
             {

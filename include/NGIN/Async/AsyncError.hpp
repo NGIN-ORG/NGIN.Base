@@ -2,9 +2,8 @@
 /// @brief Error codes and expected type for async operations.
 #pragma once
 
-#include <expected>
-
 #include <NGIN/Primitives.hpp>
+#include <NGIN/Utilities/Expected.hpp>
 
 #ifndef NGIN_ASYNC_CAPTURE_EXCEPTIONS
 #define NGIN_ASYNC_CAPTURE_EXCEPTIONS 1
@@ -45,7 +44,7 @@ namespace NGIN::Async
     };
 
     template<typename T>
-    using AsyncExpected = std::expected<T, AsyncError>;
+    using AsyncExpected = NGIN::Utilities::Expected<T, AsyncError>;
 
     [[nodiscard]] constexpr AsyncError MakeAsyncError(AsyncErrorCode code, int native = 0) noexcept
     {

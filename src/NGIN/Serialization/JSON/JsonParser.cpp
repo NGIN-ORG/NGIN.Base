@@ -466,7 +466,9 @@ namespace NGIN::Serialization
                 {
                     if (digits < 19)
                     {
-                        intValue = intValue * 10ULL + static_cast<UInt64>(*p - '0');
+                        const UInt64 digitValue =
+                                static_cast<UInt64>(static_cast<unsigned char>(*p)) - static_cast<UInt64>('0');
+                        intValue = intValue * 10ULL + digitValue;
                     }
                     else
                     {

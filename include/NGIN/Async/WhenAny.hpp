@@ -152,7 +152,7 @@ namespace NGIN::Async
             {
                 if (ctx.IsCancellationRequested())
                 {
-                    return std::unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
+                    return NGIN::Utilities::Unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
                 }
 
                 const auto signaled = state->index.load(std::memory_order_acquire);
@@ -178,7 +178,7 @@ namespace NGIN::Async
 
                 if (found == static_cast<NGIN::UIntSize>(-1))
                 {
-                    return std::unexpected(MakeAsyncError(AsyncErrorCode::InvalidState));
+                    return NGIN::Utilities::Unexpected(MakeAsyncError(AsyncErrorCode::InvalidState));
                 }
                 return found;
             }
@@ -194,7 +194,7 @@ namespace NGIN::Async
     {
         if (ctx.IsCancellationRequested())
         {
-            co_return std::unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
+            co_return NGIN::Utilities::Unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
         }
 
         auto state  = std::make_shared<detail::WhenAnySharedState>();
@@ -203,7 +203,7 @@ namespace NGIN::Async
         auto result = co_await detail::WhenAnyAwaiter<TTasks...> {ctx, std::move(state), std::tuple<TTasks&...>(tasks...)};
         if (!result)
         {
-            co_return std::unexpected(result.error());
+            co_return NGIN::Utilities::Unexpected(result.error());
         }
 
         co_return *result;

@@ -183,11 +183,11 @@ namespace NGIN::Async
             {
                 if (ctx.IsCancellationRequested())
                 {
-                    return std::unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
+                    return NGIN::Utilities::Unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
                 }
                 if (state->hasError)
                 {
-                    return std::unexpected(state->firstError);
+                    return NGIN::Utilities::Unexpected(state->firstError);
                 }
                 return {};
             }
@@ -233,7 +233,7 @@ namespace NGIN::Async
     {
         if (ctx.IsCancellationRequested())
         {
-            co_return std::unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
+            co_return NGIN::Utilities::Unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
         }
         auto state = std::make_shared<detail::when_all::WhenAllSharedState>();
         auto waitResult = co_await detail::when_all::WhenAllAwaiter<Task<T>...> {ctx,
@@ -241,7 +241,7 @@ namespace NGIN::Async
                                                                                std::tuple<Task<T>&...>(tasks...)};
         if (!waitResult)
         {
-            co_return std::unexpected(waitResult.error());
+            co_return NGIN::Utilities::Unexpected(waitResult.error());
         }
 
         auto results = std::tuple<AsyncExpected<T>...> {tasks.Get()...};
@@ -262,7 +262,7 @@ namespace NGIN::Async
 
         if (failed)
         {
-            co_return std::unexpected(firstError);
+            co_return NGIN::Utilities::Unexpected(firstError);
         }
 
         auto output = [&]<std::size_t... Is>(std::index_sequence<Is...>) {

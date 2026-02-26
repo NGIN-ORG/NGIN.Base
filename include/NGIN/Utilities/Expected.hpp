@@ -46,6 +46,11 @@ namespace NGIN::Utilities
         /// @brief Move-access the contained error.
         [[nodiscard]] constexpr E&& Error() && noexcept { return std::move(m_error); }
 
+        /// @brief `std::unexpected`-style aliases.
+        [[nodiscard]] constexpr E& error() & noexcept { return Error(); }
+        [[nodiscard]] constexpr const E& error() const& noexcept { return Error(); }
+        [[nodiscard]] constexpr E&& error() && noexcept { return std::move(*this).Error(); }
+
     private:
         E m_error;
     };
@@ -100,6 +105,15 @@ namespace NGIN::Utilities
         /// @brief Error type.
         using ErrorType = E;
 
+        /// @brief Constructs an `Expected` holding a default-constructed value.
+        constexpr Expected() noexcept(NGIN::Meta::TypeTraits<T>::IsNothrowDefaultConstructible())
+            requires(NGIN::Meta::TypeTraits<T>::IsDefaultConstructible())
+            : m_storage {}
+            , m_hasValue {1}
+        {
+            detail::WithExceptionsAbortOnThrow([&]() { m_storage.template Construct<T>(); });
+        }
+
         /// @brief Constructs an `Expected` holding a value (in-place).
         ///
         /// @param args Forwarded constructor arguments for `T`.
@@ -114,7 +128,7 @@ namespace NGIN::Utilities
         }
 
         /// @brief Constructs an `Expected` holding a value by copying `value`.
-        constexpr explicit Expected(const T& value) noexcept(NGIN::Meta::TypeTraits<T>::IsNothrowCopyConstructible())
+        constexpr Expected(const T& value) noexcept(NGIN::Meta::TypeTraits<T>::IsNothrowCopyConstructible())
             requires(NGIN::Meta::TypeTraits<T>::IsCopyConstructible())
             : m_storage {}
             , m_hasValue {1}
@@ -123,7 +137,7 @@ namespace NGIN::Utilities
         }
 
         /// @brief Constructs an `Expected` holding a value by moving `value`.
-        constexpr explicit Expected(T&& value) noexcept(NGIN::Meta::TypeTraits<T>::IsNothrowMoveConstructible())
+        constexpr Expected(T&& value) noexcept(NGIN::Meta::TypeTraits<T>::IsNothrowMoveConstructible())
             requires(NGIN::Meta::TypeTraits<T>::IsMoveConstructible())
             : m_storage {}
             , m_hasValue {1}
@@ -132,7 +146,7 @@ namespace NGIN::Utilities
         }
 
         /// @brief Constructs an `Expected` holding an error from `Unexpected<E>`.
-        constexpr explicit Expected(Unexpected<E>&& unexpected) noexcept(NGIN::Meta::TypeTraits<E>::IsNothrowMoveConstructible())
+        constexpr Expected(Unexpected<E>&& unexpected) noexcept(NGIN::Meta::TypeTraits<E>::IsNothrowMoveConstructible())
             requires(NGIN::Meta::TypeTraits<E>::IsMoveConstructible())
             : m_storage {}
             , m_hasValue {0}
@@ -379,6 +393,9 @@ namespace NGIN::Utilities
         /// @brief Returns true if this object currently holds a value.
         constexpr explicit operator bool() const noexcept { return HasValue(); }
 
+        /// @brief `std::expected`-style alias for `HasValue()`.
+        [[nodiscard]] constexpr bool has_value() const noexcept { return HasValue(); }
+
         /// @brief Returns the contained value.
         ///
         /// @details Checked accessor: if holding an error, triggers the contract policy.
@@ -514,6 +531,24 @@ namespace NGIN::Utilities
         ///
         /// @warning Undefined behavior if holding a value.
         [[nodiscard]] constexpr const E&& ErrorUnsafe() const&& noexcept { return std::move(ErrorRef()); }
+
+        /// @brief `std::expected`-style aliases.
+        [[nodiscard]] constexpr T& value() & noexcept { return Value(); }
+        [[nodiscard]] constexpr const T& value() const& noexcept { return Value(); }
+        [[nodiscard]] constexpr T&& value() && noexcept { return std::move(*this).Value(); }
+        [[nodiscard]] constexpr const T&& value() const&& noexcept { return std::move(*this).Value(); }
+        [[nodiscard]] constexpr E& error() & noexcept { return Error(); }
+        [[nodiscard]] constexpr const E& error() const& noexcept { return Error(); }
+        [[nodiscard]] constexpr E&& error() && noexcept { return std::move(*this).Error(); }
+        [[nodiscard]] constexpr const E&& error() const&& noexcept { return std::move(*this).Error(); }
+
+        /// @brief `std::expected`-style dereference operators.
+        [[nodiscard]] constexpr T& operator*() & noexcept { return Value(); }
+        [[nodiscard]] constexpr const T& operator*() const& noexcept { return Value(); }
+        [[nodiscard]] constexpr T&& operator*() && noexcept { return std::move(*this).Value(); }
+        [[nodiscard]] constexpr const T&& operator*() const&& noexcept { return std::move(*this).Value(); }
+        [[nodiscard]] constexpr T* operator->() noexcept { return &Value(); }
+        [[nodiscard]] constexpr const T* operator->() const noexcept { return &Value(); }
 
         /// @brief Returns the contained value if present, otherwise returns `fallback`.
         [[nodiscard]] constexpr const T& ValueOr(const T& fallback) const& noexcept
@@ -689,7 +724,7 @@ namespace NGIN::Utilities
         }
 
         /// @brief Constructs an error state from `Unexpected<E>`.
-        constexpr explicit Expected(Unexpected<E>&& unexpected) noexcept(NGIN::Meta::TypeTraits<E>::IsNothrowMoveConstructible())
+        constexpr Expected(Unexpected<E>&& unexpected) noexcept(NGIN::Meta::TypeTraits<E>::IsNothrowMoveConstructible())
             requires(NGIN::Meta::TypeTraits<E>::IsMoveConstructible())
             : m_error {}
             , m_hasValue {0}
@@ -864,6 +899,9 @@ namespace NGIN::Utilities
         /// @brief Returns true if holding a value (success).
         constexpr explicit operator bool() const noexcept { return HasValue(); }
 
+        /// @brief `std::expected`-style alias for `HasValue()`.
+        [[nodiscard]] constexpr bool has_value() const noexcept { return HasValue(); }
+
         /// @brief Checks that a value is present.
         ///
         /// @details Checked accessor: if holding an error, triggers the contract policy.
@@ -942,6 +980,13 @@ namespace NGIN::Utilities
         ///
         /// @warning Undefined behavior if holding a value.
         [[nodiscard]] constexpr const E&& ErrorUnsafe() const&& noexcept { return std::move(m_error.Ref()); }
+
+        /// @brief `std::expected`-style aliases.
+        constexpr void value() const noexcept { Value(); }
+        [[nodiscard]] constexpr E& error() & noexcept { return Error(); }
+        [[nodiscard]] constexpr const E& error() const& noexcept { return Error(); }
+        [[nodiscard]] constexpr E&& error() && noexcept { return std::move(*this).Error(); }
+        [[nodiscard]] constexpr const E&& error() const&& noexcept { return std::move(*this).Error(); }
 
         /// @brief Returns the contained error if present, otherwise returns `fallback`.
         [[nodiscard]] constexpr const E& ErrorOr(const E& fallback) const& noexcept

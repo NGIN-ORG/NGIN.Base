@@ -430,7 +430,8 @@ namespace NGIN::Net
                 readyEvents.reserve(static_cast<std::size_t>(ready));
                 for (int i = 0; i < ready; ++i)
                 {
-                    readyEvents[events[i].data.fd] |= events[i].events;
+                    const auto& ev = events[static_cast<std::size_t>(i)];
+                    readyEvents[ev.data.fd] |= static_cast<std::uint32_t>(ev.events);
                 }
 
                 for (auto* waiter: waiters)
@@ -977,7 +978,7 @@ namespace NGIN::Net
             {
                 if (token.IsCancellationRequested())
                 {
-                    return std::unexpected(MakeCanceledError());
+                    return NGIN::Utilities::Unexpected(MakeCanceledError());
                 }
                 return {};
             }
@@ -1072,11 +1073,11 @@ namespace NGIN::Net
             {
                 if (token.IsCancellationRequested() || op.error.native == ERROR_OPERATION_ABORTED)
                 {
-                    return std::unexpected(MakeCanceledError());
+                    return NGIN::Utilities::Unexpected(MakeCanceledError());
                 }
                 if (op.error.code != NetErrorCode::Ok)
                 {
-                    return std::unexpected(ToAsyncError(op.error));
+                    return NGIN::Utilities::Unexpected(ToAsyncError(op.error));
                 }
                 return static_cast<NGIN::UInt32>(op.bytes);
             }
@@ -1172,11 +1173,11 @@ namespace NGIN::Net
             {
                 if (token.IsCancellationRequested() || op.error.native == ERROR_OPERATION_ABORTED)
                 {
-                    return std::unexpected(MakeCanceledError());
+                    return NGIN::Utilities::Unexpected(MakeCanceledError());
                 }
                 if (op.error.code != NetErrorCode::Ok)
                 {
-                    return std::unexpected(ToAsyncError(op.error));
+                    return NGIN::Utilities::Unexpected(ToAsyncError(op.error));
                 }
                 return static_cast<NGIN::UInt32>(op.bytes);
             }
@@ -1282,11 +1283,11 @@ namespace NGIN::Net
             {
                 if (token.IsCancellationRequested() || op.error.native == ERROR_OPERATION_ABORTED)
                 {
-                    return std::unexpected(MakeCanceledError());
+                    return NGIN::Utilities::Unexpected(MakeCanceledError());
                 }
                 if (op.error.code != NetErrorCode::Ok)
                 {
-                    return std::unexpected(ToAsyncError(op.error));
+                    return NGIN::Utilities::Unexpected(ToAsyncError(op.error));
                 }
                 if (op.bytes == 0 && op.buffer.len > 0)
                 {
@@ -1389,11 +1390,11 @@ namespace NGIN::Net
             {
                 if (token.IsCancellationRequested() || op.error.native == ERROR_OPERATION_ABORTED)
                 {
-                    return std::unexpected(MakeCanceledError());
+                    return NGIN::Utilities::Unexpected(MakeCanceledError());
                 }
                 if (op.error.code != NetErrorCode::Ok)
                 {
-                    return std::unexpected(ToAsyncError(op.error));
+                    return NGIN::Utilities::Unexpected(ToAsyncError(op.error));
                 }
 
                 DatagramReceiveResult result {};
@@ -1497,18 +1498,18 @@ namespace NGIN::Net
             {
                 if (token.IsCancellationRequested() || op.error.native == ERROR_OPERATION_ABORTED)
                 {
-                    return std::unexpected(MakeCanceledError());
+                    return NGIN::Utilities::Unexpected(MakeCanceledError());
                 }
                 if (op.error.code != NetErrorCode::Ok)
                 {
-                    return std::unexpected(ToAsyncError(op.error));
+                    return NGIN::Utilities::Unexpected(ToAsyncError(op.error));
                 }
 
                 const auto sock   = detail::ToNative(*handle);
                 const int  result = ::setsockopt(sock, SOL_SOCKET, SO_UPDATE_CONNECT_CONTEXT, nullptr, 0);
                 if (result != 0)
                 {
-                    return std::unexpected(ToAsyncError(detail::LastError()));
+                    return NGIN::Utilities::Unexpected(ToAsyncError(detail::LastError()));
                 }
                 return {};
             }
@@ -1619,12 +1620,12 @@ namespace NGIN::Net
                 if (token.IsCancellationRequested() || op.error.native == ERROR_OPERATION_ABORTED)
                 {
                     accepted.Close();
-                    return std::unexpected(MakeCanceledError());
+                    return NGIN::Utilities::Unexpected(MakeCanceledError());
                 }
                 if (op.error.code != NetErrorCode::Ok)
                 {
                     accepted.Close();
-                    return std::unexpected(ToAsyncError(op.error));
+                    return NGIN::Utilities::Unexpected(ToAsyncError(op.error));
                 }
 
                 const auto listenSock = detail::ToNative(*listenHandle);
@@ -1637,13 +1638,13 @@ namespace NGIN::Net
                 if (update != 0)
                 {
                     accepted.Close();
-                    return std::unexpected(ToAsyncError(detail::LastError()));
+                    return NGIN::Utilities::Unexpected(ToAsyncError(detail::LastError()));
                 }
 
                 if (!owner->EnsureAssociated(accepted))
                 {
                     accepted.Close();
-                    return std::unexpected(ToAsyncError(detail::LastError()));
+                    return NGIN::Utilities::Unexpected(ToAsyncError(detail::LastError()));
                 }
 
                 return std::move(accepted);
@@ -1988,4 +1989,3 @@ namespace NGIN::Net
     }
 #endif
 }// namespace NGIN::Net
-

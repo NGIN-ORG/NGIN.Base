@@ -66,7 +66,7 @@ namespace
         auto yieldResult = co_await ctx.YieldNow();
         if (!yieldResult)
         {
-            co_return std::unexpected(yieldResult.error());
+            co_return NGIN::Utilities::Unexpected(yieldResult.error());
         }
         co_return value;
     }
@@ -76,12 +76,12 @@ namespace
         auto firstYield = co_await ctx.YieldNow();
         if (!firstYield)
         {
-            co_return std::unexpected(firstYield.error());
+            co_return NGIN::Utilities::Unexpected(firstYield.error());
         }
         auto secondYield = co_await ctx.YieldNow();
         if (!secondYield)
         {
-            co_return std::unexpected(secondYield.error());
+            co_return NGIN::Utilities::Unexpected(secondYield.error());
         }
         co_return value;
     }
@@ -150,16 +150,16 @@ namespace
         auto yieldResult = co_await ctx.YieldNow();
         if (!yieldResult)
         {
-            co_return std::unexpected(yieldResult.error());
+            co_return NGIN::Utilities::Unexpected(yieldResult.error());
         }
         throw std::runtime_error("boom");
 #else
         auto yieldResult = co_await ctx.YieldNow();
         if (!yieldResult)
         {
-            co_return std::unexpected(yieldResult.error());
+            co_return NGIN::Utilities::Unexpected(yieldResult.error());
         }
-        co_return std::unexpected(NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::Fault));
+        co_return NGIN::Utilities::Unexpected(NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::Fault));
 #endif
     }
 
@@ -200,7 +200,7 @@ TEST_CASE("WhenAll can be co_awaited without calling Start() on the WhenAll task
         auto allResult = co_await NGIN::Async::WhenAll(ctx, a, b);
         if (!allResult)
         {
-            co_return std::unexpected(allResult.error());
+            co_return NGIN::Utilities::Unexpected(allResult.error());
         }
         co_return *allResult;
     }(ctx);

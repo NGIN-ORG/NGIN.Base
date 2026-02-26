@@ -194,7 +194,10 @@ list(APPEND NGIN_BASE_CORE_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/PollerIocp.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/File.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/FileView.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/FileSystemUtilities.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/LocalFileSystem.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/Path.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/VirtualFileSystem.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Serialization/JSON/JsonParser.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Serialization/JSON/JsonArchive.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Serialization/XML/XmlParser.cpp

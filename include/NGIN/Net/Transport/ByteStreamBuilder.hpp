@@ -28,25 +28,27 @@ namespace NGIN::Net::Transport
         {
             if (!m_hasSocket || !m_driver)
             {
-                return std::unexpected(NGIN::Net::NetError {NGIN::Net::NetErrorCode::Unknown, 0});
+                return NGIN::Utilities::Unexpected(NGIN::Net::NetError {NGIN::Net::NetErrorCode::Unknown, 0});
             }
             auto stream = std::make_unique<TcpByteStream>(std::move(m_socket), *m_driver);
             m_hasSocket = false;
             m_driver = nullptr;
-            return stream;
+            std::unique_ptr<IByteStream> out = std::move(stream);
+            return out;
         }
 
         [[nodiscard]] NGIN::Net::NetExpected<std::unique_ptr<Filters::LengthPrefixedMessageStream>> BuildLengthPrefixed()
         {
             if (!m_hasSocket || !m_driver)
             {
-                return std::unexpected(NGIN::Net::NetError {NGIN::Net::NetErrorCode::Unknown, 0});
+                return NGIN::Utilities::Unexpected(NGIN::Net::NetError {NGIN::Net::NetErrorCode::Unknown, 0});
             }
             auto base = std::make_unique<TcpByteStream>(std::move(m_socket), *m_driver);
             auto stream = std::make_unique<Filters::LengthPrefixedMessageStream>(std::move(base));
             m_hasSocket = false;
             m_driver = nullptr;
-            return stream;
+            std::unique_ptr<Filters::LengthPrefixedMessageStream> out = std::move(stream);
+            return out;
         }
 
     private:
@@ -55,4 +57,3 @@ namespace NGIN::Net::Transport
         bool           m_hasSocket {false};
     };
 }// namespace NGIN::Net::Transport
-

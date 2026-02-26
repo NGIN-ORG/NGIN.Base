@@ -316,11 +316,11 @@ namespace NGIN::Async
             {
                 if (m_ctx.IsCancellationRequested())
                 {
-                    return std::unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
+                    return NGIN::Utilities::Unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
                 }
                 if (m_invalidExecutor)
                 {
-                    return std::unexpected(MakeAsyncError(AsyncErrorCode::InvalidState));
+                    return NGIN::Utilities::Unexpected(MakeAsyncError(AsyncErrorCode::InvalidState));
                 }
 
                 if (!m_gen.m_handle)
@@ -340,7 +340,7 @@ namespace NGIN::Async
 
                 if (p.hasError)
                 {
-                    return std::unexpected(p.error);
+                    return NGIN::Utilities::Unexpected(p.error);
                 }
 
                 if (p.current.has_value())

@@ -3,7 +3,6 @@
 #include <array>
 #include <atomic>
 #include <cstring>
-#include <expected>
 #include <mutex>
 
 namespace NGIN::Net::detail
@@ -258,19 +257,19 @@ namespace NGIN::Net::detail
     {
         if (options.reuseAddress && !SetReuseAddress(handle, true))
         {
-            return std::unexpected(LastError());
+            return NGIN::Utilities::Unexpected(LastError());
         }
         if (options.reusePort && !SetReusePort(handle, true))
         {
-            return std::unexpected(LastError());
+            return NGIN::Utilities::Unexpected(LastError());
         }
         if (isTcp && options.noDelay && !SetNoDelay(handle, true))
         {
-            return std::unexpected(LastError());
+            return NGIN::Utilities::Unexpected(LastError());
         }
         if (isUdp && options.broadcast && !SetBroadcast(handle, true))
         {
-            return std::unexpected(LastError());
+            return NGIN::Utilities::Unexpected(LastError());
         }
 
         if (family != AddressFamily::V4)
@@ -283,7 +282,7 @@ namespace NGIN::Net::detail
 
             if (!SetV6Only(handle, v6Only))
             {
-                return std::unexpected(LastError());
+                return NGIN::Utilities::Unexpected(LastError());
             }
         }
 
@@ -318,7 +317,7 @@ namespace NGIN::Net::detail
         {
             return {};
         }
-        return std::unexpected(LastError());
+        return NGIN::Utilities::Unexpected(LastError());
     }
 
     bool CloseSocket(SocketHandle& handle) noexcept
@@ -393,13 +392,13 @@ namespace NGIN::Net::detail
         socklen_t len = static_cast<socklen_t>(sizeof(error));
         if (::getsockopt(sock, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&error), &len) != 0)
         {
-            return std::unexpected(LastError());
+            return NGIN::Utilities::Unexpected(LastError());
         }
         if (error == 0)
         {
             return {};
         }
-        return std::unexpected(MapError(error));
+        return NGIN::Utilities::Unexpected(MapError(error));
     }
 
 #if defined(NGIN_PLATFORM_WINDOWS)
@@ -506,4 +505,3 @@ namespace NGIN::Net
         (void)detail::CloseSocket(*this);
     }
 }
-

@@ -60,7 +60,7 @@ namespace
         throw std::runtime_error("parent");
         co_return 0;
 #else
-        co_return std::unexpected(NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::Fault));
+        co_return NGIN::Utilities::Unexpected(NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::Fault));
 #endif
     }
 
@@ -134,7 +134,7 @@ namespace
         auto yieldResult = co_await ctx.YieldNow();
         if (!yieldResult)
         {
-            co_return std::unexpected(yieldResult.error());
+            co_return NGIN::Utilities::Unexpected(yieldResult.error());
         }
         co_return value * factor;
     }
@@ -147,7 +147,7 @@ namespace
         auto thenResult = co_await parent.ContinueWith(ctx, [&](int v) { return MultiplyAfterYield(ctx, v, 3); });
         if (!thenResult)
         {
-            co_return std::unexpected(thenResult.error());
+            co_return NGIN::Utilities::Unexpected(thenResult.error());
         }
         co_return 21;
     }

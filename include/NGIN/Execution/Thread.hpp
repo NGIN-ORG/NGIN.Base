@@ -230,7 +230,7 @@ namespace NGIN::Execution
 #elif defined(__linux__)
             cpu_set_t set {};
             CPU_ZERO(&set);
-            for (int bit = 0; bit < static_cast<int>(sizeof(UInt64) * 8); ++bit)
+            for (std::size_t bit = 0; bit < (sizeof(UInt64) * 8u); ++bit)
             {
                 if ((affinityMask & (1ull << static_cast<UInt64>(bit))) != 0)
                 {
@@ -354,7 +354,7 @@ namespace NGIN::Execution
             {
                 cpu_set_t set {};
                 CPU_ZERO(&set);
-                for (int bit = 0; bit < static_cast<int>(sizeof(UInt64) * 8); ++bit)
+                for (std::size_t bit = 0; bit < (sizeof(UInt64) * 8u); ++bit)
                 {
                     if ((ctx->affinityMask & (1ull << static_cast<UInt64>(bit))) != 0)
                     {

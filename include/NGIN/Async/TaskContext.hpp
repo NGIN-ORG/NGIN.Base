@@ -123,7 +123,7 @@ namespace NGIN::Async
         {
             if (m_cancellation.IsCancellationRequested())
             {
-                return std::unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
+                return NGIN::Utilities::Unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
             }
             return {};
         }
@@ -146,11 +146,11 @@ namespace NGIN::Async
                 {
                     if (cancellation.IsCancellationRequested())
                     {
-                        return std::unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
+                        return NGIN::Utilities::Unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
                     }
                     if (!exec.IsValid())
                     {
-                        return std::unexpected(MakeAsyncError(AsyncErrorCode::InvalidState));
+                        return NGIN::Utilities::Unexpected(MakeAsyncError(AsyncErrorCode::InvalidState));
                     }
                     return {};
                 }
@@ -206,11 +206,11 @@ namespace NGIN::Async
                 {
                     if (cancellation.IsCancellationRequested())
                     {
-                        return std::unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
+                        return NGIN::Utilities::Unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
                     }
                     if (!exec.IsValid())
                     {
-                        return std::unexpected(MakeAsyncError(AsyncErrorCode::InvalidState));
+                        return NGIN::Utilities::Unexpected(MakeAsyncError(AsyncErrorCode::InvalidState));
                     }
                     return {};
                 }
