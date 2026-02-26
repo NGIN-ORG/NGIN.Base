@@ -65,12 +65,12 @@ namespace
     }
 }// namespace
 
-TEST_CASE("CreateLinkedTokenSource cancels when any input cancels")
+TEST_CASE("CreateLinkedCancellationSource cancels when any input cancels")
 {
     NGIN::Async::CancellationSource a;
     NGIN::Async::CancellationSource b;
 
-    auto linked = NGIN::Async::CreateLinkedTokenSource({a.GetToken(), b.GetToken()});
+    auto linked = NGIN::Async::CreateLinkedCancellationSource({a.GetToken(), b.GetToken()});
     REQUIRE_FALSE(linked.IsCancellationRequested());
 
     a.Cancel();
@@ -84,11 +84,11 @@ TEST_CASE("Linked cancellation token wakes Delay")
 
     NGIN::Async::CancellationSource a;
     NGIN::Async::CancellationSource b;
-    auto linked = NGIN::Async::CreateLinkedTokenSource({a.GetToken(), b.GetToken()});
+    auto linked = NGIN::Async::CreateLinkedCancellationSource({a.GetToken(), b.GetToken()});
 
     NGIN::Async::TaskContext ctx(exec, linked.GetToken());
     auto task = DelayForever(ctx);
-    task.Start(ctx);
+    task.Schedule(ctx);
 
     exec.RunUntilIdle();
     REQUIRE_FALSE(task.IsCompleted());
@@ -116,4 +116,3 @@ TEST_CASE("CancelAfter schedules cancellation via executor")
 
     REQUIRE(src.IsCancellationRequested());
 }
-

@@ -104,17 +104,6 @@ namespace NGIN::Execution
             m_timerWake.NotifyOne();
         }
 
-        void Schedule(std::coroutine_handle<> coro) noexcept
-        {
-            Execute(WorkItem(coro));
-        }
-
-        void ScheduleAt(std::coroutine_handle<> coro, NGIN::Time::TimePoint resumeAt)
-        {
-            ExecuteAt(WorkItem(coro), resumeAt);
-        }
-
-
         bool RunOne() noexcept
         {
             WorkItem work = TryDequeueAny();

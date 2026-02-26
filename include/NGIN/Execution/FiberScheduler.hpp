@@ -106,16 +106,6 @@ namespace NGIN::Execution
         }
 
 
-        void Schedule(std::coroutine_handle<> coro) noexcept
-        {
-            Execute(WorkItem(coro));
-        }
-
-        void ScheduleAt(std::coroutine_handle<> coro, NGIN::Time::TimePoint resumeAt)
-        {
-            ExecuteAt(WorkItem(coro), resumeAt);
-        }
-
         bool RunOne() noexcept
         {
             // Not needed: scheduler runs automatically.

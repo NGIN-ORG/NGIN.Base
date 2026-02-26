@@ -34,19 +34,6 @@ namespace NGIN::Execution
             Execute(std::move(item));
         }
 
-        void Schedule(std::coroutine_handle<> coro) noexcept
-        {
-            if (coro && !coro.done())
-            {
-                coro.resume();
-            }
-        }
-
-        void ScheduleAt(std::coroutine_handle<> coro, NGIN::Time::TimePoint resumeAt)
-        {
-            ExecuteAt(WorkItem(coro), resumeAt);
-        }
-
         [[nodiscard]] bool RunOne() noexcept
         {
             return false;

@@ -95,8 +95,8 @@ namespace
     NGIN::Async::Task<void> AwaitParentFault(NGIN::Async::TaskContext& ctx)
     {
         auto parent = ParentThrows(ctx);
-        parent.Start(ctx);
-        auto thenResult = co_await parent.Then([&](int) { return Noop(ctx); });
+        parent.Schedule(ctx);
+        auto thenResult = co_await parent.ContinueWith(ctx, [&](int) { return Noop(ctx); });
         if (!thenResult)
         {
             co_await NGIN::Async::Task<void>::ReturnError(thenResult.error());
@@ -108,8 +108,8 @@ namespace
     NGIN::Async::Task<void> AwaitContinuationFault(NGIN::Async::TaskContext& ctx)
     {
         auto parent = ParentValue(ctx);
-        parent.Start(ctx);
-        auto thenResult = co_await parent.Then([&](int) { return ContinuationThrows(ctx); });
+        parent.Schedule(ctx);
+        auto thenResult = co_await parent.ContinueWith(ctx, [&](int) { return ContinuationThrows(ctx); });
         if (!thenResult)
         {
             co_await NGIN::Async::Task<void>::ReturnError(thenResult.error());
@@ -120,7 +120,7 @@ namespace
 
     NGIN::Async::Task<void> AwaitCancellation(NGIN::Async::TaskContext& ctx, NGIN::Async::Task<int>& parent)
     {
-        auto thenResult = co_await parent.Then([&](int) { return Noop(ctx); });
+        auto thenResult = co_await parent.ContinueWith(ctx, [&](int) { return Noop(ctx); });
         if (!thenResult)
         {
             co_await NGIN::Async::Task<void>::ReturnError(thenResult.error());
@@ -139,12 +139,12 @@ namespace
         co_return value * factor;
     }
 
-    NGIN::Async::Task<int> ThenSuccess(NGIN::Async::TaskContext& ctx)
+    NGIN::Async::Task<int> ContinueWithSuccess(NGIN::Async::TaskContext& ctx)
     {
         auto parent = ParentValue(ctx);
-        parent.Start(ctx);
+        parent.Schedule(ctx);
 
-        auto thenResult = co_await parent.Then([&](int v) { return MultiplyAfterYield(ctx, v, 3); });
+        auto thenResult = co_await parent.ContinueWith(ctx, [&](int v) { return MultiplyAfterYield(ctx, v, 3); });
         if (!thenResult)
         {
             co_return std::unexpected(thenResult.error());
@@ -153,14 +153,14 @@ namespace
     }
 }// namespace
 
-TEST_CASE("Task::Then propagates parent fault")
+TEST_CASE("Task::ContinueWith propagates parent fault")
 {
     NGIN::Execution::InlineScheduler scheduler;
     NGIN::Async::CancellationSource  source;
     NGIN::Async::TaskContext         ctx(scheduler, source.GetToken());
 
     auto task = AwaitParentFault(ctx);
-    task.Start(ctx);
+    task.Schedule(ctx);
 
     REQUIRE(task.IsCompleted());
     REQUIRE(task.IsFaulted());
@@ -169,14 +169,14 @@ TEST_CASE("Task::Then propagates parent fault")
     REQUIRE(result.error().code == NGIN::Async::AsyncErrorCode::Fault);
 }
 
-TEST_CASE("Task::Then propagates continuation fault")
+TEST_CASE("Task::ContinueWith propagates continuation fault")
 {
     NGIN::Execution::InlineScheduler scheduler;
     NGIN::Async::CancellationSource  source;
     NGIN::Async::TaskContext         ctx(scheduler, source.GetToken());
 
     auto task = AwaitContinuationFault(ctx);
-    task.Start(ctx);
+    task.Schedule(ctx);
 
     REQUIRE(task.IsCompleted());
     REQUIRE(task.IsFaulted());
@@ -185,17 +185,17 @@ TEST_CASE("Task::Then propagates continuation fault")
     REQUIRE(result.error().code == NGIN::Async::AsyncErrorCode::Fault);
 }
 
-TEST_CASE("Task::Then is woken by cancellation even if parent never completes")
+TEST_CASE("Task::ContinueWith is woken by cancellation even if parent never completes")
 {
     ManualTimerExecutor exec;
     NGIN::Async::CancellationSource source;
     NGIN::Async::TaskContext ctx(exec, source.GetToken());
 
     auto parent = SuspendForever(ctx);
-    parent.Start(ctx);
+    parent.Schedule(ctx);
 
     auto task = AwaitCancellation(ctx, parent);
-    task.Start(ctx);
+    task.Schedule(ctx);
 
     exec.RunUntilIdle();
     REQUIRE_FALSE(task.IsCompleted());
@@ -210,13 +210,13 @@ TEST_CASE("Task::Then is woken by cancellation even if parent never completes")
     REQUIRE(result.error().code == NGIN::Async::AsyncErrorCode::Canceled);
 }
 
-TEST_CASE("Task::Then runs continuation on success")
+TEST_CASE("Task::ContinueWith runs continuation on success")
 {
     NGIN::Execution::CooperativeScheduler scheduler;
     NGIN::Async::TaskContext              ctx(scheduler);
 
-    auto task = ThenSuccess(ctx);
-    task.Start(ctx);
+    auto task = ContinueWithSuccess(ctx);
+    task.Schedule(ctx);
 
     scheduler.RunUntilIdle();
 

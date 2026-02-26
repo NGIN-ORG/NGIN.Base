@@ -18,8 +18,6 @@ namespace NGIN::Async
     class TaskContext
     {
     public:
-        constexpr TaskContext() noexcept = default;
-
         explicit TaskContext(NGIN::Execution::ExecutorRef executor, CancellationToken cancellation = {}) noexcept
             : m_executor(executor)
             , m_cancellation(std::move(cancellation))
@@ -33,35 +31,40 @@ namespace NGIN::Async
         {
         }
 
-        void Bind(NGIN::Execution::ExecutorRef executor) noexcept
+        [[nodiscard]] bool HasExecutor() const noexcept
+        {
+            return m_executor.IsValid();
+        }
+
+        void BindExecutor(NGIN::Execution::ExecutorRef executor) noexcept
         {
             m_executor = executor;
         }
 
         template<typename TScheduler>
-        void Bind(TScheduler& scheduler) noexcept
+        void BindExecutor(TScheduler& scheduler) noexcept
         {
             m_executor = NGIN::Execution::ExecutorRef::From(scheduler);
         }
 
-        void BindCancellation(CancellationToken cancellation) noexcept
+        void BindCancellationToken(CancellationToken cancellation) noexcept
         {
             m_cancellationOwner.reset();
             m_cancellation = std::move(cancellation);
         }
 
-        [[nodiscard]] TaskContext WithCancellation(CancellationToken cancellation) const noexcept
+        [[nodiscard]] TaskContext WithCancellationToken(CancellationToken cancellation) const noexcept
         {
             TaskContext copy = *this;
-            copy.BindCancellation(std::move(cancellation));
+            copy.BindCancellationToken(std::move(cancellation));
             return copy;
         }
 
-        void BindLinkedCancellation(CancellationToken cancellation) noexcept
+        void BindLinkedCancellationToken(CancellationToken cancellation) noexcept
         {
             if (!m_cancellation.HasState())
             {
-                BindCancellation(std::move(cancellation));
+                BindCancellationToken(std::move(cancellation));
                 return;
             }
 
@@ -94,10 +97,10 @@ namespace NGIN::Async
             m_cancellation = linked->source.GetToken();
         }
 
-        [[nodiscard]] TaskContext WithLinkedCancellation(CancellationToken cancellation) const noexcept
+        [[nodiscard]] TaskContext WithLinkedCancellationToken(CancellationToken cancellation) const noexcept
         {
             TaskContext copy = *this;
-            copy.BindLinkedCancellation(std::move(cancellation));
+            copy.BindLinkedCancellationToken(std::move(cancellation));
             return copy;
         }
 
@@ -133,17 +136,21 @@ namespace NGIN::Async
                 CancellationToken            cancellation;
                 bool                         await_ready() const noexcept
                 {
-                    return cancellation.IsCancellationRequested();
+                    return cancellation.IsCancellationRequested() || !exec.IsValid();
                 }
                 void await_suspend(std::coroutine_handle<> h) const noexcept
                 {
-                    exec.Schedule(h);
+                    exec.Execute(h);
                 }
                 AsyncExpected<void> await_resume() const noexcept
                 {
                     if (cancellation.IsCancellationRequested())
                     {
                         return std::unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
+                    }
+                    if (!exec.IsValid())
+                    {
+                        return std::unexpected(MakeAsyncError(AsyncErrorCode::InvalidState));
                     }
                     return {};
                 }
@@ -186,19 +193,24 @@ namespace NGIN::Async
 
                 bool await_ready() const noexcept
                 {
-                    return cancellation.IsCancellationRequested() ||
+                    return !exec.IsValid() ||
+                           cancellation.IsCancellationRequested() ||
                            NGIN::Units::UnitCast<NGIN::Units::Nanoseconds>(dur).GetValue() <= 0.0;
                 }
                 void await_suspend(std::coroutine_handle<> handle) const
                 {
                     cancellation.Register(cancellationRegistration, exec, handle);
-                    exec.ScheduleAt(handle, until);
+                    exec.ExecuteAt(handle, until);
                 }
                 AsyncExpected<void> await_resume() const noexcept
                 {
                     if (cancellation.IsCancellationRequested())
                     {
                         return std::unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
+                    }
+                    if (!exec.IsValid())
+                    {
+                        return std::unexpected(MakeAsyncError(AsyncErrorCode::InvalidState));
                     }
                     return {};
                 }
@@ -209,7 +221,7 @@ namespace NGIN::Async
         template<typename TaskT>
         TaskT Run(TaskT&& task)
         {
-            task.Start(*this);
+            task.Schedule(*this);
             return std::forward<TaskT>(task);
         }
 
@@ -217,7 +229,7 @@ namespace NGIN::Async
         auto Run(Func&& func, Args&&... args) -> decltype(auto)
         {
             auto task = func(*this, std::forward<Args>(args)...);
-            task.Start(*this);
+            task.Schedule(*this);
             return task;
         }
 

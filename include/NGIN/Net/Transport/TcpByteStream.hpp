@@ -56,7 +56,7 @@ namespace NGIN::Net::Transport
                 co_return std::unexpected(NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::InvalidState));
             }
             auto task = socket.ReceiveAsync(ctx, *driver, destination, token);
-            task.Start(ctx);
+            task.Schedule(ctx);
             auto result = co_await task;
             if (!result)
             {
@@ -76,7 +76,7 @@ namespace NGIN::Net::Transport
                 co_return std::unexpected(NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::InvalidState));
             }
             auto task = socket.SendAsync(ctx, *driver, source, token);
-            task.Start(ctx);
+            task.Schedule(ctx);
             auto result = co_await task;
             if (!result)
             {

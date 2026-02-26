@@ -18,6 +18,19 @@ namespace NGIN::Async
 {
     namespace detail
     {
+        template<typename T>
+        struct IsTaskType final: std::false_type
+        {
+        };
+
+        template<typename TValue>
+        struct IsTaskType<Task<TValue>> final: std::true_type
+        {
+        };
+
+        template<typename T>
+        inline constexpr bool IsTaskTypeValue = IsTaskType<std::remove_cvref_t<T>>::value;
+
         struct WhenAnySharedState final
         {
             std::atomic<bool>           done {false};
@@ -80,8 +93,8 @@ namespace NGIN::Async
             ~Detached() = default;
         };
 
-        template<typename T>
-        [[nodiscard]] inline Detached WatchTask(std::shared_ptr<WhenAnySharedState> state, Task<T>& task, NGIN::UIntSize index)
+        template<typename TTask>
+        [[nodiscard]] inline Detached WatchTask(std::shared_ptr<WhenAnySharedState> state, TTask& task, NGIN::UIntSize index)
         {
             (void)co_await task;
 
@@ -97,13 +110,12 @@ namespace NGIN::Async
             co_return;
         }
 
-        template<typename T, typename... Rest>
+        template<typename... TTasks>
         struct WhenAnyAwaiter final
         {
-            TaskContext&                 ctx;
+            TaskContext&                          ctx;
             std::shared_ptr<WhenAnySharedState> state;
-            Task<T>&                     first;
-            std::tuple<Rest&...>          rest;
+            std::tuple<TTasks&...>               tasks;
 
             bool await_ready() const noexcept
             {
@@ -111,11 +123,7 @@ namespace NGIN::Async
                 {
                     return true;
                 }
-                if (first.IsCompleted())
-                {
-                    return true;
-                }
-                return std::apply([](auto&... t) { return (t.IsCompleted() || ...); }, rest);
+                return std::apply([](auto&... t) { return (t.IsCompleted() || ...); }, tasks);
             }
 
             void await_suspend(std::coroutine_handle<> awaiting) const
@@ -128,25 +136,16 @@ namespace NGIN::Async
                 state->awaiting = awaiting;
                 ctx.GetCancellationToken().Register(state->cancellationRegistration, state->exec, awaiting, &CancelWhenAny, state.get());
 
-                first.Start(ctx);
-                std::apply([&](auto&... t) { (t.Start(ctx), ...); }, rest);
+                std::apply([&](auto&... t) { (t.Schedule(ctx), ...); }, tasks);
 
                 auto& exec = state->exec;
-
-                NGIN::UIntSize idx = 0;
-                {
-                    auto watch = WatchTask(state, first, idx++);
-                    exec.Execute(std::coroutine_handle<>::from_address(watch.handle.address()));
-                }
-                std::apply(
-                        [&](auto&... t) {
-                            (([&] {
-                                 auto watch = WatchTask(state, t, idx++);
-                                 exec.Execute(std::coroutine_handle<>::from_address(watch.handle.address()));
-                             }()),
-                             ...);
-                        },
-                        rest);
+                [&]<std::size_t... Indices>(std::index_sequence<Indices...>) {
+                    (([&] {
+                         auto watch = WatchTask(state, std::get<Indices>(tasks), static_cast<NGIN::UIntSize>(Indices));
+                         exec.Execute(std::coroutine_handle<>::from_address(watch.handle.address()));
+                     }()),
+                     ...);
+                }(std::make_index_sequence<sizeof...(TTasks)> {});
             }
 
             AsyncExpected<NGIN::UIntSize> await_resume() const noexcept
@@ -162,13 +161,8 @@ namespace NGIN::Async
                     return signaled;
                 }
 
-                if (first.IsCompleted())
-                {
-                    return 0;
-                }
-
                 NGIN::UIntSize found = static_cast<NGIN::UIntSize>(-1);
-                NGIN::UIntSize idx   = 1;
+                NGIN::UIntSize idx   = 0;
                 std::apply(
                         [&](auto&... t) {
                             (([&] {
@@ -180,14 +174,13 @@ namespace NGIN::Async
                              }()),
                              ...);
                         },
-                        rest);
+                        tasks);
 
-                if (found != static_cast<NGIN::UIntSize>(-1))
+                if (found == static_cast<NGIN::UIntSize>(-1))
                 {
-                    return found;
+                    return std::unexpected(MakeAsyncError(AsyncErrorCode::InvalidState));
                 }
-
-                return state->index.load(std::memory_order_acquire);
+                return found;
             }
         };
     }// namespace detail
@@ -195,9 +188,9 @@ namespace NGIN::Async
     /// @brief Complete when any of the tasks completes; returns the index of the first completed task (0-based).
     ///
     /// Completion includes success, fault, or cancellation of the underlying task.
-    template<typename T, typename... Rest>
-        requires(sizeof...(Rest) >= 1) && (std::is_same_v<std::remove_reference_t<Rest>, Task<T>> && ...)
-    [[nodiscard]] inline Task<NGIN::UIntSize> WhenAny(TaskContext& ctx, Task<T>& first, Rest&... rest)
+    template<typename... TTasks>
+        requires(sizeof...(TTasks) > 0) && (detail::IsTaskTypeValue<TTasks> && ...)
+    [[nodiscard]] inline Task<NGIN::UIntSize> WhenAny(TaskContext& ctx, TTasks&... tasks)
     {
         if (ctx.IsCancellationRequested())
         {
@@ -207,8 +200,7 @@ namespace NGIN::Async
         auto state  = std::make_shared<detail::WhenAnySharedState>();
         state->exec = ctx.GetExecutor();
 
-        auto result =
-                co_await detail::WhenAnyAwaiter<T, Rest...> {ctx, std::move(state), first, std::tuple<Rest&...>(rest...)};
+        auto result = co_await detail::WhenAnyAwaiter<TTasks...> {ctx, std::move(state), std::tuple<TTasks&...>(tasks...)};
         if (!result)
         {
             co_return std::unexpected(result.error());

@@ -64,17 +64,17 @@ namespace
     }
 }// namespace
 
-TEST_CASE("TaskContext WithLinkedCancellation cancels when parent token cancels")
+TEST_CASE("TaskContext WithLinkedCancellationToken cancels when parent token cancels")
 {
     ManualTimerExecutor exec;
     NGIN::Async::CancellationSource parentSource;
     NGIN::Async::CancellationSource childSource;
 
     NGIN::Async::TaskContext parentCtx(exec, parentSource.GetToken());
-    auto childCtx = parentCtx.WithLinkedCancellation(childSource.GetToken());
+    auto childCtx = parentCtx.WithLinkedCancellationToken(childSource.GetToken());
 
     auto task = DelayForever(childCtx);
-    task.Start(childCtx);
+    task.Schedule(childCtx);
 
     exec.RunUntilIdle();
     REQUIRE_FALSE(task.IsCompleted());
@@ -89,7 +89,7 @@ TEST_CASE("TaskContext WithLinkedCancellation cancels when parent token cancels"
     REQUIRE(result.error().code == NGIN::Async::AsyncErrorCode::Canceled);
 }
 
-TEST_CASE("TaskContext WithLinkedCancellation supports chaining without losing root linkage")
+TEST_CASE("TaskContext WithLinkedCancellationToken supports chaining without losing root linkage")
 {
     ManualTimerExecutor exec;
     NGIN::Async::CancellationSource rootSource;
@@ -97,11 +97,11 @@ TEST_CASE("TaskContext WithLinkedCancellation supports chaining without losing r
     NGIN::Async::CancellationSource extra2;
 
     NGIN::Async::TaskContext ctx0(exec, rootSource.GetToken());
-    auto ctx1 = ctx0.WithLinkedCancellation(extra1.GetToken());
-    auto ctx2 = ctx1.WithLinkedCancellation(extra2.GetToken());
+    auto ctx1 = ctx0.WithLinkedCancellationToken(extra1.GetToken());
+    auto ctx2 = ctx1.WithLinkedCancellationToken(extra2.GetToken());
 
     auto task = DelayForever(ctx2);
-    task.Start(ctx2);
+    task.Schedule(ctx2);
 
     exec.RunUntilIdle();
     REQUIRE_FALSE(task.IsCompleted());

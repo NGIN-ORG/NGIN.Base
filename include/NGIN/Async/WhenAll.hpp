@@ -144,7 +144,7 @@ namespace NGIN::Async
 
             bool await_suspend(std::coroutine_handle<> awaiting) const
             {
-                std::apply([&](auto&... t) { (t.Start(ctx), ...); }, tasks);
+                std::apply([&](auto&... t) { (t.Schedule(ctx), ...); }, tasks);
 
                 if (ctx.IsCancellationRequested())
                 {

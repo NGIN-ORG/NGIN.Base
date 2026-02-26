@@ -178,7 +178,7 @@ TEST_CASE("WhenAll returns tuple of results")
     auto b = YieldTwice(ctx, 2);
 
     auto all = NGIN::Async::WhenAll(ctx, a, b);
-    all.Start(ctx);
+    all.Schedule(ctx);
 
     exec.RunUntilIdle();
 
@@ -205,7 +205,7 @@ TEST_CASE("WhenAll can be co_awaited without calling Start() on the WhenAll task
         co_return *allResult;
     }(ctx);
 
-    root.Start(ctx);
+    root.Schedule(ctx);
     exec.RunUntilIdle();
 
     REQUIRE(root.IsCompleted());
@@ -224,7 +224,7 @@ TEST_CASE("WhenAny returns index of first completed task")
     auto b = YieldOnce(ctx, 2);
 
     auto any = NGIN::Async::WhenAny(ctx, a, b);
-    any.Start(ctx);
+    any.Schedule(ctx);
 
     exec.RunUntilIdle();
 
@@ -245,7 +245,7 @@ TEST_CASE("WhenAny returns canceled when context is already cancelled")
     auto                     b = YieldOnce(ctx, 2);
 
     auto any = NGIN::Async::WhenAny(ctx, a, b);
-    any.Start(ctx);
+    any.Schedule(ctx);
 
     exec.RunUntilIdle();
 
@@ -266,7 +266,7 @@ TEST_CASE("WhenAny wakes and returns canceled on cancellation")
     auto b = NeverCompletes(ctx);
 
     auto any = NGIN::Async::WhenAny(ctx, a, b);
-    any.Start(ctx);
+    any.Schedule(ctx);
 
     exec.RunUntilIdle();
     REQUIRE_FALSE(any.IsCompleted());
@@ -291,7 +291,7 @@ TEST_CASE("WhenAll wakes and returns canceled even if children do not observe ca
     auto b = SuspendForever(ctx);
 
     auto all = NGIN::Async::WhenAll(ctx, a, b);
-    all.Start(ctx);
+    all.Schedule(ctx);
 
     exec.RunUntilIdle();
     REQUIRE_FALSE(all.IsCompleted());
@@ -315,7 +315,7 @@ TEST_CASE("WhenAll propagates child exception")
     auto b = YieldOnce(ctx, 2);
 
     auto all = NGIN::Async::WhenAll(ctx, a, b);
-    all.Start(ctx);
+    all.Schedule(ctx);
 
     exec.RunUntilIdle();
 
@@ -335,7 +335,7 @@ TEST_CASE("WhenAny returns index when a task faults")
     auto b = YieldTwice(ctx, 123);
 
     auto any = NGIN::Async::WhenAny(ctx, a, b);
-    any.Start(ctx);
+    any.Schedule(ctx);
 
     exec.RunUntilIdle();
 
@@ -354,14 +354,14 @@ TEST_CASE("WhenAny returns immediately if one input is already completed")
     NGIN::Async::TaskContext ctx(exec);
 
     auto a = YieldOnce(ctx, 1);
-    a.Start(ctx);
+    a.Schedule(ctx);
     exec.RunUntilIdle();
     REQUIRE(a.IsCompleted());
 
     auto b = Immediate(ctx, 2); // left unstarted
 
     auto any = NGIN::Async::WhenAny(ctx, a, b);
-    any.Start(ctx);
+    any.Schedule(ctx);
     exec.RunUntilIdle();
 
     REQUIRE(any.IsCompleted());

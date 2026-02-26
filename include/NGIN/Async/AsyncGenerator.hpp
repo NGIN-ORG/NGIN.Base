@@ -269,6 +269,7 @@ namespace NGIN::Async
 
                     if (!p.exec.IsValid())
                     {
+                        m_invalidExecutor = true;
                         return awaiting;
                     }
                 }
@@ -317,6 +318,10 @@ namespace NGIN::Async
                 {
                     return std::unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
                 }
+                if (m_invalidExecutor)
+                {
+                    return std::unexpected(MakeAsyncError(AsyncErrorCode::InvalidState));
+                }
 
                 if (!m_gen.m_handle)
                 {
@@ -357,6 +362,7 @@ namespace NGIN::Async
             AsyncGenerator&                   m_gen;
             TaskContext&                      m_ctx;
             mutable CancellationRegistration  m_cancellationRegistration {};
+            bool                              m_invalidExecutor {false};
 #if NGIN_ASYNC_CAPTURE_EXCEPTIONS
             std::coroutine_handle<>           m_awaiting {};
             using ExceptionPropagator = void (*)(std::exception_ptr, std::coroutine_handle<>) noexcept;

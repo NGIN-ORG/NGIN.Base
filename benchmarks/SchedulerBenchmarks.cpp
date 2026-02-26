@@ -65,7 +65,7 @@ int main()
                 }
                 void await_suspend(std::coroutine_handle<> h) const
                 {
-                    sched.Schedule(h);
+                    sched.Execute(NGIN::Execution::WorkItem(h));
                 }
                 void await_resume() const noexcept
                 {
@@ -120,7 +120,7 @@ int main()
             for (int i = 0; i < numYieldManyTasks; ++i)
             {
                 tasks.emplace_back(taskYieldMany(taskCtx, completed));
-                tasks.back().Start(taskCtx);
+                tasks.back().Schedule(taskCtx);
             }
 
             auto value = completed.load(std::memory_order_acquire);
@@ -249,7 +249,7 @@ int main()
                 }
                 void await_suspend(std::coroutine_handle<> h) const
                 {
-                    sched.Schedule(h);
+                    sched.Execute(NGIN::Execution::WorkItem(h));
                 }
                 void await_resume() const noexcept
                 {
@@ -400,7 +400,7 @@ int main()
             for (int i = 0; i < numCoroutines; ++i)
             {
                 tasks.emplace_back(taskYield(taskCtx, completed));
-                tasks.back().Start(taskCtx);
+                tasks.back().Schedule(taskCtx);
             }
 
             auto value = completed.load(std::memory_order_acquire);
@@ -441,7 +441,7 @@ int main()
             for (int i = 0; i < numYieldManyTasks; ++i)
             {
                 tasks.emplace_back(taskYieldMany(taskCtx, completed));
-                tasks.back().Start(taskCtx);
+                tasks.back().Schedule(taskCtx);
             }
 
             auto value = completed.load(std::memory_order_acquire);
@@ -479,7 +479,7 @@ int main()
             for (int i = 0; i < numCoroutines; ++i)
             {
                 tasks.emplace_back(delayCanceled(taskCtx, completed));
-                tasks.back().Start(taskCtx);
+                tasks.back().Schedule(taskCtx);
             }
 
             cancelSource.Cancel();
@@ -512,8 +512,8 @@ int main()
             auto coordinator = [](NGIN::Async::TaskContext& ctx, std::atomic<int>& completed, auto leaf) -> NGIN::Async::Task<void> {
                 auto a = leaf(ctx);
                 auto b = leaf(ctx);
-                a.Start(ctx);
-                b.Start(ctx);
+                a.Schedule(ctx);
+                b.Schedule(ctx);
                 auto allResult = co_await NGIN::Async::WhenAll(ctx, a, b);
                 if (!allResult)
                 {
@@ -532,7 +532,7 @@ int main()
             for (int i = 0; i < numCoroutines; ++i)
             {
                 tasks.emplace_back(coordinator(taskCtx, completed, leaf));
-                tasks.back().Start(taskCtx);
+                tasks.back().Schedule(taskCtx);
             }
 
             auto value = completed.load(std::memory_order_acquire);
@@ -592,7 +592,7 @@ int main()
             for (int i = 0; i < numCoroutines; ++i)
             {
                 tasks.emplace_back(taskYield(taskCtx, completed));
-                tasks.back().Start(taskCtx);
+                tasks.back().Schedule(taskCtx);
             }
             while (completed.load(std::memory_order_relaxed) < numCoroutines)
             {
@@ -628,7 +628,7 @@ int main()
             for (int i = 0; i < numYieldManyTasks; ++i)
             {
                 tasks.emplace_back(taskYieldMany(taskCtx, completed));
-                tasks.back().Start(taskCtx);
+                tasks.back().Schedule(taskCtx);
             }
             while (completed.load(std::memory_order_relaxed) < numYieldManyTasks)
             {
@@ -662,7 +662,7 @@ int main()
             for (int i = 0; i < numCoroutines; ++i)
             {
                 tasks.emplace_back(delayCanceled(taskCtx, completed));
-                tasks.back().Start(taskCtx);
+                tasks.back().Schedule(taskCtx);
             }
 
             cancelSource.Cancel();
@@ -692,8 +692,8 @@ int main()
             auto coordinator = [](NGIN::Async::TaskContext& ctx, std::atomic<int>& completed, auto leaf) -> NGIN::Async::Task<void> {
                 auto a = leaf(ctx);
                 auto b = leaf(ctx);
-                a.Start(ctx);
-                b.Start(ctx);
+                a.Schedule(ctx);
+                b.Schedule(ctx);
                 auto allResult = co_await NGIN::Async::WhenAll(ctx, a, b);
                 if (!allResult)
                 {
@@ -711,7 +711,7 @@ int main()
             for (int i = 0; i < numCoroutines; ++i)
             {
                 tasks.emplace_back(coordinator(taskCtx, completed, leaf));
-                tasks.back().Start(taskCtx);
+                tasks.back().Schedule(taskCtx);
             }
 
             while (completed.load(std::memory_order_relaxed) < numCoroutines)

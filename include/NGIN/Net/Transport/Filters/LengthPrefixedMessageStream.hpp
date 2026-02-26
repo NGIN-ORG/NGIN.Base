@@ -146,7 +146,7 @@ namespace NGIN::Net::Transport::Filters
             while (offset < data.size())
             {
                 auto task = stream.WriteAsync(ctx, data.subspan(offset), token);
-                task.Start(ctx);
+                task.Schedule(ctx);
                 const auto bytes = co_await task;
                 if (!bytes)
                 {
@@ -174,7 +174,7 @@ namespace NGIN::Net::Transport::Filters
             while (offset < destination.size())
             {
                 auto task = stream.ReadAsync(ctx, destination.subspan(offset), token);
-                task.Start(ctx);
+                task.Schedule(ctx);
                 const auto bytes = co_await task;
                 if (!bytes)
                 {

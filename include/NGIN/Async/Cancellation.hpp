@@ -77,29 +77,7 @@ namespace NGIN::Async
 
         void Fire() noexcept;
 
-        void MoveFrom(CancellationRegistration&& other) noexcept
-        {
-            if (other.m_state)
-            {
-                other.Reset();
-            }
-
-            m_state          = std::move(other.m_state);
-            m_exec           = other.m_exec;
-            m_handle         = other.m_handle;
-            m_callback       = other.m_callback;
-            m_callbackCtx    = other.m_callbackCtx;
-            m_index          = other.m_index;
-            m_armed.store(other.m_armed.load(std::memory_order_relaxed), std::memory_order_relaxed);
-
-            other.m_exec        = {};
-            other.m_handle      = {};
-            other.m_callback    = nullptr;
-            other.m_callbackCtx = nullptr;
-            other.m_index       = static_cast<UIntSize>(-1);
-            other.m_armed.store(false, std::memory_order_relaxed);
-            other.m_state.Reset();
-        }
+        void MoveFrom(CancellationRegistration&& other) noexcept;
 
         Memory::Shared<detail::CancellationState> m_state {};
         NGIN::Execution::ExecutorRef               m_exec {};
@@ -156,15 +134,20 @@ namespace NGIN::Async
                 registrations.reserve(8);
             }
 
-            void Register(CancellationRegistration* registration) noexcept
+            [[nodiscard]] bool TryRegister(CancellationRegistration* registration) noexcept
             {
                 if (!registration)
                 {
-                    return;
+                    return false;
                 }
                 NGIN::Sync::LockGuard guard(lock);
+                if (canceled.load(std::memory_order_acquire))
+                {
+                    return false;
+                }
                 registration->m_index = registrations.size();
                 registrations.push_back(registration);
+                return true;
             }
 
             void Unregister(CancellationRegistration* registration) noexcept
@@ -215,7 +198,7 @@ namespace NGIN::Async
                 std::vector<CancellationRegistration*> local;
                 {
                     NGIN::Sync::LockGuard guard(lock);
-                    local = registrations;
+                    local.swap(registrations);
                 }
 
                 for (auto* reg: local)
@@ -315,30 +298,35 @@ namespace NGIN::Async
             return;
         }
 
-        if (m_state->canceled.load(std::memory_order_acquire))
-        {
-            bool shouldResume = true;
-            if (callback)
-            {
-                shouldResume = callback(callbackCtx);
-            }
-            if (shouldResume)
-            {
-                if (wantsResume)
-                {
-                    exec.Execute(handle);
-                }
-            }
-            return;
-        }
-
         outRegistration.m_state       = m_state;
         outRegistration.m_exec        = exec;
         outRegistration.m_handle      = handle;
         outRegistration.m_callback    = callback;
         outRegistration.m_callbackCtx = callbackCtx;
         outRegistration.m_armed.store(true, std::memory_order_relaxed);
-        m_state->Register(&outRegistration);
+
+        if (m_state->TryRegister(&outRegistration))
+        {
+            return;
+        }
+
+        outRegistration.m_state.Reset();
+        outRegistration.m_exec        = {};
+        outRegistration.m_handle      = {};
+        outRegistration.m_callback    = nullptr;
+        outRegistration.m_callbackCtx = nullptr;
+        outRegistration.m_index       = static_cast<UIntSize>(-1);
+        outRegistration.m_armed.store(false, std::memory_order_relaxed);
+
+        bool shouldResume = true;
+        if (callback)
+        {
+            shouldResume = callback(callbackCtx);
+        }
+        if (shouldResume && wantsResume)
+        {
+            exec.Execute(handle);
+        }
     }
 
     namespace detail
@@ -424,9 +412,47 @@ namespace NGIN::Async
     };
 
     /// @brief Convenience helper to create a linked cancellation source.
-    [[nodiscard]] inline LinkedCancellationSource CreateLinkedTokenSource(std::initializer_list<CancellationToken> tokens)
+    [[nodiscard]] inline LinkedCancellationSource CreateLinkedCancellationSource(std::initializer_list<CancellationToken> tokens)
     {
         return LinkedCancellationSource(tokens);
+    }
+
+    inline void CancellationRegistration::MoveFrom(CancellationRegistration&& other) noexcept
+    {
+        m_state          = std::move(other.m_state);
+        m_exec           = other.m_exec;
+        m_handle         = other.m_handle;
+        m_callback       = other.m_callback;
+        m_callbackCtx    = other.m_callbackCtx;
+        m_index          = other.m_index;
+        m_armed.store(other.m_armed.exchange(false, std::memory_order_acq_rel), std::memory_order_relaxed);
+
+        if (m_state)
+        {
+            NGIN::Sync::LockGuard guard(m_state->lock);
+            if (m_index < m_state->registrations.size() && m_state->registrations[m_index] == &other)
+            {
+                m_state->registrations[m_index] = this;
+            }
+            else
+            {
+                for (UIntSize i = 0; i < m_state->registrations.size(); ++i)
+                {
+                    if (m_state->registrations[i] == &other)
+                    {
+                        m_state->registrations[i] = this;
+                        m_index = i;
+                        break;
+                    }
+                }
+            }
+        }
+
+        other.m_exec        = {};
+        other.m_handle      = {};
+        other.m_callback    = nullptr;
+        other.m_callbackCtx = nullptr;
+        other.m_index       = static_cast<UIntSize>(-1);
     }
 
     inline void CancellationRegistration::Reset() noexcept

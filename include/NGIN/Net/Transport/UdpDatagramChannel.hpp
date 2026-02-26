@@ -54,7 +54,7 @@ namespace NGIN::Net::Transport
                 co_return;
             }
             auto task = socket.SendToAsync(ctx, *driver, remoteEndpoint, payload, token);
-            task.Start(ctx);
+            task.Schedule(ctx);
             auto result = co_await task;
             if (!result)
             {
@@ -84,7 +84,7 @@ namespace NGIN::Net::Transport
                                                 NGIN::Net::ByteSpan {receiveBuffer.data,
                                                                      receiveBuffer.capacity},
                                                 token);
-            task.Start(ctx);
+            task.Schedule(ctx);
             auto result = co_await task;
             if (!result)
             {

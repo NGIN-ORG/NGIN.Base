@@ -168,7 +168,7 @@ TEST_CASE("Task cancellation: Delay returns canceled when already cancelled")
 
     NGIN::Async::TaskContext ctx(scheduler, source.GetToken());
     auto                     task = CancelledDelayTask(ctx);
-    task.Start(ctx);
+    task.Schedule(ctx);
 
     REQUIRE(task.IsCompleted());
     REQUIRE(task.IsCanceled());
@@ -184,7 +184,7 @@ TEST_CASE("Task cancellation: Delay is woken by cancellation")
     NGIN::Async::TaskContext ctx(exec, source.GetToken());
 
     auto task = DelayForever(ctx);
-    task.Start(ctx);
+    task.Schedule(ctx);
 
     exec.RunUntilIdle();
     REQUIRE_FALSE(task.IsCompleted());
@@ -206,7 +206,7 @@ TEST_CASE("Task cancellation: CancelAt wakes Delay without firing timers")
     NGIN::Async::TaskContext ctx(exec, source.GetToken());
 
     auto task = DelayForever(ctx);
-    task.Start(ctx);
+    task.Schedule(ctx);
 
     exec.RunUntilIdle();
     REQUIRE_FALSE(task.IsCompleted());
@@ -233,7 +233,7 @@ TEST_CASE("Task cancellation: Yield returns canceled when already cancelled")
 
     NGIN::Async::TaskContext ctx(scheduler, source.GetToken());
     auto                     task = CancelledYieldTask(ctx);
-    task.Start(ctx);
+    task.Schedule(ctx);
 
     REQUIRE(task.IsCompleted());
     REQUIRE(task.IsCanceled());
@@ -250,7 +250,7 @@ TEST_CASE("Task cancellation: CheckCancellation returns canceled")
 
     NGIN::Async::TaskContext ctx(scheduler, source.GetToken());
     auto                     task = CancelledThrowTask(ctx);
-    task.Start(ctx);
+    task.Schedule(ctx);
 
     REQUIRE(task.IsCompleted());
     REQUIRE(task.IsCanceled());
@@ -265,7 +265,7 @@ TEST_CASE("Task can be awaited without calling Start() on the child task")
     NGIN::Async::TaskContext              ctx(scheduler);
 
     auto task = AwaitChild(ctx);
-    task.Start(ctx);
+    task.Schedule(ctx);
 
     scheduler.RunUntilIdle();
 
@@ -283,7 +283,7 @@ TEST_CASE("Task propagates exceptions through co_await")
     NGIN::Async::TaskContext              ctx(scheduler);
 
     auto task = AwaitChildThatThrows(ctx);
-    task.Start(ctx);
+    task.Schedule(ctx);
 
     scheduler.RunUntilIdle();
 

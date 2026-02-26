@@ -100,7 +100,7 @@ TEST_CASE("AsyncGenerator yields values via Next(TaskContext)")
 
     auto gen  = ProduceValues(ctx);
     auto task = SumAll(ctx, gen);
-    task.Start(ctx);
+    task.Schedule(ctx);
 
     scheduler.RunUntilIdle();
 
@@ -118,7 +118,7 @@ TEST_CASE("AsyncGenerator propagates exceptions from producer")
 
     auto gen  = YieldThenThrow(ctx);
     auto task = SumAll(ctx, gen);
-    task.Start(ctx);
+    task.Schedule(ctx);
 
     scheduler.RunUntilIdle();
 
@@ -141,7 +141,7 @@ TEST_CASE("AsyncGenerator Next observes TaskContext cancellation")
 
     auto gen  = YieldOnceThenNever(ctx);
     auto task = ConsumeThenCancel(ctx, gen);
-    task.Start(ctx);
+    task.Schedule(ctx);
 
     scheduler.RunUntilIdle();
     REQUIRE_FALSE(task.IsCompleted());
