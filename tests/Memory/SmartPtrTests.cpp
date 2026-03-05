@@ -24,6 +24,32 @@ namespace
             : value(other.value) { ++constructed; }
         ~Probe() { ++destructed; }
     };
+
+    struct PolyBase
+    {
+        static inline int destructed = 0;
+        virtual ~PolyBase() { ++destructed; }
+        [[nodiscard]] virtual int Value() const noexcept = 0;
+    };
+
+    struct PolyDerived final : PolyBase
+    {
+        static inline int destructed = 0;
+
+        explicit PolyDerived(const int valueIn) noexcept
+            : value(valueIn)
+        {
+        }
+
+        ~PolyDerived() override { ++destructed; }
+
+        [[nodiscard]] int Value() const noexcept override
+        {
+            return value;
+        }
+
+        int value {0};
+    };
 }// namespace
 
 TEST_CASE("Scoped pointers manage lifetime", "[Memory][SmartPointers]")
@@ -145,5 +171,49 @@ TEST_CASE("Tickets handle edge cases", "[Memory][SmartPointers]")
 
     CHECK(Probe::constructed == 1);
     CHECK(Probe::destructed == 1);
+    CHECK(tracking.GetStats().currentCount == 0U);
+}
+
+TEST_CASE("MakeSharedAs constructs derived as base and destroys virtually", "[Memory][SmartPointers]")
+{
+    PolyBase::destructed = 0;
+    PolyDerived::destructed = 0;
+
+    {
+        auto base = NGIN::Memory::MakeSharedAs<PolyBase, PolyDerived>(123);
+        REQUIRE(base);
+        CHECK(base->Value() == 123);
+
+        auto copy = base;
+        CHECK(base.UseCount() == 2U);
+        copy.Reset();
+        CHECK(base.UseCount() == 1U);
+    }
+
+    CHECK(PolyDerived::destructed == 1);
+    CHECK(PolyBase::destructed == 1);
+}
+
+TEST_CASE("MakeSharedAs supports allocator overload", "[Memory][SmartPointers]")
+{
+    using Tracked = NGIN::Memory::Tracking<NGIN::Memory::SystemAllocator>;
+
+    PolyBase::destructed = 0;
+    PolyDerived::destructed = 0;
+
+    Tracked           tracking {NGIN::Memory::SystemAllocator {}};
+    auto              allocatorRef = NGIN::Memory::AllocatorRef(tracking);
+    const std::size_t baseline = tracking.GetStats().currentBytes;
+
+    {
+        auto base = NGIN::Memory::MakeSharedAs<PolyBase, PolyDerived>(allocatorRef, 77);
+        REQUIRE(base);
+        CHECK(base->Value() == 77);
+        CHECK(tracking.GetStats().currentCount == 1U);
+    }
+
+    CHECK(PolyDerived::destructed == 1);
+    CHECK(PolyBase::destructed == 1);
+    CHECK(tracking.GetStats().currentBytes == baseline);
     CHECK(tracking.GetStats().currentCount == 0U);
 }

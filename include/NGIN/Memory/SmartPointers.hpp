@@ -11,6 +11,7 @@
 
 #include <atomic>
 #include <cstddef>
+#include <concepts>
 #include <memory>
 #include <new>
 #include <type_traits>
@@ -27,6 +28,8 @@ namespace NGIN::Memory
         template<class T, class Alloc>
         struct SharedControl final
         {
+            using DestroyObjectFn = void (*)(void*) noexcept;
+
             std::atomic<std::size_t> strong {1};// number of Shared owners
             std::atomic<std::size_t> weak {1};  // number of Ticket owners + control's self-weak
 
@@ -35,16 +38,24 @@ namespace NGIN::Memory
             std::size_t                 totalBytes {0};
             std::size_t                 allocAlignment {alignof(std::max_align_t)};
             T*                          objectPtr {nullptr};
+            DestroyObjectFn             destroyObjectFn {nullptr};
 
             SharedControl() = default;
-            SharedControl(Alloc a, void* b, std::size_t bytes, std::size_t aln, T* obj) noexcept
-                : alloc(std::move(a)), base(b), totalBytes(bytes), allocAlignment(aln), objectPtr(obj) {}
+            SharedControl(Alloc a, void* b, std::size_t bytes, std::size_t aln, T* obj, DestroyObjectFn destroyFn) noexcept
+                : alloc(std::move(a)), base(b), totalBytes(bytes), allocAlignment(aln), objectPtr(obj), destroyObjectFn(destroyFn) {}
 
             void DestroyObject() noexcept(std::is_nothrow_destructible_v<T>)
             {
                 if (objectPtr)
                 {
-                    objectPtr->~T();
+                    if (destroyObjectFn)
+                    {
+                        destroyObjectFn(static_cast<void*>(objectPtr));
+                    }
+                    else
+                    {
+                        objectPtr->~T();
+                    }
                     objectPtr = nullptr;
                 }
             }
@@ -249,6 +260,9 @@ namespace NGIN::Memory
 
         template<class U, AllocatorConcept A, class... Args>
         friend Shared<U, A> MakeShared(A alloc, Args&&... args);
+        template<class UBase, class UDerived, AllocatorConcept A, class... Args>
+            requires std::derived_from<UDerived, UBase> && std::has_virtual_destructor_v<UBase>
+        friend Shared<UBase, A> MakeSharedAs(A alloc, Args&&... args);
         template<class U, AllocatorConcept A>
         friend Ticket<U, A> MakeTicket(const Shared<U, A>&) noexcept;
 
@@ -374,6 +388,9 @@ namespace NGIN::Memory
 
         template<class U, AllocatorConcept A, class... Args>
         friend Shared<U, A> MakeShared(A alloc, Args&&... args);
+        template<class UBase, class UDerived, AllocatorConcept A, class... Args>
+            requires std::derived_from<UDerived, UBase> && std::has_virtual_destructor_v<UBase>
+        friend Shared<UBase, A> MakeSharedAs(A alloc, Args&&... args);
         template<class U, AllocatorConcept A>
         friend Ticket<U, A> MakeTicket(const Shared<U, A>&) noexcept;
     };
@@ -397,7 +414,15 @@ namespace NGIN::Memory
             throw std::bad_alloc {};
 
         // place the control block at base
-        auto* ctrl = ::new (base) Control(std::move(alloc), base, total, alignment, nullptr);
+        auto* ctrl = ::new (base) Control(
+            std::move(alloc),
+            base,
+            total,
+            alignment,
+            nullptr,
+            +[](void* ptr) noexcept {
+                static_cast<T*>(ptr)->~T();
+            });
 
         // carve out space for T after the control block
         auto*       raw   = static_cast<std::byte*>(base) + sizeof(Control);
@@ -422,6 +447,57 @@ namespace NGIN::Memory
         return Shared<T, Alloc>(ctrl);
     }
 
+    /// \brief Construct `TDerived` and return `Shared<TBase, Alloc>` in one allocation.
+    ///
+    /// \tparam TBase Base interface/parent type stored in Shared control block.
+    /// \tparam TDerived Concrete constructed type.
+    /// \tparam Alloc Allocator type.
+    /// \tparam Args Constructor argument pack for `TDerived`.
+    template<class TBase, class TDerived, AllocatorConcept Alloc = SystemAllocator, class... Args>
+        requires std::derived_from<TDerived, TBase> && std::has_virtual_destructor_v<TBase>
+    [[nodiscard]] Shared<TBase, Alloc> MakeSharedAs(Alloc alloc, Args&&... args)
+    {
+        using Control = detail::SharedControl<TBase, Alloc>;
+
+        constexpr std::size_t derivedAlign = alignof(TDerived);
+        constexpr std::size_t ctrlAlign    = alignof(Control);
+        const std::size_t     alignment    = ctrlAlign > derivedAlign ? ctrlAlign : derivedAlign;
+
+        const std::size_t total = sizeof(Control) + (derivedAlign - 1) + sizeof(TDerived);
+
+        void* base = alloc.Allocate(total, alignment);
+        if (!base)
+            throw std::bad_alloc {};
+
+        auto* ctrl = ::new (base) Control(
+            std::move(alloc),
+            base,
+            total,
+            alignment,
+            nullptr,
+            +[](void* ptr) noexcept {
+                static_cast<TDerived*>(ptr)->~TDerived();
+            });
+
+        auto*       raw   = static_cast<std::byte*>(base) + sizeof(Control);
+        std::size_t space = total - sizeof(Control);
+
+        void* objVoid = static_cast<void*>(raw);
+        if (std::align(alignof(TDerived), sizeof(TDerived), objVoid, space) == nullptr)
+        {
+            ctrl->DeallocateSelf();
+            throw std::bad_alloc {};
+        }
+
+        TDerived* derivedPtr = std::construct_at(static_cast<TDerived*>(objVoid), std::forward<Args>(args)...);
+
+        ctrl->objectPtr = static_cast<TBase*>(derivedPtr);
+        ctrl->strong.store(1, std::memory_order_relaxed);
+        ctrl->weak.store(1, std::memory_order_relaxed);
+
+        return Shared<TBase, Alloc>(ctrl);
+    }
+
     /// \brief Create a weak Ticket from a Shared, bumping weak count.
     template<class T, AllocatorConcept Alloc>
     [[nodiscard]] Ticket<T, Alloc> MakeTicket(const Shared<T, Alloc>& shared) noexcept
@@ -442,5 +518,18 @@ namespace NGIN::Memory
     {
         SystemAllocator alloc {};
         return MakeShared<T, SystemAllocator>(alloc, std::forward<Args>(args)...);
+    }
+
+    /// \brief Construct `TDerived` and return `Shared<TBase, SystemAllocator>`.
+    ///
+    /// \tparam TBase Base interface/parent type stored in Shared control block.
+    /// \tparam TDerived Concrete constructed type.
+    /// \tparam Args Constructor argument pack for `TDerived`.
+    template<class TBase, class TDerived, class... Args>
+        requires std::derived_from<TDerived, TBase> && std::has_virtual_destructor_v<TBase>
+    [[nodiscard]] Shared<TBase, SystemAllocator> MakeSharedAs(Args&&... args)
+    {
+        SystemAllocator alloc {};
+        return MakeSharedAs<TBase, TDerived, SystemAllocator>(alloc, std::forward<Args>(args)...);
     }
 }// namespace NGIN::Memory
