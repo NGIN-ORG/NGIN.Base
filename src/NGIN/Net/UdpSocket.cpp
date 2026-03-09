@@ -17,6 +17,7 @@
 
 namespace NGIN::Net
 {
+#if !defined(NGIN_PLATFORM_WINDOWS)
     [[nodiscard]] static NGIN::Async::AsyncError ToAsyncError(NetError error) noexcept
     {
         using NGIN::Async::AsyncErrorCode;
@@ -33,6 +34,7 @@ namespace NGIN::Net
         const int native = (error.native != 0) ? error.native : static_cast<int>(error.code);
         return NGIN::Async::MakeAsyncError(code, native);
     }
+#endif
 
     NetExpected<void> UdpSocket::Open(AddressFamily family, SocketOptions options) noexcept
     {

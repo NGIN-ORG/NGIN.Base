@@ -196,7 +196,7 @@ namespace NGIN::Net::detail
         const NativeSocket sock = ToNative(handle);
 #if defined(NGIN_PLATFORM_WINDOWS)
         u_long mode = value ? 1UL : 0UL;
-        return ::ioctlsocket(sock, FIONBIO, &mode) == 0;
+        return ::ioctlsocket(sock, static_cast<long>(FIONBIO), &mode) == 0;
 #else
         const int flags = ::fcntl(sock, F_GETFL, 0);
         if (flags < 0)
@@ -365,7 +365,7 @@ namespace NGIN::Net::detail
     Endpoint FromSockAddr(const sockaddr_storage& storage, socklen_t length) noexcept
     {
         Endpoint endpoint {};
-        if (length >= sizeof(sockaddr_in) && storage.ss_family == AF_INET)
+        if (length >= static_cast<socklen_t>(sizeof(sockaddr_in)) && storage.ss_family == AF_INET)
         {
             sockaddr_in addr {};
             std::memcpy(&addr, &storage, sizeof(addr));
