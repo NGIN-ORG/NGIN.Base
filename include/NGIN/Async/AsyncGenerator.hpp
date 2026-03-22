@@ -4,13 +4,13 @@
 
 #include <cassert>
 #include <coroutine>
+#include <exception>
 #include <optional>
 #include <type_traits>
 #include <utility>
 
-#include <NGIN/Async/AsyncError.hpp>
 #include <NGIN/Async/Cancellation.hpp>
-#include <NGIN/Async/TaskContext.hpp>
+#include <NGIN/Async/Task.hpp>
 #include <NGIN/Execution/ExecutorRef.hpp>
 #include <NGIN/Meta/TypeTraits.hpp>
 #include <NGIN/Sync/LockGuard.hpp>
@@ -18,30 +18,98 @@
 
 namespace NGIN::Async
 {
-    /// @brief Async pull generator that yields values via `co_yield` and is advanced via `co_await gen.Next(ctx)`.
-    ///
-    /// This is intentionally separate from `Task<T>` (single-result). `AsyncGenerator<T>` yields a sequence of values
-    /// over time, resuming on the provided `TaskContext` executor and observing cancellation cooperatively.
-    ///
-    /// Usage:
-    /// `for (;;) { auto next = co_await gen.Next(ctx); if (!next) { ... } if (!*next) break; ... **next ... }`
-    /// To report a fault without exceptions, `co_await AsyncGenerator<T>::ReturnError(MakeAsyncError(...)); co_return;`.
     template<typename T>
+    class GeneratorNext final
+    {
+    public:
+        [[nodiscard]] static GeneratorNext Item(T value) noexcept(NGIN::Meta::TypeTraits<T>::IsNothrowMoveConstructible())
+        {
+            return GeneratorNext(std::move(value));
+        }
+
+        [[nodiscard]] static GeneratorNext End() noexcept
+        {
+            return GeneratorNext();
+        }
+
+        [[nodiscard]] bool HasItem() const noexcept
+        {
+            return m_value.has_value();
+        }
+
+        [[nodiscard]] bool IsEnd() const noexcept
+        {
+            return !m_value.has_value();
+        }
+
+        [[nodiscard]] explicit operator bool() const noexcept
+        {
+            return HasItem();
+        }
+
+        [[nodiscard]] T& Value() noexcept
+        {
+            assert(m_value.has_value());
+            return *m_value;
+        }
+
+        [[nodiscard]] const T& Value() const noexcept
+        {
+            assert(m_value.has_value());
+            return *m_value;
+        }
+
+        [[nodiscard]] T& operator*() noexcept
+        {
+            return Value();
+        }
+
+        [[nodiscard]] const T& operator*() const noexcept
+        {
+            return Value();
+        }
+
+        [[nodiscard]] T* operator->() noexcept
+        {
+            assert(m_value.has_value());
+            return &*m_value;
+        }
+
+        [[nodiscard]] const T* operator->() const noexcept
+        {
+            assert(m_value.has_value());
+            return &*m_value;
+        }
+
+    private:
+        GeneratorNext() = default;
+
+        explicit GeneratorNext(T value) noexcept(NGIN::Meta::TypeTraits<T>::IsNothrowMoveConstructible())
+            : m_value(std::move(value))
+        {
+        }
+
+        std::optional<T> m_value {};
+    };
+
+    /// @brief Async pull generator that yields values via `co_yield` and advances via `co_await gen.Next(ctx)`.
+    template<typename T, typename E = NoError>
     class AsyncGenerator final
     {
     public:
         struct promise_type final
         {
-            NGIN::Sync::SpinLock           lock {};
-            NGIN::Execution::ExecutorRef   exec {};
-            std::coroutine_handle<>        consumer {};
-            std::optional<T>               current {};
-            AsyncError                     error {};
-            bool                           hasError {false};
+            NGIN::Sync::SpinLock         lock {};
+            NGIN::Execution::ExecutorRef exec {};
+            std::coroutine_handle<>      consumer {};
+            std::optional<T>             current {};
+            std::optional<E>             domainError {};
+            std::optional<AsyncFault>    fault {};
 #if NGIN_ASYNC_CAPTURE_EXCEPTIONS
-            std::exception_ptr             exception {};
+            std::exception_ptr           exception {};
 #endif
-            bool                           completed {false};
+            bool completed {false};
+            bool canceled {false};
 
             promise_type() = default;
 
@@ -78,80 +146,41 @@ namespace NGIN::Async
 
                 std::coroutine_handle<> await_suspend(std::coroutine_handle<promise_type>) noexcept
                 {
-                    std::coroutine_handle<> toResume {};
-                    NGIN::Execution::ExecutorRef exec {};
-                    {
-                        NGIN::Sync::LockGuard guard(promise->lock);
-                        toResume = promise->consumer;
-                        promise->consumer = {};
-                        exec = promise->exec;
-                    }
-
-                    if (toResume)
-                    {
-                        if (exec.IsValid())
-                        {
-                            exec.Execute(toResume);
-                        }
-                        else
-                        {
-                            toResume.resume();
-                        }
-                    }
-
-                    return std::noop_coroutine();
+                    return promise->WakeConsumer();
                 }
 
                 void await_resume() noexcept {}
             };
 
-            struct FinalAwaiter
+            struct FinalAwaiter final
             {
                 bool await_ready() noexcept
                 {
                     return false;
                 }
 
-                void await_suspend(std::coroutine_handle<promise_type> h) noexcept
+                void await_suspend(std::coroutine_handle<promise_type> handle) noexcept
                 {
-                    auto& p = h.promise();
-
-                    std::coroutine_handle<> toResume {};
-                    NGIN::Execution::ExecutorRef exec {};
+                    auto& promise = handle.promise();
                     {
-                        NGIN::Sync::LockGuard guard(p.lock);
-                        p.completed = true;
-                        toResume    = p.consumer;
-                        p.consumer  = {};
-                        exec        = p.exec;
+                        NGIN::Sync::LockGuard guard(promise.lock);
+                        promise.completed = true;
                     }
-
-                    if (toResume)
+                    auto consumer = promise.WakeConsumer();
+                    if (consumer)
                     {
-                        if (exec.IsValid())
-                        {
-                            exec.Execute(toResume);
-                        }
-                        else
-                        {
-                            toResume.resume();
-                        }
+                        consumer.resume();
                     }
                 }
 
                 void await_resume() noexcept {}
             };
 
-            FinalAwaiter final_suspend() noexcept
-            {
-                return {};
-            }
-
             YieldAwaiter yield_value(T value) noexcept(NGIN::Meta::TypeTraits<T>::IsNothrowMoveConstructible())
             {
                 {
                     NGIN::Sync::LockGuard guard(lock);
-                    current  = std::move(value);
+                    current = std::move(value);
                 }
                 return YieldAwaiter {this};
             }
@@ -161,14 +190,64 @@ namespace NGIN::Async
             void unhandled_exception() noexcept
             {
 #if NGIN_ASYNC_HAS_EXCEPTIONS
-                error = AsyncError {AsyncErrorCode::Fault, 0};
-                hasError = true;
+                fault = MakeAsyncFault(AsyncFaultCode::UnhandledException);
 #if NGIN_ASYNC_CAPTURE_EXCEPTIONS
                 exception = std::current_exception();
 #endif
 #else
                 std::terminate();
 #endif
+            }
+
+            FinalAwaiter final_suspend() noexcept
+            {
+                return {};
+            }
+
+            void SetCanceled() noexcept
+            {
+                NGIN::Sync::LockGuard guard(lock);
+                canceled = true;
+            }
+
+            void SetFault(AsyncFault asyncFault) noexcept
+            {
+                NGIN::Sync::LockGuard guard(lock);
+                fault = std::move(asyncFault);
+            }
+
+            void MarkFinishedAndResume(std::coroutine_handle<promise_type>) noexcept
+            {
+                {
+                    NGIN::Sync::LockGuard guard(lock);
+                    completed = true;
+                }
+
+                auto consumer = WakeConsumer();
+                if (consumer)
+                {
+                    consumer.resume();
+                }
+            }
+
+            std::coroutine_handle<> WakeConsumer() noexcept
+            {
+                std::coroutine_handle<> toResume {};
+                NGIN::Execution::ExecutorRef executor {};
+                {
+                    NGIN::Sync::LockGuard guard(lock);
+                    toResume = consumer;
+                    consumer = {};
+                    executor = exec;
+                }
+
+                if (toResume && executor.IsValid())
+                {
+                    executor.Execute(toResume);
+                    return std::noop_coroutine();
+                }
+
+                return toResume;
             }
         };
 
@@ -206,99 +285,94 @@ namespace NGIN::Async
             Reset();
         }
 
-        class NextAwaiter final
+        struct AdvanceAwaiter final
         {
-        public:
-            NextAwaiter(AsyncGenerator& gen, TaskContext& ctx) noexcept
-                : m_gen(gen)
-                , m_ctx(ctx)
-            {
-            }
+            AsyncGenerator&                 generator;
+            TaskContext&                    context;
+            CancellationRegistration        cancellationRegistration {};
 
             bool await_ready() const noexcept
             {
-                if (m_ctx.IsCancellationRequested())
+                if (context.IsCancellationRequested())
                 {
                     return true;
                 }
 
-                if (!m_gen.m_handle)
+                if (!generator.m_handle)
                 {
                     return true;
                 }
 
-                auto& p = m_gen.m_handle.promise();
-                NGIN::Sync::LockGuard guard(p.lock);
-                return p.current.has_value() || p.completed;
+                auto& promise = generator.m_handle.promise();
+                NGIN::Sync::LockGuard guard(promise.lock);
+                return promise.current.has_value() || promise.domainError.has_value() || promise.fault.has_value() ||
+                       promise.canceled || promise.completed;
             }
 
-            template<typename Promise>
-            std::coroutine_handle<> await_suspend(std::coroutine_handle<Promise> awaiting) noexcept
+            std::coroutine_handle<> await_suspend(std::coroutine_handle<> awaiting) noexcept
             {
-                if (m_ctx.IsCancellationRequested())
+                if (context.IsCancellationRequested())
                 {
                     return awaiting;
                 }
 
-                if (!m_gen.m_handle)
+                if (!generator.m_handle)
                 {
                     return awaiting;
                 }
 
-#if NGIN_ASYNC_CAPTURE_EXCEPTIONS
-                m_awaiting = awaiting;
-                m_propagateException = &AsyncGenerator::template PropagateChildException<Promise>;
-#endif
-
-                auto& p = m_gen.m_handle.promise();
+                auto& promise = generator.m_handle.promise();
 
                 {
-                    NGIN::Sync::LockGuard guard(p.lock);
-                    if (p.hasError || p.current.has_value() || p.completed)
+                    NGIN::Sync::LockGuard guard(promise.lock);
+                    if (promise.current.has_value() || promise.domainError.has_value() || promise.fault.has_value() ||
+                        promise.canceled || promise.completed)
                     {
                         return awaiting;
                     }
 
-                    assert(!p.consumer && "AsyncGenerator::Next does not support concurrent consumers");
-                    p.consumer = awaiting;
+                    assert(!promise.consumer && "AsyncGenerator::Next does not support concurrent consumers");
+                    promise.consumer = awaiting;
 
-                    if (!p.exec.IsValid())
+                    if (!promise.exec.IsValid())
                     {
-                        p.exec = m_ctx.GetExecutor();
+                        promise.exec = context.GetExecutor();
                     }
 
-                    if (!p.exec.IsValid())
+                    if (!promise.exec.IsValid())
                     {
-                        m_invalidExecutor = true;
+                        promise.fault = MakeAsyncFault(AsyncFaultCode::InvalidState);
+                        promise.completed = true;
+                        promise.consumer = {};
                         return awaiting;
                     }
                 }
 
-                m_ctx.GetCancellationToken().Register(
-                        m_cancellationRegistration,
+                context.GetCancellationToken().Register(
+                        cancellationRegistration,
                         {},
                         {},
-                        +[](void* ctx) noexcept -> bool {
-                            auto* promise = static_cast<promise_type*>(ctx);
+                        +[](void* rawPromise) noexcept -> bool {
+                            auto* promise = static_cast<promise_type*>(rawPromise);
                             if (!promise)
                             {
                                 return false;
                             }
 
                             std::coroutine_handle<> toResume {};
-                            NGIN::Execution::ExecutorRef exec {};
+                            NGIN::Execution::ExecutorRef executor {};
                             {
                                 NGIN::Sync::LockGuard guard(promise->lock);
                                 toResume = promise->consumer;
                                 promise->consumer = {};
-                                exec = promise->exec;
+                                executor = promise->exec;
                             }
 
                             if (toResume)
                             {
-                                if (exec.IsValid())
+                                if (executor.IsValid())
                                 {
-                                    exec.Execute(toResume);
+                                    executor.Execute(toResume);
                                 }
                                 else
                                 {
@@ -307,92 +381,116 @@ namespace NGIN::Async
                             }
                             return false;
                         },
-                        &p);
+                        &promise);
 
-                return m_gen.m_handle;
+                return generator.m_handle;
             }
 
-            AsyncExpected<std::optional<T>> await_resume() noexcept
-            {
-                if (m_ctx.IsCancellationRequested())
-                {
-                    return NGIN::Utilities::Unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
-                }
-                if (m_invalidExecutor)
-                {
-                    return NGIN::Utilities::Unexpected(MakeAsyncError(AsyncErrorCode::InvalidState));
-                }
-
-                if (!m_gen.m_handle)
-                {
-                    return std::optional<T> {};
-                }
-
-                auto& p = m_gen.m_handle.promise();
-                NGIN::Sync::LockGuard guard(p.lock);
-
-#if NGIN_ASYNC_CAPTURE_EXCEPTIONS
-                if (p.hasError && p.exception && m_propagateException && m_awaiting)
-                {
-                    m_propagateException(p.exception, m_awaiting);
-                }
-#endif
-
-                if (p.hasError)
-                {
-                    return NGIN::Utilities::Unexpected(p.error);
-                }
-
-                if (p.current.has_value())
-                {
-                    auto out = std::move(p.current);
-                    p.current.reset();
-                    return out;
-                }
-
-                if (p.completed)
-                {
-                    return std::optional<T> {};
-                }
-
-                return std::optional<T> {};
-            }
-
-        private:
-            AsyncGenerator&                   m_gen;
-            TaskContext&                      m_ctx;
-            mutable CancellationRegistration  m_cancellationRegistration {};
-            bool                              m_invalidExecutor {false};
-#if NGIN_ASYNC_CAPTURE_EXCEPTIONS
-            std::coroutine_handle<>           m_awaiting {};
-            using ExceptionPropagator = void (*)(std::exception_ptr, std::coroutine_handle<>) noexcept;
-            ExceptionPropagator               m_propagateException {};
-#endif
+            void await_resume() const noexcept {}
         };
 
-        [[nodiscard]] auto Next(TaskContext& ctx) noexcept
+        [[nodiscard]] Task<GeneratorNext<T>, E> Next(TaskContext& ctx)
         {
-            return NextAwaiter(*this, ctx);
+            co_await AdvanceAwaiter {*this, ctx};
+
+            if (ctx.IsCancellationRequested())
+            {
+                co_return Canceled;
+            }
+
+            if (!m_handle)
+            {
+                co_return GeneratorNext<T>::End();
+            }
+
+            auto& promise = m_handle.promise();
+            NGIN::Sync::LockGuard guard(promise.lock);
+
+            if (promise.fault.has_value())
+            {
+                co_return Fault(*promise.fault);
+            }
+
+            if (promise.canceled)
+            {
+                co_return Canceled;
+            }
+
+            if (promise.domainError.has_value())
+            {
+                co_return NGIN::Utilities::Unexpected(*promise.domainError);
+            }
+
+            if (promise.current.has_value())
+            {
+                auto value = std::move(*promise.current);
+                promise.current.reset();
+                co_return GeneratorNext<T>::Item(std::move(value));
+            }
+
+            co_return GeneratorNext<T>::End();
         }
 
         struct ReturnErrorAwaiter final
         {
-            AsyncError error {};
+            E error {};
 
             bool await_ready() const noexcept { return false; }
-            bool await_suspend(std::coroutine_handle<promise_type> h) const noexcept
+
+            bool await_suspend(std::coroutine_handle<promise_type> handle) const noexcept
             {
-                auto& p = h.promise();
-                p.error = error;
-                p.hasError = true;
+                auto& promise = handle.promise();
+                {
+                    NGIN::Sync::LockGuard guard(promise.lock);
+                    promise.domainError = error;
+                }
                 return false;
             }
+
             void await_resume() const noexcept {}
         };
 
-        [[nodiscard]] static ReturnErrorAwaiter ReturnError(AsyncError error) noexcept
+        struct ReturnCanceledAwaiter final
         {
-            return ReturnErrorAwaiter {error};
+            bool await_ready() const noexcept { return false; }
+
+            bool await_suspend(std::coroutine_handle<promise_type> handle) const noexcept
+            {
+                handle.promise().SetCanceled();
+                return false;
+            }
+
+            void await_resume() const noexcept {}
+        };
+
+        struct ReturnFaultAwaiter final
+        {
+            AsyncFault fault {};
+
+            bool await_ready() const noexcept { return false; }
+
+            bool await_suspend(std::coroutine_handle<promise_type> handle) const noexcept
+            {
+                handle.promise().SetFault(fault);
+                return false;
+            }
+
+            void await_resume() const noexcept {}
+        };
+
+        [[nodiscard]] static ReturnErrorAwaiter ReturnError(E error) noexcept
+        {
+            return ReturnErrorAwaiter {std::move(error)};
+        }
+
+        [[nodiscard]] static ReturnCanceledAwaiter ReturnCanceled() noexcept
+        {
+            return {};
+        }
+
+        [[nodiscard]] static ReturnFaultAwaiter ReturnFault(AsyncFault fault) noexcept
+        {
+            return ReturnFaultAwaiter {std::move(fault)};
         }
 
     private:
@@ -404,26 +502,6 @@ namespace NGIN::Async
                 m_handle = {};
             }
         }
-
-#if NGIN_ASYNC_CAPTURE_EXCEPTIONS
-        template<typename Promise>
-        static void PropagateChildException(std::exception_ptr ex, std::coroutine_handle<> cont) noexcept
-        {
-            if (!ex || !cont)
-            {
-                return;
-            }
-            if constexpr (requires(Promise& p) { p.SetChildException(ex); })
-            {
-                auto typed = std::coroutine_handle<Promise>::from_address(cont.address());
-                typed.promise().SetChildException(ex);
-            }
-            else
-            {
-                (void)cont;
-            }
-        }
-#endif
 
         handle_type m_handle {};
     };

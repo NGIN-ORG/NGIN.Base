@@ -17,32 +17,6 @@
 
 namespace NGIN::Net
 {
-    [[nodiscard]] static NGIN::Async::AsyncError ToAsyncError(NetError error) noexcept
-    {
-        using NGIN::Async::AsyncErrorCode;
-        AsyncErrorCode code = AsyncErrorCode::Fault;
-        switch (error.code)
-        {
-            case NetErrorCode::TimedOut:
-                code = AsyncErrorCode::TimedOut;
-                break;
-            case NetErrorCode::MessageTooLarge:
-                code = AsyncErrorCode::InvalidArgument;
-                break;
-            case NetErrorCode::WouldBlock:
-                code = AsyncErrorCode::InvalidState;
-                break;
-            case NetErrorCode::Ok:
-                code = AsyncErrorCode::Ok;
-                break;
-            default:
-                break;
-        }
-
-        const int native = (error.native != 0) ? error.native : static_cast<int>(error.code);
-        return NGIN::Async::MakeAsyncError(code, native);
-    }
-
     NetExpected<void> TcpSocket::Open(AddressFamily family, SocketOptions options) noexcept
     {
         m_handle.Close();
@@ -87,24 +61,19 @@ namespace NGIN::Net
         return NGIN::Utilities::Unexpected(err);
     }
 
-    NGIN::Async::Task<void> TcpSocket::ConnectAsync(NGIN::Async::TaskContext&      ctx,
-                                                    NetworkDriver&                 driver,
-                                                    Endpoint                       remoteEndpoint,
-                                                    NGIN::Async::CancellationToken token)
+    NGIN::Async::Task<void, NetError> TcpSocket::ConnectAsync(NGIN::Async::TaskContext&      ctx,
+                                                              NetworkDriver&                 driver,
+                                                              Endpoint                       remoteEndpoint,
+                                                              NGIN::Async::CancellationToken token)
     {
 #if defined(NGIN_PLATFORM_WINDOWS)
         if (!detail::EnsureBoundForConnectEx(m_handle, remoteEndpoint))
         {
-            co_await NGIN::Async::Task<void>::ReturnError(ToAsyncError(detail::LastError()));
+            co_await NGIN::Async::Task<void, NetError>::ReturnError(detail::LastError());
             co_return;
         }
 
-        auto result = co_await driver.SubmitConnect(ctx, m_handle, remoteEndpoint, token);
-        if (!result)
-        {
-            co_await NGIN::Async::Task<void>::ReturnError(result.Error());
-            co_return;
-        }
+        co_await driver.SubmitConnect(ctx, m_handle, remoteEndpoint, token);
         co_return;
 #else
         for (;;)
@@ -117,16 +86,11 @@ namespace NGIN::Net
 
             if (result.Error().code != NetErrorCode::WouldBlock)
             {
-                co_await NGIN::Async::Task<void>::ReturnError(ToAsyncError(result.Error()));
+                co_await NGIN::Async::Task<void, NetError>::ReturnError(result.Error());
                 co_return;
             }
 
-            auto waitResult = co_await driver.WaitUntilWritable(ctx, m_handle, token);
-            if (!waitResult)
-            {
-                co_await NGIN::Async::Task<void>::ReturnError(waitResult.Error());
-                co_return;
-            }
+            co_await driver.WaitUntilWritable(ctx, m_handle, token);
             auto connectResult = detail::CheckConnectResult(m_handle);
             if (connectResult)
             {
@@ -135,7 +99,7 @@ namespace NGIN::Net
 
             if (connectResult.Error().code != NetErrorCode::WouldBlock)
             {
-                co_await NGIN::Async::Task<void>::ReturnError(ToAsyncError(connectResult.Error()));
+                co_await NGIN::Async::Task<void, NetError>::ReturnError(connectResult.Error());
                 co_return;
             }
         }
@@ -365,10 +329,10 @@ namespace NGIN::Net
 #endif
     }
 
-    NGIN::Async::Task<NGIN::UInt32> TcpSocket::SendAsync(NGIN::Async::TaskContext&      ctx,
-                                                         NetworkDriver&                 driver,
-                                                         ConstByteSpan                  data,
-                                                         NGIN::Async::CancellationToken token)
+    NGIN::Async::Task<NGIN::UInt32, NetError> TcpSocket::SendAsync(NGIN::Async::TaskContext&      ctx,
+                                                                   NetworkDriver&                 driver,
+                                                                   ConstByteSpan                  data,
+                                                                   NGIN::Async::CancellationToken token)
     {
 #if defined(NGIN_PLATFORM_WINDOWS)
         co_return co_await driver.SubmitSend(ctx, m_handle, data, token);
@@ -383,22 +347,18 @@ namespace NGIN::Net
 
             if (result.Error().code != NetErrorCode::WouldBlock)
             {
-                co_return NGIN::Utilities::Unexpected(ToAsyncError(result.Error()));
+                co_return NGIN::Utilities::Unexpected(result.Error());
             }
 
-            auto waitResult = co_await driver.WaitUntilWritable(ctx, m_handle, token);
-            if (!waitResult)
-            {
-                co_return NGIN::Utilities::Unexpected(waitResult.Error());
-            }
+            co_await driver.WaitUntilWritable(ctx, m_handle, token);
         }
 #endif
     }
 
-    NGIN::Async::Task<NGIN::UInt32> TcpSocket::ReceiveAsync(NGIN::Async::TaskContext&      ctx,
-                                                            NetworkDriver&                 driver,
-                                                            ByteSpan                       destination,
-                                                            NGIN::Async::CancellationToken token)
+    NGIN::Async::Task<NGIN::UInt32, NetError> TcpSocket::ReceiveAsync(NGIN::Async::TaskContext&      ctx,
+                                                                      NetworkDriver&                 driver,
+                                                                      ByteSpan                       destination,
+                                                                      NGIN::Async::CancellationToken token)
     {
 #if defined(NGIN_PLATFORM_WINDOWS)
         co_return co_await driver.SubmitReceive(ctx, m_handle, destination, token);
@@ -413,14 +373,10 @@ namespace NGIN::Net
 
             if (result.Error().code != NetErrorCode::WouldBlock)
             {
-                co_return NGIN::Utilities::Unexpected(ToAsyncError(result.Error()));
+                co_return NGIN::Utilities::Unexpected(result.Error());
             }
 
-            auto waitResult = co_await driver.WaitUntilReadable(ctx, m_handle, token);
-            if (!waitResult)
-            {
-                co_return NGIN::Utilities::Unexpected(waitResult.Error());
-            }
+            co_await driver.WaitUntilReadable(ctx, m_handle, token);
         }
 #endif
     }

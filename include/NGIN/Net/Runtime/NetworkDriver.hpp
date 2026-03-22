@@ -9,6 +9,8 @@
   #include <NGIN/Net/Types/Endpoint.hpp>
 #endif
 
+#include <NGIN/Async/AsyncError.hpp>
+#include <NGIN/Net/Types/NetError.hpp>
 #include <NGIN/Primitives.hpp>
 #include <NGIN/Units.hpp>
 
@@ -16,7 +18,7 @@ namespace NGIN::Async
 {
     class TaskContext;
     class CancellationToken;
-    template<typename T>
+    template<typename T, typename E>
     class Task;
 }// namespace NGIN::Async
 
@@ -53,12 +55,12 @@ namespace NGIN::Net
         void PollOnce();
         void Stop();
 
-        NGIN::Async::Task<void> WaitUntilReadable(NGIN::Async::TaskContext& ctx,
-                                                  SocketHandle& handle,
-                                                  NGIN::Async::CancellationToken token);
-        NGIN::Async::Task<void> WaitUntilWritable(NGIN::Async::TaskContext& ctx,
-                                                  SocketHandle& handle,
-                                                  NGIN::Async::CancellationToken token);
+        NGIN::Async::Task<void, NetError> WaitUntilReadable(NGIN::Async::TaskContext& ctx,
+                                                            SocketHandle& handle,
+                                                            NGIN::Async::CancellationToken token);
+        NGIN::Async::Task<void, NetError> WaitUntilWritable(NGIN::Async::TaskContext& ctx,
+                                                            SocketHandle& handle,
+                                                            NGIN::Async::CancellationToken token);
 
     private:
         NetworkDriver();
@@ -68,30 +70,30 @@ namespace NGIN::Net
         friend class UdpSocket;
         friend class TcpListener;
 
-        NGIN::Async::Task<NGIN::UInt32> SubmitSend(NGIN::Async::TaskContext& ctx,
-                                                   SocketHandle& handle,
-                                                   ConstByteSpan data,
-                                                   NGIN::Async::CancellationToken token);
-        NGIN::Async::Task<NGIN::UInt32> SubmitReceive(NGIN::Async::TaskContext& ctx,
-                                                      SocketHandle& handle,
-                                                      ByteSpan destination,
-                                                      NGIN::Async::CancellationToken token);
-        NGIN::Async::Task<NGIN::UInt32> SubmitSendTo(NGIN::Async::TaskContext& ctx,
-                                                     SocketHandle& handle,
-                                                     Endpoint remoteEndpoint,
-                                                     ConstByteSpan data,
-                                                     NGIN::Async::CancellationToken token);
-        NGIN::Async::Task<DatagramReceiveResult> SubmitReceiveFrom(NGIN::Async::TaskContext& ctx,
-                                                                   SocketHandle& handle,
-                                                                   ByteSpan destination,
-                                                                   NGIN::Async::CancellationToken token);
-        NGIN::Async::Task<void> SubmitConnect(NGIN::Async::TaskContext& ctx,
-                                              SocketHandle& handle,
-                                              Endpoint remoteEndpoint,
-                                              NGIN::Async::CancellationToken token);
-        NGIN::Async::Task<SocketHandle> SubmitAccept(NGIN::Async::TaskContext& ctx,
-                                                     SocketHandle& handle,
-                                                     NGIN::Async::CancellationToken token);
+        NGIN::Async::Task<NGIN::UInt32, NetError> SubmitSend(NGIN::Async::TaskContext& ctx,
+                                                             SocketHandle& handle,
+                                                             ConstByteSpan data,
+                                                             NGIN::Async::CancellationToken token);
+        NGIN::Async::Task<NGIN::UInt32, NetError> SubmitReceive(NGIN::Async::TaskContext& ctx,
+                                                                SocketHandle& handle,
+                                                                ByteSpan destination,
+                                                                NGIN::Async::CancellationToken token);
+        NGIN::Async::Task<NGIN::UInt32, NetError> SubmitSendTo(NGIN::Async::TaskContext& ctx,
+                                                               SocketHandle& handle,
+                                                               Endpoint remoteEndpoint,
+                                                               ConstByteSpan data,
+                                                               NGIN::Async::CancellationToken token);
+        NGIN::Async::Task<DatagramReceiveResult, NetError> SubmitReceiveFrom(NGIN::Async::TaskContext& ctx,
+                                                                             SocketHandle& handle,
+                                                                             ByteSpan destination,
+                                                                             NGIN::Async::CancellationToken token);
+        NGIN::Async::Task<void, NetError> SubmitConnect(NGIN::Async::TaskContext& ctx,
+                                                        SocketHandle& handle,
+                                                        Endpoint remoteEndpoint,
+                                                        NGIN::Async::CancellationToken token);
+        NGIN::Async::Task<SocketHandle, NetError> SubmitAccept(NGIN::Async::TaskContext& ctx,
+                                                               SocketHandle& handle,
+                                                               NGIN::Async::CancellationToken token);
 #endif
 
         struct Impl;

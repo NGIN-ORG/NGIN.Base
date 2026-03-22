@@ -1742,10 +1742,10 @@ namespace NGIN::Net
         }
 
     public:
-        static NGIN::Async::Task<void> WaitUntilReadable(NGIN::Async::TaskContext&      ctx,
-                                                         Impl&                          owner,
-                                                         SocketHandle&                  handle,
-                                                         NGIN::Async::CancellationToken token)
+        static NGIN::Async::Task<void, NetError> WaitUntilReadable(NGIN::Async::TaskContext&      ctx,
+                                                                   Impl&                          owner,
+                                                                   SocketHandle&                  handle,
+                                                                   NGIN::Async::CancellationToken token)
         {
             WaiterAwaiter awaiter {};
             awaiter.owner    = &owner;
@@ -1756,16 +1756,22 @@ namespace NGIN::Net
             auto result      = co_await awaiter;
             if (!result)
             {
-                co_await NGIN::Async::Task<void>::ReturnError(result.Error());
+                if (result.Error().code == NGIN::Async::AsyncErrorCode::Canceled)
+                {
+                    co_await NGIN::Async::Task<void, NetError>::ReturnCanceled();
+                    co_return;
+                }
+                co_await NGIN::Async::Task<void, NetError>::ReturnFault(
+                        NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidState, result.Error().native));
                 co_return;
             }
             co_return;
         }
 
-        static NGIN::Async::Task<void> WaitUntilWritable(NGIN::Async::TaskContext&      ctx,
-                                                         Impl&                          owner,
-                                                         SocketHandle&                  handle,
-                                                         NGIN::Async::CancellationToken token)
+        static NGIN::Async::Task<void, NetError> WaitUntilWritable(NGIN::Async::TaskContext&      ctx,
+                                                                   Impl&                          owner,
+                                                                   SocketHandle&                  handle,
+                                                                   NGIN::Async::CancellationToken token)
         {
             WaiterAwaiter awaiter {};
             awaiter.owner     = &owner;
@@ -1776,18 +1782,24 @@ namespace NGIN::Net
             auto result       = co_await awaiter;
             if (!result)
             {
-                co_await NGIN::Async::Task<void>::ReturnError(result.Error());
+                if (result.Error().code == NGIN::Async::AsyncErrorCode::Canceled)
+                {
+                    co_await NGIN::Async::Task<void, NetError>::ReturnCanceled();
+                    co_return;
+                }
+                co_await NGIN::Async::Task<void, NetError>::ReturnFault(
+                        NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidState, result.Error().native));
                 co_return;
             }
             co_return;
         }
 
 #if defined(NGIN_PLATFORM_WINDOWS)
-        static NGIN::Async::Task<NGIN::UInt32> SubmitSend(NGIN::Async::TaskContext&      ctx,
-                                                          Impl&                          owner,
-                                                          SocketHandle&                  handle,
-                                                          ConstByteSpan                  data,
-                                                          NGIN::Async::CancellationToken token)
+        static NGIN::Async::Task<NGIN::UInt32, NetError> SubmitSend(NGIN::Async::TaskContext&      ctx,
+                                                                    Impl&                          owner,
+                                                                    SocketHandle&                  handle,
+                                                                    ConstByteSpan                  data,
+                                                                    NGIN::Async::CancellationToken token)
         {
             SendAwaiter awaiter {};
             awaiter.owner  = &owner;
@@ -1798,11 +1810,11 @@ namespace NGIN::Net
             co_return co_await awaiter;
         }
 
-        static NGIN::Async::Task<NGIN::UInt32> SubmitReceive(NGIN::Async::TaskContext&      ctx,
-                                                             Impl&                          owner,
-                                                             SocketHandle&                  handle,
-                                                             ByteSpan                       destination,
-                                                             NGIN::Async::CancellationToken token)
+        static NGIN::Async::Task<NGIN::UInt32, NetError> SubmitReceive(NGIN::Async::TaskContext&      ctx,
+                                                                       Impl&                          owner,
+                                                                       SocketHandle&                  handle,
+                                                                       ByteSpan                       destination,
+                                                                       NGIN::Async::CancellationToken token)
         {
             ReceiveAwaiter awaiter {};
             awaiter.owner       = &owner;
@@ -1813,12 +1825,12 @@ namespace NGIN::Net
             co_return co_await awaiter;
         }
 
-        static NGIN::Async::Task<NGIN::UInt32> SubmitSendTo(NGIN::Async::TaskContext&      ctx,
-                                                            Impl&                          owner,
-                                                            SocketHandle&                  handle,
-                                                            Endpoint                       remoteEndpoint,
-                                                            ConstByteSpan                  data,
-                                                            NGIN::Async::CancellationToken token)
+        static NGIN::Async::Task<NGIN::UInt32, NetError> SubmitSendTo(NGIN::Async::TaskContext&      ctx,
+                                                                      Impl&                          owner,
+                                                                      SocketHandle&                  handle,
+                                                                      Endpoint                       remoteEndpoint,
+                                                                      ConstByteSpan                  data,
+                                                                      NGIN::Async::CancellationToken token)
         {
             SendToAwaiter awaiter {};
             awaiter.owner          = &owner;
@@ -1830,11 +1842,11 @@ namespace NGIN::Net
             co_return co_await awaiter;
         }
 
-        static NGIN::Async::Task<DatagramReceiveResult> SubmitReceiveFrom(NGIN::Async::TaskContext&      ctx,
-                                                                          Impl&                          owner,
-                                                                          SocketHandle&                  handle,
-                                                                          ByteSpan                       destination,
-                                                                          NGIN::Async::CancellationToken token)
+        static NGIN::Async::Task<DatagramReceiveResult, NetError> SubmitReceiveFrom(NGIN::Async::TaskContext&      ctx,
+                                                                                    Impl&                          owner,
+                                                                                    SocketHandle&                  handle,
+                                                                                    ByteSpan                       destination,
+                                                                                    NGIN::Async::CancellationToken token)
         {
             ReceiveFromAwaiter awaiter {};
             awaiter.owner       = &owner;
@@ -1845,11 +1857,11 @@ namespace NGIN::Net
             co_return co_await awaiter;
         }
 
-        static NGIN::Async::Task<void> SubmitConnect(NGIN::Async::TaskContext&      ctx,
-                                                     Impl&                          owner,
-                                                     SocketHandle&                  handle,
-                                                     Endpoint                       remoteEndpoint,
-                                                     NGIN::Async::CancellationToken token)
+        static NGIN::Async::Task<void, NetError> SubmitConnect(NGIN::Async::TaskContext&      ctx,
+                                                               Impl&                          owner,
+                                                               SocketHandle&                  handle,
+                                                               Endpoint                       remoteEndpoint,
+                                                               NGIN::Async::CancellationToken token)
         {
             ConnectAwaiter awaiter {};
             awaiter.owner          = &owner;
@@ -1860,16 +1872,17 @@ namespace NGIN::Net
             auto result            = co_await awaiter;
             if (!result)
             {
-                co_await NGIN::Async::Task<void>::ReturnError(result.Error());
+                co_await NGIN::Async::Task<void, NetError>::ReturnFault(
+                        NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidState, result.Error().native));
                 co_return;
             }
             co_return;
         }
 
-        static NGIN::Async::Task<SocketHandle> SubmitAccept(NGIN::Async::TaskContext&      ctx,
-                                                            Impl&                          owner,
-                                                            SocketHandle&                  handle,
-                                                            NGIN::Async::CancellationToken token)
+        static NGIN::Async::Task<SocketHandle, NetError> SubmitAccept(NGIN::Async::TaskContext&      ctx,
+                                                                      Impl&                          owner,
+                                                                      SocketHandle&                  handle,
+                                                                      NGIN::Async::CancellationToken token)
         {
             AcceptAwaiter awaiter {};
             awaiter.owner        = &owner;
@@ -1925,65 +1938,65 @@ namespace NGIN::Net
         }
     }
 
-    NGIN::Async::Task<void> NetworkDriver::WaitUntilReadable(NGIN::Async::TaskContext&      ctx,
-                                                             SocketHandle&                  handle,
-                                                             NGIN::Async::CancellationToken token)
+    NGIN::Async::Task<void, NetError> NetworkDriver::WaitUntilReadable(NGIN::Async::TaskContext&      ctx,
+                                                                       SocketHandle&                  handle,
+                                                                       NGIN::Async::CancellationToken token)
     {
         return Impl::WaitUntilReadable(ctx, *m_impl, handle, token);
     }
 
-    NGIN::Async::Task<void> NetworkDriver::WaitUntilWritable(NGIN::Async::TaskContext&      ctx,
-                                                             SocketHandle&                  handle,
-                                                             NGIN::Async::CancellationToken token)
+    NGIN::Async::Task<void, NetError> NetworkDriver::WaitUntilWritable(NGIN::Async::TaskContext&      ctx,
+                                                                       SocketHandle&                  handle,
+                                                                       NGIN::Async::CancellationToken token)
     {
         return Impl::WaitUntilWritable(ctx, *m_impl, handle, token);
     }
 
 #if defined(NGIN_PLATFORM_WINDOWS)
-    NGIN::Async::Task<NGIN::UInt32> NetworkDriver::SubmitSend(NGIN::Async::TaskContext&      ctx,
-                                                              SocketHandle&                  handle,
-                                                              ConstByteSpan                  data,
-                                                              NGIN::Async::CancellationToken token)
+    NGIN::Async::Task<NGIN::UInt32, NetError> NetworkDriver::SubmitSend(NGIN::Async::TaskContext&      ctx,
+                                                                        SocketHandle&                  handle,
+                                                                        ConstByteSpan                  data,
+                                                                        NGIN::Async::CancellationToken token)
     {
         return Impl::SubmitSend(ctx, *m_impl, handle, data, token);
     }
 
-    NGIN::Async::Task<NGIN::UInt32> NetworkDriver::SubmitReceive(NGIN::Async::TaskContext&      ctx,
-                                                                 SocketHandle&                  handle,
-                                                                 ByteSpan                       destination,
-                                                                 NGIN::Async::CancellationToken token)
+    NGIN::Async::Task<NGIN::UInt32, NetError> NetworkDriver::SubmitReceive(NGIN::Async::TaskContext&      ctx,
+                                                                           SocketHandle&                  handle,
+                                                                           ByteSpan                       destination,
+                                                                           NGIN::Async::CancellationToken token)
     {
         return Impl::SubmitReceive(ctx, *m_impl, handle, destination, token);
     }
 
-    NGIN::Async::Task<NGIN::UInt32> NetworkDriver::SubmitSendTo(NGIN::Async::TaskContext&      ctx,
-                                                                SocketHandle&                  handle,
-                                                                Endpoint                       remoteEndpoint,
-                                                                ConstByteSpan                  data,
-                                                                NGIN::Async::CancellationToken token)
+    NGIN::Async::Task<NGIN::UInt32, NetError> NetworkDriver::SubmitSendTo(NGIN::Async::TaskContext&      ctx,
+                                                                          SocketHandle&                  handle,
+                                                                          Endpoint                       remoteEndpoint,
+                                                                          ConstByteSpan                  data,
+                                                                          NGIN::Async::CancellationToken token)
     {
         return Impl::SubmitSendTo(ctx, *m_impl, handle, remoteEndpoint, data, token);
     }
 
-    NGIN::Async::Task<DatagramReceiveResult> NetworkDriver::SubmitReceiveFrom(NGIN::Async::TaskContext&      ctx,
-                                                                              SocketHandle&                  handle,
-                                                                              ByteSpan                       destination,
-                                                                              NGIN::Async::CancellationToken token)
+    NGIN::Async::Task<DatagramReceiveResult, NetError> NetworkDriver::SubmitReceiveFrom(NGIN::Async::TaskContext&      ctx,
+                                                                                        SocketHandle&                  handle,
+                                                                                        ByteSpan                       destination,
+                                                                                        NGIN::Async::CancellationToken token)
     {
         return Impl::SubmitReceiveFrom(ctx, *m_impl, handle, destination, token);
     }
 
-    NGIN::Async::Task<void> NetworkDriver::SubmitConnect(NGIN::Async::TaskContext&      ctx,
-                                                         SocketHandle&                  handle,
-                                                         Endpoint                       remoteEndpoint,
-                                                         NGIN::Async::CancellationToken token)
+    NGIN::Async::Task<void, NetError> NetworkDriver::SubmitConnect(NGIN::Async::TaskContext&      ctx,
+                                                                   SocketHandle&                  handle,
+                                                                   Endpoint                       remoteEndpoint,
+                                                                   NGIN::Async::CancellationToken token)
     {
         return Impl::SubmitConnect(ctx, *m_impl, handle, remoteEndpoint, token);
     }
 
-    NGIN::Async::Task<SocketHandle> NetworkDriver::SubmitAccept(NGIN::Async::TaskContext&      ctx,
-                                                                SocketHandle&                  handle,
-                                                                NGIN::Async::CancellationToken token)
+    NGIN::Async::Task<SocketHandle, NetError> NetworkDriver::SubmitAccept(NGIN::Async::TaskContext&      ctx,
+                                                                          SocketHandle&                  handle,
+                                                                          NGIN::Async::CancellationToken token)
     {
         return Impl::SubmitAccept(ctx, *m_impl, handle, token);
     }

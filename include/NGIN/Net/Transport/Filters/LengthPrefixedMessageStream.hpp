@@ -28,63 +28,43 @@ namespace NGIN::Net::Transport::Filters
         [[nodiscard]] IByteStream*       Inner() noexcept { return m_inner.get(); }
         [[nodiscard]] const IByteStream* Inner() const noexcept { return m_inner.get(); }
 
-        NGIN::Async::Task<void> WriteMessageAsync(NGIN::Async::TaskContext&      ctx,
-                                                  NGIN::Net::ConstByteSpan       message,
-                                                  NGIN::Async::CancellationToken token)
+        NGIN::Async::Task<void, NGIN::Net::NetError> WriteMessageAsync(NGIN::Async::TaskContext&      ctx,
+                                                                        NGIN::Net::ConstByteSpan       message,
+                                                                        NGIN::Async::CancellationToken token)
         {
             if (!m_inner)
             {
-                co_await NGIN::Async::Task<void>::ReturnError(
-                        NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::InvalidState));
+                co_await NGIN::Async::Task<void, NGIN::Net::NetError>::ReturnFault(
+                        NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidState));
                 co_return;
             }
 
             if (message.size() > std::numeric_limits<NGIN::UInt32>::max())
             {
-                co_await NGIN::Async::Task<void>::ReturnError(
-                        NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::InvalidArgument));
+                co_await NGIN::Async::Task<void, NGIN::Net::NetError>::ReturnError(
+                        NGIN::Net::NetError {NGIN::Net::NetErrorCode::MessageTooLarge, 0});
                 co_return;
             }
 
             std::array<NGIN::Byte, LengthBytes> header {};
             EncodeLength(static_cast<NGIN::UInt32>(message.size()), header);
 
-            auto headerResult = co_await WriteAll(ctx,
-                                                  *m_inner,
-                                                  NGIN::Net::ConstByteSpan {header.data(), header.size()},
-                                                  token);
-            if (!headerResult)
-            {
-                co_await NGIN::Async::Task<void>::ReturnError(headerResult.Error());
-                co_return;
-            }
-            auto bodyResult = co_await WriteAll(ctx, *m_inner, message, token);
-            if (!bodyResult)
-            {
-                co_await NGIN::Async::Task<void>::ReturnError(bodyResult.Error());
-                co_return;
-            }
+            co_await WriteAll(ctx, *m_inner, NGIN::Net::ConstByteSpan {header.data(), header.size()}, token);
+            co_await WriteAll(ctx, *m_inner, message, token);
             co_return;
         }
 
-        NGIN::Async::Task<NGIN::Net::ConstByteSpan> ReadMessageAsync(NGIN::Async::TaskContext&      ctx,
-                                                                     NGIN::Net::Buffer&             messageBuffer,
-                                                                     NGIN::Async::CancellationToken token)
+        NGIN::Async::Task<NGIN::Net::ConstByteSpan, NGIN::Net::NetError> ReadMessageAsync(NGIN::Async::TaskContext&      ctx,
+                                                                                           NGIN::Net::Buffer&             messageBuffer,
+                                                                                           NGIN::Async::CancellationToken token)
         {
             if (!m_inner)
             {
-                co_return NGIN::Utilities::Unexpected(NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::InvalidState));
+                co_return NGIN::Async::Fault(NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidState));
             }
 
             std::array<NGIN::Byte, LengthBytes> header {};
-            auto                                headerResult = co_await ReadExact(ctx,
-                                                                                  *m_inner,
-                                                                                  NGIN::Net::ByteSpan {header.data(), header.size()},
-                                                                                  token);
-            if (!headerResult)
-            {
-                co_return NGIN::Utilities::Unexpected(headerResult.Error());
-            }
+            co_await ReadExact(ctx, *m_inner, NGIN::Net::ByteSpan {header.data(), header.size()}, token);
 
             const auto messageSize = DecodeLength(header);
             if (messageSize == 0)
@@ -95,17 +75,10 @@ namespace NGIN::Net::Transport::Filters
 
             if (!messageBuffer.data || messageBuffer.capacity < messageSize)
             {
-                co_return NGIN::Utilities::Unexpected(NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::InvalidArgument));
+                co_return NGIN::Async::Fault(NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidState));
             }
 
-            auto payloadResult = co_await ReadExact(ctx,
-                                                    *m_inner,
-                                                    NGIN::Net::ByteSpan {messageBuffer.data, messageSize},
-                                                    token);
-            if (!payloadResult)
-            {
-                co_return NGIN::Utilities::Unexpected(payloadResult.Error());
-            }
+            co_await ReadExact(ctx, *m_inner, NGIN::Net::ByteSpan {messageBuffer.data, messageSize}, token);
             messageBuffer.size = messageSize;
             co_return NGIN::Net::ConstByteSpan {messageBuffer.data, messageSize};
         }
@@ -137,58 +110,42 @@ namespace NGIN::Net::Transport::Filters
             return (b0 << 24) | (b1 << 16) | (b2 << 8) | b3;
         }
 
-        static NGIN::Async::Task<void> WriteAll(NGIN::Async::TaskContext&      ctx,
-                                                IByteStream&                   stream,
-                                                NGIN::Net::ConstByteSpan       data,
-                                                NGIN::Async::CancellationToken token)
+        static NGIN::Async::Task<void, NGIN::Net::NetError> WriteAll(NGIN::Async::TaskContext&      ctx,
+                                                                      IByteStream&                   stream,
+                                                                      NGIN::Net::ConstByteSpan       data,
+                                                                      NGIN::Async::CancellationToken token)
         {
             std::size_t offset = 0;
             while (offset < data.size())
             {
-                auto task = stream.WriteAsync(ctx, data.subspan(offset), token);
-                task.Schedule(ctx);
-                const auto bytes = co_await task;
-                if (!bytes)
+                const auto bytes = co_await stream.WriteAsync(ctx, data.subspan(offset), token);
+                if (bytes == 0)
                 {
-                    co_await NGIN::Async::Task<void>::ReturnError(bytes.Error());
+                    co_await NGIN::Async::Task<void, NGIN::Net::NetError>::ReturnError(
+                            NGIN::Net::NetError {NGIN::Net::NetErrorCode::Disconnected, 0});
                     co_return;
                 }
-                if (*bytes == 0)
-                {
-                    co_await NGIN::Async::Task<void>::ReturnError(
-                            NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::Fault,
-                                                        static_cast<int>(NetErrorCode::Disconnected)));
-                    co_return;
-                }
-                offset += *bytes;
+                offset += bytes;
             }
             co_return;
         }
 
-        static NGIN::Async::Task<void> ReadExact(NGIN::Async::TaskContext&      ctx,
-                                                 IByteStream&                   stream,
-                                                 NGIN::Net::ByteSpan            destination,
-                                                 NGIN::Async::CancellationToken token)
+        static NGIN::Async::Task<void, NGIN::Net::NetError> ReadExact(NGIN::Async::TaskContext&      ctx,
+                                                                       IByteStream&                   stream,
+                                                                       NGIN::Net::ByteSpan            destination,
+                                                                       NGIN::Async::CancellationToken token)
         {
             std::size_t offset = 0;
             while (offset < destination.size())
             {
-                auto task = stream.ReadAsync(ctx, destination.subspan(offset), token);
-                task.Schedule(ctx);
-                const auto bytes = co_await task;
-                if (!bytes)
+                const auto bytes = co_await stream.ReadAsync(ctx, destination.subspan(offset), token);
+                if (bytes == 0)
                 {
-                    co_await NGIN::Async::Task<void>::ReturnError(bytes.Error());
+                    co_await NGIN::Async::Task<void, NGIN::Net::NetError>::ReturnError(
+                            NGIN::Net::NetError {NGIN::Net::NetErrorCode::Disconnected, 0});
                     co_return;
                 }
-                if (*bytes == 0)
-                {
-                    co_await NGIN::Async::Task<void>::ReturnError(
-                            NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::Fault,
-                                                        static_cast<int>(NetErrorCode::Disconnected)));
-                    co_return;
-                }
-                offset += *bytes;
+                offset += bytes;
             }
             co_return;
         }

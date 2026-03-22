@@ -63,37 +63,20 @@ namespace
 
     NGIN::Async::Task<int> YieldOnce(NGIN::Async::TaskContext& ctx, int value)
     {
-        auto yieldResult = co_await ctx.YieldNow();
-        if (!yieldResult)
-        {
-            co_return NGIN::Utilities::Unexpected(yieldResult.Error());
-        }
+        co_await ctx.YieldNow();
         co_return value;
     }
 
     NGIN::Async::Task<int> YieldTwice(NGIN::Async::TaskContext& ctx, int value)
     {
-        auto firstYield = co_await ctx.YieldNow();
-        if (!firstYield)
-        {
-            co_return NGIN::Utilities::Unexpected(firstYield.Error());
-        }
-        auto secondYield = co_await ctx.YieldNow();
-        if (!secondYield)
-        {
-            co_return NGIN::Utilities::Unexpected(secondYield.Error());
-        }
+        co_await ctx.YieldNow();
+        co_await ctx.YieldNow();
         co_return value;
     }
 
     NGIN::Async::Task<void> SuspendForever(NGIN::Async::TaskContext& ctx)
     {
-        auto yieldResult = co_await ctx.YieldNow();
-        if (!yieldResult)
-        {
-            co_await NGIN::Async::Task<void>::ReturnError(yieldResult.Error());
-            co_return;
-        }
+        co_await ctx.YieldNow();
         co_await std::suspend_always {};
         co_return;
     }
@@ -135,31 +118,18 @@ namespace
 
     NGIN::Async::Task<void> NeverCompletes(NGIN::Async::TaskContext& ctx)
     {
-        auto delayResult = co_await ctx.Delay(NGIN::Units::Seconds(60.0));
-        if (!delayResult)
-        {
-            co_await NGIN::Async::Task<void>::ReturnError(delayResult.Error());
-            co_return;
-        }
+        co_await ctx.Delay(NGIN::Units::Seconds(60.0));
         co_return;
     }
 
     NGIN::Async::Task<int> ThrowOnce(NGIN::Async::TaskContext& ctx)
     {
 #if NGIN_ASYNC_HAS_EXCEPTIONS
-        auto yieldResult = co_await ctx.YieldNow();
-        if (!yieldResult)
-        {
-            co_return NGIN::Utilities::Unexpected(yieldResult.Error());
-        }
+        co_await ctx.YieldNow();
         throw std::runtime_error("boom");
 #else
-        auto yieldResult = co_await ctx.YieldNow();
-        if (!yieldResult)
-        {
-            co_return NGIN::Utilities::Unexpected(yieldResult.Error());
-        }
-        co_return NGIN::Utilities::Unexpected(NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::Fault));
+        co_await ctx.YieldNow();
+        co_return NGIN::Async::Fault(NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::Unknown));
 #endif
     }
 
@@ -197,12 +167,7 @@ TEST_CASE("WhenAll can be co_awaited without calling Start() on the WhenAll task
     auto root = [](NGIN::Async::TaskContext& ctx) -> NGIN::Async::Task<std::tuple<int, int>> {
         auto a         = YieldOnce(ctx, 1);
         auto b         = YieldOnce(ctx, 2);
-        auto allResult = co_await NGIN::Async::WhenAll(ctx, a, b);
-        if (!allResult)
-        {
-            co_return NGIN::Utilities::Unexpected(allResult.Error());
-        }
-        co_return *allResult;
+        co_return co_await NGIN::Async::WhenAll(ctx, a, b);
     }(ctx);
 
     root.Schedule(ctx);
@@ -253,7 +218,7 @@ TEST_CASE("WhenAny returns canceled when context is already cancelled")
     REQUIRE(any.IsCanceled());
     auto result = any.Get();
     REQUIRE_FALSE(result);
-    REQUIRE(result.Error().code == NGIN::Async::AsyncErrorCode::Canceled);
+    REQUIRE(result.IsCanceled());
 }
 
 TEST_CASE("WhenAny wakes and returns canceled on cancellation")
@@ -278,7 +243,7 @@ TEST_CASE("WhenAny wakes and returns canceled on cancellation")
     REQUIRE(any.IsCanceled());
     auto result = any.Get();
     REQUIRE_FALSE(result);
-    REQUIRE(result.Error().code == NGIN::Async::AsyncErrorCode::Canceled);
+    REQUIRE(result.IsCanceled());
 }
 
 TEST_CASE("WhenAll wakes and returns canceled even if children do not observe cancellation")
@@ -303,7 +268,7 @@ TEST_CASE("WhenAll wakes and returns canceled even if children do not observe ca
     REQUIRE(all.IsCanceled());
     auto result = all.Get();
     REQUIRE_FALSE(result);
-    REQUIRE(result.Error().code == NGIN::Async::AsyncErrorCode::Canceled);
+    REQUIRE(result.IsCanceled());
 }
 
 TEST_CASE("WhenAll propagates child exception")
@@ -323,7 +288,7 @@ TEST_CASE("WhenAll propagates child exception")
     REQUIRE(all.IsFaulted());
     auto result = all.Get();
     REQUIRE_FALSE(result);
-    REQUIRE(result.Error().code == NGIN::Async::AsyncErrorCode::Fault);
+    REQUIRE(result.IsFault());
 }
 
 TEST_CASE("WhenAny returns index when a task faults")
@@ -345,7 +310,7 @@ TEST_CASE("WhenAny returns index when a task faults")
     REQUIRE(*anyResult == 0);
     auto aResult = a.Get();
     REQUIRE_FALSE(aResult);
-    REQUIRE(aResult.Error().code == NGIN::Async::AsyncErrorCode::Fault);
+    REQUIRE(aResult.IsFault());
 }
 
 TEST_CASE("WhenAny returns immediately if one input is already completed")

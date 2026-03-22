@@ -10,7 +10,7 @@ namespace NGIN::Async
 {
     class TaskContext;
     class CancellationToken;
-    template<typename T>
+    template<typename T, typename E>
     class Task;
 }// namespace NGIN::Async
 
@@ -30,13 +30,13 @@ namespace NGIN::Net::Transport
     public:
         virtual ~IDatagramChannel() = default;
 
-        virtual NGIN::Async::Task<void> SendAsync(NGIN::Async::TaskContext& ctx,
-                                                  NGIN::Net::Endpoint remoteEndpoint,
-                                                  NGIN::Net::ConstByteSpan payload,
-                                                  NGIN::Async::CancellationToken token) = 0;
+        virtual NGIN::Async::Task<void, NGIN::Net::NetError> SendAsync(NGIN::Async::TaskContext& ctx,
+                                                                        NGIN::Net::Endpoint remoteEndpoint,
+                                                                        NGIN::Net::ConstByteSpan payload,
+                                                                        NGIN::Async::CancellationToken token) = 0;
 
-        virtual NGIN::Async::Task<ReceivedDatagram> ReceiveAsync(NGIN::Async::TaskContext& ctx,
-                                                                 NGIN::Net::Buffer& receiveBuffer,
-                                                                 NGIN::Async::CancellationToken token) = 0;
+        virtual NGIN::Async::Task<ReceivedDatagram, NGIN::Net::NetError> ReceiveAsync(NGIN::Async::TaskContext& ctx,
+                                                                                       NGIN::Net::Buffer& receiveBuffer,
+                                                                                       NGIN::Async::CancellationToken token) = 0;
     };
 }// namespace NGIN::Net::Transport

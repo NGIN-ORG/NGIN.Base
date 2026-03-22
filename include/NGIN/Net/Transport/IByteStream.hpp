@@ -9,7 +9,7 @@ namespace NGIN::Async
 {
     class TaskContext;
     class CancellationToken;
-    template<typename T>
+    template<typename T, typename E>
     class Task;
 }// namespace NGIN::Async
 
@@ -21,12 +21,12 @@ namespace NGIN::Net::Transport
     public:
         virtual ~IByteStream() = default;
 
-        virtual NGIN::Async::Task<NGIN::UInt32> ReadAsync(NGIN::Async::TaskContext& ctx,
-                                                         NGIN::Net::ByteSpan destination,
-                                                         NGIN::Async::CancellationToken token) = 0;
-        virtual NGIN::Async::Task<NGIN::UInt32> WriteAsync(NGIN::Async::TaskContext& ctx,
-                                                          NGIN::Net::ConstByteSpan source,
-                                                          NGIN::Async::CancellationToken token) = 0;
+        virtual NGIN::Async::Task<NGIN::UInt32, NGIN::Net::NetError> ReadAsync(NGIN::Async::TaskContext& ctx,
+                                                                                NGIN::Net::ByteSpan destination,
+                                                                                NGIN::Async::CancellationToken token) = 0;
+        virtual NGIN::Async::Task<NGIN::UInt32, NGIN::Net::NetError> WriteAsync(NGIN::Async::TaskContext& ctx,
+                                                                                 NGIN::Net::ConstByteSpan source,
+                                                                                 NGIN::Async::CancellationToken token) = 0;
         virtual NGIN::Net::NetExpected<void> Close() = 0;
     };
 }// namespace NGIN::Net::Transport

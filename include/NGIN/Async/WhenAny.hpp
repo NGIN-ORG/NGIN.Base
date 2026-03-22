@@ -3,35 +3,20 @@
 #pragma once
 
 #include <atomic>
-#include <cstddef>
 #include <memory>
 #include <tuple>
 #include <type_traits>
 #include <utility>
 
-#include <NGIN/Async/AsyncError.hpp>
 #include <NGIN/Async/Cancellation.hpp>
 #include <NGIN/Async/Task.hpp>
 #include <NGIN/Primitives.hpp>
 
 namespace NGIN::Async
 {
-    namespace detail
+    namespace detail::when_any
     {
-        template<typename T>
-        struct IsTaskType final : std::false_type
-        {
-        };
-
-        template<typename TValue>
-        struct IsTaskType<Task<TValue>> final : std::true_type
-        {
-        };
-
-        template<typename T>
-        inline constexpr bool IsTaskTypeValue = IsTaskType<std::remove_cvref_t<T>>::value;
-
-        struct WhenAnySharedState final
+        struct SharedState final
         {
             std::atomic<bool>            done {false};
             std::atomic<NGIN::UIntSize>  index {static_cast<NGIN::UIntSize>(-1)};
@@ -40,14 +25,15 @@ namespace NGIN::Async
             CancellationRegistration     cancellationRegistration {};
         };
 
-        [[nodiscard]] inline bool CancelWhenAny(void* ctx) noexcept
+        [[nodiscard]] inline bool CancelWhenAny(void* context) noexcept
         {
-            auto* state    = static_cast<WhenAnySharedState*>(ctx);
+            auto* state    = static_cast<SharedState*>(context);
             bool  expected = false;
             if (!state->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
             {
                 return false;
             }
+
             state->index.store(static_cast<NGIN::UIntSize>(-1), std::memory_order_release);
             return true;
         }
@@ -60,13 +46,16 @@ namespace NGIN::Async
                 {
                     return Detached {std::coroutine_handle<promise_type>::from_promise(*this)};
                 }
+
                 std::suspend_always initial_suspend() noexcept { return {}; }
+
                 struct Final
                 {
                     bool await_ready() noexcept { return false; }
                     void await_suspend(std::coroutine_handle<promise_type> h) noexcept { h.destroy(); }
                     void await_resume() noexcept {}
                 };
+
                 Final final_suspend() noexcept { return {}; }
                 void  return_void() noexcept {}
                 void  unhandled_exception() noexcept {}
@@ -94,9 +83,9 @@ namespace NGIN::Async
         };
 
         template<typename TTask>
-        [[nodiscard]] inline Detached WatchTask(std::shared_ptr<WhenAnySharedState> state, TTask& task, NGIN::UIntSize index)
+        [[nodiscard]] inline Detached WatchTask(std::shared_ptr<SharedState> state, TTask& task, NGIN::UIntSize index)
         {
-            (void) co_await task;
+            (void) co_await task.AsOutcome();
 
             bool expected = false;
             if (state->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
@@ -107,36 +96,39 @@ namespace NGIN::Async
                     state->exec.Execute(state->awaiting);
                 }
             }
+
             co_return;
         }
 
         template<typename... TTasks>
-        struct WhenAnyAwaiter final
+        struct Awaiter final
         {
-            TaskContext&                        ctx;
-            std::shared_ptr<WhenAnySharedState> state;
-            std::tuple<TTasks&...>              tasks;
+            TaskContext&                  ctx;
+            std::shared_ptr<SharedState>  state;
+            std::tuple<TTasks&...>        tasks;
 
             bool await_ready() const noexcept
             {
-                if (ctx.IsCancellationRequested())
-                {
-                    return true;
-                }
-                return std::apply([](auto&... t) { return (t.IsCompleted() || ...); }, tasks);
+                return ctx.IsCancellationRequested() ||
+                       std::apply([](auto&... task) { return (task.IsCompleted() || ...); }, tasks);
             }
 
-            void await_suspend(std::coroutine_handle<> awaiting) const
+            bool await_suspend(std::coroutine_handle<> awaiting) const
             {
                 if (ctx.IsCancellationRequested())
                 {
-                    return;
+                    return false;
                 }
 
+                state->exec = ctx.GetExecutor();
                 state->awaiting = awaiting;
-                ctx.GetCancellationToken().Register(state->cancellationRegistration, state->exec, awaiting, &CancelWhenAny, state.get());
+                ctx.GetCancellationToken().Register(state->cancellationRegistration,
+                                                    state->exec,
+                                                    awaiting,
+                                                    &CancelWhenAny,
+                                                    state.get());
 
-                std::apply([&](auto&... t) { (t.Schedule(ctx), ...); }, tasks);
+                std::apply([&](auto&... task) { (task.Schedule(ctx), ...); }, tasks);
 
                 auto& exec = state->exec;
                 [&]<std::size_t... Indices>(std::index_sequence<Indices...>) {
@@ -146,13 +138,15 @@ namespace NGIN::Async
                      }()),
                      ...);
                 }(std::make_index_sequence<sizeof...(TTasks)> {});
+
+                return true;
             }
 
-            AsyncExpected<NGIN::UIntSize> await_resume() const noexcept
+            [[nodiscard]] NGIN::UIntSize await_resume() const noexcept
             {
                 if (ctx.IsCancellationRequested())
                 {
-                    return NGIN::Utilities::Unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
+                    return static_cast<NGIN::UIntSize>(-1);
                 }
 
                 const auto signaled = state->index.load(std::memory_order_acquire);
@@ -162,50 +156,46 @@ namespace NGIN::Async
                 }
 
                 NGIN::UIntSize found = static_cast<NGIN::UIntSize>(-1);
-                NGIN::UIntSize idx   = 0;
+                NGIN::UIntSize index = 0;
                 std::apply(
-                        [&](auto&... t) {
+                        [&](auto&... task) {
                             (([&] {
-                                 if (found == static_cast<NGIN::UIntSize>(-1) && t.IsCompleted())
+                                 if (found == static_cast<NGIN::UIntSize>(-1) && task.IsCompleted())
                                  {
-                                     found = idx;
+                                     found = index;
                                  }
-                                 ++idx;
+                                 ++index;
                              }()),
                              ...);
                         },
                         tasks);
-
-                if (found == static_cast<NGIN::UIntSize>(-1))
-                {
-                    return NGIN::Utilities::Unexpected(MakeAsyncError(AsyncErrorCode::InvalidState));
-                }
                 return found;
             }
         };
-    }// namespace detail
+    }// namespace detail::when_any
 
-    /// @brief Complete when any of the tasks completes; returns the index of the first completed task (0-based).
-    ///
-    /// Completion includes success, fault, or cancellation of the underlying task.
-    template<typename... TTasks>
-        requires(sizeof...(TTasks) > 0) && (detail::IsTaskTypeValue<TTasks> && ...)
-    [[nodiscard]] inline Task<NGIN::UIntSize> WhenAny(TaskContext& ctx, TTasks&... tasks)
+    template<typename TFirstTask, typename... TOtherTasks>
+        requires(detail::IsTaskTypeV<TFirstTask>) && (detail::IsTaskTypeV<TOtherTasks> && ...) &&
+                (std::is_same_v<typename std::remove_reference_t<TFirstTask>::ErrorType,
+                                typename std::remove_reference_t<TOtherTasks>::ErrorType> && ...)
+    [[nodiscard]] inline Task<NGIN::UIntSize, typename std::remove_reference_t<TFirstTask>::ErrorType>
+    WhenAny(TaskContext& ctx, TFirstTask& firstTask, TOtherTasks&... otherTasks)
     {
         if (ctx.IsCancellationRequested())
         {
-            co_return NGIN::Utilities::Unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
+            co_return Canceled;
         }
 
-        auto state  = std::make_shared<detail::WhenAnySharedState>();
-        state->exec = ctx.GetExecutor();
-
-        auto result = co_await detail::WhenAnyAwaiter<TTasks...> {ctx, std::move(state), std::tuple<TTasks&...>(tasks...)};
-        if (!result)
+        auto state = std::make_shared<detail::when_any::SharedState>();
+        auto index = co_await detail::when_any::Awaiter<TFirstTask, TOtherTasks...> {
+                ctx,
+                std::move(state),
+                std::tuple<TFirstTask&, TOtherTasks&...>(firstTask, otherTasks...)};
+        if (ctx.IsCancellationRequested() || index == static_cast<NGIN::UIntSize>(-1))
         {
-            co_return NGIN::Utilities::Unexpected(result.Error());
+            co_return Canceled;
         }
 
-        co_return *result;
+        co_return index;
     }
 }// namespace NGIN::Async

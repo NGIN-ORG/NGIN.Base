@@ -124,37 +124,20 @@ namespace NGIN::IO
         options.access      = FileAccess::Read;
         options.disposition = FileCreateDisposition::OpenExisting;
 
-        auto fileExpected = co_await fs.OpenFileAsync(ctx, path, options);
-        if (!fileExpected)
-        {
-            co_await AsyncTask<NGIN::Containers::Vector<NGIN::Byte>>::ReturnError(fileExpected.Error());
-            co_return AsyncResult<NGIN::Containers::Vector<NGIN::Byte>>(NGIN::Containers::Vector<NGIN::Byte> {});
-        }
-        auto fileResult = std::move(*fileExpected);
-        if (!fileResult)
-            co_return AsyncResult<NGIN::Containers::Vector<NGIN::Byte>>(NGIN::Utilities::Unexpected<IOError>(std::move(fileResult.Error())));
+        auto file = co_await fs.OpenFileAsync(ctx, path, options);
 
         NGIN::Containers::Vector<NGIN::Byte> bytes;
         NGIN::Byte                           temp[64 * 1024];
         for (;;)
         {
-            auto readExpected = co_await fileResult.Value()->ReadAsync(ctx, std::span<NGIN::Byte>(temp, sizeof(temp)));
-            if (!readExpected)
-            {
-                co_await AsyncTask<NGIN::Containers::Vector<NGIN::Byte>>::ReturnError(readExpected.Error());
-                co_return AsyncResult<NGIN::Containers::Vector<NGIN::Byte>>(NGIN::Containers::Vector<NGIN::Byte> {});
-            }
-            auto readResult = std::move(*readExpected);
-            if (!readResult)
-                co_return AsyncResult<NGIN::Containers::Vector<NGIN::Byte>>(NGIN::Utilities::Unexpected<IOError>(std::move(readResult.Error())));
-            const UIntSize n = readResult.Value();
+            const UIntSize n = co_await file->ReadAsync(ctx, std::span<NGIN::Byte>(temp, sizeof(temp)));
             if (n == 0)
                 break;
             for (UIntSize i = 0; i < n; ++i)
                 bytes.PushBack(temp[i]);
         }
 
-        co_return AsyncResult<NGIN::Containers::Vector<NGIN::Byte>>(std::move(bytes));
+        co_return std::move(bytes);
     }
 
     AsyncTaskVoid WriteAllBytesAsync(IAsyncFileSystem& fs, NGIN::Async::TaskContext& ctx, const Path& path, std::span<const NGIN::Byte> bytes)
@@ -163,45 +146,27 @@ namespace NGIN::IO
         options.access      = FileAccess::Write;
         options.disposition = FileCreateDisposition::CreateAlways;
 
-        auto fileExpected = co_await fs.OpenFileAsync(ctx, path, options);
-        if (!fileExpected)
-        {
-            co_await AsyncTaskVoid::ReturnError(fileExpected.Error());
-            co_return AsyncResult<void> {};
-        }
-        auto fileResult = std::move(*fileExpected);
-        if (!fileResult)
-            co_return AsyncResult<void>(NGIN::Utilities::Unexpected<IOError>(std::move(fileResult.Error())));
+        auto file = co_await fs.OpenFileAsync(ctx, path, options);
 
         UIntSize total = 0;
         while (total < bytes.size())
         {
-            auto writeExpected = co_await fileResult.Value()->WriteAsync(ctx, bytes.subspan(total));
-            if (!writeExpected)
-            {
-                co_await AsyncTaskVoid::ReturnError(writeExpected.Error());
-                co_return AsyncResult<void> {};
-            }
-            auto writeResult = std::move(*writeExpected);
-            if (!writeResult)
-                co_return AsyncResult<void>(NGIN::Utilities::Unexpected<IOError>(std::move(writeResult.Error())));
-            const UIntSize n = writeResult.Value();
+            const UIntSize n = co_await file->WriteAsync(ctx, bytes.subspan(total));
             if (n == 0)
-                co_return AsyncResult<void>(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::SystemError, "short write", path)));
+            {
+                co_await AsyncTaskVoid::ReturnError(MakeError(IOErrorCode::SystemError, "short write", path));
+                co_return;
+            }
             total += n;
         }
 
-        auto flushExpected = co_await fileResult.Value()->FlushAsync(ctx);
-        if (!flushExpected)
-        {
-            co_await AsyncTaskVoid::ReturnError(flushExpected.Error());
-            co_return AsyncResult<void> {};
-        }
-        co_return *flushExpected;
+        co_await file->FlushAsync(ctx);
+        co_return;
     }
 
     AsyncTaskVoid CopyFileAsync(IAsyncFileSystem& fs, NGIN::Async::TaskContext& ctx, const Path& from, const Path& to, const CopyOptions& options)
     {
-        co_return co_await fs.CopyFileAsync(ctx, from, to, options);
+        co_await fs.CopyFileAsync(ctx, from, to, options);
+        co_return;
     }
 }// namespace NGIN::IO

@@ -8,12 +8,13 @@
 #include <NGIN/Net/Types/Endpoint.hpp>
 #include <NGIN/Net/Types/NetError.hpp>
 #include <NGIN/Net/Types/SocketOptions.hpp>
+#include <NGIN/Async/AsyncError.hpp>
 
 namespace NGIN::Async
 {
     class TaskContext;
     class CancellationToken;
-    template<typename T>
+    template<typename T, typename E>
     class Task;
 }// namespace NGIN::Async
 
@@ -49,15 +50,15 @@ namespace NGIN::Net
         NetExpected<NGIN::UInt32> TrySendToSegments(Endpoint remoteEndpoint, BufferSegmentSpan payload) noexcept;
         NetExpected<DatagramReceiveResult> TryReceiveFromSegments(MutableBufferSegmentSpan destination) noexcept;
 
-        NGIN::Async::Task<NGIN::UInt32> SendToAsync(NGIN::Async::TaskContext& ctx,
-                                                   NetworkDriver& driver,
-                                                   Endpoint remoteEndpoint,
-                                                   ConstByteSpan payload,
-                                                   NGIN::Async::CancellationToken token);
-        NGIN::Async::Task<DatagramReceiveResult> ReceiveFromAsync(NGIN::Async::TaskContext& ctx,
-                                                                  NetworkDriver& driver,
-                                                                  ByteSpan destination,
-                                                                  NGIN::Async::CancellationToken token);
+        NGIN::Async::Task<NGIN::UInt32, NetError> SendToAsync(NGIN::Async::TaskContext& ctx,
+                                                              NetworkDriver& driver,
+                                                              Endpoint remoteEndpoint,
+                                                              ConstByteSpan payload,
+                                                              NGIN::Async::CancellationToken token);
+        NGIN::Async::Task<DatagramReceiveResult, NetError> ReceiveFromAsync(NGIN::Async::TaskContext& ctx,
+                                                                            NetworkDriver& driver,
+                                                                            ByteSpan destination,
+                                                                            NGIN::Async::CancellationToken token);
 
         [[nodiscard]] SocketHandle& Handle() noexcept { return m_handle; }
         [[nodiscard]] const SocketHandle& Handle() const noexcept { return m_handle; }

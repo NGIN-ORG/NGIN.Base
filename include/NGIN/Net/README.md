@@ -15,7 +15,7 @@ Key Types:
 
 Usage Notes:
 - Try* APIs are non-blocking and report errors via NetExpected.
-- Async APIs return AsyncExpected from `co_await`/`Get()`; cancellation uses AsyncErrorCode::Canceled.
+- Async APIs use typed `Task<T, NetError>` results; cancellation and faults stay in the async layer.
 - Async methods require TaskContext and NetworkDriver.
 - Filters wrap transports to add semantics like framing, TLS, compression, or metrics.
 - Length-prefixed framing uses a 32-bit big-endian size prefix per message.
@@ -28,4 +28,3 @@ Performance Notes:
 Testing Guidance:
 - Loopback-only tests for TCP/UDP.
 - Validate WouldBlock, EOF, and cancellation behavior.
-

@@ -14,17 +14,9 @@ namespace
     NGIN::Async::AsyncGenerator<int> ProduceValues(NGIN::Async::TaskContext& ctx)
     {
         co_yield 1;
-        if (auto yieldResult = co_await ctx.YieldNow(); !yieldResult)
-        {
-            co_await NGIN::Async::AsyncGenerator<int>::ReturnError(yieldResult.Error());
-            co_return;
-        }
+        co_await ctx.YieldNow();
         co_yield 2;
-        if (auto yieldResult = co_await ctx.YieldNow(); !yieldResult)
-        {
-            co_await NGIN::Async::AsyncGenerator<int>::ReturnError(yieldResult.Error());
-            co_return;
-        }
+        co_await ctx.YieldNow();
         co_yield 3;
     }
 
@@ -32,11 +24,7 @@ namespace
     NGIN::Async::AsyncGenerator<int> YieldThenThrow(NGIN::Async::TaskContext& ctx)
     {
         co_yield 1;
-        if (auto yieldResult = co_await ctx.YieldNow(); !yieldResult)
-        {
-            co_await NGIN::Async::AsyncGenerator<int>::ReturnError(yieldResult.Error());
-            co_return;
-        }
+        co_await ctx.YieldNow();
         throw std::runtime_error("boom");
     }
 #endif
@@ -56,39 +44,25 @@ namespace
         int sum = 0;
         for (;;)
         {
-            auto nextResult = co_await gen.Next(ctx);
-            if (!nextResult)
-            {
-                co_return NGIN::Utilities::Unexpected(nextResult.Error());
-            }
-            if (!*nextResult)
+            auto next = co_await gen.Next(ctx);
+            if (next.IsEnd())
             {
                 break;
             }
-            sum += **nextResult;
+            sum += *next;
         }
         co_return sum;
     }
 
     NGIN::Async::Task<void> ConsumeThenCancel(NGIN::Async::TaskContext& ctx, NGIN::Async::AsyncGenerator<int>& gen)
     {
-        auto firstResult = co_await gen.Next(ctx);
-        if (!firstResult)
+        auto first = co_await gen.Next(ctx);
+        if (first)
         {
-            co_await NGIN::Async::Task<void>::ReturnError(firstResult.Error());
-            co_return;
-        }
-        if (*firstResult)
-        {
-            (void) **firstResult;
+            (void) *first;
         }
 
-        auto secondResult = co_await gen.Next(ctx);
-        if (!secondResult)
-        {
-            co_await NGIN::Async::Task<void>::ReturnError(secondResult.Error());
-            co_return;
-        }
+        static_cast<void>(co_await gen.Next(ctx));
         co_return;
     }
 }// namespace
@@ -126,10 +100,6 @@ TEST_CASE("AsyncGenerator propagates exceptions from producer")
     auto result = task.Get();
     REQUIRE_FALSE(result);
     REQUIRE(task.IsFaulted());
-#if NGIN_ASYNC_CAPTURE_EXCEPTIONS
-    REQUIRE(task.GetException() != nullptr);
-    REQUIRE_THROWS_AS(std::rethrow_exception(task.GetException()), std::runtime_error);
-#endif
 }
 #endif
 
@@ -153,5 +123,5 @@ TEST_CASE("AsyncGenerator Next observes TaskContext cancellation")
     REQUIRE(task.IsCanceled());
     auto result = task.Get();
     REQUIRE_FALSE(result);
-    REQUIRE(result.Error().code == NGIN::Async::AsyncErrorCode::Canceled);
+    REQUIRE(result.IsCanceled());
 }

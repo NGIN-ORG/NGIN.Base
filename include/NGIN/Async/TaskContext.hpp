@@ -4,8 +4,8 @@
 #pragma once
 
 #include <coroutine>
-#include <utility>
 #include <memory>
+#include <utility>
 
 #include <NGIN/Async/AsyncError.hpp>
 #include <NGIN/Async/Cancellation.hpp>
@@ -17,6 +17,171 @@ namespace NGIN::Async
 {
     class TaskContext
     {
+        template<typename Promise>
+        [[nodiscard]] static bool PromiseAlreadyCompleted(const Promise& promise) noexcept
+        {
+            if constexpr (requires { promise.m_finished.load(std::memory_order_acquire); })
+            {
+                return promise.m_finished.load(std::memory_order_acquire);
+            }
+            else if constexpr (requires { promise.completed; })
+            {
+                return promise.completed;
+            }
+            else
+            {
+                return false;
+            }
+        }
+
+        struct YieldAwaiter final
+        {
+            NGIN::Execution::ExecutorRef exec {};
+            CancellationToken            cancellation {};
+            mutable CancellationRegistration cancellationRegistration {};
+
+            bool await_ready() const noexcept
+            {
+                return false;
+            }
+
+            template<typename Promise>
+            std::coroutine_handle<> await_suspend(std::coroutine_handle<Promise> awaiting) const noexcept
+            {
+                if (cancellation.IsCancellationRequested())
+                {
+                    awaiting.promise().SetCanceled();
+                    awaiting.promise().MarkFinishedAndResume(awaiting);
+                    return std::noop_coroutine();
+                }
+
+                if (!exec.IsValid())
+                {
+                    awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidState));
+                    awaiting.promise().MarkFinishedAndResume(awaiting);
+                    return std::noop_coroutine();
+                }
+
+                cancellation.Register(
+                        cancellationRegistration,
+                        {},
+                        {},
+                        +[](void* rawPromise) noexcept -> bool {
+                            auto* promise = static_cast<Promise*>(rawPromise);
+                            if (!promise)
+                            {
+                                return false;
+                            }
+
+                            auto handle = std::coroutine_handle<Promise>::from_promise(*promise);
+                            promise->SetCanceled();
+                            promise->MarkFinishedAndResume(handle);
+                            return false;
+                        },
+                        &awaiting.promise());
+
+                auto* promise = &awaiting.promise();
+                exec.Execute([promise, awaiting]() mutable noexcept {
+                    if (TaskContext::PromiseAlreadyCompleted(*promise))
+                    {
+                        return;
+                    }
+                    awaiting.resume();
+                });
+                return std::noop_coroutine();
+            }
+
+            void await_resume() const noexcept {}
+        };
+
+        template<typename TUnit>
+        struct DelayAwaiter final
+        {
+            NGIN::Execution::ExecutorRef     exec {};
+            CancellationToken                cancellation {};
+            mutable CancellationRegistration cancellationRegistration {};
+            TUnit                            duration;
+            NGIN::Time::TimePoint            until;
+
+            DelayAwaiter(NGIN::Execution::ExecutorRef executor, CancellationToken token, const TUnit& dur)
+                : exec(executor)
+                , cancellation(std::move(token))
+                , duration(dur)
+                , until([&] {
+                    const auto now = NGIN::Time::MonotonicClock::Now();
+                    const auto ns  = NGIN::Units::UnitCast<NGIN::Units::Nanoseconds>(dur).GetValue();
+                    if (ns <= 0.0)
+                    {
+                        return now;
+                    }
+                    auto add = static_cast<NGIN::UInt64>(ns);
+                    if (static_cast<double>(add) < ns)
+                    {
+                        ++add;
+                    }
+                    return NGIN::Time::TimePoint::FromNanoseconds(now.ToNanoseconds() + add);
+                }())
+            {
+            }
+
+            bool await_ready() const noexcept
+            {
+                return exec.IsValid() &&
+                       !cancellation.IsCancellationRequested() &&
+                       NGIN::Units::UnitCast<NGIN::Units::Nanoseconds>(duration).GetValue() <= 0.0;
+            }
+
+            template<typename Promise>
+            std::coroutine_handle<> await_suspend(std::coroutine_handle<Promise> awaiting) const noexcept
+            {
+                if (cancellation.IsCancellationRequested())
+                {
+                    awaiting.promise().SetCanceled();
+                    awaiting.promise().MarkFinishedAndResume(awaiting);
+                    return std::noop_coroutine();
+                }
+
+                if (!exec.IsValid())
+                {
+                    awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidState));
+                    awaiting.promise().MarkFinishedAndResume(awaiting);
+                    return std::noop_coroutine();
+                }
+
+                cancellation.Register(
+                        cancellationRegistration,
+                        {},
+                        {},
+                        +[](void* rawPromise) noexcept -> bool {
+                            auto* promise = static_cast<Promise*>(rawPromise);
+                            if (!promise)
+                            {
+                                return false;
+                            }
+
+                            auto handle = std::coroutine_handle<Promise>::from_promise(*promise);
+                            promise->SetCanceled();
+                            promise->MarkFinishedAndResume(handle);
+                            return false;
+                        },
+                        &awaiting.promise());
+
+                auto* promise = &awaiting.promise();
+                exec.ExecuteAt(
+                        [promise, awaiting]() mutable noexcept {
+                            if (TaskContext::PromiseAlreadyCompleted(*promise))
+                            {
+                                return;
+                            }
+                            awaiting.resume();
+                        },
+                        until);
+                return std::noop_coroutine();
+            }
+
+            void await_resume() const noexcept {}
+        };
+
     public:
         explicit TaskContext(NGIN::Execution::ExecutorRef executor, CancellationToken cancellation = {}) noexcept
             : m_executor(executor)
@@ -84,7 +249,7 @@ namespace NGIN::Async
                     std::shared_ptr<void> current {};
                 };
 
-                auto chain     = std::make_shared<OwnerChain>();
+                auto chain = std::make_shared<OwnerChain>();
                 chain->previous = m_cancellationOwner;
                 chain->current  = linked;
                 m_cancellationOwner = std::move(chain);
@@ -119,118 +284,21 @@ namespace NGIN::Async
             return m_cancellation.IsCancellationRequested();
         }
 
-        [[nodiscard]] AsyncExpected<void> CheckCancellation() const noexcept
+        [[nodiscard]] bool CheckCancellation() const noexcept
         {
-            if (m_cancellation.IsCancellationRequested())
-            {
-                return NGIN::Utilities::Unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
-            }
-            return {};
+            return m_cancellation.IsCancellationRequested();
         }
 
-        auto YieldNow() const noexcept
+        [[nodiscard]] auto YieldNow() const noexcept
         {
-            struct Awaiter
-            {
-                NGIN::Execution::ExecutorRef exec;
-                CancellationToken            cancellation;
-                bool                         await_ready() const noexcept
-                {
-                    return cancellation.IsCancellationRequested() || !exec.IsValid();
-                }
-                void await_suspend(std::coroutine_handle<> h) const noexcept
-                {
-                    exec.Execute(h);
-                }
-                AsyncExpected<void> await_resume() const noexcept
-                {
-                    if (cancellation.IsCancellationRequested())
-                    {
-                        return NGIN::Utilities::Unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
-                    }
-                    if (!exec.IsValid())
-                    {
-                        return NGIN::Utilities::Unexpected(MakeAsyncError(AsyncErrorCode::InvalidState));
-                    }
-                    return {};
-                }
-            };
-            return Awaiter {m_executor, m_cancellation};
+            return YieldAwaiter {m_executor, m_cancellation};
         }
 
         template<typename TUnit>
             requires NGIN::Units::QuantityOf<NGIN::Units::TIME, TUnit>
-        auto Delay(const TUnit& dur) const noexcept
+        [[nodiscard]] auto Delay(const TUnit& duration) const noexcept
         {
-            struct DelayAwaiter
-            {
-                NGIN::Execution::ExecutorRef           exec;
-                CancellationToken                      cancellation;
-                mutable CancellationRegistration        cancellationRegistration {};
-                TUnit                                  dur;
-                NGIN::Time::TimePoint                  until;
-
-                DelayAwaiter(NGIN::Execution::ExecutorRef e, CancellationToken c, const TUnit& d)
-                    : exec(e)
-                    , cancellation(std::move(c))
-                    , dur(d)
-                    , until([&] {
-                        const auto now = NGIN::Time::MonotonicClock::Now();
-                        const auto ns  = NGIN::Units::UnitCast<NGIN::Units::Nanoseconds>(d).GetValue();
-                        if (ns <= 0.0)
-                        {
-                            return now;
-                        }
-                        auto add = static_cast<NGIN::UInt64>(ns);
-                        if (static_cast<double>(add) < ns)
-                        {
-                            ++add;
-                        }
-                        return NGIN::Time::TimePoint::FromNanoseconds(now.ToNanoseconds() + add);
-                    }())
-                {
-                }
-
-                bool await_ready() const noexcept
-                {
-                    return !exec.IsValid() ||
-                           cancellation.IsCancellationRequested() ||
-                           NGIN::Units::UnitCast<NGIN::Units::Nanoseconds>(dur).GetValue() <= 0.0;
-                }
-                void await_suspend(std::coroutine_handle<> handle) const
-                {
-                    cancellation.Register(cancellationRegistration, exec, handle);
-                    exec.ExecuteAt(handle, until);
-                }
-                AsyncExpected<void> await_resume() const noexcept
-                {
-                    if (cancellation.IsCancellationRequested())
-                    {
-                        return NGIN::Utilities::Unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
-                    }
-                    if (!exec.IsValid())
-                    {
-                        return NGIN::Utilities::Unexpected(MakeAsyncError(AsyncErrorCode::InvalidState));
-                    }
-                    return {};
-                }
-            };
-            return DelayAwaiter {m_executor, m_cancellation, dur};
-        }
-
-        template<typename TaskT>
-        TaskT Run(TaskT&& task)
-        {
-            task.Schedule(*this);
-            return std::forward<TaskT>(task);
-        }
-
-        template<typename Func, typename... Args>
-        auto Run(Func&& func, Args&&... args) -> decltype(auto)
-        {
-            auto task = func(*this, std::forward<Args>(args)...);
-            task.Schedule(*this);
-            return task;
+            return DelayAwaiter<TUnit> {m_executor, m_cancellation, duration};
         }
 
     private:

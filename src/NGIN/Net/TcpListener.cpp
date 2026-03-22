@@ -11,34 +11,6 @@
 
 namespace NGIN::Net
 {
-#if !defined(NGIN_PLATFORM_WINDOWS)
-    [[nodiscard]] static NGIN::Async::AsyncError ToAsyncError(NetError error) noexcept
-    {
-        using NGIN::Async::AsyncErrorCode;
-        AsyncErrorCode code = AsyncErrorCode::Fault;
-        switch (error.code)
-        {
-            case NetErrorCode::TimedOut:
-                code = AsyncErrorCode::TimedOut;
-                break;
-            case NetErrorCode::MessageTooLarge:
-                code = AsyncErrorCode::InvalidArgument;
-                break;
-            case NetErrorCode::WouldBlock:
-                code = AsyncErrorCode::InvalidState;
-                break;
-            case NetErrorCode::Ok:
-                code = AsyncErrorCode::Ok;
-                break;
-            default:
-                break;
-        }
-
-        const int native = (error.native != 0) ? error.native : static_cast<int>(error.code);
-        return NGIN::Async::MakeAsyncError(code, native);
-    }
-#endif
-
     NetExpected<void> TcpListener::Open(AddressFamily family, SocketOptions options) noexcept
     {
         m_handle.Close();
@@ -98,16 +70,12 @@ namespace NGIN::Net
         return socket;
     }
 
-    NGIN::Async::Task<TcpSocket> TcpListener::AcceptAsync(NGIN::Async::TaskContext&      ctx,
-                                                          NetworkDriver&                 driver,
-                                                          NGIN::Async::CancellationToken token)
+    NGIN::Async::Task<TcpSocket, NetError> TcpListener::AcceptAsync(NGIN::Async::TaskContext&      ctx,
+                                                                    NetworkDriver&                 driver,
+                                                                    NGIN::Async::CancellationToken token)
     {
 #if defined(NGIN_PLATFORM_WINDOWS)
         auto handleResult = co_await driver.SubmitAccept(ctx, m_handle, token);
-        if (!handleResult)
-        {
-            co_return NGIN::Utilities::Unexpected(handleResult.Error());
-        }
         co_return TcpSocket(std::move(*handleResult), true);
 #else
         for (;;)
@@ -120,14 +88,10 @@ namespace NGIN::Net
 
             if (result.Error().code != NetErrorCode::WouldBlock)
             {
-                co_return NGIN::Utilities::Unexpected(ToAsyncError(result.Error()));
+                co_return NGIN::Utilities::Unexpected(result.Error());
             }
 
-            auto waitResult = co_await driver.WaitUntilReadable(ctx, m_handle, token);
-            if (!waitResult)
-            {
-                co_return NGIN::Utilities::Unexpected(waitResult.Error());
-            }
+            co_await driver.WaitUntilReadable(ctx, m_handle, token);
         }
 #endif
     }

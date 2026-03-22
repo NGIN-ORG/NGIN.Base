@@ -20,17 +20,17 @@ namespace NGIN::Net::Transport
         {
         }
 
-        NGIN::Async::Task<void> SendAsync(NGIN::Async::TaskContext&      ctx,
-                                          NGIN::Net::Endpoint            remoteEndpoint,
-                                          NGIN::Net::ConstByteSpan       payload,
-                                          NGIN::Async::CancellationToken token) override
+        NGIN::Async::Task<void, NGIN::Net::NetError> SendAsync(NGIN::Async::TaskContext&      ctx,
+                                                               NGIN::Net::Endpoint            remoteEndpoint,
+                                                               NGIN::Net::ConstByteSpan       payload,
+                                                               NGIN::Async::CancellationToken token) override
         {
             return SendImpl(ctx, m_socket, m_driver, remoteEndpoint, payload, token);
         }
 
-        NGIN::Async::Task<ReceivedDatagram> ReceiveAsync(NGIN::Async::TaskContext&      ctx,
-                                                         NGIN::Net::Buffer&             receiveBuffer,
-                                                         NGIN::Async::CancellationToken token) override
+        NGIN::Async::Task<ReceivedDatagram, NGIN::Net::NetError> ReceiveAsync(NGIN::Async::TaskContext&      ctx,
+                                                                               NGIN::Net::Buffer&             receiveBuffer,
+                                                                               NGIN::Async::CancellationToken token) override
         {
             return ReceiveImpl(ctx, m_socket, m_driver, receiveBuffer, token);
         }
@@ -39,63 +39,50 @@ namespace NGIN::Net::Transport
         [[nodiscard]] const UdpSocket& Socket() const noexcept { return m_socket; }
 
     private:
-        static NGIN::Async::Task<void> SendImpl(NGIN::Async::TaskContext&      ctx,
-                                                UdpSocket&                     socket,
-                                                NetworkDriver*                 driver,
-                                                NGIN::Net::Endpoint            remoteEndpoint,
-                                                NGIN::Net::ConstByteSpan       payload,
-                                                NGIN::Async::CancellationToken token)
+        static NGIN::Async::Task<void, NGIN::Net::NetError> SendImpl(NGIN::Async::TaskContext&      ctx,
+                                                                      UdpSocket&                     socket,
+                                                                      NetworkDriver*                 driver,
+                                                                      NGIN::Net::Endpoint            remoteEndpoint,
+                                                                      NGIN::Net::ConstByteSpan       payload,
+                                                                      NGIN::Async::CancellationToken token)
         {
             if (!driver)
             {
-                co_await NGIN::Async::Task<void>::ReturnError(
-                        NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::InvalidState));
+                co_await NGIN::Async::Task<void, NGIN::Net::NetError>::ReturnFault(
+                        NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidState));
                 co_return;
             }
-            auto task = socket.SendToAsync(ctx, *driver, remoteEndpoint, payload, token);
-            task.Schedule(ctx);
-            auto result = co_await task;
-            if (!result)
-            {
-                co_await NGIN::Async::Task<void>::ReturnError(result.Error());
-                co_return;
-            }
+            static_cast<void>(co_await socket.SendToAsync(ctx, *driver, remoteEndpoint, payload, token));
             co_return;
         }
 
-        static NGIN::Async::Task<ReceivedDatagram> ReceiveImpl(NGIN::Async::TaskContext&      ctx,
-                                                               UdpSocket&                     socket,
-                                                               NetworkDriver*                 driver,
-                                                               NGIN::Net::Buffer&             receiveBuffer,
-                                                               NGIN::Async::CancellationToken token)
+        static NGIN::Async::Task<ReceivedDatagram, NGIN::Net::NetError> ReceiveImpl(NGIN::Async::TaskContext&      ctx,
+                                                                                     UdpSocket&                     socket,
+                                                                                     NetworkDriver*                 driver,
+                                                                                     NGIN::Net::Buffer&             receiveBuffer,
+                                                                                     NGIN::Async::CancellationToken token)
         {
             if (!driver)
             {
-                co_return NGIN::Utilities::Unexpected(NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::InvalidState));
+                co_return NGIN::Async::Fault(NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidState));
             }
             if (!receiveBuffer.data || receiveBuffer.capacity == 0)
             {
-                co_return NGIN::Utilities::Unexpected(NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::InvalidArgument));
+                co_return NGIN::Async::Fault(NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidState));
             }
 
-            auto task = socket.ReceiveFromAsync(ctx,
-                                                *driver,
-                                                NGIN::Net::ByteSpan {receiveBuffer.data,
-                                                                     receiveBuffer.capacity},
-                                                token);
-            task.Schedule(ctx);
-            auto result = co_await task;
-            if (!result)
-            {
-                co_return NGIN::Utilities::Unexpected(result.Error());
-            }
+            auto result = co_await socket.ReceiveFromAsync(ctx,
+                                                           *driver,
+                                                           NGIN::Net::ByteSpan {receiveBuffer.data,
+                                                                                receiveBuffer.capacity},
+                                                           token);
 
-            receiveBuffer.size = result->bytesReceived;
+            receiveBuffer.size = result.bytesReceived;
 
             ReceivedDatagram datagram {};
-            datagram.remoteEndpoint = result->remoteEndpoint;
-            datagram.bytesReceived  = result->bytesReceived;
-            datagram.payload        = NGIN::Net::ConstByteSpan {receiveBuffer.data, result->bytesReceived};
+            datagram.remoteEndpoint = result.remoteEndpoint;
+            datagram.bytesReceived  = result.bytesReceived;
+            datagram.payload        = NGIN::Net::ConstByteSpan {receiveBuffer.data, result.bytesReceived};
             co_return datagram;
         }
 

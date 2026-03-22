@@ -1,5 +1,5 @@
 /// @file AsyncError.hpp
-/// @brief Error codes and expected type for async operations.
+/// @brief Fault and control-flow support types for async operations.
 #pragma once
 
 #include <NGIN/Primitives.hpp>
@@ -22,7 +22,38 @@
 
 namespace NGIN::Async
 {
-    /// @brief Async error codes for coroutine operations.
+    struct NoError final
+    {
+    };
+
+    enum class AsyncFaultCode : NGIN::UInt8
+    {
+        None,
+        InvalidState,
+        InvalidArgument,
+        SchedulerFailure,
+        ContinuationDispatchFailure,
+        UnhandledException,
+        Unknown,
+    };
+
+    struct AsyncFault final
+    {
+        AsyncFaultCode code {AsyncFaultCode::None};
+        int            native {0};
+
+        [[nodiscard]] constexpr bool IsOk() const noexcept
+        {
+            return code == AsyncFaultCode::None;
+        }
+    };
+
+    [[nodiscard]] constexpr AsyncFault MakeAsyncFault(AsyncFaultCode code, int native = 0) noexcept
+    {
+        return AsyncFault {code, native};
+    }
+
+    // Legacy compatibility surface used by unmigrated internal helpers while the async stack is being retargeted.
     enum class AsyncErrorCode : NGIN::UInt8
     {
         Ok,
@@ -34,13 +65,15 @@ namespace NGIN::Async
         Unknown,
     };
 
-    /// @brief Async error value with optional native error code.
     struct AsyncError final
     {
         AsyncErrorCode code {AsyncErrorCode::Ok};
         int            native {0};
 
-        [[nodiscard]] constexpr bool IsOk() const noexcept { return code == AsyncErrorCode::Ok; }
+        [[nodiscard]] constexpr bool IsOk() const noexcept
+        {
+            return code == AsyncErrorCode::Ok;
+        }
     };
 
     template<typename T>
@@ -49,5 +82,26 @@ namespace NGIN::Async
     [[nodiscard]] constexpr AsyncError MakeAsyncError(AsyncErrorCode code, int native = 0) noexcept
     {
         return AsyncError {code, native};
+    }
+
+    struct CanceledTag final
+    {
+    };
+
+    inline constexpr CanceledTag Canceled {};
+
+    struct FaultResult final
+    {
+        AsyncFault fault {};
+    };
+
+    [[nodiscard]] constexpr FaultResult Fault(AsyncFault fault) noexcept
+    {
+        return FaultResult {fault};
+    }
+
+    [[nodiscard]] constexpr FaultResult Fault(AsyncFaultCode code, int native = 0) noexcept
+    {
+        return FaultResult {MakeAsyncFault(code, native)};
     }
 }// namespace NGIN::Async

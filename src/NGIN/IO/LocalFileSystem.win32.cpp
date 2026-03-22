@@ -540,69 +540,45 @@ namespace NGIN::IO
 
             AsyncTask<UIntSize> ReadAsync(NGIN::Async::TaskContext& ctx, std::span<NGIN::Byte> destination) override
             {
-                auto yielded = co_await ctx.YieldNow();
-                if (!yielded)
-                {
-                    co_await AsyncTask<UIntSize>::ReturnError(yielded.Error());
-                    co_return AsyncResult<UIntSize>(UIntSize {0});
-                }
+                co_await ctx.YieldNow();
                 co_return ToAsyncResult(Read(destination));
             }
 
             AsyncTask<UIntSize> WriteAsync(NGIN::Async::TaskContext& ctx, std::span<const NGIN::Byte> source) override
             {
-                auto yielded = co_await ctx.YieldNow();
-                if (!yielded)
-                {
-                    co_await AsyncTask<UIntSize>::ReturnError(yielded.Error());
-                    co_return AsyncResult<UIntSize>(UIntSize {0});
-                }
+                co_await ctx.YieldNow();
                 co_return ToAsyncResult(Write(source));
             }
 
             AsyncTask<UIntSize> ReadAtAsync(NGIN::Async::TaskContext& ctx, UInt64 offset, std::span<NGIN::Byte> destination) override
             {
-                auto yielded = co_await ctx.YieldNow();
-                if (!yielded)
-                {
-                    co_await AsyncTask<UIntSize>::ReturnError(yielded.Error());
-                    co_return AsyncResult<UIntSize>(UIntSize {0});
-                }
+                co_await ctx.YieldNow();
                 co_return ToAsyncResult(ReadAt(offset, destination));
             }
 
             AsyncTask<UIntSize> WriteAtAsync(NGIN::Async::TaskContext& ctx, UInt64 offset, std::span<const NGIN::Byte> source) override
             {
-                auto yielded = co_await ctx.YieldNow();
-                if (!yielded)
-                {
-                    co_await AsyncTask<UIntSize>::ReturnError(yielded.Error());
-                    co_return AsyncResult<UIntSize>(UIntSize {0});
-                }
+                co_await ctx.YieldNow();
                 co_return ToAsyncResult(WriteAt(offset, source));
             }
 
             AsyncTaskVoid FlushAsync(NGIN::Async::TaskContext& ctx) override
             {
-                auto yielded = co_await ctx.YieldNow();
-                if (!yielded)
+                co_await ctx.YieldNow();
+                auto flushed = Flush();
+                if (!flushed)
                 {
-                    co_await AsyncTaskVoid::ReturnError(yielded.Error());
-                    co_return AsyncResult<void> {};
+                    co_await AsyncTaskVoid::ReturnError(std::move(flushed).TakeError());
+                    co_return;
                 }
-                co_return ToAsyncResult(Flush());
+                co_return;
             }
 
             AsyncTaskVoid CloseAsync(NGIN::Async::TaskContext& ctx) override
             {
-                auto yielded = co_await ctx.YieldNow();
-                if (!yielded)
-                {
-                    co_await AsyncTaskVoid::ReturnError(yielded.Error());
-                    co_return AsyncResult<void> {};
-                }
+                co_await ctx.YieldNow();
                 Close();
-                co_return AsyncResult<void> {};
+                co_return;
             }
 
         private:
@@ -1292,20 +1268,15 @@ namespace NGIN::IO
     AsyncTask<std::unique_ptr<IAsyncFileHandle>> LocalFileSystem::OpenFileAsync(
             NGIN::Async::TaskContext& ctx, const Path& path, const FileOpenOptions& options)
     {
-        auto yielded = co_await ctx.YieldNow();
-        if (!yielded)
-        {
-            co_await AsyncTask<std::unique_ptr<IAsyncFileHandle>>::ReturnError(yielded.Error());
-            co_return AsyncResult<std::unique_ptr<IAsyncFileHandle>>(std::unique_ptr<IAsyncFileHandle> {});
-        }
+        co_await ctx.YieldNow();
 
         auto opened = LocalFileHandle::Open(path, options);
         if (!opened.HasValue())
         {
-            co_return AsyncResult<std::unique_ptr<IAsyncFileHandle>>(NGIN::Utilities::Unexpected<IOError>(std::move(opened.Error())));
+            co_return NGIN::Utilities::Unexpected<IOError>(std::move(opened.Error()));
         }
 
         std::unique_ptr<IAsyncFileHandle> result(opened.Value().release());
-        co_return AsyncResult<std::unique_ptr<IAsyncFileHandle>>(std::move(result));
+        co_return std::move(result);
     }
 }// namespace NGIN::IO

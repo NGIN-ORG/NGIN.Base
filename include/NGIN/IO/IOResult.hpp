@@ -15,9 +15,9 @@ namespace NGIN::IO
     using AsyncResult = Result<T>;
 
     template<typename T>
-    using AsyncTask = NGIN::Async::Task<Result<T>>;
+    using AsyncTask = NGIN::Async::Task<T, IOError>;
 
-    using AsyncTaskVoid = NGIN::Async::Task<ResultVoid>;
+    using AsyncTaskVoid = NGIN::Async::Task<void, IOError>;
 
     template<typename T>
     [[nodiscard]] inline AsyncResult<T> ToAsyncResult(Result<T>&& result)

@@ -8,6 +8,7 @@
 #include <NGIN/Net/Types/Endpoint.hpp>
 #include <NGIN/Net/Types/NetError.hpp>
 #include <NGIN/Net/Types/ShutdownMode.hpp>
+#include <NGIN/Async/AsyncError.hpp>
 
 #include <utility>
 #include <NGIN/Net/Types/SocketOptions.hpp>
@@ -16,7 +17,7 @@ namespace NGIN::Async
 {
     class TaskContext;
     class CancellationToken;
-    template<typename T>
+    template<typename T, typename E>
     class Task;
 }// namespace NGIN::Async
 
@@ -39,10 +40,10 @@ namespace NGIN::Net
                                SocketOptions options = {}) noexcept;
 
         NetExpected<bool> TryConnect(Endpoint remoteEndpoint) noexcept;
-        NGIN::Async::Task<void> ConnectAsync(NGIN::Async::TaskContext& ctx,
-                                             NetworkDriver& driver,
-                                             Endpoint remoteEndpoint,
-                                             NGIN::Async::CancellationToken token);
+        NGIN::Async::Task<void, NetError> ConnectAsync(NGIN::Async::TaskContext& ctx,
+                                                       NetworkDriver& driver,
+                                                       Endpoint remoteEndpoint,
+                                                       NGIN::Async::CancellationToken token);
 
         NetExpected<void> Connect(Endpoint remoteEndpoint);
 
@@ -51,14 +52,14 @@ namespace NGIN::Net
         NetExpected<NGIN::UInt32> TrySendSegments(BufferSegmentSpan data) noexcept;
         NetExpected<NGIN::UInt32> TryReceiveSegments(MutableBufferSegmentSpan destination) noexcept;
 
-        NGIN::Async::Task<NGIN::UInt32> SendAsync(NGIN::Async::TaskContext& ctx,
-                                                  NetworkDriver& driver,
-                                                  ConstByteSpan data,
-                                                  NGIN::Async::CancellationToken token);
-        NGIN::Async::Task<NGIN::UInt32> ReceiveAsync(NGIN::Async::TaskContext& ctx,
-                                                     NetworkDriver& driver,
-                                                     ByteSpan destination,
-                                                     NGIN::Async::CancellationToken token);
+        NGIN::Async::Task<NGIN::UInt32, NetError> SendAsync(NGIN::Async::TaskContext& ctx,
+                                                            NetworkDriver& driver,
+                                                            ConstByteSpan data,
+                                                            NGIN::Async::CancellationToken token);
+        NGIN::Async::Task<NGIN::UInt32, NetError> ReceiveAsync(NGIN::Async::TaskContext& ctx,
+                                                               NetworkDriver& driver,
+                                                               ByteSpan destination,
+                                                               NGIN::Async::CancellationToken token);
 
         NetExpected<void> Shutdown(ShutdownMode mode) noexcept;
         void Close() noexcept;

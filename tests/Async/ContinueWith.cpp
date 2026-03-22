@@ -60,7 +60,7 @@ namespace
         throw std::runtime_error("parent");
         co_return 0;
 #else
-        co_return NGIN::Utilities::Unexpected(NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::Fault));
+        co_return NGIN::Async::Fault(NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::Unknown));
 #endif
     }
 
@@ -75,8 +75,8 @@ namespace
         throw std::runtime_error("continuation");
         co_return;
 #else
-        co_await NGIN::Async::Task<void>::ReturnError(
-                NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::Fault));
+        co_await NGIN::Async::Task<void>::ReturnFault(
+                NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::Unknown));
         co_return;
 #endif
     }
@@ -96,12 +96,7 @@ namespace
     {
         auto parent = ParentThrows(ctx);
         parent.Schedule(ctx);
-        auto thenResult = co_await parent.ContinueWith(ctx, [&](int) { return Noop(ctx); });
-        if (!thenResult)
-        {
-            co_await NGIN::Async::Task<void>::ReturnError(thenResult.Error());
-            co_return;
-        }
+        co_await parent.ContinueWith(ctx, [&](int) { return Noop(ctx); });
         co_return;
     }
 
@@ -109,34 +104,20 @@ namespace
     {
         auto parent = ParentValue(ctx);
         parent.Schedule(ctx);
-        auto thenResult = co_await parent.ContinueWith(ctx, [&](int) { return ContinuationThrows(ctx); });
-        if (!thenResult)
-        {
-            co_await NGIN::Async::Task<void>::ReturnError(thenResult.Error());
-            co_return;
-        }
+        co_await parent.ContinueWith(ctx, [&](int) { return ContinuationThrows(ctx); });
         co_return;
     }
 
     NGIN::Async::Task<void> AwaitCancellation(NGIN::Async::TaskContext& ctx, NGIN::Async::Task<int>& parent)
     {
-        auto thenResult = co_await parent.ContinueWith(ctx, [&](int) { return Noop(ctx); });
-        if (!thenResult)
-        {
-            co_await NGIN::Async::Task<void>::ReturnError(thenResult.Error());
-            co_return;
-        }
+        co_await parent.ContinueWith(ctx, [&](int) { return Noop(ctx); });
         co_return;
     }
 
     NGIN::Async::Task<int> MultiplyAfterYield(NGIN::Async::TaskContext& ctx, int value, int factor)
     {
-        auto yieldResult = co_await ctx.YieldNow();
-        if (!yieldResult)
-        {
-            co_return NGIN::Utilities::Unexpected(yieldResult.Error());
-        }
-        co_return value* factor;
+        co_await ctx.YieldNow();
+        co_return value * factor;
     }
 
     NGIN::Async::Task<int> ContinueWithSuccess(NGIN::Async::TaskContext& ctx)
@@ -144,12 +125,7 @@ namespace
         auto parent = ParentValue(ctx);
         parent.Schedule(ctx);
 
-        auto thenResult = co_await parent.ContinueWith(ctx, [&](int v) { return MultiplyAfterYield(ctx, v, 3); });
-        if (!thenResult)
-        {
-            co_return NGIN::Utilities::Unexpected(thenResult.Error());
-        }
-        co_return 21;
+        co_return co_await parent.ContinueWith(ctx, [&](int v) { return MultiplyAfterYield(ctx, v, 3); });
     }
 }// namespace
 
@@ -166,7 +142,7 @@ TEST_CASE("Task::ContinueWith propagates parent fault")
     REQUIRE(task.IsFaulted());
     auto result = task.Get();
     REQUIRE_FALSE(result);
-    REQUIRE(result.Error().code == NGIN::Async::AsyncErrorCode::Fault);
+    REQUIRE(result.IsFault());
 }
 
 TEST_CASE("Task::ContinueWith propagates continuation fault")
@@ -182,7 +158,7 @@ TEST_CASE("Task::ContinueWith propagates continuation fault")
     REQUIRE(task.IsFaulted());
     auto result = task.Get();
     REQUIRE_FALSE(result);
-    REQUIRE(result.Error().code == NGIN::Async::AsyncErrorCode::Fault);
+    REQUIRE(result.IsFault());
 }
 
 TEST_CASE("Task::ContinueWith is woken by cancellation even if parent never completes")
@@ -207,7 +183,7 @@ TEST_CASE("Task::ContinueWith is woken by cancellation even if parent never comp
     REQUIRE(task.IsCanceled());
     auto result = task.Get();
     REQUIRE_FALSE(result);
-    REQUIRE(result.Error().code == NGIN::Async::AsyncErrorCode::Canceled);
+    REQUIRE(result.IsCanceled());
 }
 
 TEST_CASE("Task::ContinueWith runs continuation on success")

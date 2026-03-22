@@ -753,7 +753,7 @@ namespace NGIN::Net
         REQUIRE(PumpUntil(scheduler, *driver, [&]() { return recvTask.IsCompleted(); }));
         auto recvResult = recvTask.Get();
         REQUIRE_FALSE(recvResult);
-        REQUIRE(recvResult.Error().code == NGIN::Async::AsyncErrorCode::Canceled);
+        REQUIRE(recvResult.IsCanceled());
 
         socket.Close();
     }
@@ -781,7 +781,7 @@ namespace NGIN::Net
         REQUIRE(PumpUntil(scheduler, *driver, [&]() { return acceptTask.IsCompleted(); }));
         auto acceptResult = acceptTask.Get();
         REQUIRE_FALSE(acceptResult);
-        REQUIRE(acceptResult.Error().code == NGIN::Async::AsyncErrorCode::Canceled);
+        REQUIRE(acceptResult.IsCanceled());
 
         listener.Close();
     }
@@ -837,7 +837,7 @@ namespace NGIN::Net
         REQUIRE(PumpUntil(scheduler, *driver, [&]() { return recvTask.IsCompleted(); }));
         auto recvResult = recvTask.Get();
         REQUIRE_FALSE(recvResult);
-        REQUIRE(recvResult.Error().code == NGIN::Async::AsyncErrorCode::Canceled);
+        REQUIRE(recvResult.IsCanceled());
 
         client.Close();
         server.Close();
@@ -1169,7 +1169,9 @@ namespace NGIN::Net
         REQUIRE(PumpUntil(scheduler, *driver, [&]() { return connectTask.IsCompleted(); }));
         auto connectResult = connectTask.Get();
         REQUIRE_FALSE(connectResult);
-        REQUIRE(connectResult.Error().code == NGIN::Async::AsyncErrorCode::Fault);
+        REQUIRE(connectResult.IsDomainError());
+        const auto code = connectResult.DomainError().code;
+        REQUIRE((code == NetErrorCode::Disconnected || code == NetErrorCode::ConnectionReset));
 
         client.Close();
     }

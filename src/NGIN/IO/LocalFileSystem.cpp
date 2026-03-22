@@ -41,24 +41,22 @@ namespace NGIN::IO
     AsyncTask<FileInfo> LocalFileSystem::GetInfoAsync(
             NGIN::Async::TaskContext& ctx, const Path& path, const MetadataOptions& options)
     {
-        auto yielded = co_await ctx.YieldNow();
-        if (!yielded)
-        {
-            co_await AsyncTask<FileInfo>::ReturnError(yielded.Error());
-            co_return AsyncResult<FileInfo>(FileInfo {});
-        }
+        co_await ctx.YieldNow();
         co_return ToAsyncResult(GetInfo(path, options));
     }
 
     AsyncTaskVoid LocalFileSystem::CopyFileAsync(
             NGIN::Async::TaskContext& ctx, const Path& from, const Path& to, const CopyOptions& options)
     {
-        auto yielded = co_await ctx.YieldNow();
-        if (!yielded)
+        co_await ctx.YieldNow();
+
+        auto copied = CopyFile(from, to, options);
+        if (!copied)
         {
-            co_await AsyncTaskVoid::ReturnError(yielded.Error());
-            co_return AsyncResult<void> {};
+            co_await AsyncTaskVoid::ReturnError(std::move(copied).TakeError());
+            co_return;
         }
-        co_return ToAsyncResult(CopyFile(from, to, options));
+
+        co_return;
     }
 }// namespace NGIN::IO

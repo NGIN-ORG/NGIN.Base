@@ -1,84 +1,107 @@
 # Async
 
-Async in NGIN means writing code that can **suspend instead of blocking** and later **resume on an executor** when it
-can make progress. It is built on standard C++ *stackless coroutines*: the coroutine machinery handles suspension and
-state, while NGIN decides *when/where* to resume continuations.
+`NGIN::Async` is the coroutine and cancellation layer in `NGIN.Base`.
 
-The design is performance-first and explicit:
+The current public model is:
 
-- No hidden global runtime: you choose an executor/scheduler.
-- No implicit thread usage: some executors are cooperative (you “pump” them), others run background workers.
-- Cancellation is cooperative: code must observe it (`CheckCancellation`, `YieldNow`, `Delay`).
+- `Task<T, E>` for async work that produces `T` or a typed domain error `E`
+- `Task<void, E>` for async work with no success payload
+- `TaskOutcome<T, E>` for terminal observation at task boundaries
+- distinct non-success states:
+  - domain error `E`
+  - canceled
+  - fault (`AsyncFault`)
 
-## Architecture
-
-NGIN’s async stack is split across two namespaces:
-
-- `NGIN::Async`: coroutine types and combinators (`Task`, `TaskContext`, cancellation, `WhenAll`, `WhenAny`, generators).
-- `NGIN::Execution`: executors/schedulers (`ExecutorRef`, `CooperativeScheduler`, `ThreadPoolScheduler`, etc).
-
-The core idea is: **coroutines stay scheduler-agnostic**, and a `TaskContext` binds them to an `ExecutorRef` +
-`CancellationToken`.
+This is an explicit, exception-optional async model. Coroutine code should normally read like straight-line success-path code, while root callers inspect `TaskOutcome<T, E>`.
 
 ## Mental Model
 
-- A `Task<T>` is a *description* of work that can complete later (it is not necessarily running yet).
-- A `TaskContext` describes *where* the work runs (executor) and *under what cancellation rules* (token).
-- Work runs only after it is scheduled (either explicitly, or implicitly when awaited from a running task).
+- A `Task<T, E>` is cold by default.
+- A `TaskContext` supplies the executor and cancellation token.
+- `co_await childTask` inside another compatible `Task<U, E>` either:
+  - yields `T`, or
+  - completes the awaiting coroutine with the same non-success outcome.
+- `Get()` is for terminal observation, not the normal in-coroutine style.
 
-If you are familiar with C#/.NET:
-
-- `Task<T>` ≈ `Task<T>` (but cold by default; see below)
-- `TaskContext` ≈ `SynchronizationContext` + `CancellationToken`
-- `ExecutorRef` ≈ a scheduler / dispatcher
+In v1, automatic propagation requires the exact same domain error type `E`.
 
 ## Key Types
 
-- `NGIN::Async::Task<T>` / `NGIN::Async::Task<void>`
-  - Single-result coroutine type (similar to .NET `Task<T>`).
-  - `co_return` produces the result; `Get()`/`co_await` return `AsyncExpected<T>` for explicit error handling.
-  - `Task` is intentionally *not* a generator; `co_yield` is not part of `Task`.
-  - `Task<T>` instances are **cold by default**:
-    - Constructing a task does not start execution.
-    - Execution begins once the task is scheduled (e.g. `Start(ctx)`), or when it is first `co_await`’d from a task that
-      is already running in a context.
+### `Task<T, E>`
 
-- `NGIN::Async::TaskContext`
-  - Holds an `NGIN::Execution::ExecutorRef` and a `CancellationToken`.
-  - Provides awaitables: `YieldNow()` and `Delay(duration)` (duration is an NGIN Units time quantity).
-  - Tasks scheduled through a context share its executor and cancellation scope.
-  - Typical usage is long-lived and reused across many tasks. Avoid mutating (`Bind(...)`) while tasks are concurrently
-    using the context.
+Use `Task<T, E>` for ordinary async coroutines:
 
-- `NGIN::Async::CancellationSource` / `CancellationToken`
-  - Cooperative cancellation. `TaskContext::CheckCancellation()` returns `AsyncErrorCode::Canceled`.
+```cpp
+NGIN::Async::Task<int, MyError> Compute(NGIN::Async::TaskContext& ctx)
+{
+    co_await ctx.YieldNow();
+    co_return 123;
+}
+```
 
-- `NGIN::Async::WhenAll` / `WhenAny`
-  - Combinators for awaiting multiple tasks with .NET-like behavior.
+Success is returned with `co_return value`.
 
-- `NGIN::Async::Generator<T>`
-  - Synchronous pull generator (`co_yield`) for sequences in non-async code.
+Non-success can be produced with:
 
-- `NGIN::Async::AsyncGenerator<T>`
-  - Cooperative async pull generator advanced via `co_await gen.Next(ctx)` returning `AsyncExpected<std::optional<T>>`.
+- `co_return NGIN::Utilities::Unexpected<E>(error)`
+- `co_return NGIN::Async::Canceled`
+- `co_return NGIN::Async::Fault(asyncFault)`
+
+Helper awaiters such as `Task<T, E>::ReturnError(...)` still exist, but they are convenience helpers, not the preferred public style.
+
+### `TaskOutcome<T, E>`
+
+`TaskOutcome<T, E>` is the observation API returned by `Get()`.
+
+Use it at:
+
+- root-task boundaries
+- tests
+- schedulers/executors
+- bridge code
+
+Main queries:
+
+- `Succeeded()`
+- `HasValue()` / `Value()` for non-void
+- `IsDomainError()` / `DomainError()`
+- `IsCanceled()`
+- `IsFault()` / `Fault()`
+
+### `TaskContext`
+
+`TaskContext` binds a coroutine to:
+
+- an executor (`ExecutorRef`)
+- a cancellation token
+
+It also provides the main cancellation-aware await points:
+
+- `YieldNow()`
+- `Delay(...)`
+
+`CheckCancellation()` is a cheap status query only.
 
 ## Getting Started
 
-Typical “root task” pattern:
+Typical root-task flow:
 
 ```cpp
 #include <NGIN/Async/Task.hpp>
-#include <NGIN/Async/TaskContext.hpp>
 #include <NGIN/Execution/CooperativeScheduler.hpp>
 
-NGIN::Async::Task<int> Compute(NGIN::Async::TaskContext& ctx)
+namespace
 {
-    auto yielded = co_await ctx.YieldNow();
-    if (!yielded)
+    enum class DemoError
     {
-        co_return std::unexpected(yielded.error());
+        InvalidInput,
+    };
+
+    NGIN::Async::Task<int, DemoError> Compute(NGIN::Async::TaskContext& ctx)
+    {
+        co_await ctx.YieldNow();
+        co_return 7;
     }
-    co_return 123;
 }
 
 int main()
@@ -86,209 +109,196 @@ int main()
     NGIN::Execution::CooperativeScheduler scheduler;
     NGIN::Async::TaskContext ctx(scheduler);
 
-    auto t = Compute(ctx);
-    t.Start(ctx);
+    auto task = Compute(ctx);
+    task.Start(ctx);
     scheduler.RunUntilIdle();
-    auto result = t.Get();
-    if (!result)
+
+    auto outcome = task.Get();
+    if (!outcome)
     {
         return 1;
     }
-    return *result;
-}```
 
-Notes:
-
-- A **root** task must be scheduled somehow (usually `Start(ctx)` or `ctx.Run(...)`).
-- Child tasks that are `co_await`’d from a started/bound task can be scheduled automatically.
-
-Execution flow:
-
-1. `Compute(ctx)` constructs a `Task<int>` (no coroutine body runs yet).
-2. `t.Start(ctx)` schedules the coroutine on the executor inside `ctx`.
-3. `scheduler.RunUntilIdle()` drives execution until no runnable work remains.
-4. `t.Get()` retrieves an `AsyncExpected<int>`; check for errors or cancellation.
-
-### `TaskContext::Run`
-
-`TaskContext::Run` is a convenience helper that creates a task, binds it to the context, and schedules it immediately.
-
-```cpp
-auto task = ctx.Run([](NGIN::Async::TaskContext& ctx) -> NGIN::Async::Task<int> {
-    auto yielded = co_await ctx.YieldNow();
-    if (!yielded)
-    {
-        co_return std::unexpected(yielded.error());
-    }
-    co_return 7;
-});
-// task already started
-```
-
-Use `Run` for top-level entry points where you don’t need to control the start moment.
-
-## Error Handling
-
-- Tasks do not throw; failures are returned as `AsyncExpected<T>`.
-- Unhandled exceptions (when enabled) are converted to `AsyncErrorCode::Fault`.
-- `co_await` and `Get()` always return `AsyncExpected<T>` so callers can branch explicitly.
-
-```cpp
-NGIN::Async::Task<void> Fails(NGIN::Async::TaskContext&)
-{
-    co_await NGIN::Async::Task<void>::ReturnError(
-            NGIN::Async::MakeAsyncError(NGIN::Async::AsyncErrorCode::Fault));
-    co_return;
+    return outcome.Value();
 }
 ```
 
-If you schedule and run `Fails`, `Get()` will return `AsyncExpected<void>` with `AsyncErrorCode::Fault`.
-## Cancellation Model
+What happens here:
 
-Cancellation is cooperative:
+1. `Compute(ctx)` creates a cold task.
+2. `task.Start(ctx)` binds it to the context and schedules it.
+3. `scheduler.RunUntilIdle()` drives execution.
+4. `task.Get()` returns `TaskOutcome<int, DemoError>`.
 
-- `TaskContext::YieldNow()` and `Delay(...)` return `AsyncErrorCode::Canceled` when cancellation is observed.
-- Use `ctx.CheckCancellation()` at well-defined points in long-running tasks.
+## Error and Fault Model
+
+`E` is only for domain errors such as:
+
+- IO errors
+- parse errors
+- network/transport domain failures
+- validation failures
+
+Cancellation and async runtime failures are not encoded as `E`.
+
+### Cancellation
+
+Cancellation is a first-class completion state.
+
+Examples:
 
 ```cpp
-NGIN::Async::Task<void> Work(NGIN::Async::TaskContext& ctx)
+NGIN::Async::Task<void, MyError> Work(NGIN::Async::TaskContext& ctx)
 {
     for (;;)
     {
-        auto cancel = ctx.CheckCancellation();
-        if (!cancel)
+        if (ctx.CheckCancellation())
         {
-            co_await NGIN::Async::Task<void>::ReturnError(cancel.error());
-            co_return;
+            co_return NGIN::Async::Canceled;
         }
 
-        auto yielded = co_await ctx.YieldNow();
-        if (!yielded)
-        {
-            co_await NGIN::Async::Task<void>::ReturnError(yielded.error());
-            co_return;
-        }
+        co_await ctx.YieldNow();
     }
 }
 ```
 
-Cancellation notes:
+### Faults
 
-- Cancellation is **cooperative**: if your task never checks the token, it will not stop �?oby itself�??.
-- Child tasks run under whatever `TaskContext` you pass to them (same context ��' same token).
-- `WhenAll`/`WhenAny` observe cancellation from the `TaskContext` they are awaited with, not from any implicit global.
+`AsyncFault` is reserved for async runtime/execution failures, such as:
+
+- invalid task state
+- scheduler/executor failure
+- broken runtime contract
+- unhandled exception converted to fault when exceptions are enabled
+
+Ordinary operation failures should stay in `E`.
+
 ## Combinators
 
 ### `WhenAll`
 
-- `WhenAll(ctx, Task<T>&...) -> Task<std::tuple<T...>>`
-- `WhenAll(ctx, Task<void>&...) -> Task<void>`
+- `WhenAll(ctx, Task<T, E>&...) -> Task<std::tuple<T...>, E>`
+- `WhenAll(ctx, Task<void, E>&...) -> Task<void, E>`
 
-```cpp
-auto a = Foo(ctx);
-auto b = Bar(ctx);
-auto all = NGIN::Async::WhenAll(ctx, a, b);
-all.Start(ctx);
-co_await all; // or all.Get() after completion
-```
+Behavior:
 
-Failure behavior:
-
-- If any child task faults, the combined task faults (first error wins).
-- If the context is canceled, the combined task returns `AsyncErrorCode::Canceled`.
-- Remaining tasks continue executing unless canceled via the context.
+- all children must use the same `E`
+- if all succeed, the combined task succeeds
+- if any child completes non-success, `WhenAll` completes with the earliest observed non-success child outcome
+- cancellation of the awaiting context completes the combined task as canceled, even if children do not observe cancellation themselves
 
 ### `WhenAny`
 
-- `WhenAny(ctx, Task<T>& first, Task<T>&... rest) -> Task<NGIN::UIntSize>`
-- Returns the index (0-based) of the first task that completes (success/fault/cancel).
+- `WhenAny(ctx, Task<...>& first, Task<...>&... rest) -> Task<NGIN::UIntSize, E>`
 
-Failure behavior:
+Behavior:
 
-- `WhenAny` completes when any input completes, even if that task faulted or was canceled.
-- `WhenAny` itself faults/cancels only if the *context* is canceled.
-- After `WhenAny` returns an index, call `Get()` on the corresponding task to observe its `AsyncExpected` result.
+- returns the index of the first child to complete
+- the winning child may have succeeded, failed with a domain error, canceled, or faulted
+- the caller inspects the winning child separately
+- if the awaiting context is canceled before a winner exists, `WhenAny` completes as canceled
 
-## Generators
+## `ContinueWith`
 
-Use `Generator<T>` when:
+`ContinueWith(ctx, func)` runs a continuation after the source task completes.
 
-- You want a synchronous sequence (range-for) produced lazily.
-- No async work occurs between produced elements.
+Rules:
 
-Use `AsyncGenerator<T>` when:
+- the continuation must return `Task<..., E>` with the same `E`
+- parent domain error, cancellation, and fault propagate automatically
+- context cancellation can wake the continuation even if the parent task never completes
 
-- Producing the next element requires async work (e.g. waiting, IO, scheduling).
-- You want backpressure via `co_await Next(ctx)`.
-
-### `Generator<T>` (sync)
+Example:
 
 ```cpp
-NGIN::Async::Generator<int> Range(int n)
+NGIN::Async::Task<int, MyError> Parent(NGIN::Async::TaskContext& ctx)
 {
-    for (int i = 0; i < n; ++i) { co_yield i; }
+    co_await ctx.YieldNow();
+    co_return 5;
 }
 
-for (int v : Range(3)) { /* 0,1,2 */ }
+NGIN::Async::Task<int, MyError> Child(NGIN::Async::TaskContext& ctx)
+{
+    auto parent = Parent(ctx);
+    co_return co_await parent.ContinueWith(ctx, [&](int value) -> NGIN::Async::Task<int, MyError> {
+        co_return value * 2;
+    });
+}
 ```
 
-### `AsyncGenerator<T>` (async)
+## Async Generators
 
-`Next(ctx)` is an awaitable that returns `AsyncExpected<std::optional<T>>`. `nullopt` means the sequence is complete.
+`AsyncGenerator<T, E>` is the multi-yield async sequence type.
+
+Advance it with:
+
+- `Next(ctx) -> Task<GeneratorNext<T>, E>`
+
+`GeneratorNext<T>` distinguishes:
+
+- `Item(T)`
+- `End`
+
+End-of-sequence is not encoded as an error, cancellation, or fault.
+
+Example:
 
 ```cpp
-NGIN::Async::AsyncGenerator<int> Produce(NGIN::Async::TaskContext& ctx)
+NGIN::Async::AsyncGenerator<int, MyError> Produce(NGIN::Async::TaskContext& ctx)
 {
     co_yield 1;
-    auto yielded = co_await ctx.YieldNow();
-    if (!yielded)
-    {
-        co_await NGIN::Async::AsyncGenerator<int>::ReturnError(yielded.error());
-        co_return;
-    }
+    co_await ctx.YieldNow();
     co_yield 2;
 }
 
-NGIN::Async::Task<int> Consume(NGIN::Async::TaskContext& ctx)
+NGIN::Async::Task<int, MyError> Consume(NGIN::Async::TaskContext& ctx)
 {
     auto gen = Produce(ctx);
     int sum = 0;
+
     for (;;)
     {
         auto next = co_await gen.Next(ctx);
-        if (!next)
-        {
-            co_return std::unexpected(next.error());
-        }
-        if (!*next)
+        if (next.IsEnd())
         {
             break;
         }
-        sum += **next;
+        sum += next.Value();
     }
+
     co_return sum;
 }
+```
 
-## Design Notes / Invariants
+## Lifecycle Rules
 
-- `Task<T>` is a **single-result** type: `co_yield` does not belong in `Task`.
-- `AsyncGenerator<T>` is a **single-consumer** sequence (concurrent `Next()` calls are not supported).
-- Prefer explicit scheduling with `TaskContext` to keep execution deterministic and testable.
+Current v1 rules:
 
-## Common Pitfalls
+- tasks are cold by default
+- tasks are move-only
+- a task may be started at most once
+- `Get()` is terminal observation and waits for completion when needed
+- repeated `Get()` on a completed task is supported
+- invalid lifecycle use becomes a fault outcome instead of throwing
 
-- Forgetting to schedule a root task (`Start(ctx)` / `ctx.Run(...)`).
-- Assuming a task starts running when constructed.
-- Calling `Get()`/`Wait()` without driving the executor (e.g. not pumping `CooperativeScheduler`).
-- Using `AsyncGenerator` from multiple consumers concurrently.
-- Forgetting to observe cancellation in long-running loops.
+## Exception Policy
 
+Exceptions remain optional.
 
+- exception-free builds are first-class
+- async public APIs do not throw as part of normal control flow
+- when exceptions are enabled, unhandled exceptions inside a task are converted to `AsyncFault`
 
+## Current Guidance
 
+Use this style by default:
 
+- inside coroutines: `co_await Task<T, E>` directly and write success-path code
+- at roots/tests: inspect `TaskOutcome<T, E>` from `Get()`
+- use `WhenAll`/`WhenAny` for composition rather than manually wiring multiple continuations
 
+For async filesystem and networking examples, see:
 
-
-
-
+- [`IO.md`](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/IO.md)
+- [`Network.md`](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/Network.md)
+- [`AsyncPlan.md`](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/AsyncPlan.md)

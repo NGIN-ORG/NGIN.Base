@@ -9,18 +9,16 @@
 #include <type_traits>
 #include <utility>
 
-#include <NGIN/Async/AsyncError.hpp>
 #include <NGIN/Async/Cancellation.hpp>
 #include <NGIN/Async/Task.hpp>
 #include <NGIN/Primitives.hpp>
-#include <NGIN/Sync/LockGuard.hpp>
-#include <NGIN/Sync/SpinLock.hpp>
 
 namespace NGIN::Async
 {
     namespace detail::when_all
     {
-        struct WhenAllSharedState final
+        template<typename E>
+        struct SharedState final
         {
             std::atomic<bool>            done {false};
             std::atomic<NGIN::UIntSize>  remaining {0};
@@ -28,25 +26,22 @@ namespace NGIN::Async
             std::coroutine_handle<>      awaiting {};
             CancellationRegistration     cancellationRegistration {};
 
-            NGIN::Sync::SpinLock errorLock {};
-            AsyncError           firstError {};
-            bool                 hasError {false};
+            TaskStatus               status {TaskStatus::Pending};
+            std::optional<E>         domainError {};
+            std::optional<AsyncFault> fault {};
         };
 
-        [[nodiscard]] inline bool CancelWhenAll(void* ctx) noexcept
+        template<typename E>
+        [[nodiscard]] inline bool CancelWhenAll(void* context) noexcept
         {
-            auto* state    = static_cast<WhenAllSharedState*>(ctx);
+            auto* state    = static_cast<SharedState<E>*>(context);
             bool  expected = false;
             if (!state->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
             {
                 return false;
             }
-            NGIN::Sync::LockGuard guard(state->errorLock);
-            if (!state->hasError)
-            {
-                state->firstError = MakeAsyncError(AsyncErrorCode::Canceled);
-                state->hasError   = true;
-            }
+
+            state->status = TaskStatus::Canceled;
             return true;
         }
 
@@ -58,13 +53,16 @@ namespace NGIN::Async
                 {
                     return Detached {std::coroutine_handle<promise_type>::from_promise(*this)};
                 }
+
                 std::suspend_always initial_suspend() noexcept { return {}; }
+
                 struct Final
                 {
                     bool await_ready() noexcept { return false; }
                     void await_suspend(std::coroutine_handle<promise_type> h) noexcept { h.destroy(); }
                     void await_resume() noexcept {}
                 };
+
                 Final final_suspend() noexcept { return {}; }
                 void  return_void() noexcept {}
                 void  unhandled_exception() noexcept {}
@@ -91,30 +89,48 @@ namespace NGIN::Async
             ~Detached() = default;
         };
 
-        template<typename TTask>
-        [[nodiscard]] inline Detached WatchTask(std::weak_ptr<WhenAllSharedState> weakState, TTask& task)
+        template<typename E, typename TTask>
+        [[nodiscard]] inline Detached WatchTask(std::weak_ptr<SharedState<E>> weakState, TTask& task, NGIN::UIntSize)
         {
-            if (auto result = co_await task; !result)
-            {
-                if (auto state = weakState.lock())
-                {
-                    NGIN::Sync::LockGuard guard(state->errorLock);
-                    if (!state->hasError)
-                    {
-                        state->firstError = result.Error();
-                        state->hasError   = true;
-                    }
-                }
-            }
+            auto outcome = co_await task.AsOutcome();
 
             if (auto state = weakState.lock())
             {
+                if (!outcome.Succeeded())
+                {
+                    bool expected = false;
+                    if (state->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
+                    {
+                        if (outcome.IsDomainError())
+                        {
+                            state->status = TaskStatus::DomainError;
+                            state->domainError = outcome.DomainError();
+                        }
+                        else if (outcome.IsCanceled())
+                        {
+                            state->status = TaskStatus::Canceled;
+                        }
+                        else if (outcome.IsFault())
+                        {
+                            state->status = TaskStatus::Fault;
+                            state->fault = outcome.Fault();
+                        }
+
+                        if (state->awaiting)
+                        {
+                            state->exec.Execute(state->awaiting);
+                        }
+                    }
+                    co_return;
+                }
+
                 const auto left = state->remaining.fetch_sub(1, std::memory_order_acq_rel) - 1;
                 if (left == 0)
                 {
                     bool expected = false;
                     if (state->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
                     {
+                        state->status = TaskStatus::Succeeded;
                         if (state->awaiting)
                         {
                             state->exec.Execute(state->awaiting);
@@ -126,149 +142,146 @@ namespace NGIN::Async
             co_return;
         }
 
-        template<typename... TTasks>
-        struct WhenAllAwaiter final
+        template<typename E, typename... TTasks>
+        struct Awaiter final
         {
-            TaskContext&                        ctx;
-            std::shared_ptr<WhenAllSharedState> state;
-            std::tuple<TTasks&...>              tasks;
+            TaskContext&                    ctx;
+            std::shared_ptr<SharedState<E>> state;
+            std::tuple<TTasks&...>          tasks;
 
             bool await_ready() const noexcept
             {
-                if (ctx.IsCancellationRequested())
-                {
-                    return true;
-                }
-                return std::apply([](auto&... t) { return (t.IsCompleted() && ...); }, tasks);
+                return ctx.IsCancellationRequested() ||
+                       std::apply([](auto&... task) { return (task.IsCompleted() && ...); }, tasks);
             }
 
             bool await_suspend(std::coroutine_handle<> awaiting) const
             {
-                std::apply([&](auto&... t) { (t.Schedule(ctx), ...); }, tasks);
+                std::apply([&](auto&... task) { (task.Schedule(ctx), ...); }, tasks);
 
                 if (ctx.IsCancellationRequested())
                 {
                     return false;
                 }
 
-                if (std::apply([](auto&... t) { return (t.IsCompleted() && ...); }, tasks))
+                if (std::apply([](auto&... task) { return (task.IsCompleted() && ...); }, tasks))
                 {
                     return false;
                 }
 
-                state->exec     = ctx.GetExecutor();
+                state->exec = ctx.GetExecutor();
                 state->awaiting = awaiting;
                 state->remaining.store(static_cast<NGIN::UIntSize>(sizeof...(TTasks)), std::memory_order_release);
 
                 ctx.GetCancellationToken().Register(
-                        state->cancellationRegistration, state->exec, awaiting, &CancelWhenAll, state.get());
+                        state->cancellationRegistration, state->exec, awaiting, &CancelWhenAll<E>, state.get());
 
-                std::weak_ptr<WhenAllSharedState> weakState = state;
-                auto&                             exec      = state->exec;
-
-                std::apply(
-                        [&](auto&... t) {
-                            (([&] {
-                                 auto watch = WatchTask(weakState, t);
-                                 exec.Execute(std::coroutine_handle<>::from_address(watch.handle.address()));
-                             }()),
-                             ...);
-                        },
-                        tasks);
+                std::weak_ptr<SharedState<E>> weakState = state;
+                auto& exec = state->exec;
+                [&]<std::size_t... Indices>(std::index_sequence<Indices...>) {
+                    (([&] {
+                         auto watch = WatchTask<E>(weakState, std::get<Indices>(tasks), static_cast<NGIN::UIntSize>(Indices));
+                         exec.Execute(std::coroutine_handle<>::from_address(watch.handle.address()));
+                     }()),
+                     ...);
+                }(std::make_index_sequence<sizeof...(TTasks)> {});
 
                 return true;
             }
 
-            AsyncExpected<void> await_resume() const noexcept
-            {
-                if (ctx.IsCancellationRequested())
-                {
-                    return NGIN::Utilities::Unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
-                }
-                if (state->hasError)
-                {
-                    return NGIN::Utilities::Unexpected(state->firstError);
-                }
-                return {};
-            }
+            void await_resume() const noexcept {}
         };
     }// namespace detail::when_all
 
-    /// @brief Await multiple `Task<void>` and complete when all are finished.
-    template<typename... TTasks>
-        requires(sizeof...(TTasks) > 0) && (std::is_same_v<std::remove_reference_t<TTasks>, Task<void>> && ...)
-    [[nodiscard]] inline Task<void> WhenAll(TaskContext& ctx, TTasks&... tasks)
+    template<typename TFirstTask, typename... TOtherTasks>
+        requires(std::is_same_v<std::remove_reference_t<TFirstTask>,
+                                Task<void, typename std::remove_reference_t<TFirstTask>::ErrorType>>) &&
+                (std::is_same_v<typename std::remove_reference_t<TFirstTask>::ErrorType,
+                                typename std::remove_reference_t<TOtherTasks>::ErrorType> && ...) &&
+                (std::is_same_v<std::remove_reference_t<TOtherTasks>,
+                                Task<void, typename std::remove_reference_t<TFirstTask>::ErrorType>> && ...)
+    [[nodiscard]] inline Task<void, typename std::remove_reference_t<TFirstTask>::ErrorType>
+    WhenAll(TaskContext& ctx, TFirstTask& firstTask, TOtherTasks&... otherTasks)
     {
+        using E = typename std::remove_reference_t<TFirstTask>::ErrorType;
+
         if (ctx.IsCancellationRequested())
         {
-            co_await Task<void>::ReturnError(MakeAsyncError(AsyncErrorCode::Canceled));
-            co_return;
-        }
-        auto state = std::make_shared<detail::when_all::WhenAllSharedState>();
-        auto waitResult =
-                co_await detail::when_all::WhenAllAwaiter<TTasks...> {ctx, state, std::tuple<TTasks&...>(tasks...)};
-        if (!waitResult)
-        {
-            co_await Task<void>::ReturnError(waitResult.Error());
+            co_await Task<void, E>::ReturnCanceled();
             co_return;
         }
 
-        // Surface faults from individual tasks (first error wins, .NET-like aggregation can be added later).
-        for (auto* taskPtr: std::initializer_list<Task<void>*> {&tasks...})
+        auto state = std::make_shared<detail::when_all::SharedState<E>>();
+        co_await detail::when_all::Awaiter<E, TFirstTask, TOtherTasks...> {
+                ctx,
+                state,
+                std::tuple<TFirstTask&, TOtherTasks&...>(firstTask, otherTasks...)};
+
+        if (state->status == TaskStatus::DomainError)
         {
-            auto result = taskPtr->Get();
-            if (!result)
+            co_await Task<void, E>::ReturnError(std::move(*state->domainError));
+            co_return;
+        }
+        if (state->status == TaskStatus::Canceled || ctx.IsCancellationRequested())
+        {
+            co_await Task<void, E>::ReturnCanceled();
+            co_return;
+        }
+        if (state->status == TaskStatus::Fault)
+        {
+            co_await Task<void, E>::ReturnFault(*state->fault);
+            co_return;
+        }
+
+        for (auto* task: std::initializer_list<Task<void, E>*> {&firstTask, &otherTasks...})
+        {
+            auto outcome = task->Get();
+            if (outcome.IsDomainError())
             {
-                co_await Task<void>::ReturnError(result.Error());
+                co_await Task<void, E>::ReturnError(outcome.DomainError());
+                co_return;
+            }
+            if (outcome.IsCanceled())
+            {
+                co_await Task<void, E>::ReturnCanceled();
+                co_return;
+            }
+            if (outcome.IsFault())
+            {
+                co_await Task<void, E>::ReturnFault(outcome.Fault());
                 co_return;
             }
         }
+
         co_return;
     }
 
-    /// @brief Await multiple `Task<T>` and complete when all are finished, returning a tuple of results.
-    template<typename... T>
-        requires(sizeof...(T) > 0) && ((!std::is_void_v<T>) && ...)
-    [[nodiscard]] inline Task<std::tuple<T...>> WhenAll(TaskContext& ctx, Task<T>&... tasks)
+    template<typename E, typename... T>
+        requires(sizeof...(T) > 0) && (!std::is_void_v<T> && ...)
+    [[nodiscard]] inline Task<std::tuple<T...>, E> WhenAll(TaskContext& ctx, Task<T, E>&... tasks)
     {
         if (ctx.IsCancellationRequested())
         {
-            co_return NGIN::Utilities::Unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
+            co_return Canceled;
         }
-        auto state      = std::make_shared<detail::when_all::WhenAllSharedState>();
-        auto waitResult = co_await detail::when_all::WhenAllAwaiter<Task<T>...> {ctx,
-                                                                                 state,
-                                                                                 std::tuple<Task<T>&...>(tasks...)};
-        if (!waitResult)
+
+        auto state = std::make_shared<detail::when_all::SharedState<E>>();
+        co_await detail::when_all::Awaiter<E, Task<T, E>...> {ctx, state, std::tuple<Task<T, E>&...>(tasks...)};
+
+        if (state->status == TaskStatus::DomainError)
         {
-            co_return NGIN::Utilities::Unexpected(waitResult.Error());
+            co_return NGIN::Utilities::Unexpected<E>(std::move(*state->domainError));
         }
-
-        auto       results = std::tuple<AsyncExpected<T>...> {tasks.Get()...};
-        AsyncError firstError {};
-        bool       failed = false;
-        std::apply(
-                [&](auto&... r) {
-                    (([&] {
-                         if (!failed && !r)
-                         {
-                             firstError = r.Error();
-                             failed     = true;
-                         }
-                     }()),
-                     ...);
-                },
-                results);
-
-        if (failed)
+        if (state->status == TaskStatus::Canceled || ctx.IsCancellationRequested())
         {
-            co_return NGIN::Utilities::Unexpected(firstError);
+            co_return Canceled;
+        }
+        if (state->status == TaskStatus::Fault)
+        {
+            co_return Fault(*state->fault);
         }
 
-        auto output = [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-            return std::tuple<T...> {std::move(*std::get<Is>(results))...};
-        }(std::make_index_sequence<sizeof...(T)> {});
-
+        auto output = std::tuple<T...> {std::move(*tasks.Get())...};
         co_return output;
     }
 }// namespace NGIN::Async

@@ -9,12 +9,13 @@
 #include <NGIN/Net/Types/NetError.hpp>
 #include <NGIN/Net/Types/SocketOptions.hpp>
 #include <NGIN/Primitives.hpp>
+#include <NGIN/Async/AsyncError.hpp>
 
 namespace NGIN::Async
 {
     class TaskContext;
     class CancellationToken;
-    template<typename T>
+    template<typename T, typename E>
     class Task;
 }// namespace NGIN::Async
 
@@ -38,9 +39,9 @@ namespace NGIN::Net
         NetExpected<void> Listen(NGIN::Int32 backlog = 128) noexcept;
         NetExpected<TcpSocket> TryAccept() noexcept;
 
-        NGIN::Async::Task<TcpSocket> AcceptAsync(NGIN::Async::TaskContext& ctx,
-                                                 NetworkDriver& driver,
-                                                 NGIN::Async::CancellationToken token);
+        NGIN::Async::Task<TcpSocket, NetError> AcceptAsync(NGIN::Async::TaskContext& ctx,
+                                                           NetworkDriver& driver,
+                                                           NGIN::Async::CancellationToken token);
 
         void Close() noexcept;
 

@@ -54,12 +54,7 @@ namespace
 
     NGIN::Async::Task<void> DelayForever(NGIN::Async::TaskContext& ctx)
     {
-        auto delayResult = co_await ctx.Delay(NGIN::Units::Seconds(60.0));
-        if (!delayResult)
-        {
-            co_await NGIN::Async::Task<void>::ReturnError(delayResult.Error());
-            co_return;
-        }
+        co_await ctx.Delay(NGIN::Units::Seconds(60.0));
         co_return;
     }
 }// namespace
@@ -86,7 +81,7 @@ TEST_CASE("TaskContext WithLinkedCancellationToken cancels when parent token can
     REQUIRE(task.IsCanceled());
     auto result = task.Get();
     REQUIRE_FALSE(result);
-    REQUIRE(result.Error().code == NGIN::Async::AsyncErrorCode::Canceled);
+    REQUIRE(result.IsCanceled());
 }
 
 TEST_CASE("TaskContext WithLinkedCancellationToken supports chaining without losing root linkage")
@@ -113,5 +108,5 @@ TEST_CASE("TaskContext WithLinkedCancellationToken supports chaining without los
     REQUIRE(task.IsCanceled());
     auto result = task.Get();
     REQUIRE_FALSE(result);
-    REQUIRE(result.Error().code == NGIN::Async::AsyncErrorCode::Canceled);
+    REQUIRE(result.IsCanceled());
 }

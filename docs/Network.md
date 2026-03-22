@@ -10,7 +10,7 @@ async calls that are driven by an explicit NetworkDriver. There are no hidden gl
 
 - Explicit runtime control: no hidden threads or globals; you drive or run NetworkDriver yourself.
 - Non-blocking by default: sockets open in non-blocking mode and Try* calls surface WouldBlock.
-- Clear error boundaries: NetExpected for fast-path results, std::system_error for async failures.
+- Clear error boundaries: NetExpected for fast-path results, typed `Task<T, NetError>` for async operations.
 - Minimal allocations: buffer pooling and stack-first I/O vectoring for hot paths.
 - Portable async: IOCP on Windows and readiness polling on other platforms.
 
@@ -134,14 +134,14 @@ The explicit async runtime used by socket awaitables.
 - On non-Windows platforms, PollOnce uses epoll (Linux), kqueue (BSD/macOS), or select as a fallback.
 
 Cancellation integrates with the async system: waiters unregister themselves, IOCP operations are canceled with
-CancelIoEx, and awaiting tasks observe AsyncErrorCode::Canceled.
+CancelIoEx, and awaiting tasks complete as canceled rather than surfacing cancellation as `NetError`.
 
 ## Transport Layer
 
 ### IByteStream
 
-Abstract async byte-stream interface used by higher-level protocols. Implementations must provide ReadAsync,
-WriteAsync, and Close. Errors are surfaced via AsyncExpected from async methods and via NetExpected from Close.
+Abstract async byte-stream interface used by higher-level protocols. Implementations provide typed async tasks for
+reads/writes and `NetExpected<void>` for `Close`.
 
 ### TcpByteStream
 
@@ -184,7 +184,7 @@ A framing filter over IByteStream that prepends a 32-bit big-endian length prefi
 - Zero-length messages are supported and return an empty span.
 
 The length prefix is big-endian to match common network conventions. Read/Write are strict: if the stream returns
-zero bytes mid-transfer, the filter returns AsyncErrorCode::Fault to avoid silent truncation.
+zero bytes mid-transfer, the filter completes with a fault to avoid silent truncation.
 
 ## Platform Notes
 
@@ -211,4 +211,3 @@ The expected flow is:
 2. Open/bind/connect sockets and use Try* calls for non-blocking integration.
 3. Use async methods from coroutines with a TaskContext bound to the driver.
 4. Wrap sockets in transport adapters when you want byte-stream or message semantics.
-
