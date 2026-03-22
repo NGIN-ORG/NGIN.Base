@@ -18,7 +18,7 @@ TEST_CASE("JsonParser parses basic object", "[serialization][json]")
     auto result = JsonParser::Parse(std::string_view {input});
     REQUIRE(result.HasValue());
 
-    const JsonValue& root = result.ValueUnsafe().Root();
+    const JsonValue& root = result.Value().Root();
     REQUIRE(root.IsObject());
     const JsonObject& obj = root.AsObject();
 

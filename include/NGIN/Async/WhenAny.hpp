@@ -19,12 +19,12 @@ namespace NGIN::Async
     namespace detail
     {
         template<typename T>
-        struct IsTaskType final: std::false_type
+        struct IsTaskType final : std::false_type
         {
         };
 
         template<typename TValue>
-        struct IsTaskType<Task<TValue>> final: std::true_type
+        struct IsTaskType<Task<TValue>> final : std::true_type
         {
         };
 
@@ -33,8 +33,8 @@ namespace NGIN::Async
 
         struct WhenAnySharedState final
         {
-            std::atomic<bool>           done {false};
-            std::atomic<NGIN::UIntSize> index {static_cast<NGIN::UIntSize>(-1)};
+            std::atomic<bool>            done {false};
+            std::atomic<NGIN::UIntSize>  index {static_cast<NGIN::UIntSize>(-1)};
             NGIN::Execution::ExecutorRef exec {};
             std::coroutine_handle<>      awaiting {};
             CancellationRegistration     cancellationRegistration {};
@@ -42,8 +42,8 @@ namespace NGIN::Async
 
         [[nodiscard]] inline bool CancelWhenAny(void* ctx) noexcept
         {
-            auto* state = static_cast<WhenAnySharedState*>(ctx);
-            bool expected = false;
+            auto* state    = static_cast<WhenAnySharedState*>(ctx);
+            bool  expected = false;
             if (!state->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
             {
                 return false;
@@ -96,7 +96,7 @@ namespace NGIN::Async
         template<typename TTask>
         [[nodiscard]] inline Detached WatchTask(std::shared_ptr<WhenAnySharedState> state, TTask& task, NGIN::UIntSize index)
         {
-            (void)co_await task;
+            (void) co_await task;
 
             bool expected = false;
             if (state->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
@@ -113,9 +113,9 @@ namespace NGIN::Async
         template<typename... TTasks>
         struct WhenAnyAwaiter final
         {
-            TaskContext&                          ctx;
+            TaskContext&                        ctx;
             std::shared_ptr<WhenAnySharedState> state;
-            std::tuple<TTasks&...>               tasks;
+            std::tuple<TTasks&...>              tasks;
 
             bool await_ready() const noexcept
             {
@@ -203,7 +203,7 @@ namespace NGIN::Async
         auto result = co_await detail::WhenAnyAwaiter<TTasks...> {ctx, std::move(state), std::tuple<TTasks&...>(tasks...)};
         if (!result)
         {
-            co_return NGIN::Utilities::Unexpected(result.error());
+            co_return NGIN::Utilities::Unexpected(result.Error());
         }
 
         co_return *result;

@@ -9,14 +9,18 @@
 #include <NGIN/Primitives.hpp>
 #include <NGIN/Utilities/Tags.hpp>
 
+#include <type_traits>
 #include <utility>
 
 namespace NGIN::Utilities
 {
+    template<class T, class E>
+    class Expected;
+
     /// @brief Wrapper used to explicitly construct an error value for `Expected<T, E>`.
     ///
     /// @tparam E Error type.
-    template <class E>
+    template<class E>
     class Unexpected
     {
     public:
@@ -46,11 +50,6 @@ namespace NGIN::Utilities
         /// @brief Move-access the contained error.
         [[nodiscard]] constexpr E&& Error() && noexcept { return std::move(m_error); }
 
-        /// @brief `std::unexpected`-style aliases.
-        [[nodiscard]] constexpr E& error() & noexcept { return Error(); }
-        [[nodiscard]] constexpr const E& error() const& noexcept { return Error(); }
-        [[nodiscard]] constexpr E&& error() && noexcept { return std::move(*this).Error(); }
-
     private:
         E m_error;
     };
@@ -69,15 +68,14 @@ namespace NGIN::Utilities
             NGIN_ABORT("NGIN::Utilities::Expected::Error called when holding value");
         }
 
-        template <class F>
+        template<class F>
         constexpr void WithExceptionsAbortOnThrow(F&& f) noexcept
         {
 #if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
             try
             {
                 std::forward<F>(f)();
-            }
-            catch (...)
+            } catch (...)
             {
                 NGIN_ABORT("NGIN::Utilities::Expected operation threw; policy is abort");
             }
@@ -85,13 +83,27 @@ namespace NGIN::Utilities
             std::forward<F>(f)();
 #endif
         }
-    }
+
+        template<class T>
+        struct ExpectedTraits
+        {
+            static constexpr bool IsExpected = false;
+        };
+
+        template<class T, class E>
+        struct ExpectedTraits<Expected<T, E>>
+        {
+            static constexpr bool IsExpected = true;
+            using ValueType                  = T;
+            using ErrorType                  = E;
+        };
+    }// namespace detail
 
     /// @brief Inline "value or error" return type with explicit lifetime and zero allocations.
     ///
     /// @tparam T Value type.
     /// @tparam E Error type.
-    template <class T, class E>
+    template<class T, class E>
     class [[nodiscard]] Expected
     {
         static_assert(!NGIN::Meta::TypeTraits<T>::IsReference(), "Expected<T&,...> is not supported.");
@@ -108,8 +120,7 @@ namespace NGIN::Utilities
         /// @brief Constructs an `Expected` holding a default-constructed value.
         constexpr Expected() noexcept(NGIN::Meta::TypeTraits<T>::IsNothrowDefaultConstructible())
             requires(NGIN::Meta::TypeTraits<T>::IsDefaultConstructible())
-            : m_storage {}
-            , m_hasValue {1}
+            : m_storage {}, m_hasValue {1}
         {
             detail::WithExceptionsAbortOnThrow([&]() { m_storage.template Construct<T>(); });
         }
@@ -117,12 +128,10 @@ namespace NGIN::Utilities
         /// @brief Constructs an `Expected` holding a value (in-place).
         ///
         /// @param args Forwarded constructor arguments for `T`.
-        template <class... Args>
-        constexpr explicit Expected(InPlaceType<T>, Args&&... args)
-            noexcept(NGIN::Meta::TypeTraits<T>::template IsNothrowConstructible<Args...>())
+        template<class... Args>
+        constexpr explicit Expected(InPlaceType<T>, Args&&... args) noexcept(NGIN::Meta::TypeTraits<T>::template IsNothrowConstructible<Args...>())
             requires(NGIN::Meta::TypeTraits<T>::template IsConstructible<Args...>())
-            : m_storage {}
-            , m_hasValue {1}
+            : m_storage {}, m_hasValue {1}
         {
             detail::WithExceptionsAbortOnThrow([&]() { m_storage.template Construct<T>(std::forward<Args>(args)...); });
         }
@@ -130,8 +139,7 @@ namespace NGIN::Utilities
         /// @brief Constructs an `Expected` holding a value by copying `value`.
         constexpr Expected(const T& value) noexcept(NGIN::Meta::TypeTraits<T>::IsNothrowCopyConstructible())
             requires(NGIN::Meta::TypeTraits<T>::IsCopyConstructible())
-            : m_storage {}
-            , m_hasValue {1}
+            : m_storage {}, m_hasValue {1}
         {
             detail::WithExceptionsAbortOnThrow([&]() { m_storage.template Construct<T>(value); });
         }
@@ -139,8 +147,7 @@ namespace NGIN::Utilities
         /// @brief Constructs an `Expected` holding a value by moving `value`.
         constexpr Expected(T&& value) noexcept(NGIN::Meta::TypeTraits<T>::IsNothrowMoveConstructible())
             requires(NGIN::Meta::TypeTraits<T>::IsMoveConstructible())
-            : m_storage {}
-            , m_hasValue {1}
+            : m_storage {}, m_hasValue {1}
         {
             detail::WithExceptionsAbortOnThrow([&]() { m_storage.template Construct<T>(std::move(value)); });
         }
@@ -148,8 +155,7 @@ namespace NGIN::Utilities
         /// @brief Constructs an `Expected` holding an error from `Unexpected<E>`.
         constexpr Expected(Unexpected<E>&& unexpected) noexcept(NGIN::Meta::TypeTraits<E>::IsNothrowMoveConstructible())
             requires(NGIN::Meta::TypeTraits<E>::IsMoveConstructible())
-            : m_storage {}
-            , m_hasValue {0}
+            : m_storage {}, m_hasValue {0}
         {
             detail::WithExceptionsAbortOnThrow([&]() { m_storage.template Construct<E>(std::move(unexpected).Error()); });
         }
@@ -157,14 +163,12 @@ namespace NGIN::Utilities
         /// @brief Constructs an `Expected` holding an error in-place.
         ///
         /// @param args Forwarded constructor arguments for `E`.
-        template <class... Args>
-        constexpr explicit Expected(InPlaceType<E>, Args&&... args)
-            noexcept(NGIN::Meta::TypeTraits<E>::template IsNothrowConstructible<Args...>())
+        template<class... Args>
+        constexpr explicit Expected(InPlaceType<E>, Args&&... args) noexcept(NGIN::Meta::TypeTraits<E>::template IsNothrowConstructible<Args...>())
             requires(
-                !NGIN::Meta::TypeTraits<T>::template IsSame<E>() &&
-                NGIN::Meta::TypeTraits<E>::template IsConstructible<Args...>())
-            : m_storage {}
-            , m_hasValue {0}
+                            !NGIN::Meta::TypeTraits<T>::template IsSame<E>() &&
+                            NGIN::Meta::TypeTraits<E>::template IsConstructible<Args...>())
+            : m_storage {}, m_hasValue {0}
         {
             detail::WithExceptionsAbortOnThrow([&]() { m_storage.template Construct<E>(std::forward<Args>(args)...); });
         }
@@ -177,15 +181,13 @@ namespace NGIN::Utilities
         = default;
 
         /// @brief Copy-constructs (non-trivial path).
-        constexpr Expected(const Expected& other)
-            noexcept(
+        constexpr Expected(const Expected& other) noexcept(
                 NGIN::Meta::TypeTraits<T>::IsNothrowCopyConstructible() &&
                 NGIN::Meta::TypeTraits<E>::IsNothrowCopyConstructible())
             requires(
-                !(NGIN::Meta::TypeTraits<T>::IsTriviallyCopyable() && NGIN::Meta::TypeTraits<E>::IsTriviallyCopyable()) &&
-                NGIN::Meta::TypeTraits<T>::IsCopyConstructible() && NGIN::Meta::TypeTraits<E>::IsCopyConstructible())
-            : m_storage {}
-            , m_hasValue {0}
+                            !(NGIN::Meta::TypeTraits<T>::IsTriviallyCopyable() && NGIN::Meta::TypeTraits<E>::IsTriviallyCopyable()) &&
+                            NGIN::Meta::TypeTraits<T>::IsCopyConstructible() && NGIN::Meta::TypeTraits<E>::IsCopyConstructible())
+            : m_storage {}, m_hasValue {0}
         {
             if (other.m_hasValue)
             {
@@ -208,15 +210,13 @@ namespace NGIN::Utilities
         = default;
 
         /// @brief Move-constructs (non-trivial path).
-        constexpr Expected(Expected&& other)
-            noexcept(
+        constexpr Expected(Expected&& other) noexcept(
                 NGIN::Meta::TypeTraits<T>::IsNothrowMoveConstructible() &&
                 NGIN::Meta::TypeTraits<E>::IsNothrowMoveConstructible())
             requires(
-                !(NGIN::Meta::TypeTraits<T>::IsTriviallyCopyable() && NGIN::Meta::TypeTraits<E>::IsTriviallyCopyable()) &&
-                NGIN::Meta::TypeTraits<T>::IsMoveConstructible() && NGIN::Meta::TypeTraits<E>::IsMoveConstructible())
-            : m_storage {}
-            , m_hasValue {0}
+                            !(NGIN::Meta::TypeTraits<T>::IsTriviallyCopyable() && NGIN::Meta::TypeTraits<E>::IsTriviallyCopyable()) &&
+                            NGIN::Meta::TypeTraits<T>::IsMoveConstructible() && NGIN::Meta::TypeTraits<E>::IsMoveConstructible())
+            : m_storage {}, m_hasValue {0}
         {
             if (other.m_hasValue)
             {
@@ -238,8 +238,7 @@ namespace NGIN::Utilities
         = default;
 
         /// @brief Copy-assigns (non-trivial path).
-        constexpr Expected& operator=(const Expected& other)
-            noexcept(
+        constexpr Expected& operator=(const Expected& other) noexcept(
                 NGIN::Meta::TypeTraits<T>::IsNothrowCopyConstructible() &&
                 NGIN::Meta::TypeTraits<E>::IsNothrowCopyConstructible() &&
                 NGIN::Meta::TypeTraits<T>::IsNothrowDestructible() &&
@@ -247,8 +246,8 @@ namespace NGIN::Utilities
                 (!NGIN::Meta::TypeTraits<T>::IsCopyAssignable() || NGIN::Meta::TypeTraits<T>::IsNothrowCopyAssignable()) &&
                 (!NGIN::Meta::TypeTraits<E>::IsCopyAssignable() || NGIN::Meta::TypeTraits<E>::IsNothrowCopyAssignable()))
             requires(
-                !(NGIN::Meta::TypeTraits<T>::IsTriviallyCopyable() && NGIN::Meta::TypeTraits<E>::IsTriviallyCopyable()) &&
-                NGIN::Meta::TypeTraits<T>::IsCopyConstructible() && NGIN::Meta::TypeTraits<E>::IsCopyConstructible())
+                    !(NGIN::Meta::TypeTraits<T>::IsTriviallyCopyable() && NGIN::Meta::TypeTraits<E>::IsTriviallyCopyable()) &&
+                    NGIN::Meta::TypeTraits<T>::IsCopyConstructible() && NGIN::Meta::TypeTraits<E>::IsCopyConstructible())
         {
             if (this == &other)
             {
@@ -310,8 +309,7 @@ namespace NGIN::Utilities
         = default;
 
         /// @brief Move-assigns (non-trivial path).
-        constexpr Expected& operator=(Expected&& other)
-            noexcept(
+        constexpr Expected& operator=(Expected&& other) noexcept(
                 NGIN::Meta::TypeTraits<T>::IsNothrowMoveConstructible() &&
                 NGIN::Meta::TypeTraits<E>::IsNothrowMoveConstructible() &&
                 NGIN::Meta::TypeTraits<T>::IsNothrowDestructible() &&
@@ -319,8 +317,8 @@ namespace NGIN::Utilities
                 (!NGIN::Meta::TypeTraits<T>::IsMoveAssignable() || NGIN::Meta::TypeTraits<T>::IsNothrowMoveAssignable()) &&
                 (!NGIN::Meta::TypeTraits<E>::IsMoveAssignable() || NGIN::Meta::TypeTraits<E>::IsNothrowMoveAssignable()))
             requires(
-                !(NGIN::Meta::TypeTraits<T>::IsTriviallyCopyable() && NGIN::Meta::TypeTraits<E>::IsTriviallyCopyable()) &&
-                NGIN::Meta::TypeTraits<T>::IsMoveConstructible() && NGIN::Meta::TypeTraits<E>::IsMoveConstructible())
+                    !(NGIN::Meta::TypeTraits<T>::IsTriviallyCopyable() && NGIN::Meta::TypeTraits<E>::IsTriviallyCopyable()) &&
+                    NGIN::Meta::TypeTraits<T>::IsMoveConstructible() && NGIN::Meta::TypeTraits<E>::IsMoveConstructible())
         {
             if (this == &other)
             {
@@ -392,9 +390,6 @@ namespace NGIN::Utilities
 
         /// @brief Returns true if this object currently holds a value.
         constexpr explicit operator bool() const noexcept { return HasValue(); }
-
-        /// @brief `std::expected`-style alias for `HasValue()`.
-        [[nodiscard]] constexpr bool has_value() const noexcept { return HasValue(); }
 
         /// @brief Returns the contained value.
         ///
@@ -492,102 +487,243 @@ namespace NGIN::Utilities
             return std::move(ErrorRef());
         }
 
-        /// @brief Returns the contained value without checking.
-        ///
-        /// @warning Undefined behavior if holding an error.
-        [[nodiscard]] constexpr T& ValueUnsafe() & noexcept { return ValueRef(); }
+        /// @brief Moves the contained value out of an rvalue `Expected`.
+        [[nodiscard]] constexpr T TakeValue() &&
+                requires(NGIN::Meta::TypeTraits<T>::IsMoveConstructible()) {
+                    return std::move(*this).Value();
+                }
 
-        /// @brief Returns the contained value without checking (const).
-        ///
-        /// @warning Undefined behavior if holding an error.
-        [[nodiscard]] constexpr const T& ValueUnsafe() const& noexcept { return ValueRef(); }
+                /// @brief Moves the contained error out of an rvalue `Expected`.
+                [[nodiscard]] constexpr E TakeError() &&
+                requires(NGIN::Meta::TypeTraits<E>::IsMoveConstructible()) {
+                    return std::move(*this).Error();
+                }
 
-        /// @brief Returns the contained value without checking (rvalue).
-        ///
-        /// @warning Undefined behavior if holding an error.
-        [[nodiscard]] constexpr T&& ValueUnsafe() && noexcept { return std::move(ValueRef()); }
-
-        /// @brief Returns the contained value without checking (const rvalue).
-        ///
-        /// @warning Undefined behavior if holding an error.
-        [[nodiscard]] constexpr const T&& ValueUnsafe() const&& noexcept { return std::move(ValueRef()); }
-
-        /// @brief Returns the contained error without checking.
-        ///
-        /// @warning Undefined behavior if holding a value.
-        [[nodiscard]] constexpr E& ErrorUnsafe() & noexcept { return ErrorRef(); }
-
-        /// @brief Returns the contained error without checking (const).
-        ///
-        /// @warning Undefined behavior if holding a value.
-        [[nodiscard]] constexpr const E& ErrorUnsafe() const& noexcept { return ErrorRef(); }
-
-        /// @brief Returns the contained error without checking (rvalue).
-        ///
-        /// @warning Undefined behavior if holding a value.
-        [[nodiscard]] constexpr E&& ErrorUnsafe() && noexcept { return std::move(ErrorRef()); }
-
-        /// @brief Returns the contained error without checking (const rvalue).
-        ///
-        /// @warning Undefined behavior if holding a value.
-        [[nodiscard]] constexpr const E&& ErrorUnsafe() const&& noexcept { return std::move(ErrorRef()); }
-
-        /// @brief `std::expected`-style aliases.
-        [[nodiscard]] constexpr T& value() & noexcept { return Value(); }
-        [[nodiscard]] constexpr const T& value() const& noexcept { return Value(); }
-        [[nodiscard]] constexpr T&& value() && noexcept { return std::move(*this).Value(); }
-        [[nodiscard]] constexpr const T&& value() const&& noexcept { return std::move(*this).Value(); }
-        [[nodiscard]] constexpr E& error() & noexcept { return Error(); }
-        [[nodiscard]] constexpr const E& error() const& noexcept { return Error(); }
-        [[nodiscard]] constexpr E&& error() && noexcept { return std::move(*this).Error(); }
-        [[nodiscard]] constexpr const E&& error() const&& noexcept { return std::move(*this).Error(); }
-
-        /// @brief `std::expected`-style dereference operators.
-        [[nodiscard]] constexpr T& operator*() & noexcept { return Value(); }
-        [[nodiscard]] constexpr const T& operator*() const& noexcept { return Value(); }
-        [[nodiscard]] constexpr T&& operator*() && noexcept { return std::move(*this).Value(); }
+                /// @brief `std::expected`-style dereference operators.
+                [[nodiscard]] constexpr T& operator*() & noexcept
+        {
+            return Value();
+        }
+        [[nodiscard]] constexpr const T&  operator*() const& noexcept { return Value(); }
+        [[nodiscard]] constexpr T&&       operator*() && noexcept { return std::move(*this).Value(); }
         [[nodiscard]] constexpr const T&& operator*() const&& noexcept { return std::move(*this).Value(); }
-        [[nodiscard]] constexpr T* operator->() noexcept { return &Value(); }
-        [[nodiscard]] constexpr const T* operator->() const noexcept { return &Value(); }
+        [[nodiscard]] constexpr T*        operator->() noexcept { return &Value(); }
+        [[nodiscard]] constexpr const T*  operator->() const noexcept { return &Value(); }
+
+        template<class F>
+        constexpr auto Transform(F&& f) & -> Expected<std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<T&>()))>, E>
+            requires(
+                    !std::is_void_v<decltype(std::forward<F>(f)(std::declval<T&>()))> &&
+                    NGIN::Meta::TypeTraits<E>::IsCopyConstructible())
+        {
+            using ResultValue = std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<T&>()))>;
+            if (m_hasValue)
+                return Expected<ResultValue, E>(std::forward<F>(f)(ValueRef()));
+            return Expected<ResultValue, E>(Unexpected<E>(ErrorRef()));
+        }
+
+        template<class F>
+        constexpr auto Transform(F&& f) const& -> Expected<std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<const T&>()))>, E>
+            requires(
+                    !std::is_void_v<decltype(std::forward<F>(f)(std::declval<const T&>()))> &&
+                    NGIN::Meta::TypeTraits<E>::IsCopyConstructible())
+        {
+            using ResultValue = std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<const T&>()))>;
+            if (m_hasValue)
+                return Expected<ResultValue, E>(std::forward<F>(f)(ValueRef()));
+            return Expected<ResultValue, E>(Unexpected<E>(ErrorRef()));
+        }
+
+        template<class F>
+        constexpr auto Transform(F&& f) && -> Expected<std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<T&&>()))>, E>
+            requires(!std::is_void_v<decltype(std::forward<F>(f)(std::declval<T &&>()))>)
+        {
+            using ResultValue = std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<T&&>()))>;
+            if (m_hasValue)
+                return Expected<ResultValue, E>(std::forward<F>(f)(std::move(ValueRef())));
+            return Expected<ResultValue, E>(Unexpected<E>(std::move(ErrorRef())));
+        }
+
+        template<class F>
+        constexpr auto Transform(F&& f) & -> Expected<void, E>
+            requires(
+                    std::is_void_v<decltype(std::forward<F>(f)(std::declval<T&>()))> &&
+                    NGIN::Meta::TypeTraits<E>::IsCopyConstructible())
+        {
+            if (m_hasValue)
+            {
+                std::forward<F>(f)(ValueRef());
+                return Expected<void, E> {};
+            }
+            return Expected<void, E>(Unexpected<E>(ErrorRef()));
+        }
+
+        template<class F>
+        constexpr auto Transform(F&& f) const& -> Expected<void, E>
+            requires(
+                    std::is_void_v<decltype(std::forward<F>(f)(std::declval<const T&>()))> &&
+                    NGIN::Meta::TypeTraits<E>::IsCopyConstructible())
+        {
+            if (m_hasValue)
+            {
+                std::forward<F>(f)(ValueRef());
+                return Expected<void, E> {};
+            }
+            return Expected<void, E>(Unexpected<E>(ErrorRef()));
+        }
+
+        template<class F>
+        constexpr auto Transform(F&& f) && -> Expected<void, E>
+            requires(std::is_void_v<decltype(std::forward<F>(f)(std::declval<T &&>()))>)
+        {
+            if (m_hasValue)
+            {
+                std::forward<F>(f)(std::move(ValueRef()));
+                return Expected<void, E> {};
+            }
+            return Expected<void, E>(Unexpected<E>(std::move(ErrorRef())));
+        }
+
+        template<class F>
+        constexpr auto AndThen(F&& f) & -> std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<T&>()))>
+            requires(
+                    detail::ExpectedTraits<std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<T&>()))>>::IsExpected &&
+                    std::is_same_v<typename detail::ExpectedTraits<std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<T&>()))>>::ErrorType, E> &&
+                    NGIN::Meta::TypeTraits<E>::IsCopyConstructible())
+        {
+            using ResultType = std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<T&>()))>;
+            if (m_hasValue)
+                return std::forward<F>(f)(ValueRef());
+            return ResultType(Unexpected<E>(ErrorRef()));
+        }
+
+        template<class F>
+        constexpr auto AndThen(F&& f) const& -> std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<const T&>()))>
+            requires(
+                    detail::ExpectedTraits<std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<const T&>()))>>::IsExpected &&
+                    std::is_same_v<typename detail::ExpectedTraits<std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<const T&>()))>>::ErrorType, E> &&
+                    NGIN::Meta::TypeTraits<E>::IsCopyConstructible())
+        {
+            using ResultType = std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<const T&>()))>;
+            if (m_hasValue)
+                return std::forward<F>(f)(ValueRef());
+            return ResultType(Unexpected<E>(ErrorRef()));
+        }
+
+        template<class F>
+        constexpr auto AndThen(F&& f) && -> std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<T&&>()))>
+            requires(
+                    detail::ExpectedTraits<std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<T &&>()))>>::IsExpected &&
+                    std::is_same_v<typename detail::ExpectedTraits<std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<T &&>()))>>::ErrorType, E>)
+        {
+            using ResultType = std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<T&&>()))>;
+            if (m_hasValue)
+                return std::forward<F>(f)(std::move(ValueRef()));
+            return ResultType(Unexpected<E>(std::move(ErrorRef())));
+        }
+
+        template<class F>
+        constexpr auto OrElse(F&& f) & -> Expected<T, E>
+            requires(
+                    std::is_same_v<std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<E&>()))>, Expected<T, E>> &&
+                    NGIN::Meta::TypeTraits<T>::IsCopyConstructible())
+        {
+            if (m_hasValue)
+                return Expected<T, E>(ValueRef());
+            return std::forward<F>(f)(ErrorRef());
+        }
+
+        template<class F>
+        constexpr auto OrElse(F&& f) const& -> Expected<T, E>
+            requires(
+                    std::is_same_v<std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<const E&>()))>, Expected<T, E>> &&
+                    NGIN::Meta::TypeTraits<T>::IsCopyConstructible())
+        {
+            if (m_hasValue)
+                return Expected<T, E>(ValueRef());
+            return std::forward<F>(f)(ErrorRef());
+        }
+
+        template<class F>
+        constexpr auto OrElse(F&& f) && -> Expected<T, E>
+            requires(std::is_same_v<std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<E &&>()))>, Expected<T, E>>)
+        {
+            if (m_hasValue)
+                return Expected<T, E>(std::move(ValueRef()));
+            return std::forward<F>(f)(std::move(ErrorRef()));
+        }
+
+        template<class F>
+        constexpr auto TransformError(F&& f) & -> Expected<T, std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<E&>()))>>
+            requires(
+                    NGIN::Meta::TypeTraits<T>::IsCopyConstructible() &&
+                    !std::is_void_v<decltype(std::forward<F>(f)(std::declval<E&>()))>)
+        {
+            using ResultError = std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<E&>()))>;
+            if (m_hasValue)
+                return Expected<T, ResultError>(ValueRef());
+            return Expected<T, ResultError>(Unexpected<ResultError>(std::forward<F>(f)(ErrorRef())));
+        }
+
+        template<class F>
+        constexpr auto TransformError(F&& f) const& -> Expected<T, std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<const E&>()))>>
+            requires(
+                    NGIN::Meta::TypeTraits<T>::IsCopyConstructible() &&
+                    !std::is_void_v<decltype(std::forward<F>(f)(std::declval<const E&>()))>)
+        {
+            using ResultError = std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<const E&>()))>;
+            if (m_hasValue)
+                return Expected<T, ResultError>(ValueRef());
+            return Expected<T, ResultError>(Unexpected<ResultError>(std::forward<F>(f)(ErrorRef())));
+        }
+
+        template<class F>
+        constexpr auto TransformError(F&& f) && -> Expected<T, std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<E&&>()))>>
+            requires(!std::is_void_v<decltype(std::forward<F>(f)(std::declval<E &&>()))>)
+        {
+            using ResultError = std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<E&&>()))>;
+            if (m_hasValue)
+                return Expected<T, ResultError>(std::move(ValueRef()));
+            return Expected<T, ResultError>(Unexpected<ResultError>(std::forward<F>(f)(std::move(ErrorRef()))));
+        }
 
         /// @brief Returns the contained value if present, otherwise returns `fallback`.
         [[nodiscard]] constexpr const T& ValueOr(const T& fallback) const& noexcept
         {
-            return m_hasValue ? ValueUnsafe() : fallback;
+            return m_hasValue ? ValueRef() : fallback;
         }
 
         /// @brief Returns the contained value if present, otherwise returns `fallback`.
         [[nodiscard]] constexpr T ValueOr(T fallback) && noexcept(NGIN::Meta::TypeTraits<T>::IsNothrowMoveConstructible())
             requires(NGIN::Meta::TypeTraits<T>::IsMoveConstructible())
         {
-            return m_hasValue ? std::move(ValueUnsafe()) : std::move(fallback);
+            return m_hasValue ? std::move(ValueRef()) : std::move(fallback);
         }
 
         /// @brief Returns the contained error if present, otherwise returns `fallback`.
         [[nodiscard]] constexpr const E& ErrorOr(const E& fallback) const& noexcept
         {
-            return m_hasValue ? fallback : ErrorUnsafe();
+            return m_hasValue ? fallback : ErrorRef();
         }
 
         /// @brief Returns the contained error if present, otherwise returns `fallback`.
         [[nodiscard]] constexpr E ErrorOr(E fallback) && noexcept(NGIN::Meta::TypeTraits<E>::IsNothrowMoveConstructible())
             requires(NGIN::Meta::TypeTraits<E>::IsMoveConstructible())
         {
-            return m_hasValue ? std::move(fallback) : std::move(ErrorUnsafe());
+            return m_hasValue ? std::move(fallback) : std::move(ErrorRef());
         }
 
         /// @brief Swaps two `Expected` values.
-        constexpr void Swap(Expected& other)
-            noexcept(
+        constexpr void Swap(Expected& other) noexcept(
                 NGIN::Meta::TypeTraits<T>::IsNothrowMoveConstructible() &&
                 NGIN::Meta::TypeTraits<E>::IsNothrowMoveConstructible() &&
                 NGIN::Meta::TypeTraits<T>::IsNothrowDestructible() &&
                 NGIN::Meta::TypeTraits<E>::IsNothrowDestructible())
             requires(
-                NGIN::Meta::TypeTraits<T>::IsMoveConstructible() &&
-                NGIN::Meta::TypeTraits<E>::IsMoveConstructible() &&
-                NGIN::Meta::TypeTraits<T>::IsDestructible() &&
-                NGIN::Meta::TypeTraits<E>::IsDestructible())
+                    NGIN::Meta::TypeTraits<T>::IsMoveConstructible() &&
+                    NGIN::Meta::TypeTraits<E>::IsMoveConstructible() &&
+                    NGIN::Meta::TypeTraits<T>::IsDestructible() &&
+                    NGIN::Meta::TypeTraits<E>::IsDestructible())
         {
             if (this == &other)
             {
@@ -646,9 +782,8 @@ namespace NGIN::Utilities
         }
 
         /// @brief Constructs/replaces the contained value.
-        template <class... Args>
-        constexpr T& EmplaceValue(Args&&... args)
-            noexcept(
+        template<class... Args>
+        constexpr T& EmplaceValue(Args&&... args) noexcept(
                 NGIN::Meta::TypeTraits<T>::template IsNothrowConstructible<Args...>() &&
                 NGIN::Meta::TypeTraits<T>::IsNothrowDestructible() &&
                 NGIN::Meta::TypeTraits<E>::IsNothrowDestructible())
@@ -661,9 +796,8 @@ namespace NGIN::Utilities
         }
 
         /// @brief Constructs/replaces the contained error.
-        template <class... Args>
-        constexpr E& EmplaceError(Args&&... args)
-            noexcept(
+        template<class... Args>
+        constexpr E& EmplaceError(Args&&... args) noexcept(
                 NGIN::Meta::TypeTraits<E>::template IsNothrowConstructible<Args...>() &&
                 NGIN::Meta::TypeTraits<T>::IsNothrowDestructible() &&
                 NGIN::Meta::TypeTraits<E>::IsNothrowDestructible())
@@ -676,9 +810,9 @@ namespace NGIN::Utilities
         }
 
     private:
-        [[nodiscard]] constexpr T& ValueRef() noexcept { return m_storage.template Ref<T>(); }
+        [[nodiscard]] constexpr T&       ValueRef() noexcept { return m_storage.template Ref<T>(); }
         [[nodiscard]] constexpr const T& ValueRef() const noexcept { return m_storage.template Ref<T>(); }
-        [[nodiscard]] constexpr E& ErrorRef() noexcept { return m_storage.template Ref<E>(); }
+        [[nodiscard]] constexpr E&       ErrorRef() noexcept { return m_storage.template Ref<E>(); }
         [[nodiscard]] constexpr const E& ErrorRef() const noexcept { return m_storage.template Ref<E>(); }
 
         constexpr void DestroyActive() noexcept
@@ -700,14 +834,14 @@ namespace NGIN::Utilities
         }
 
         [[no_unique_address]] NGIN::Memory::UnionStorageFor<T, E> m_storage {};
-        NGIN::UInt8 m_hasValue {0};
+        NGIN::UInt8                                               m_hasValue {0};
     };
 
     /// @brief Specialization for "success or error" without a value payload.
     ///
     /// @details
     /// The value state contains no payload; only the error is stored when `HasValue() == false`.
-    template <class E>
+    template<class E>
     class [[nodiscard]] Expected<void, E>
     {
         static_assert(!NGIN::Meta::TypeTraits<E>::IsReference(), "Expected<void,E&> is not supported.");
@@ -718,27 +852,23 @@ namespace NGIN::Utilities
 
         /// @brief Constructs a success state.
         constexpr Expected() noexcept
-            : m_error {}
-            , m_hasValue {1}
+            : m_error {}, m_hasValue {1}
         {
         }
 
         /// @brief Constructs an error state from `Unexpected<E>`.
         constexpr Expected(Unexpected<E>&& unexpected) noexcept(NGIN::Meta::TypeTraits<E>::IsNothrowMoveConstructible())
             requires(NGIN::Meta::TypeTraits<E>::IsMoveConstructible())
-            : m_error {}
-            , m_hasValue {0}
+            : m_error {}, m_hasValue {0}
         {
             detail::WithExceptionsAbortOnThrow([&]() { m_error.Construct(std::move(unexpected).Error()); });
         }
 
         /// @brief Constructs an error state in-place.
-        template <class... Args>
-        constexpr explicit Expected(InPlaceType<E>, Args&&... args)
-            noexcept(NGIN::Meta::TypeTraits<E>::template IsNothrowConstructible<Args...>())
+        template<class... Args>
+        constexpr explicit Expected(InPlaceType<E>, Args&&... args) noexcept(NGIN::Meta::TypeTraits<E>::template IsNothrowConstructible<Args...>())
             requires(NGIN::Meta::TypeTraits<E>::template IsConstructible<Args...>())
-            : m_error {}
-            , m_hasValue {0}
+            : m_error {}, m_hasValue {0}
         {
             detail::WithExceptionsAbortOnThrow([&]() { m_error.Construct(std::forward<Args>(args)...); });
         }
@@ -751,8 +881,7 @@ namespace NGIN::Utilities
         /// @brief Copy-constructs (non-trivial path).
         constexpr Expected(const Expected& other) noexcept(NGIN::Meta::TypeTraits<E>::IsNothrowCopyConstructible())
             requires(!NGIN::Meta::TypeTraits<E>::IsTriviallyCopyable() && NGIN::Meta::TypeTraits<E>::IsCopyConstructible())
-            : m_error {}
-            , m_hasValue {other.m_hasValue}
+            : m_error {}, m_hasValue {other.m_hasValue}
         {
             if (!other.m_hasValue)
             {
@@ -768,8 +897,7 @@ namespace NGIN::Utilities
         /// @brief Move-constructs (non-trivial path).
         constexpr Expected(Expected&& other) noexcept(NGIN::Meta::TypeTraits<E>::IsNothrowMoveConstructible())
             requires(!NGIN::Meta::TypeTraits<E>::IsTriviallyCopyable() && NGIN::Meta::TypeTraits<E>::IsMoveConstructible())
-            : m_error {}
-            , m_hasValue {other.m_hasValue}
+            : m_error {}, m_hasValue {other.m_hasValue}
         {
             if (!other.m_hasValue)
             {
@@ -783,8 +911,7 @@ namespace NGIN::Utilities
         = default;
 
         /// @brief Copy-assigns (non-trivial path).
-        constexpr Expected& operator=(const Expected& other)
-            noexcept(
+        constexpr Expected& operator=(const Expected& other) noexcept(
                 NGIN::Meta::TypeTraits<E>::IsNothrowCopyConstructible() &&
                 NGIN::Meta::TypeTraits<E>::IsNothrowDestructible() &&
                 (!NGIN::Meta::TypeTraits<E>::IsCopyAssignable() || NGIN::Meta::TypeTraits<E>::IsNothrowCopyAssignable()))
@@ -835,8 +962,7 @@ namespace NGIN::Utilities
         = default;
 
         /// @brief Move-assigns (non-trivial path).
-        constexpr Expected& operator=(Expected&& other)
-            noexcept(
+        constexpr Expected& operator=(Expected&& other) noexcept(
                 NGIN::Meta::TypeTraits<E>::IsNothrowMoveConstructible() &&
                 NGIN::Meta::TypeTraits<E>::IsNothrowDestructible() &&
                 (!NGIN::Meta::TypeTraits<E>::IsMoveAssignable() || NGIN::Meta::TypeTraits<E>::IsNothrowMoveAssignable()))
@@ -899,9 +1025,6 @@ namespace NGIN::Utilities
         /// @brief Returns true if holding a value (success).
         constexpr explicit operator bool() const noexcept { return HasValue(); }
 
-        /// @brief `std::expected`-style alias for `HasValue()`.
-        [[nodiscard]] constexpr bool has_value() const noexcept { return HasValue(); }
-
         /// @brief Checks that a value is present.
         ///
         /// @details Checked accessor: if holding an error, triggers the contract policy.
@@ -961,49 +1084,196 @@ namespace NGIN::Utilities
             return std::move(m_error.Ref());
         }
 
-        /// @brief Returns the contained error without checking.
-        ///
-        /// @warning Undefined behavior if holding a value.
-        [[nodiscard]] constexpr E& ErrorUnsafe() & noexcept { return m_error.Ref(); }
+        /// @brief Moves the contained error out of an rvalue `Expected<void, E>`.
+        [[nodiscard]] constexpr E TakeError() &&
+                requires(NGIN::Meta::TypeTraits<E>::IsMoveConstructible()) {
+                    return std::move(*this).Error();
+                }
 
-        /// @brief Returns the contained error without checking (const).
-        ///
-        /// @warning Undefined behavior if holding a value.
-        [[nodiscard]] constexpr const E& ErrorUnsafe() const& noexcept { return m_error.Ref(); }
+                template<class F>
+                constexpr auto Transform(F&& f) & -> Expected<std::remove_cvref_t<decltype(std::forward<F>(f)())>, E>
+                    requires(
+                            !std::is_void_v<decltype(std::forward<F>(f)())> &&
+                            NGIN::Meta::TypeTraits<E>::IsCopyConstructible())
+        {
+            using ResultValue = std::remove_cvref_t<decltype(std::forward<F>(f)())>;
+            if (m_hasValue)
+                return Expected<ResultValue, E>(std::forward<F>(f)());
+            return Expected<ResultValue, E>(Unexpected<E>(m_error.Ref()));
+        }
 
-        /// @brief Returns the contained error without checking (rvalue).
-        ///
-        /// @warning Undefined behavior if holding a value.
-        [[nodiscard]] constexpr E&& ErrorUnsafe() && noexcept { return std::move(m_error.Ref()); }
+        template<class F>
+        constexpr auto Transform(F&& f) const& -> Expected<std::remove_cvref_t<decltype(std::forward<F>(f)())>, E>
+            requires(
+                    !std::is_void_v<decltype(std::forward<F>(f)())> &&
+                    NGIN::Meta::TypeTraits<E>::IsCopyConstructible())
+        {
+            using ResultValue = std::remove_cvref_t<decltype(std::forward<F>(f)())>;
+            if (m_hasValue)
+                return Expected<ResultValue, E>(std::forward<F>(f)());
+            return Expected<ResultValue, E>(Unexpected<E>(m_error.Ref()));
+        }
 
-        /// @brief Returns the contained error without checking (const rvalue).
-        ///
-        /// @warning Undefined behavior if holding a value.
-        [[nodiscard]] constexpr const E&& ErrorUnsafe() const&& noexcept { return std::move(m_error.Ref()); }
+        template<class F>
+        constexpr auto Transform(F&& f) && -> Expected<std::remove_cvref_t<decltype(std::forward<F>(f)())>, E>
+            requires(!std::is_void_v<decltype(std::forward<F>(f)())>)
+        {
+            using ResultValue = std::remove_cvref_t<decltype(std::forward<F>(f)())>;
+            if (m_hasValue)
+                return Expected<ResultValue, E>(std::forward<F>(f)());
+            return Expected<ResultValue, E>(Unexpected<E>(std::move(m_error.Ref())));
+        }
 
-        /// @brief `std::expected`-style aliases.
-        constexpr void value() const noexcept { Value(); }
-        [[nodiscard]] constexpr E& error() & noexcept { return Error(); }
-        [[nodiscard]] constexpr const E& error() const& noexcept { return Error(); }
-        [[nodiscard]] constexpr E&& error() && noexcept { return std::move(*this).Error(); }
-        [[nodiscard]] constexpr const E&& error() const&& noexcept { return std::move(*this).Error(); }
+        template<class F>
+        constexpr auto Transform(F&& f) & -> Expected<void, E>
+            requires(
+                    std::is_void_v<decltype(std::forward<F>(f)())> &&
+                    NGIN::Meta::TypeTraits<E>::IsCopyConstructible())
+        {
+            if (m_hasValue)
+            {
+                std::forward<F>(f)();
+                return Expected<void, E> {};
+            }
+            return Expected<void, E>(Unexpected<E>(m_error.Ref()));
+        }
+
+        template<class F>
+        constexpr auto Transform(F&& f) const& -> Expected<void, E>
+            requires(
+                    std::is_void_v<decltype(std::forward<F>(f)())> &&
+                    NGIN::Meta::TypeTraits<E>::IsCopyConstructible())
+        {
+            if (m_hasValue)
+            {
+                std::forward<F>(f)();
+                return Expected<void, E> {};
+            }
+            return Expected<void, E>(Unexpected<E>(m_error.Ref()));
+        }
+
+        template<class F>
+        constexpr auto Transform(F&& f) && -> Expected<void, E>
+            requires(std::is_void_v<decltype(std::forward<F>(f)())>)
+        {
+            if (m_hasValue)
+            {
+                std::forward<F>(f)();
+                return Expected<void, E> {};
+            }
+            return Expected<void, E>(Unexpected<E>(std::move(m_error.Ref())));
+        }
+
+        template<class F>
+        constexpr auto AndThen(F&& f) & -> std::remove_cvref_t<decltype(std::forward<F>(f)())>
+            requires(
+                    detail::ExpectedTraits<std::remove_cvref_t<decltype(std::forward<F>(f)())>>::IsExpected &&
+                    std::is_same_v<typename detail::ExpectedTraits<std::remove_cvref_t<decltype(std::forward<F>(f)())>>::ErrorType, E> &&
+                    NGIN::Meta::TypeTraits<E>::IsCopyConstructible())
+        {
+            using ResultType = std::remove_cvref_t<decltype(std::forward<F>(f)())>;
+            if (m_hasValue)
+                return std::forward<F>(f)();
+            return ResultType(Unexpected<E>(m_error.Ref()));
+        }
+
+        template<class F>
+        constexpr auto AndThen(F&& f) const& -> std::remove_cvref_t<decltype(std::forward<F>(f)())>
+            requires(
+                    detail::ExpectedTraits<std::remove_cvref_t<decltype(std::forward<F>(f)())>>::IsExpected &&
+                    std::is_same_v<typename detail::ExpectedTraits<std::remove_cvref_t<decltype(std::forward<F>(f)())>>::ErrorType, E> &&
+                    NGIN::Meta::TypeTraits<E>::IsCopyConstructible())
+        {
+            using ResultType = std::remove_cvref_t<decltype(std::forward<F>(f)())>;
+            if (m_hasValue)
+                return std::forward<F>(f)();
+            return ResultType(Unexpected<E>(m_error.Ref()));
+        }
+
+        template<class F>
+        constexpr auto AndThen(F&& f) && -> std::remove_cvref_t<decltype(std::forward<F>(f)())>
+            requires(
+                    detail::ExpectedTraits<std::remove_cvref_t<decltype(std::forward<F>(f)())>>::IsExpected &&
+                    std::is_same_v<typename detail::ExpectedTraits<std::remove_cvref_t<decltype(std::forward<F>(f)())>>::ErrorType, E>)
+        {
+            using ResultType = std::remove_cvref_t<decltype(std::forward<F>(f)())>;
+            if (m_hasValue)
+                return std::forward<F>(f)();
+            return ResultType(Unexpected<E>(std::move(m_error.Ref())));
+        }
+
+        template<class F>
+        constexpr auto OrElse(F&& f) & -> Expected<void, E>
+            requires(std::is_same_v<std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<E&>()))>, Expected<void, E>>)
+        {
+            if (m_hasValue)
+                return Expected<void, E> {};
+            return std::forward<F>(f)(m_error.Ref());
+        }
+
+        template<class F>
+        constexpr auto OrElse(F&& f) const& -> Expected<void, E>
+            requires(std::is_same_v<std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<const E&>()))>, Expected<void, E>>)
+        {
+            if (m_hasValue)
+                return Expected<void, E> {};
+            return std::forward<F>(f)(m_error.Ref());
+        }
+
+        template<class F>
+        constexpr auto OrElse(F&& f) && -> Expected<void, E>
+            requires(std::is_same_v<std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<E &&>()))>, Expected<void, E>>)
+        {
+            if (m_hasValue)
+                return Expected<void, E> {};
+            return std::forward<F>(f)(std::move(m_error.Ref()));
+        }
+
+        template<class F>
+        constexpr auto TransformError(F&& f) & -> Expected<void, std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<E&>()))>>
+            requires(!std::is_void_v<decltype(std::forward<F>(f)(std::declval<E&>()))>)
+        {
+            using ResultError = std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<E&>()))>;
+            if (m_hasValue)
+                return Expected<void, ResultError> {};
+            return Expected<void, ResultError>(Unexpected<ResultError>(std::forward<F>(f)(m_error.Ref())));
+        }
+
+        template<class F>
+        constexpr auto TransformError(F&& f) const& -> Expected<void, std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<const E&>()))>>
+            requires(!std::is_void_v<decltype(std::forward<F>(f)(std::declval<const E&>()))>)
+        {
+            using ResultError = std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<const E&>()))>;
+            if (m_hasValue)
+                return Expected<void, ResultError> {};
+            return Expected<void, ResultError>(Unexpected<ResultError>(std::forward<F>(f)(m_error.Ref())));
+        }
+
+        template<class F>
+        constexpr auto TransformError(F&& f) && -> Expected<void, std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<E&&>()))>>
+            requires(!std::is_void_v<decltype(std::forward<F>(f)(std::declval<E &&>()))>)
+        {
+            using ResultError = std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<E&&>()))>;
+            if (m_hasValue)
+                return Expected<void, ResultError> {};
+            return Expected<void, ResultError>(Unexpected<ResultError>(std::forward<F>(f)(std::move(m_error.Ref()))));
+        }
 
         /// @brief Returns the contained error if present, otherwise returns `fallback`.
         [[nodiscard]] constexpr const E& ErrorOr(const E& fallback) const& noexcept
         {
-            return m_hasValue ? fallback : ErrorUnsafe();
+            return m_hasValue ? fallback : m_error.Ref();
         }
 
         /// @brief Returns the contained error if present, otherwise returns `fallback`.
         [[nodiscard]] constexpr E ErrorOr(E fallback) && noexcept(NGIN::Meta::TypeTraits<E>::IsNothrowMoveConstructible())
             requires(NGIN::Meta::TypeTraits<E>::IsMoveConstructible())
         {
-            return m_hasValue ? std::move(fallback) : std::move(ErrorUnsafe());
+            return m_hasValue ? std::move(fallback) : std::move(m_error.Ref());
         }
 
         /// @brief Swaps two `Expected<void, E>` values.
-        constexpr void Swap(Expected& other)
-            noexcept(
+        constexpr void Swap(Expected& other) noexcept(
                 NGIN::Meta::TypeTraits<E>::IsNothrowMoveConstructible() &&
                 NGIN::Meta::TypeTraits<E>::IsNothrowDestructible())
             requires(NGIN::Meta::TypeTraits<E>::IsMoveConstructible())
@@ -1062,9 +1332,8 @@ namespace NGIN::Utilities
         }
 
         /// @brief Constructs/replaces the error state.
-        template <class... Args>
-        constexpr E& EmplaceError(Args&&... args)
-            noexcept(
+        template<class... Args>
+        constexpr E& EmplaceError(Args&&... args) noexcept(
                 NGIN::Meta::TypeTraits<E>::template IsNothrowConstructible<Args...>() &&
                 NGIN::Meta::TypeTraits<E>::IsNothrowDestructible())
             requires(NGIN::Meta::TypeTraits<E>::template IsConstructible<Args...>())
@@ -1088,6 +1357,6 @@ namespace NGIN::Utilities
         }
 
         [[no_unique_address]] NGIN::Memory::StorageFor<E> m_error {};
-        NGIN::UInt8 m_hasValue {1};
+        NGIN::UInt8                                       m_hasValue {1};
     };
- }
+}// namespace NGIN::Utilities

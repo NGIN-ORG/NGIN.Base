@@ -1,28 +1,28 @@
-#include <NGIN/Benchmark.hpp>
 #include <NGIN/Async/Task.hpp>
 #include <NGIN/Async/TaskContext.hpp>
 #include <NGIN/Async/WhenAll.hpp>
+#include <NGIN/Benchmark.hpp>
 #include <NGIN/Execution/CooperativeScheduler.hpp>
 #include <NGIN/Execution/FiberScheduler.hpp>
 #include <NGIN/Execution/ThreadPoolScheduler.hpp>
-#include <iostream>
-#include <coroutine>
 #include <atomic>
+#include <coroutine>
+#include <iostream>
 #include <thread>
 #include <vector>
 
 int main()
 {
     using namespace NGIN;
-    constexpr int numCoroutines = 10000;
-    constexpr int numThreads    = 4;
-    constexpr int numFibers     = 128;
-    constexpr int numProducers  = 4;
-    constexpr int numYieldManyTasks  = 2000;
-    constexpr int yieldsPerYieldMany = 8;
+    constexpr int  numCoroutines           = 10000;
+    constexpr int  numThreads              = 4;
+    constexpr int  numFibers               = 128;
+    constexpr int  numProducers            = 4;
+    constexpr int  numYieldManyTasks       = 2000;
+    constexpr int  yieldsPerYieldMany      = 8;
     constexpr bool runCooperativeScheduler = true;
-    constexpr bool runFiberScheduler      = true;
-    constexpr bool runThreadPoolScheduler = true;
+    constexpr bool runFiberScheduler       = true;
+    constexpr bool runThreadPoolScheduler  = true;
 
     // Minimal coroutine type for benchmarking
     struct BenchTask
@@ -54,12 +54,12 @@ int main()
     {
         Benchmark::Register([](BenchmarkContext& benchCtx) {
             NGIN::Execution::FiberScheduler scheduler(numThreads, numFibers);
-            std::atomic<int> completed {0};
+            std::atomic<int>                completed {0};
             struct Awaitable
             {
                 NGIN::Execution::FiberScheduler& sched;
-                std::atomic<int>& completed;
-                bool await_ready() const noexcept
+                std::atomic<int>&                completed;
+                bool                             await_ready() const noexcept
                 {
                     return false;
                 }
@@ -94,7 +94,7 @@ int main()
 
         Benchmark::Register([](BenchmarkContext& benchCtx) {
             NGIN::Execution::FiberScheduler scheduler(numThreads, numFibers);
-            std::atomic<int> completed {0};
+            std::atomic<int>                completed {0};
 
             NGIN::Async::TaskContext taskCtx(scheduler);
 
@@ -104,7 +104,7 @@ int main()
                     auto yieldResult = co_await ctx.YieldNow();
                     if (!yieldResult)
                     {
-                        co_await NGIN::Async::Task<void>::ReturnError(yieldResult.error());
+                        co_await NGIN::Async::Task<void>::ReturnError(yieldResult.Error());
                         co_return;
                     }
                 }
@@ -135,7 +135,7 @@ int main()
 
         Benchmark::Register([](BenchmarkContext& benchCtx) {
             NGIN::Execution::FiberScheduler scheduler(numThreads, numFibers);
-            std::atomic<int> completed {0};
+            std::atomic<int>                completed {0};
 
             auto job = [&completed]() noexcept {
                 completed.fetch_add(1, std::memory_order_release);
@@ -160,9 +160,9 @@ int main()
 
         Benchmark::Register([](BenchmarkContext& benchCtx) {
             NGIN::Execution::FiberScheduler scheduler(numThreads, numFibers);
-            std::atomic<int> completed {0};
-            std::atomic<int> ready {0};
-            std::atomic<bool> go {false};
+            std::atomic<int>                completed {0};
+            std::atomic<int>                ready {0};
+            std::atomic<bool>               go {false};
 
             auto job = [&completed]() noexcept {
                 completed.fetch_add(1, std::memory_order_release);
@@ -219,8 +219,8 @@ int main()
 
         Benchmark::Register([](BenchmarkContext& benchCtx) {
             NGIN::Execution::FiberScheduler scheduler(numThreads, numFibers);
-            const auto nowNanos  = NGIN::Time::MonotonicClock::Now().ToNanoseconds();
-            const auto farFuture = NGIN::Time::TimePoint::FromNanoseconds(nowNanos + 60ull * 1'000'000'000ull);
+            const auto                      nowNanos  = NGIN::Time::MonotonicClock::Now().ToNanoseconds();
+            const auto                      farFuture = NGIN::Time::TimePoint::FromNanoseconds(nowNanos + 60ull * 1'000'000'000ull);
 
             benchCtx.start();
             for (int i = 0; i < numCoroutines; ++i)
@@ -238,12 +238,12 @@ int main()
     {
         Benchmark::Register([](BenchmarkContext& benchCtx) {
             NGIN::Execution::ThreadPoolScheduler scheduler(numThreads);
-            std::atomic<int> completed {0};
+            std::atomic<int>                     completed {0};
             struct Awaitable
             {
                 NGIN::Execution::ThreadPoolScheduler& sched;
-                std::atomic<int>& completed;
-                bool await_ready() const noexcept
+                std::atomic<int>&                     completed;
+                bool                                  await_ready() const noexcept
                 {
                     return false;
                 }
@@ -278,7 +278,7 @@ int main()
 
         Benchmark::Register([](BenchmarkContext& benchCtx) {
             NGIN::Execution::ThreadPoolScheduler scheduler(numThreads);
-            std::atomic<int> completed {0};
+            std::atomic<int>                     completed {0};
 
             auto job = [&completed]() noexcept {
                 completed.fetch_add(1, std::memory_order_release);
@@ -303,9 +303,9 @@ int main()
 
         Benchmark::Register([](BenchmarkContext& benchCtx) {
             NGIN::Execution::ThreadPoolScheduler scheduler(numThreads);
-            std::atomic<int> completed {0};
-            std::atomic<int> ready {0};
-            std::atomic<bool> go {false};
+            std::atomic<int>                     completed {0};
+            std::atomic<int>                     ready {0};
+            std::atomic<bool>                    go {false};
 
             auto job = [&completed]() noexcept {
                 completed.fetch_add(1, std::memory_order_release);
@@ -362,8 +362,8 @@ int main()
 
         Benchmark::Register([](BenchmarkContext& benchCtx) {
             NGIN::Execution::ThreadPoolScheduler scheduler(numThreads);
-            const auto nowNanos  = NGIN::Time::MonotonicClock::Now().ToNanoseconds();
-            const auto farFuture = NGIN::Time::TimePoint::FromNanoseconds(nowNanos + 60ull * 1'000'000'000ull);
+            const auto                           nowNanos  = NGIN::Time::MonotonicClock::Now().ToNanoseconds();
+            const auto                           farFuture = NGIN::Time::TimePoint::FromNanoseconds(nowNanos + 60ull * 1'000'000'000ull);
 
             benchCtx.start();
             for (int i = 0; i < numCoroutines; ++i)
@@ -377,7 +377,7 @@ int main()
 
         Benchmark::Register([](BenchmarkContext& benchCtx) {
             NGIN::Execution::ThreadPoolScheduler scheduler(numThreads);
-            std::atomic<int> completed {0};
+            std::atomic<int>                     completed {0};
 
             NGIN::Async::TaskContext taskCtx(scheduler);
 
@@ -385,7 +385,7 @@ int main()
                 auto yieldResult = co_await ctx.YieldNow();
                 if (!yieldResult)
                 {
-                    co_await NGIN::Async::Task<void>::ReturnError(yieldResult.error());
+                    co_await NGIN::Async::Task<void>::ReturnError(yieldResult.Error());
                     co_return;
                 }
                 completed.fetch_add(1, std::memory_order_release);
@@ -415,7 +415,7 @@ int main()
 
         Benchmark::Register([](BenchmarkContext& benchCtx) {
             NGIN::Execution::ThreadPoolScheduler scheduler(numThreads);
-            std::atomic<int> completed {0};
+            std::atomic<int>                     completed {0};
 
             NGIN::Async::TaskContext taskCtx(scheduler);
 
@@ -425,7 +425,7 @@ int main()
                     auto yieldResult = co_await ctx.YieldNow();
                     if (!yieldResult)
                     {
-                        co_await NGIN::Async::Task<void>::ReturnError(yieldResult.error());
+                        co_await NGIN::Async::Task<void>::ReturnError(yieldResult.Error());
                         co_return;
                     }
                 }
@@ -462,9 +462,9 @@ int main()
 
             auto delayCanceled = [](NGIN::Async::TaskContext& ctx, std::atomic<int>& completed) -> NGIN::Async::Task<void> {
                 auto delayResult = co_await ctx.Delay(NGIN::Units::Milliseconds(100.0));
-                if (!delayResult && delayResult.error().code != NGIN::Async::AsyncErrorCode::Canceled)
+                if (!delayResult && delayResult.Error().code != NGIN::Async::AsyncErrorCode::Canceled)
                 {
-                    co_await NGIN::Async::Task<void>::ReturnError(delayResult.error());
+                    co_await NGIN::Async::Task<void>::ReturnError(delayResult.Error());
                     co_return;
                 }
                 completed.fetch_add(1, std::memory_order_release);
@@ -503,7 +503,7 @@ int main()
                 auto yieldResult = co_await ctx.YieldNow();
                 if (!yieldResult)
                 {
-                    co_await NGIN::Async::Task<void>::ReturnError(yieldResult.error());
+                    co_await NGIN::Async::Task<void>::ReturnError(yieldResult.Error());
                     co_return;
                 }
                 co_return;
@@ -517,7 +517,7 @@ int main()
                 auto allResult = co_await NGIN::Async::WhenAll(ctx, a, b);
                 if (!allResult)
                 {
-                    co_await NGIN::Async::Task<void>::ReturnError(allResult.error());
+                    co_await NGIN::Async::Task<void>::ReturnError(allResult.Error());
                     co_return;
                 }
                 completed.fetch_add(1, std::memory_order_release);
@@ -550,7 +550,7 @@ int main()
     {
         Benchmark::Register([](BenchmarkContext& benchCtx) {
             NGIN::Execution::CooperativeScheduler scheduler;
-            std::atomic<int> completed {0};
+            std::atomic<int>                      completed {0};
 
             auto job = [&completed]() noexcept {
                 completed.fetch_add(1, std::memory_order_relaxed);
@@ -571,14 +571,14 @@ int main()
 
         Benchmark::Register([](BenchmarkContext& benchCtx) {
             NGIN::Execution::CooperativeScheduler scheduler;
-            std::atomic<int> completed {0};
-            NGIN::Async::TaskContext taskCtx(scheduler);
+            std::atomic<int>                      completed {0};
+            NGIN::Async::TaskContext              taskCtx(scheduler);
 
             auto taskYield = [](NGIN::Async::TaskContext& ctx, std::atomic<int>& completed) -> NGIN::Async::Task<void> {
                 auto yieldResult = co_await ctx.YieldNow();
                 if (!yieldResult)
                 {
-                    co_await NGIN::Async::Task<void>::ReturnError(yieldResult.error());
+                    co_await NGIN::Async::Task<void>::ReturnError(yieldResult.Error());
                     co_return;
                 }
                 completed.fetch_add(1, std::memory_order_relaxed);
@@ -604,8 +604,8 @@ int main()
 
         Benchmark::Register([](BenchmarkContext& benchCtx) {
             NGIN::Execution::CooperativeScheduler scheduler;
-            std::atomic<int> completed {0};
-            NGIN::Async::TaskContext taskCtx(scheduler);
+            std::atomic<int>                      completed {0};
+            NGIN::Async::TaskContext              taskCtx(scheduler);
 
             auto taskYieldMany = [](NGIN::Async::TaskContext& ctx, std::atomic<int>& completed) -> NGIN::Async::Task<void> {
                 for (int i = 0; i < yieldsPerYieldMany; ++i)
@@ -613,7 +613,7 @@ int main()
                     auto yieldResult = co_await ctx.YieldNow();
                     if (!yieldResult)
                     {
-                        co_await NGIN::Async::Task<void>::ReturnError(yieldResult.error());
+                        co_await NGIN::Async::Task<void>::ReturnError(yieldResult.Error());
                         co_return;
                     }
                 }
@@ -640,15 +640,15 @@ int main()
 
         Benchmark::Register([](BenchmarkContext& benchCtx) {
             NGIN::Execution::CooperativeScheduler scheduler;
-            NGIN::Async::CancellationSource      cancelSource;
-            NGIN::Async::TaskContext             taskCtx(scheduler, cancelSource.GetToken());
-            std::atomic<int>                     completed {0};
+            NGIN::Async::CancellationSource       cancelSource;
+            NGIN::Async::TaskContext              taskCtx(scheduler, cancelSource.GetToken());
+            std::atomic<int>                      completed {0};
 
             auto delayCanceled = [](NGIN::Async::TaskContext& ctx, std::atomic<int>& completed) -> NGIN::Async::Task<void> {
                 auto delayResult = co_await ctx.Delay(NGIN::Units::Milliseconds(100.0));
-                if (!delayResult && delayResult.error().code != NGIN::Async::AsyncErrorCode::Canceled)
+                if (!delayResult && delayResult.Error().code != NGIN::Async::AsyncErrorCode::Canceled)
                 {
-                    co_await NGIN::Async::Task<void>::ReturnError(delayResult.error());
+                    co_await NGIN::Async::Task<void>::ReturnError(delayResult.Error());
                     co_return;
                 }
                 completed.fetch_add(1, std::memory_order_relaxed);
@@ -676,14 +676,14 @@ int main()
 
         Benchmark::Register([](BenchmarkContext& benchCtx) {
             NGIN::Execution::CooperativeScheduler scheduler;
-            NGIN::Async::TaskContext             taskCtx(scheduler);
-            std::atomic<int>                     completed {0};
+            NGIN::Async::TaskContext              taskCtx(scheduler);
+            std::atomic<int>                      completed {0};
 
             auto leaf = [](NGIN::Async::TaskContext& ctx) -> NGIN::Async::Task<void> {
                 auto yieldResult = co_await ctx.YieldNow();
                 if (!yieldResult)
                 {
-                    co_await NGIN::Async::Task<void>::ReturnError(yieldResult.error());
+                    co_await NGIN::Async::Task<void>::ReturnError(yieldResult.Error());
                     co_return;
                 }
                 co_return;
@@ -697,7 +697,7 @@ int main()
                 auto allResult = co_await NGIN::Async::WhenAll(ctx, a, b);
                 if (!allResult)
                 {
-                    co_await NGIN::Async::Task<void>::ReturnError(allResult.error());
+                    co_await NGIN::Async::Task<void>::ReturnError(allResult.Error());
                     co_return;
                 }
                 completed.fetch_add(1, std::memory_order_relaxed);
@@ -724,8 +724,8 @@ int main()
 
         Benchmark::Register([](BenchmarkContext& benchCtx) {
             NGIN::Execution::CooperativeScheduler scheduler;
-            const auto nowNanos  = NGIN::Time::MonotonicClock::Now().ToNanoseconds();
-            const auto farFuture = NGIN::Time::TimePoint::FromNanoseconds(nowNanos + 60ull * 1'000'000'000ull);
+            const auto                            nowNanos  = NGIN::Time::MonotonicClock::Now().ToNanoseconds();
+            const auto                            farFuture = NGIN::Time::TimePoint::FromNanoseconds(nowNanos + 60ull * 1'000'000'000ull);
 
             benchCtx.start();
             for (int i = 0; i < numCoroutines; ++i)

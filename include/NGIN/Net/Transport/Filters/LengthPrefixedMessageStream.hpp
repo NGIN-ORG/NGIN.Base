@@ -25,11 +25,11 @@ namespace NGIN::Net::Transport::Filters
         {
         }
 
-        [[nodiscard]] IByteStream* Inner() noexcept { return m_inner.get(); }
+        [[nodiscard]] IByteStream*       Inner() noexcept { return m_inner.get(); }
         [[nodiscard]] const IByteStream* Inner() const noexcept { return m_inner.get(); }
 
-        NGIN::Async::Task<void> WriteMessageAsync(NGIN::Async::TaskContext& ctx,
-                                                  NGIN::Net::ConstByteSpan message,
+        NGIN::Async::Task<void> WriteMessageAsync(NGIN::Async::TaskContext&      ctx,
+                                                  NGIN::Net::ConstByteSpan       message,
                                                   NGIN::Async::CancellationToken token)
         {
             if (!m_inner)
@@ -55,20 +55,20 @@ namespace NGIN::Net::Transport::Filters
                                                   token);
             if (!headerResult)
             {
-                co_await NGIN::Async::Task<void>::ReturnError(headerResult.error());
+                co_await NGIN::Async::Task<void>::ReturnError(headerResult.Error());
                 co_return;
             }
             auto bodyResult = co_await WriteAll(ctx, *m_inner, message, token);
             if (!bodyResult)
             {
-                co_await NGIN::Async::Task<void>::ReturnError(bodyResult.error());
+                co_await NGIN::Async::Task<void>::ReturnError(bodyResult.Error());
                 co_return;
             }
             co_return;
         }
 
-        NGIN::Async::Task<NGIN::Net::ConstByteSpan> ReadMessageAsync(NGIN::Async::TaskContext& ctx,
-                                                                     NGIN::Net::Buffer& messageBuffer,
+        NGIN::Async::Task<NGIN::Net::ConstByteSpan> ReadMessageAsync(NGIN::Async::TaskContext&      ctx,
+                                                                     NGIN::Net::Buffer&             messageBuffer,
                                                                      NGIN::Async::CancellationToken token)
         {
             if (!m_inner)
@@ -77,13 +77,13 @@ namespace NGIN::Net::Transport::Filters
             }
 
             std::array<NGIN::Byte, LengthBytes> header {};
-            auto headerResult = co_await ReadExact(ctx,
-                                                   *m_inner,
-                                                   NGIN::Net::ByteSpan {header.data(), header.size()},
-                                                   token);
+            auto                                headerResult = co_await ReadExact(ctx,
+                                                                                  *m_inner,
+                                                                                  NGIN::Net::ByteSpan {header.data(), header.size()},
+                                                                                  token);
             if (!headerResult)
             {
-                co_return NGIN::Utilities::Unexpected(headerResult.error());
+                co_return NGIN::Utilities::Unexpected(headerResult.Error());
             }
 
             const auto messageSize = DecodeLength(header);
@@ -104,7 +104,7 @@ namespace NGIN::Net::Transport::Filters
                                                     token);
             if (!payloadResult)
             {
-                co_return NGIN::Utilities::Unexpected(payloadResult.error());
+                co_return NGIN::Utilities::Unexpected(payloadResult.Error());
             }
             messageBuffer.size = messageSize;
             co_return NGIN::Net::ConstByteSpan {messageBuffer.data, messageSize};
@@ -137,9 +137,9 @@ namespace NGIN::Net::Transport::Filters
             return (b0 << 24) | (b1 << 16) | (b2 << 8) | b3;
         }
 
-        static NGIN::Async::Task<void> WriteAll(NGIN::Async::TaskContext& ctx,
-                                                IByteStream& stream,
-                                                NGIN::Net::ConstByteSpan data,
+        static NGIN::Async::Task<void> WriteAll(NGIN::Async::TaskContext&      ctx,
+                                                IByteStream&                   stream,
+                                                NGIN::Net::ConstByteSpan       data,
                                                 NGIN::Async::CancellationToken token)
         {
             std::size_t offset = 0;
@@ -150,7 +150,7 @@ namespace NGIN::Net::Transport::Filters
                 const auto bytes = co_await task;
                 if (!bytes)
                 {
-                    co_await NGIN::Async::Task<void>::ReturnError(bytes.error());
+                    co_await NGIN::Async::Task<void>::ReturnError(bytes.Error());
                     co_return;
                 }
                 if (*bytes == 0)
@@ -165,9 +165,9 @@ namespace NGIN::Net::Transport::Filters
             co_return;
         }
 
-        static NGIN::Async::Task<void> ReadExact(NGIN::Async::TaskContext& ctx,
-                                                 IByteStream& stream,
-                                                 NGIN::Net::ByteSpan destination,
+        static NGIN::Async::Task<void> ReadExact(NGIN::Async::TaskContext&      ctx,
+                                                 IByteStream&                   stream,
+                                                 NGIN::Net::ByteSpan            destination,
                                                  NGIN::Async::CancellationToken token)
         {
             std::size_t offset = 0;
@@ -178,7 +178,7 @@ namespace NGIN::Net::Transport::Filters
                 const auto bytes = co_await task;
                 if (!bytes)
                 {
-                    co_await NGIN::Async::Task<void>::ReturnError(bytes.error());
+                    co_await NGIN::Async::Task<void>::ReturnError(bytes.Error());
                     co_return;
                 }
                 if (*bytes == 0)
@@ -196,4 +196,3 @@ namespace NGIN::Net::Transport::Filters
         std::unique_ptr<IByteStream> m_inner {};
     };
 }// namespace NGIN::Net::Transport::Filters
-

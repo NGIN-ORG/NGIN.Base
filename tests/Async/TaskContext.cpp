@@ -57,7 +57,7 @@ namespace
         auto delayResult = co_await ctx.Delay(NGIN::Units::Seconds(60.0));
         if (!delayResult)
         {
-            co_await NGIN::Async::Task<void>::ReturnError(delayResult.error());
+            co_await NGIN::Async::Task<void>::ReturnError(delayResult.Error());
             co_return;
         }
         co_return;
@@ -66,12 +66,12 @@ namespace
 
 TEST_CASE("TaskContext WithLinkedCancellationToken cancels when parent token cancels")
 {
-    ManualTimerExecutor exec;
+    ManualTimerExecutor             exec;
     NGIN::Async::CancellationSource parentSource;
     NGIN::Async::CancellationSource childSource;
 
     NGIN::Async::TaskContext parentCtx(exec, parentSource.GetToken());
-    auto childCtx = parentCtx.WithLinkedCancellationToken(childSource.GetToken());
+    auto                     childCtx = parentCtx.WithLinkedCancellationToken(childSource.GetToken());
 
     auto task = DelayForever(childCtx);
     task.Schedule(childCtx);
@@ -86,19 +86,19 @@ TEST_CASE("TaskContext WithLinkedCancellationToken cancels when parent token can
     REQUIRE(task.IsCanceled());
     auto result = task.Get();
     REQUIRE_FALSE(result);
-    REQUIRE(result.error().code == NGIN::Async::AsyncErrorCode::Canceled);
+    REQUIRE(result.Error().code == NGIN::Async::AsyncErrorCode::Canceled);
 }
 
 TEST_CASE("TaskContext WithLinkedCancellationToken supports chaining without losing root linkage")
 {
-    ManualTimerExecutor exec;
+    ManualTimerExecutor             exec;
     NGIN::Async::CancellationSource rootSource;
     NGIN::Async::CancellationSource extra1;
     NGIN::Async::CancellationSource extra2;
 
     NGIN::Async::TaskContext ctx0(exec, rootSource.GetToken());
-    auto ctx1 = ctx0.WithLinkedCancellationToken(extra1.GetToken());
-    auto ctx2 = ctx1.WithLinkedCancellationToken(extra2.GetToken());
+    auto                     ctx1 = ctx0.WithLinkedCancellationToken(extra1.GetToken());
+    auto                     ctx2 = ctx1.WithLinkedCancellationToken(extra2.GetToken());
 
     auto task = DelayForever(ctx2);
     task.Schedule(ctx2);
@@ -113,5 +113,5 @@ TEST_CASE("TaskContext WithLinkedCancellationToken supports chaining without los
     REQUIRE(task.IsCanceled());
     auto result = task.Get();
     REQUIRE_FALSE(result);
-    REQUIRE(result.error().code == NGIN::Async::AsyncErrorCode::Canceled);
+    REQUIRE(result.Error().code == NGIN::Async::AsyncErrorCode::Canceled);
 }

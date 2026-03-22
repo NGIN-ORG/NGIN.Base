@@ -7,7 +7,7 @@ namespace NGIN::IO
         auto renamed = Rename(from, to);
         if (renamed.HasValue())
             return renamed;
-        if (renamed.ErrorUnsafe().code != IOErrorCode::CrossDevice)
+        if (renamed.Error().code != IOErrorCode::CrossDevice)
             return renamed;
 
         auto copied = CopyFile(from, to, options);
@@ -22,9 +22,9 @@ namespace NGIN::IO
         metadataOptions.symlinkMode = SymlinkMode::DoNotFollow;
         auto infoResult             = GetInfo(from, metadataOptions);
         if (!infoResult.HasValue())
-            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(infoResult.ErrorUnsafe())));
+            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(infoResult.Error())));
 
-        if (infoResult.ValueUnsafe().type == EntryType::Directory)
+        if (infoResult.Value().type == EntryType::Directory)
             return RemoveDirectory(from, removeOptions);
         return RemoveFile(from, removeOptions);
     }
@@ -34,7 +34,7 @@ namespace NGIN::IO
         FileView view;
         auto     result = view.Open(path);
         if (!result.HasValue())
-            return Result<FileView>(NGIN::Utilities::Unexpected<IOError>(std::move(result.ErrorUnsafe())));
+            return Result<FileView>(NGIN::Utilities::Unexpected<IOError>(std::move(result.Error())));
         return Result<FileView>(std::move(view));
     }
 
@@ -44,7 +44,7 @@ namespace NGIN::IO
         auto yielded = co_await ctx.YieldNow();
         if (!yielded)
         {
-            co_await AsyncTask<FileInfo>::ReturnError(yielded.error());
+            co_await AsyncTask<FileInfo>::ReturnError(yielded.Error());
             co_return AsyncResult<FileInfo>(FileInfo {});
         }
         co_return ToAsyncResult(GetInfo(path, options));
@@ -56,7 +56,7 @@ namespace NGIN::IO
         auto yielded = co_await ctx.YieldNow();
         if (!yielded)
         {
-            co_await AsyncTaskVoid::ReturnError(yielded.error());
+            co_await AsyncTaskVoid::ReturnError(yielded.Error());
             co_return AsyncResult<void> {};
         }
         co_return ToAsyncResult(CopyFile(from, to, options));

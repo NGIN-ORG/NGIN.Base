@@ -251,8 +251,8 @@ namespace NGIN::IO
         auto sizeResult = Size();
         if (!sizeResult.HasValue())
             return NGIN::Utilities::Expected<NGIN::Containers::Vector<NGIN::Byte>, IOError>(
-                    NGIN::Utilities::Unexpected<IOError>(std::move(sizeResult.ErrorUnsafe())));
-        const UIntSize fileSize = sizeResult.ValueUnsafe();
+                    NGIN::Utilities::Unexpected<IOError>(std::move(sizeResult.Error())));
+        const UIntSize fileSize = sizeResult.Value();
 
         NGIN::Containers::Vector<NGIN::Byte> data;
         data.Reserve(fileSize);
@@ -267,9 +267,9 @@ namespace NGIN::IO
             if (!readResult.HasValue())
             {
                 return NGIN::Utilities::Expected<NGIN::Containers::Vector<NGIN::Byte>, IOError>(
-                        NGIN::Utilities::Unexpected<IOError>(std::move(readResult.ErrorUnsafe())));
+                        NGIN::Utilities::Unexpected<IOError>(std::move(readResult.Error())));
             }
-            const UIntSize readBytes = readResult.ValueUnsafe();
+            const UIntSize readBytes = readResult.Value();
             if (readBytes == 0)
                 break;
             for (UIntSize i = 0; i < readBytes; ++i)

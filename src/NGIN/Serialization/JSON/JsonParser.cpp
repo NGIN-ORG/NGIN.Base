@@ -21,14 +21,14 @@ namespace NGIN::Serialization
         }
         struct JsonParseContext
         {
-            InputCursor      cursor;
-            JsonParseOptions options;
-            JsonArena*       arena {nullptr};
-            char*            mutableBase {nullptr};
-            UIntSize         depth {0};
+            InputCursor                               cursor;
+            JsonParseOptions                          options;
+            JsonArena*                                arena {nullptr};
+            char*                                     mutableBase {nullptr};
+            UIntSize                                  depth {0};
             const NGIN::Containers::Vector<UIntSize>* containerCounts {nullptr};
-            UIntSize         containerIndex {0};
-            JsonDocument*    document {nullptr};
+            UIntSize                                  containerIndex {0};
+            JsonDocument*                             document {nullptr};
         };
 
         [[nodiscard]] ParseError MakeError(const JsonParseContext& ctx, ParseErrorCode code, const char* message)
@@ -433,12 +433,12 @@ namespace NGIN::Serialization
             const char* start = ctx.cursor.CurrentPtr();
             const char* p     = start;
 
-            bool        negative  = false;
-            bool        hasFrac   = false;
-            bool        hasExp    = false;
-            bool        overflow  = false;
-            UInt64      intValue  = 0;
-            UInt32      digits    = 0;
+            bool   negative = false;
+            bool   hasFrac  = false;
+            bool   hasExp   = false;
+            bool   overflow = false;
+            UInt64 intValue = 0;
+            UInt32 digits   = 0;
 
             if (*p == '-')
             {
@@ -460,7 +460,7 @@ namespace NGIN::Serialization
                 if (!IsDigit(*p))
                 {
                     return NGIN::Utilities::Expected<F64, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                        MakeError(ctx, ParseErrorCode::InvalidNumber, "Invalid number")));
+                            MakeError(ctx, ParseErrorCode::InvalidNumber, "Invalid number")));
                 }
                 while (p < ctx.cursor.EndPtr() && IsDigit(*p))
                 {
@@ -507,10 +507,10 @@ namespace NGIN::Serialization
                     ++p;
             }
 
-            const auto len    = static_cast<std::size_t>(p - start);
+            const auto len = static_cast<std::size_t>(p - start);
             if (!hasFrac && !hasExp && digits > 0 && !overflow)
             {
-                static constexpr UInt64 maxExact = 9007199254740991ULL; // 2^53 - 1
+                static constexpr UInt64 maxExact = 9007199254740991ULL;// 2^53 - 1
                 if (intValue <= maxExact)
                 {
                     const F64 value = negative ? -static_cast<F64>(intValue) : static_cast<F64>(intValue);
@@ -586,10 +586,10 @@ namespace NGIN::Serialization
             return {};
         }
 
-        NGIN::Utilities::Expected<void, ParseError> CountValue(JsonParseContext& ctx,
+        NGIN::Utilities::Expected<void, ParseError> CountValue(JsonParseContext&                   ctx,
                                                                NGIN::Containers::Vector<UIntSize>& containerCounts);
 
-        NGIN::Utilities::Expected<void, ParseError> CountArray(JsonParseContext& ctx,
+        NGIN::Utilities::Expected<void, ParseError> CountArray(JsonParseContext&                   ctx,
                                                                NGIN::Containers::Vector<UIntSize>& containerCounts)
         {
             if (ctx.depth >= ctx.options.maxDepth)
@@ -654,7 +654,7 @@ namespace NGIN::Serialization
             return {};
         }
 
-        NGIN::Utilities::Expected<void, ParseError> CountObject(JsonParseContext& ctx,
+        NGIN::Utilities::Expected<void, ParseError> CountObject(JsonParseContext&                   ctx,
                                                                 NGIN::Containers::Vector<UIntSize>& containerCounts)
         {
             if (ctx.depth >= ctx.options.maxDepth)
@@ -737,7 +737,7 @@ namespace NGIN::Serialization
             return {};
         }
 
-        NGIN::Utilities::Expected<void, ParseError> CountValue(JsonParseContext& ctx,
+        NGIN::Utilities::Expected<void, ParseError> CountValue(JsonParseContext&                   ctx,
                                                                NGIN::Containers::Vector<UIntSize>& containerCounts)
         {
             auto skipResult = SkipWhitespaceAndComments(ctx);
@@ -805,7 +805,7 @@ namespace NGIN::Serialization
             ctx.cursor.Advance();
             auto skipResult = SkipWhitespaceAndComments(ctx);
             if (!skipResult.HasValue())
-                return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(skipResult.ErrorUnsafe())));
+                return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(skipResult).TakeError()));
 
             void* memory = ctx.arena->Allocate(sizeof(JsonArray), alignof(JsonArray));
             if (!memory)
@@ -813,7 +813,7 @@ namespace NGIN::Serialization
                 return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
                         MakeError(ctx, ParseErrorCode::OutOfMemory, "Array allocation failed")));
             }
-            auto* array = new (memory) JsonArray(allocator);
+            auto*          array        = new (memory) JsonArray(allocator);
             const UIntSize reserveCount = NextContainerCount(ctx);
             if (reserveCount > 0)
                 array->values.Reserve(reserveCount);
@@ -830,11 +830,11 @@ namespace NGIN::Serialization
                 auto valueResult = ParseValue(ctx, allocator);
                 if (!valueResult.HasValue())
                     return valueResult;
-                array->values.PushBack(std::move(valueResult.ValueUnsafe()));
+                array->values.PushBack(std::move(valueResult).TakeValue());
 
                 auto postResult = SkipWhitespaceAndComments(ctx);
                 if (!postResult.HasValue())
-                    return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(postResult.ErrorUnsafe())));
+                    return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(postResult.Error())));
 
                 const char next = ctx.cursor.Peek();
                 if (next == ',')
@@ -842,7 +842,7 @@ namespace NGIN::Serialization
                     ctx.cursor.Advance();
                     auto commaResult = SkipWhitespaceAndComments(ctx);
                     if (!commaResult.HasValue())
-                        return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(commaResult.ErrorUnsafe())));
+                        return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(commaResult.Error())));
                     if (ctx.cursor.Peek() == ']' && !ctx.options.allowTrailingCommas)
                     {
                         return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
@@ -875,7 +875,7 @@ namespace NGIN::Serialization
             ctx.cursor.Advance();
             auto skipResult = SkipWhitespaceAndComments(ctx);
             if (!skipResult.HasValue())
-                return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(skipResult.ErrorUnsafe())));
+                return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(skipResult).TakeError()));
 
             void* memory = ctx.arena->Allocate(sizeof(JsonObject), alignof(JsonObject));
             if (!memory)
@@ -883,7 +883,7 @@ namespace NGIN::Serialization
                 return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
                         MakeError(ctx, ParseErrorCode::OutOfMemory, "Object allocation failed")));
             }
-            auto* object = new (memory) JsonObject(allocator);
+            auto*          object       = new (memory) JsonObject(allocator);
             const UIntSize reserveCount = NextContainerCount(ctx);
             if (reserveCount > 0)
                 object->members.Reserve(reserveCount);
@@ -899,8 +899,8 @@ namespace NGIN::Serialization
             {
                 auto keyResult = ParseString(ctx);
                 if (!keyResult.HasValue())
-                    return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(keyResult.ErrorUnsafe())));
-                std::string_view key = keyResult.ValueUnsafe();
+                    return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(keyResult).TakeError()));
+                std::string_view key = keyResult.Value();
                 if (ctx.options.internKeys && ctx.document)
                 {
                     const std::string_view interned = ctx.document->InternString(key);
@@ -914,7 +914,7 @@ namespace NGIN::Serialization
 
                 auto colonResult = SkipWhitespaceAndComments(ctx);
                 if (!colonResult.HasValue())
-                    return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(colonResult.ErrorUnsafe())));
+                    return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(colonResult.Error())));
                 if (ctx.cursor.Peek() != ':')
                 {
                     return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
@@ -924,17 +924,17 @@ namespace NGIN::Serialization
 
                 auto valueSkip = SkipWhitespaceAndComments(ctx);
                 if (!valueSkip.HasValue())
-                    return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(valueSkip.ErrorUnsafe())));
+                    return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(valueSkip.Error())));
 
                 auto valueResult = ParseValue(ctx, allocator);
                 if (!valueResult.HasValue())
                     return valueResult;
 
-                object->members.PushBack(JsonMember {key, std::move(valueResult.ValueUnsafe())});
+                object->members.PushBack(JsonMember {key, std::move(valueResult).TakeValue()});
 
                 auto postResult = SkipWhitespaceAndComments(ctx);
                 if (!postResult.HasValue())
-                    return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(postResult.ErrorUnsafe())));
+                    return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(postResult.Error())));
 
                 const char next = ctx.cursor.Peek();
                 if (next == ',')
@@ -942,7 +942,7 @@ namespace NGIN::Serialization
                     ctx.cursor.Advance();
                     auto commaResult = SkipWhitespaceAndComments(ctx);
                     if (!commaResult.HasValue())
-                        return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(commaResult.ErrorUnsafe())));
+                        return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(commaResult.Error())));
                     if (ctx.cursor.Peek() == '}' && !ctx.options.allowTrailingCommas)
                     {
                         return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
@@ -967,7 +967,7 @@ namespace NGIN::Serialization
         {
             auto skipResult = SkipWhitespaceAndComments(ctx);
             if (!skipResult.HasValue())
-                return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(skipResult.ErrorUnsafe())));
+                return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(skipResult).TakeError()));
 
             const char c = ctx.cursor.Peek();
             if (c == 'n')
@@ -1002,10 +1002,7 @@ namespace NGIN::Serialization
             }
             if (c == '"')
             {
-                auto stringResult = ParseString(ctx);
-                if (!stringResult.HasValue())
-                    return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(stringResult.ErrorUnsafe())));
-                return NGIN::Utilities::Expected<JsonValue, ParseError>(JsonValue::MakeString(stringResult.ValueUnsafe()));
+                return ParseString(ctx).Transform([](const std::string_view value) { return JsonValue::MakeString(value); });
             }
             if (c == '{')
                 return ParseObject(ctx, allocator);
@@ -1013,10 +1010,7 @@ namespace NGIN::Serialization
                 return ParseArray(ctx, allocator);
             if (c == '-' || IsDigit(c))
             {
-                auto numberResult = ParseNumber(ctx);
-                if (!numberResult.HasValue())
-                    return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(numberResult.ErrorUnsafe())));
-                return NGIN::Utilities::Expected<JsonValue, ParseError>(JsonValue::MakeNumber(numberResult.ValueUnsafe()));
+                return ParseNumber(ctx).Transform([](const F64 value) { return JsonValue::MakeNumber(value); });
             }
             return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
                     MakeError(ctx, ParseErrorCode::UnexpectedCharacter, "Unexpected token")));
@@ -1134,8 +1128,8 @@ namespace NGIN::Serialization
             {
                 auto keyResult = ParseString(ctx);
                 if (!keyResult.HasValue())
-                    return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(keyResult.ErrorUnsafe())));
-                if (!reader.OnKey(keyResult.ValueUnsafe()))
+                    return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(keyResult.Error())));
+                if (!reader.OnKey(keyResult.Value()))
                 {
                     return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
                             MakeError(ctx, ParseErrorCode::HandlerRejected, "Handler rejected key")));
@@ -1245,8 +1239,8 @@ namespace NGIN::Serialization
             {
                 auto stringResult = ParseString(ctx);
                 if (!stringResult.HasValue())
-                    return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(stringResult.ErrorUnsafe())));
-                if (!reader.OnString(stringResult.ValueUnsafe()))
+                    return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(stringResult.Error())));
+                if (!reader.OnString(stringResult.Value()))
                     return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
                             MakeError(ctx, ParseErrorCode::HandlerRejected, "Handler rejected string")));
                 return {};
@@ -1259,8 +1253,8 @@ namespace NGIN::Serialization
             {
                 auto numberResult = ParseNumber(ctx);
                 if (!numberResult.HasValue())
-                    return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(numberResult.ErrorUnsafe())));
-                if (!reader.OnNumber(numberResult.ValueUnsafe()))
+                    return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(numberResult.Error())));
+                if (!reader.OnNumber(numberResult.Value()))
                     return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
                             MakeError(ctx, ParseErrorCode::HandlerRejected, "Handler rejected number")));
                 return {};
@@ -1374,7 +1368,7 @@ namespace NGIN::Serialization
         const UIntSize arenaBytes = options.arenaBytes != 0 ? options.arenaBytes : (input.size() * 2 + 4096);
         JsonDocument   document(arenaBytes);
 
-        const bool doPrecompute = ShouldPrecomputeContainers(options, static_cast<UIntSize>(input.size()));
+        const bool                         doPrecompute = ShouldPrecomputeContainers(options, static_cast<UIntSize>(input.size()));
         NGIN::Containers::Vector<UIntSize> containerCounts;
         if (doPrecompute)
         {
@@ -1391,11 +1385,11 @@ namespace NGIN::Serialization
 
             auto countResult = CountValue(countCtx, containerCounts);
             if (!countResult.HasValue())
-                return NGIN::Utilities::Expected<JsonDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(countResult.ErrorUnsafe())));
+                return NGIN::Utilities::Expected<JsonDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(countResult.Error())));
 
             auto tailResult = SkipWhitespaceAndComments(countCtx);
             if (!tailResult.HasValue())
-                return NGIN::Utilities::Expected<JsonDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(tailResult.ErrorUnsafe())));
+                return NGIN::Utilities::Expected<JsonDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(tailResult.Error())));
 
             if (!countCtx.cursor.IsEof())
             {
@@ -1419,13 +1413,13 @@ namespace NGIN::Serialization
         {
             auto valueResult = ParseValue(ctx, document.Allocator());
             if (!valueResult.HasValue())
-                return NGIN::Utilities::Expected<JsonDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(valueResult.ErrorUnsafe())));
+                return NGIN::Utilities::Expected<JsonDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(valueResult.Error())));
 
-            document.Root() = std::move(valueResult.ValueUnsafe());
+            document.Root() = std::move(valueResult.Value());
 
             auto tailResult = SkipWhitespaceAndComments(ctx);
             if (!tailResult.HasValue())
-                return NGIN::Utilities::Expected<JsonDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(tailResult.ErrorUnsafe())));
+                return NGIN::Utilities::Expected<JsonDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(tailResult.Error())));
         } catch (const std::bad_alloc&)
         {
             return NGIN::Utilities::Expected<JsonDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
@@ -1449,7 +1443,7 @@ namespace NGIN::Serialization
         const UIntSize arenaBytes      = inSituOptions.arenaBytes != 0 ? inSituOptions.arenaBytes : (input.size() * 2 + 4096);
         JsonDocument   document(arenaBytes);
 
-        const bool doPrecompute = ShouldPrecomputeContainers(inSituOptions, static_cast<UIntSize>(input.size()));
+        const bool                         doPrecompute = ShouldPrecomputeContainers(inSituOptions, static_cast<UIntSize>(input.size()));
         NGIN::Containers::Vector<UIntSize> containerCounts;
         if (doPrecompute)
         {
@@ -1466,11 +1460,11 @@ namespace NGIN::Serialization
 
             auto countResult = CountValue(countCtx, containerCounts);
             if (!countResult.HasValue())
-                return NGIN::Utilities::Expected<JsonDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(countResult.ErrorUnsafe())));
+                return NGIN::Utilities::Expected<JsonDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(countResult.Error())));
 
             auto tailResult = SkipWhitespaceAndComments(countCtx);
             if (!tailResult.HasValue())
-                return NGIN::Utilities::Expected<JsonDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(tailResult.ErrorUnsafe())));
+                return NGIN::Utilities::Expected<JsonDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(tailResult.Error())));
 
             if (!countCtx.cursor.IsEof())
             {
@@ -1494,13 +1488,13 @@ namespace NGIN::Serialization
         {
             auto valueResult = ParseValue(ctx, document.Allocator());
             if (!valueResult.HasValue())
-                return NGIN::Utilities::Expected<JsonDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(valueResult.ErrorUnsafe())));
+                return NGIN::Utilities::Expected<JsonDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(valueResult.Error())));
 
-            document.Root() = std::move(valueResult.ValueUnsafe());
+            document.Root() = std::move(valueResult.Value());
 
             auto tailResult = SkipWhitespaceAndComments(ctx);
             if (!tailResult.HasValue())
-                return NGIN::Utilities::Expected<JsonDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(tailResult.ErrorUnsafe())));
+                return NGIN::Utilities::Expected<JsonDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(tailResult.Error())));
         } catch (const std::bad_alloc&)
         {
             return NGIN::Utilities::Expected<JsonDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
@@ -1538,7 +1532,7 @@ namespace NGIN::Serialization
                 err.message = "Failed to read from reader";
                 return NGIN::Utilities::Expected<JsonDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(err)));
             }
-            const UIntSize readBytes = readResult.ValueUnsafe();
+            const UIntSize readBytes = readResult.Value();
             if (readBytes == 0)
                 break;
             for (UIntSize i = 0; i < readBytes; ++i)
@@ -1548,7 +1542,7 @@ namespace NGIN::Serialization
                               ? Parse(std::span<NGIN::Byte>(buffer.data(), buffer.Size()), options)
                               : Parse(std::span<const NGIN::Byte>(buffer.data(), buffer.Size()), options);
         if (result.HasValue())
-            result.ValueUnsafe().AdoptInput(std::move(buffer));
+            result.Value().AdoptInput(std::move(buffer));
         return result;
     }
 

@@ -22,21 +22,21 @@ namespace NGIN::Async
     {
         struct WhenAllSharedState final
         {
-            std::atomic<bool>               done {false};
-            std::atomic<NGIN::UIntSize>     remaining {0};
-            NGIN::Execution::ExecutorRef    exec {};
-            std::coroutine_handle<>         awaiting {};
-            CancellationRegistration        cancellationRegistration {};
+            std::atomic<bool>            done {false};
+            std::atomic<NGIN::UIntSize>  remaining {0};
+            NGIN::Execution::ExecutorRef exec {};
+            std::coroutine_handle<>      awaiting {};
+            CancellationRegistration     cancellationRegistration {};
 
-            NGIN::Sync::SpinLock            errorLock {};
-            AsyncError                      firstError {};
-            bool                            hasError {false};
+            NGIN::Sync::SpinLock errorLock {};
+            AsyncError           firstError {};
+            bool                 hasError {false};
         };
 
         [[nodiscard]] inline bool CancelWhenAll(void* ctx) noexcept
         {
-            auto* state = static_cast<WhenAllSharedState*>(ctx);
-            bool expected = false;
+            auto* state    = static_cast<WhenAllSharedState*>(ctx);
+            bool  expected = false;
             if (!state->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
             {
                 return false;
@@ -45,7 +45,7 @@ namespace NGIN::Async
             if (!state->hasError)
             {
                 state->firstError = MakeAsyncError(AsyncErrorCode::Canceled);
-                state->hasError = true;
+                state->hasError   = true;
             }
             return true;
         }
@@ -101,8 +101,8 @@ namespace NGIN::Async
                     NGIN::Sync::LockGuard guard(state->errorLock);
                     if (!state->hasError)
                     {
-                        state->firstError = result.error();
-                        state->hasError = true;
+                        state->firstError = result.Error();
+                        state->hasError   = true;
                     }
                 }
             }
@@ -129,9 +129,9 @@ namespace NGIN::Async
         template<typename... TTasks>
         struct WhenAllAwaiter final
         {
-            TaskContext&                       ctx;
+            TaskContext&                        ctx;
             std::shared_ptr<WhenAllSharedState> state;
-            std::tuple<TTasks&...>             tasks;
+            std::tuple<TTasks&...>              tasks;
 
             bool await_ready() const noexcept
             {
@@ -156,15 +156,15 @@ namespace NGIN::Async
                     return false;
                 }
 
-                state->exec      = ctx.GetExecutor();
-                state->awaiting  = awaiting;
+                state->exec     = ctx.GetExecutor();
+                state->awaiting = awaiting;
                 state->remaining.store(static_cast<NGIN::UIntSize>(sizeof...(TTasks)), std::memory_order_release);
 
                 ctx.GetCancellationToken().Register(
                         state->cancellationRegistration, state->exec, awaiting, &CancelWhenAll, state.get());
 
                 std::weak_ptr<WhenAllSharedState> weakState = state;
-                auto& exec                                  = state->exec;
+                auto&                             exec      = state->exec;
 
                 std::apply(
                         [&](auto&... t) {
@@ -209,7 +209,7 @@ namespace NGIN::Async
                 co_await detail::when_all::WhenAllAwaiter<TTasks...> {ctx, state, std::tuple<TTasks&...>(tasks...)};
         if (!waitResult)
         {
-            co_await Task<void>::ReturnError(waitResult.error());
+            co_await Task<void>::ReturnError(waitResult.Error());
             co_return;
         }
 
@@ -219,7 +219,7 @@ namespace NGIN::Async
             auto result = taskPtr->Get();
             if (!result)
             {
-                co_await Task<void>::ReturnError(result.error());
+                co_await Task<void>::ReturnError(result.Error());
                 co_return;
             }
         }
@@ -235,16 +235,16 @@ namespace NGIN::Async
         {
             co_return NGIN::Utilities::Unexpected(MakeAsyncError(AsyncErrorCode::Canceled));
         }
-        auto state = std::make_shared<detail::when_all::WhenAllSharedState>();
+        auto state      = std::make_shared<detail::when_all::WhenAllSharedState>();
         auto waitResult = co_await detail::when_all::WhenAllAwaiter<Task<T>...> {ctx,
-                                                                               state,
-                                                                               std::tuple<Task<T>&...>(tasks...)};
+                                                                                 state,
+                                                                                 std::tuple<Task<T>&...>(tasks...)};
         if (!waitResult)
         {
-            co_return NGIN::Utilities::Unexpected(waitResult.error());
+            co_return NGIN::Utilities::Unexpected(waitResult.Error());
         }
 
-        auto results = std::tuple<AsyncExpected<T>...> {tasks.Get()...};
+        auto       results = std::tuple<AsyncExpected<T>...> {tasks.Get()...};
         AsyncError firstError {};
         bool       failed = false;
         std::apply(
@@ -252,8 +252,8 @@ namespace NGIN::Async
                     (([&] {
                          if (!failed && !r)
                          {
-                             firstError = r.error();
-                             failed = true;
+                             firstError = r.Error();
+                             failed     = true;
                          }
                      }()),
                      ...);

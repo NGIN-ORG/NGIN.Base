@@ -16,7 +16,7 @@ namespace
         REQUIRE(tempDirectory.HasValue());
 
         const auto uniqueValue = std::chrono::steady_clock::now().time_since_epoch().count();
-        const auto path        = tempDirectory.ValueUnsafe().Join("ngin_base_vfs_test_" + std::to_string(uniqueValue));
+        const auto path        = tempDirectory.Value().Join("ngin_base_vfs_test_" + std::to_string(uniqueValue));
 
         REQUIRE(fs.CreateDirectories(path).HasValue());
         return path;
@@ -53,32 +53,32 @@ TEST_CASE("IO.VirtualFileSystem forwards path-returning operations", "[IO][Virtu
 
     auto canonical = vfs.Canonical(virtualLink);
     REQUIRE(canonical.HasValue());
-    REQUIRE(canonical.ValueUnsafe().View() == virtualFile.View());
+    REQUIRE(canonical.Value().View() == virtualFile.View());
 
     auto weaklyCanonical = vfs.WeaklyCanonical(virtualRoot.Join("missing/child.txt"));
     REQUIRE(weaklyCanonical.HasValue());
-    REQUIRE(weaklyCanonical.ValueUnsafe().View() == virtualRoot.Join("missing/child.txt").LexicallyNormal().View());
+    REQUIRE(weaklyCanonical.Value().View() == virtualRoot.Join("missing/child.txt").LexicallyNormal().View());
 
     auto symlinkTarget = vfs.ReadSymlink(virtualLink);
     REQUIRE(symlinkTarget.HasValue());
-    REQUIRE(symlinkTarget.ValueUnsafe().View() == virtualFile.View());
+    REQUIRE(symlinkTarget.Value().View() == virtualFile.View());
 
     auto sameFile = vfs.SameFile(virtualFile, virtualHard);
     REQUIRE(sameFile.HasValue());
-    REQUIRE(sameFile.ValueUnsafe());
+    REQUIRE(sameFile.Value());
 
     auto tempDirectory = vfs.CreateTempDirectory(virtualRoot, "dir_");
     REQUIRE(tempDirectory.HasValue());
     auto tempFile = vfs.CreateTempFile(virtualRoot, "file_");
     REQUIRE(tempFile.HasValue());
-    REQUIRE(vfs.Exists(tempDirectory.ValueUnsafe()).ValueUnsafe());
-    REQUIRE(vfs.Exists(tempFile.ValueUnsafe()).ValueUnsafe());
+    REQUIRE(vfs.Exists(tempDirectory.Value()).Value());
+    REQUIRE(vfs.Exists(tempFile.Value()).Value());
 
     REQUIRE(NGIN::IO::WriteAllText(vfs, virtualReplace, "replacement").HasValue());
     REQUIRE(vfs.ReplaceFile(virtualReplace, virtualFile).HasValue());
     auto text = NGIN::IO::ReadAllText(vfs, virtualFile);
     REQUIRE(text.HasValue());
-    REQUIRE(std::string(text.ValueUnsafe().Data(), text.ValueUnsafe().Size()) == "replacement");
+    REQUIRE(std::string(text.Value().Data(), text.Value().Size()) == "replacement");
 
     RemoveTempDir(backingFs, realRoot);
 }
@@ -103,11 +103,11 @@ TEST_CASE("IO.VirtualFileSystem directory handles scope relative operations", "[
     auto directory = vfs.OpenDirectory(nestedDir);
     REQUIRE(directory.HasValue());
 
-    auto exists = directory.ValueUnsafe()->Exists(NGIN::IO::Path {"seed.txt"});
+    auto exists = directory.Value()->Exists(NGIN::IO::Path {"seed.txt"});
     REQUIRE(exists.HasValue());
-    REQUIRE(exists.ValueUnsafe());
+    REQUIRE(exists.Value());
 
-    auto child = directory.ValueUnsafe()->OpenDirectory(NGIN::IO::Path {"child"});
+    auto child = directory.Value()->OpenDirectory(NGIN::IO::Path {"child"});
     REQUIRE(child.HasValue());
 
     NGIN::IO::FileOpenOptions openOptions;
@@ -115,31 +115,31 @@ TEST_CASE("IO.VirtualFileSystem directory handles scope relative operations", "[
     openOptions.share       = NGIN::IO::FileShare::Read;
     openOptions.disposition = NGIN::IO::FileCreateDisposition::CreateAlways;
 
-    auto openedFile = directory.ValueUnsafe()->OpenFile(NGIN::IO::Path {"from_handle.txt"}, openOptions);
+    auto openedFile = directory.Value()->OpenFile(NGIN::IO::Path {"from_handle.txt"}, openOptions);
     REQUIRE(openedFile.HasValue());
 
     const std::string payload = "virtual-dir-handle";
     const auto        writeResult =
-            openedFile.ValueUnsafe()->Write({reinterpret_cast<const NGIN::Byte*>(payload.data()), payload.size()});
+            openedFile.Value()->Write({reinterpret_cast<const NGIN::Byte*>(payload.data()), payload.size()});
     REQUIRE(writeResult.HasValue());
-    REQUIRE(writeResult.ValueUnsafe() == payload.size());
-    openedFile.ValueUnsafe()->Close();
+    REQUIRE(writeResult.Value() == payload.size());
+    openedFile.Value()->Close();
 
     auto writtenText = NGIN::IO::ReadAllText(vfs, nestedDir.Join("from_handle.txt"));
     REQUIRE(writtenText.HasValue());
-    REQUIRE(std::string(writtenText.ValueUnsafe().Data(), writtenText.ValueUnsafe().Size()) == payload);
+    REQUIRE(std::string(writtenText.Value().Data(), writtenText.Value().Size()) == payload);
 
-    REQUIRE(directory.ValueUnsafe()->CreateDirectory(NGIN::IO::Path {"created"}).HasValue());
-    REQUIRE(vfs.Exists(nestedDir.Join("created")).ValueUnsafe());
-    REQUIRE(directory.ValueUnsafe()->RemoveDirectory(NGIN::IO::Path {"created"}).HasValue());
-    REQUIRE_FALSE(vfs.Exists(nestedDir.Join("created")).ValueUnsafe());
+    REQUIRE(directory.Value()->CreateDirectory(NGIN::IO::Path {"created"}).HasValue());
+    REQUIRE(vfs.Exists(nestedDir.Join("created")).Value());
+    REQUIRE(directory.Value()->RemoveDirectory(NGIN::IO::Path {"created"}).HasValue());
+    REQUIRE_FALSE(vfs.Exists(nestedDir.Join("created")).Value());
 
-    REQUIRE(directory.ValueUnsafe()->RemoveFile(NGIN::IO::Path {"from_handle.txt"}).HasValue());
-    REQUIRE_FALSE(vfs.Exists(nestedDir.Join("from_handle.txt")).ValueUnsafe());
+    REQUIRE(directory.Value()->RemoveFile(NGIN::IO::Path {"from_handle.txt"}).HasValue());
+    REQUIRE_FALSE(vfs.Exists(nestedDir.Join("from_handle.txt")).Value());
 
-    auto escaped = directory.ValueUnsafe()->Exists(NGIN::IO::Path {"../outside.txt"});
+    auto escaped = directory.Value()->Exists(NGIN::IO::Path {"../outside.txt"});
     REQUIRE_FALSE(escaped.HasValue());
-    REQUIRE(escaped.ErrorUnsafe().code == NGIN::IO::IOErrorCode::InvalidPath);
+    REQUIRE(escaped.Error().code == NGIN::IO::IOErrorCode::InvalidPath);
 
     RemoveTempDir(backingFs, realRoot);
 }

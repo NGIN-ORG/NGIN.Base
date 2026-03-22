@@ -6,14 +6,14 @@
 #include <NGIN/Async/Task.hpp>
 #include <NGIN/Async/TaskContext.hpp>
 #include <NGIN/Execution/ExecutorRef.hpp>
+#include <NGIN/Execution/ThisThread.hpp>
 #include <NGIN/Execution/Thread.hpp>
 #include <NGIN/Execution/ThreadName.hpp>
-#include <NGIN/Execution/ThisThread.hpp>
 
 #if defined(NGIN_PLATFORM_WINDOWS)
+#include <NGIN/Net/Sockets/UdpSocket.hpp>
 #include <Windows.h>
 #include <ioapiset.h>
-#include <NGIN/Net/Sockets/UdpSocket.hpp>
 #endif
 
 #include <algorithm>
@@ -23,10 +23,10 @@
 #include <cstring>
 #include <limits>
 #include <mutex>
-#include <utility>
-#include <unordered_map>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 #if defined(__linux__)
@@ -293,9 +293,9 @@ namespace NGIN::Net
 
             for (int i = 0; i < 63; ++i)
             {
-                bytes = 0;
-                key = 0;
-                overlapped = nullptr;
+                bytes              = 0;
+                key                = 0;
+                overlapped         = nullptr;
                 const BOOL drainOk = ::GetQueuedCompletionStatus(m_iocp, &bytes, &key, &overlapped, 0);
                 if (!overlapped)
                 {
@@ -413,11 +413,11 @@ namespace NGIN::Net
             if (m_epollFd >= 0)
             {
                 std::array<epoll_event, 64> events {};
-                const int timeout = timeoutMs > 0 ? timeoutMs : 0;
-                const int ready = ::epoll_wait(m_epollFd,
-                                               events.data(),
-                                               static_cast<int>(events.size()),
-                                               timeout);
+                const int                   timeout = timeoutMs > 0 ? timeoutMs : 0;
+                const int                   ready   = ::epoll_wait(m_epollFd,
+                                                                   events.data(),
+                                                                   static_cast<int>(events.size()),
+                                                                   timeout);
                 if (ready <= 0)
                 {
                     return;
@@ -473,18 +473,18 @@ namespace NGIN::Net
             if (m_kqueueFd >= 0)
             {
                 std::array<kevent, 64> events {};
-                timespec timeout {};
+                timespec               timeout {};
                 if (timeoutMs > 0)
                 {
-                    timeout.tv_sec = timeoutMs / 1000;
+                    timeout.tv_sec  = timeoutMs / 1000;
                     timeout.tv_nsec = (timeoutMs % 1000) * 1000000L;
                 }
-                const int              ready = ::kevent(m_kqueueFd,
-                                            nullptr,
-                                            0,
-                                            events.data(),
-                                            static_cast<int>(events.size()),
-                                            &timeout);
+                const int ready = ::kevent(m_kqueueFd,
+                                           nullptr,
+                                           0,
+                                           events.data(),
+                                           static_cast<int>(events.size()),
+                                           &timeout);
                 if (ready <= 0)
                 {
                     return;
@@ -498,13 +498,13 @@ namespace NGIN::Net
 
                 thread_local std::unordered_map<int, KqueueReady> tlsReadyEvents {};
                 std::unordered_map<int, KqueueReady>              localReadyEvents {};
-                auto&                                            readyEvents = useThreadLocal ? tlsReadyEvents : localReadyEvents;
+                auto&                                             readyEvents = useThreadLocal ? tlsReadyEvents : localReadyEvents;
                 readyEvents.clear();
                 readyEvents.reserve(static_cast<std::size_t>(ready));
                 for (int i = 0; i < ready; ++i)
                 {
-                    const auto fd = static_cast<int>(events[i].ident);
-                    auto& entry = readyEvents[fd];
+                    const auto fd    = static_cast<int>(events[i].ident);
+                    auto&      entry = readyEvents[fd];
                     if (events[i].filter == EVFILT_READ)
                     {
                         entry.read = true;
@@ -515,7 +515,7 @@ namespace NGIN::Net
                     }
                     if (events[i].flags & (EV_EOF | EV_ERROR))
                     {
-                        entry.read = true;
+                        entry.read  = true;
                         entry.write = true;
                     }
                 }
@@ -540,7 +540,7 @@ namespace NGIN::Net
                         continue;
                     }
 
-                    const bool readyRead = waiter->wantRead && it->second.read;
+                    const bool readyRead  = waiter->wantRead && it->second.read;
                     const bool readyWrite = waiter->wantWrite && it->second.write;
                     if (!readyRead && !readyWrite)
                     {
@@ -591,7 +591,7 @@ namespace NGIN::Net
             timeval timeout {};
             if (timeoutMs > 0)
             {
-                timeout.tv_sec = timeoutMs / 1000;
+                timeout.tv_sec  = timeoutMs / 1000;
                 timeout.tv_usec = (timeoutMs % 1000) * 1000;
             }
 
@@ -683,8 +683,8 @@ namespace NGIN::Net
             int writers {0};
         };
 
-        int                                   m_kqueueFd {-1};
-        std::unordered_map<int, KqueueWatch>  m_kqueueWatches {};
+        int                                  m_kqueueFd {-1};
+        std::unordered_map<int, KqueueWatch> m_kqueueWatches {};
 #endif
 
     private:
@@ -809,8 +809,8 @@ namespace NGIN::Net
                 return;
             }
 
-            auto& watch        = m_kqueueWatches[fd];
-            const int prevRead = watch.readers;
+            auto&     watch     = m_kqueueWatches[fd];
+            const int prevRead  = watch.readers;
             const int prevWrite = watch.writers;
 
             if (waiter->wantRead)
@@ -868,8 +868,8 @@ namespace NGIN::Net
                 return;
             }
 
-            auto& watch        = it->second;
-            const int prevRead = watch.readers;
+            auto&     watch     = it->second;
+            const int prevRead  = watch.readers;
             const int prevWrite = watch.writers;
 
             if (waiter->wantRead && watch.readers > 0)
@@ -1567,7 +1567,7 @@ namespace NGIN::Net
                 }
 
                 const AddressFamily family = detail::GetSocketFamily(*listenHandle);
-                NetError createError {};
+                NetError            createError {};
                 accepted = detail::CreateSocket(family, SOCK_STREAM, IPPROTO_TCP, true, createError);
                 if (createError.code != NetErrorCode::Ok)
                 {
@@ -1753,10 +1753,10 @@ namespace NGIN::Net
             awaiter.wantRead = true;
             awaiter.exec     = ctx.GetExecutor();
             awaiter.token    = token;
-            auto result = co_await awaiter;
+            auto result      = co_await awaiter;
             if (!result)
             {
-                co_await NGIN::Async::Task<void>::ReturnError(result.error());
+                co_await NGIN::Async::Task<void>::ReturnError(result.Error());
                 co_return;
             }
             co_return;
@@ -1773,10 +1773,10 @@ namespace NGIN::Net
             awaiter.wantWrite = true;
             awaiter.exec      = ctx.GetExecutor();
             awaiter.token     = token;
-            auto result = co_await awaiter;
+            auto result       = co_await awaiter;
             if (!result)
             {
-                co_await NGIN::Async::Task<void>::ReturnError(result.error());
+                co_await NGIN::Async::Task<void>::ReturnError(result.Error());
                 co_return;
             }
             co_return;
@@ -1857,10 +1857,10 @@ namespace NGIN::Net
             awaiter.remoteEndpoint = remoteEndpoint;
             awaiter.exec           = ctx.GetExecutor();
             awaiter.token          = token;
-            auto result = co_await awaiter;
+            auto result            = co_await awaiter;
             if (!result)
             {
-                co_await NGIN::Async::Task<void>::ReturnError(result.error());
+                co_await NGIN::Async::Task<void>::ReturnError(result.Error());
                 co_return;
             }
             co_return;

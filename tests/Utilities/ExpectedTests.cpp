@@ -17,7 +17,7 @@ namespace
         {
         }
 
-        MoveOnly(const MoveOnly&) = delete;
+        MoveOnly(const MoveOnly&)            = delete;
         MoveOnly& operator=(const MoveOnly&) = delete;
 
         MoveOnly(MoveOnly&& other) noexcept
@@ -28,7 +28,7 @@ namespace
 
         MoveOnly& operator=(MoveOnly&& other) noexcept
         {
-            value = other.value;
+            value       = other.value;
             other.value = -1;
             return *this;
         }
@@ -50,7 +50,7 @@ namespace
 
         NoCopyAssign& operator=(const NoCopyAssign&) = delete;
 
-        NoCopyAssign(NoCopyAssign&&) = default;
+        NoCopyAssign(NoCopyAssign&&)            = default;
         NoCopyAssign& operator=(NoCopyAssign&&) = default;
     };
 
@@ -63,7 +63,7 @@ namespace
         {
         }
 
-        NoMoveAssign(const NoMoveAssign&) = delete;
+        NoMoveAssign(const NoMoveAssign&)            = delete;
         NoMoveAssign& operator=(const NoMoveAssign&) = delete;
 
         NoMoveAssign(NoMoveAssign&& other) noexcept
@@ -98,13 +98,13 @@ namespace
         }
 
         CountingError& operator=(const CountingError&) = default;
-        CountingError& operator=(CountingError&&) = default;
+        CountingError& operator=(CountingError&&)      = default;
 
         ~CountingError() { ++s_destructCount; }
 
         static void Reset() { s_destructCount = 0; }
     };
-}
+}// namespace
 
 TEST_CASE("Expected<T,E> basic value construction")
 {
@@ -196,17 +196,82 @@ TEST_CASE("Expected<T,E> rvalue Value/Error accessors move")
     using ExpectedValue = NGIN::Utilities::Expected<MoveOnly, int>;
     ExpectedValue a {NGIN::Utilities::InPlaceType<MoveOnly> {}, 42};
 
-    MoveOnly extracted = std::move(a).Value();
+    MoveOnly extracted = std::move(a).TakeValue();
     REQUIRE(extracted.value == 42);
     REQUIRE(a.HasValue());
-    REQUIRE(a.ValueUnsafe().value == -1);
+    REQUIRE(a.Value().value == -1);
 
     using ExpectedError = NGIN::Utilities::Expected<int, CountingError>;
     ExpectedError b {NGIN::Utilities::Unexpected<CountingError> {CountingError {7}}};
-    CountingError extractedError = std::move(b).Error();
+    CountingError extractedError = std::move(b).TakeError();
     REQUIRE(extractedError.value == 7);
     REQUIRE_FALSE(b.HasValue());
-    REQUIRE(b.ErrorUnsafe().value == -1);
+    REQUIRE(b.Error().value == -1);
+}
+
+TEST_CASE("Expected<T,E> TakeError supports move-only error payloads")
+{
+    using ExpectedError = NGIN::Utilities::Expected<int, MoveOnly>;
+
+    ExpectedError result {NGIN::Utilities::Unexpected<MoveOnly> {MoveOnly {19}}};
+    MoveOnly      extracted = std::move(result).TakeError();
+    REQUIRE(extracted.value == 19);
+    REQUIRE_FALSE(result.HasValue());
+    REQUIRE(result.Error().value == -1);
+}
+
+TEST_CASE("Expected<T,E> Transform maps value and preserves error")
+{
+    using Expected = NGIN::Utilities::Expected<int, int>;
+
+    Expected value {3};
+    auto     transformed = value.Transform([](const int input) { return input * 2; });
+    REQUIRE(transformed.HasValue());
+    REQUIRE(transformed.Value() == 6);
+
+    Expected error {NGIN::Utilities::Unexpected<int> {9}};
+    auto     preserved = error.Transform([](const int input) { return input * 2; });
+    REQUIRE_FALSE(preserved.HasValue());
+    REQUIRE(preserved.Error() == 9);
+}
+
+TEST_CASE("Expected<T,E> AndThen chains expected results")
+{
+    using Expected = NGIN::Utilities::Expected<int, int>;
+
+    auto result = Expected {4}.AndThen([](const int input) { return Expected {input + 1}; });
+    REQUIRE(result.HasValue());
+    REQUIRE(result.Value() == 5);
+
+    auto failed = Expected {NGIN::Utilities::Unexpected<int> {7}}.AndThen([](const int input) { return Expected {input + 1}; });
+    REQUIRE_FALSE(failed.HasValue());
+    REQUIRE(failed.Error() == 7);
+}
+
+TEST_CASE("Expected<T,E> OrElse recovers from error")
+{
+    using Expected = NGIN::Utilities::Expected<int, int>;
+
+    auto recovered = Expected {NGIN::Utilities::Unexpected<int> {5}}.OrElse([](const int error) { return Expected {error + 10}; });
+    REQUIRE(recovered.HasValue());
+    REQUIRE(recovered.Value() == 15);
+
+    auto preserved = Expected {3}.OrElse([](const int error) { return Expected {error + 10}; });
+    REQUIRE(preserved.HasValue());
+    REQUIRE(preserved.Value() == 3);
+}
+
+TEST_CASE("Expected<T,E> TransformError changes error type")
+{
+    using Expected = NGIN::Utilities::Expected<int, int>;
+
+    auto mapped = Expected {NGIN::Utilities::Unexpected<int> {4}}.TransformError([](const int error) { return CountingError {error + 1}; });
+    REQUIRE_FALSE(mapped.HasValue());
+    REQUIRE(mapped.Error().value == 5);
+
+    auto preserved = Expected {11}.TransformError([](const int error) { return CountingError {error + 1}; });
+    REQUIRE(preserved.HasValue());
+    REQUIRE(preserved.Value() == 11);
 }
 
 TEST_CASE("Expected<T,E> Swap")
@@ -301,6 +366,30 @@ TEST_CASE("Expected<void,E> ErrorOr")
 
     REQUIRE(ok.ErrorOr(9) == 9);
     REQUIRE(err.ErrorOr(9) == 5);
+}
+
+TEST_CASE("Expected<void,E> combinators")
+{
+    using ExpectedInt  = NGIN::Utilities::Expected<int, int>;
+    using ExpectedVoid = NGIN::Utilities::Expected<void, int>;
+
+    auto transformed = ExpectedVoid {}.Transform([]() { return 7; });
+    REQUIRE(transformed.HasValue());
+    REQUIRE(transformed.Value() == 7);
+
+    auto chained = ExpectedVoid {}.AndThen([]() { return ExpectedInt {9}; });
+    REQUIRE(chained.HasValue());
+    REQUIRE(chained.Value() == 9);
+
+    auto recovered = ExpectedVoid {NGIN::Utilities::Unexpected<int> {3}}.OrElse([](const int) { return ExpectedVoid {}; });
+    REQUIRE(recovered.HasValue());
+
+    auto mappedError = ExpectedVoid {NGIN::Utilities::Unexpected<int> {6}}.TransformError([](const int error) { return CountingError {error}; });
+    REQUIRE_FALSE(mappedError.HasValue());
+    REQUIRE(mappedError.Error().value == 6);
+
+    auto movedError = std::move(ExpectedVoid {NGIN::Utilities::Unexpected<int> {12}}).TakeError();
+    REQUIRE(movedError == 12);
 }
 
 TEST_CASE("Expected<void,E> Swap")

@@ -16,35 +16,34 @@ namespace NGIN::Net::Transport
     {
     public:
         UdpDatagramChannel(UdpSocket&& socket, NetworkDriver& driver) noexcept
-            : m_socket(std::move(socket))
-            , m_driver(&driver)
+            : m_socket(std::move(socket)), m_driver(&driver)
         {
         }
 
-        NGIN::Async::Task<void> SendAsync(NGIN::Async::TaskContext& ctx,
-                                          NGIN::Net::Endpoint remoteEndpoint,
-                                          NGIN::Net::ConstByteSpan payload,
+        NGIN::Async::Task<void> SendAsync(NGIN::Async::TaskContext&      ctx,
+                                          NGIN::Net::Endpoint            remoteEndpoint,
+                                          NGIN::Net::ConstByteSpan       payload,
                                           NGIN::Async::CancellationToken token) override
         {
             return SendImpl(ctx, m_socket, m_driver, remoteEndpoint, payload, token);
         }
 
-        NGIN::Async::Task<ReceivedDatagram> ReceiveAsync(NGIN::Async::TaskContext& ctx,
-                                                         NGIN::Net::Buffer& receiveBuffer,
+        NGIN::Async::Task<ReceivedDatagram> ReceiveAsync(NGIN::Async::TaskContext&      ctx,
+                                                         NGIN::Net::Buffer&             receiveBuffer,
                                                          NGIN::Async::CancellationToken token) override
         {
             return ReceiveImpl(ctx, m_socket, m_driver, receiveBuffer, token);
         }
 
-        [[nodiscard]] UdpSocket& Socket() noexcept { return m_socket; }
+        [[nodiscard]] UdpSocket&       Socket() noexcept { return m_socket; }
         [[nodiscard]] const UdpSocket& Socket() const noexcept { return m_socket; }
 
     private:
-        static NGIN::Async::Task<void> SendImpl(NGIN::Async::TaskContext& ctx,
-                                                UdpSocket& socket,
-                                                NetworkDriver* driver,
-                                                NGIN::Net::Endpoint remoteEndpoint,
-                                                NGIN::Net::ConstByteSpan payload,
+        static NGIN::Async::Task<void> SendImpl(NGIN::Async::TaskContext&      ctx,
+                                                UdpSocket&                     socket,
+                                                NetworkDriver*                 driver,
+                                                NGIN::Net::Endpoint            remoteEndpoint,
+                                                NGIN::Net::ConstByteSpan       payload,
                                                 NGIN::Async::CancellationToken token)
         {
             if (!driver)
@@ -58,16 +57,16 @@ namespace NGIN::Net::Transport
             auto result = co_await task;
             if (!result)
             {
-                co_await NGIN::Async::Task<void>::ReturnError(result.error());
+                co_await NGIN::Async::Task<void>::ReturnError(result.Error());
                 co_return;
             }
             co_return;
         }
 
-        static NGIN::Async::Task<ReceivedDatagram> ReceiveImpl(NGIN::Async::TaskContext& ctx,
-                                                               UdpSocket& socket,
-                                                               NetworkDriver* driver,
-                                                               NGIN::Net::Buffer& receiveBuffer,
+        static NGIN::Async::Task<ReceivedDatagram> ReceiveImpl(NGIN::Async::TaskContext&      ctx,
+                                                               UdpSocket&                     socket,
+                                                               NetworkDriver*                 driver,
+                                                               NGIN::Net::Buffer&             receiveBuffer,
                                                                NGIN::Async::CancellationToken token)
         {
             if (!driver)
@@ -88,15 +87,15 @@ namespace NGIN::Net::Transport
             auto result = co_await task;
             if (!result)
             {
-                co_return NGIN::Utilities::Unexpected(result.error());
+                co_return NGIN::Utilities::Unexpected(result.Error());
             }
 
             receiveBuffer.size = result->bytesReceived;
 
             ReceivedDatagram datagram {};
             datagram.remoteEndpoint = result->remoteEndpoint;
-            datagram.bytesReceived = result->bytesReceived;
-            datagram.payload = NGIN::Net::ConstByteSpan {receiveBuffer.data, result->bytesReceived};
+            datagram.bytesReceived  = result->bytesReceived;
+            datagram.payload        = NGIN::Net::ConstByteSpan {receiveBuffer.data, result->bytesReceived};
             co_return datagram;
         }
 

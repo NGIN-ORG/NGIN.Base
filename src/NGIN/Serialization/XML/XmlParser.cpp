@@ -22,15 +22,15 @@ namespace NGIN::Serialization
 
         struct XmlParseContext
         {
-            InputCursor     cursor;
-            XmlParseOptions options;
-            XmlArena*       arena {nullptr};
-            char*           mutableBase {nullptr};
-            char*           mutableEnd {nullptr};
-            UIntSize        depth {0};
+            InputCursor                                             cursor;
+            XmlParseOptions                                         options;
+            XmlArena*                                               arena {nullptr};
+            char*                                                   mutableBase {nullptr};
+            char*                                                   mutableEnd {nullptr};
+            UIntSize                                                depth {0};
             const NGIN::Containers::Vector<struct XmlElementCount>* elementCounts {nullptr};
-            UIntSize        elementIndex {0};
-            XmlDocument*    document {nullptr};
+            UIntSize                                                elementIndex {0};
+            XmlDocument*                                            document {nullptr};
         };
 
         struct XmlElementCount
@@ -244,7 +244,7 @@ namespace NGIN::Serialization
                 }
                 output = static_cast<char*>(memory);
             }
-            char* write  = output;
+            char* write = output;
 
             const char* data = input.data();
             const char* end  = data + input.size();
@@ -374,7 +374,7 @@ namespace NGIN::Serialization
                 }
                 output = static_cast<char*>(memory);
             }
-            char* write  = output;
+            char* write = output;
 
             bool inSpace = false;
             for (char c: input)
@@ -459,7 +459,7 @@ namespace NGIN::Serialization
             auto decoded = DecodeEntitiesInternal(ctx, raw);
             if (!decoded.HasValue())
                 return decoded;
-            return NormalizeWhitespaceInternal(ctx, decoded.ValueUnsafe());
+            return NormalizeWhitespaceInternal(ctx, decoded.Value());
         }
 
         NGIN::Utilities::Expected<void, ParseError> SkipAttributeValueRaw(XmlParseContext& ctx)
@@ -510,7 +510,7 @@ namespace NGIN::Serialization
                     static_cast<UIntSize>(ctx.cursor.CurrentPtr() - start) > 0);
         }
 
-        NGIN::Utilities::Expected<void, ParseError> CountElement(XmlParseContext& ctx,
+        NGIN::Utilities::Expected<void, ParseError> CountElement(XmlParseContext&                           ctx,
                                                                  NGIN::Containers::Vector<XmlElementCount>& elementCounts)
         {
             if (ctx.depth >= ctx.options.maxDepth)
@@ -529,9 +529,9 @@ namespace NGIN::Serialization
 
             auto nameResult = ParseName(ctx);
             if (!nameResult.HasValue())
-                return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(nameResult.ErrorUnsafe())));
+                return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(nameResult.Error())));
 
-            const std::string_view elementName = nameResult.ValueUnsafe();
+            const std::string_view elementName = nameResult.Value();
             const UIntSize         countIndex  = elementCounts.Size();
             elementCounts.PushBack(XmlElementCount {});
 
@@ -555,7 +555,7 @@ namespace NGIN::Serialization
 
                 auto attrNameResult = ParseName(ctx);
                 if (!attrNameResult.HasValue())
-                    return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(attrNameResult.ErrorUnsafe())));
+                    return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(attrNameResult.Error())));
 
                 SkipWhitespace(ctx.cursor);
                 if (ctx.cursor.Peek() != '=')
@@ -582,7 +582,7 @@ namespace NGIN::Serialization
                         ctx.cursor.Advance(2);
                         auto endNameResult = ParseName(ctx);
                         if (!endNameResult.HasValue())
-                            return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(endNameResult.ErrorUnsafe())));
+                            return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(endNameResult.Error())));
                         SkipWhitespace(ctx.cursor);
                         if (ctx.cursor.Peek() != '>')
                         {
@@ -590,7 +590,7 @@ namespace NGIN::Serialization
                                     MakeError(ctx, ParseErrorCode::InvalidToken, "Expected '>'")));
                         }
                         ctx.cursor.Advance();
-                        if (endNameResult.ValueUnsafe() != elementName)
+                        if (endNameResult.Value() != elementName)
                         {
                             return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
                                     MakeError(ctx, ParseErrorCode::MismatchedTag, "Mismatched end tag")));
@@ -657,8 +657,8 @@ namespace NGIN::Serialization
 
                 auto textResult = SkipTextRaw(ctx);
                 if (!textResult.HasValue())
-                    return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(textResult.ErrorUnsafe())));
-                if (textResult.ValueUnsafe())
+                    return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(textResult.Error())));
+                if (textResult.Value())
                     ++childCount;
             }
 
@@ -666,7 +666,7 @@ namespace NGIN::Serialization
                     MakeError(ctx, ParseErrorCode::UnexpectedEnd, "Unexpected end of XML")));
         }
 
-        NGIN::Utilities::Expected<void, ParseError> CountDocument(XmlParseContext& ctx,
+        NGIN::Utilities::Expected<void, ParseError> CountDocument(XmlParseContext&                           ctx,
                                                                   NGIN::Containers::Vector<XmlElementCount>& elementCounts)
         {
             SkipWhitespace(ctx.cursor);
@@ -742,9 +742,9 @@ namespace NGIN::Serialization
 
             auto nameResult = ParseName(ctx);
             if (!nameResult.HasValue())
-                return NGIN::Utilities::Expected<XmlElement*, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(nameResult.ErrorUnsafe())));
+                return NGIN::Utilities::Expected<XmlElement*, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(nameResult.Error())));
 
-            std::string_view elementName = nameResult.ValueUnsafe();
+            std::string_view elementName = nameResult.Value();
             if (ctx.options.internNames && ctx.document)
             {
                 const std::string_view interned = ctx.document->InternString(elementName);
@@ -762,8 +762,8 @@ namespace NGIN::Serialization
                 return NGIN::Utilities::Expected<XmlElement*, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
                         MakeError(ctx, ParseErrorCode::OutOfMemory, "Element allocation failed")));
             }
-            auto* element = new (memory) XmlElement(allocator);
-            element->name = elementName;
+            auto* element                = new (memory) XmlElement(allocator);
+            element->name                = elementName;
             const XmlElementCount counts = NextElementCount(ctx);
             if (counts.attributes > 0)
                 element->attributes.Reserve(counts.attributes);
@@ -788,9 +788,9 @@ namespace NGIN::Serialization
 
                 auto attrNameResult = ParseName(ctx);
                 if (!attrNameResult.HasValue())
-                    return NGIN::Utilities::Expected<XmlElement*, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(attrNameResult.ErrorUnsafe())));
+                    return NGIN::Utilities::Expected<XmlElement*, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(attrNameResult.Error())));
 
-                std::string_view attrName = attrNameResult.ValueUnsafe();
+                std::string_view attrName = attrNameResult.Value();
                 if (ctx.options.internNames && ctx.document)
                 {
                     const std::string_view interned = ctx.document->InternString(attrName);
@@ -813,9 +813,9 @@ namespace NGIN::Serialization
 
                 auto attrValueResult = ParseAttributeValue(ctx);
                 if (!attrValueResult.HasValue())
-                    return NGIN::Utilities::Expected<XmlElement*, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(attrValueResult.ErrorUnsafe())));
+                    return NGIN::Utilities::Expected<XmlElement*, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(attrValueResult.Error())));
 
-                element->attributes.PushBack(XmlAttribute {attrName, attrValueResult.ValueUnsafe()});
+                element->attributes.PushBack(XmlAttribute {attrName, attrValueResult.Value()});
             }
 
             while (!ctx.cursor.IsEof())
@@ -827,7 +827,7 @@ namespace NGIN::Serialization
                         ctx.cursor.Advance(2);
                         auto endNameResult = ParseName(ctx);
                         if (!endNameResult.HasValue())
-                            return NGIN::Utilities::Expected<XmlElement*, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(endNameResult.ErrorUnsafe())));
+                            return NGIN::Utilities::Expected<XmlElement*, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(endNameResult.Error())));
                         SkipWhitespace(ctx.cursor);
                         if (ctx.cursor.Peek() != '>')
                         {
@@ -835,7 +835,7 @@ namespace NGIN::Serialization
                                     MakeError(ctx, ParseErrorCode::InvalidToken, "Expected '>'")));
                         }
                         ctx.cursor.Advance();
-                        if (endNameResult.ValueUnsafe() != element->name)
+                        if (endNameResult.Value() != element->name)
                         {
                             return NGIN::Utilities::Expected<XmlElement*, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
                                     MakeError(ctx, ParseErrorCode::MismatchedTag, "Mismatched end tag")));
@@ -855,7 +855,7 @@ namespace NGIN::Serialization
                             ctx.cursor.Advance(4);
                             auto commentResult = SkipComment(ctx);
                             if (!commentResult.HasValue())
-                                return NGIN::Utilities::Expected<XmlElement*, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(commentResult.ErrorUnsafe())));
+                                return NGIN::Utilities::Expected<XmlElement*, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(commentResult.Error())));
                             continue;
                         }
                         if (ctx.cursor.Peek(2) == '[' && ctx.cursor.Peek(3) == 'C' && ctx.cursor.Peek(4) == 'D' && ctx.cursor.Peek(5) == 'A' && ctx.cursor.Peek(6) == 'T' && ctx.cursor.Peek(7) == 'A' && ctx.cursor.Peek(8) == '[')
@@ -864,7 +864,7 @@ namespace NGIN::Serialization
                             const char* start       = ctx.cursor.CurrentPtr();
                             auto        cdataResult = SkipUntil(ctx, "]]>");
                             if (!cdataResult.HasValue())
-                                return NGIN::Utilities::Expected<XmlElement*, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(cdataResult.ErrorUnsafe())));
+                                return NGIN::Utilities::Expected<XmlElement*, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(cdataResult.Error())));
                             const char*      end = ctx.cursor.CurrentPtr() - 3;
                             std::string_view cdata(start, static_cast<UIntSize>(end - start));
                             element->children.PushBack(XmlNode::MakeCData(cdata));
@@ -875,7 +875,7 @@ namespace NGIN::Serialization
                             ctx.cursor.Advance(9);
                             auto doctypeResult = SkipDoctype(ctx);
                             if (!doctypeResult.HasValue())
-                                return NGIN::Utilities::Expected<XmlElement*, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(doctypeResult.ErrorUnsafe())));
+                                return NGIN::Utilities::Expected<XmlElement*, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(doctypeResult.Error())));
                             continue;
                         }
                         return NGIN::Utilities::Expected<XmlElement*, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
@@ -891,22 +891,22 @@ namespace NGIN::Serialization
                         ctx.cursor.Advance(2);
                         auto piResult = SkipProcessingInstruction(ctx);
                         if (!piResult.HasValue())
-                            return NGIN::Utilities::Expected<XmlElement*, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(piResult.ErrorUnsafe())));
+                            return NGIN::Utilities::Expected<XmlElement*, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(piResult.Error())));
                         continue;
                     }
 
                     auto childResult = ParseElement(ctx, allocator);
                     if (!childResult.HasValue())
                         return childResult;
-                    element->children.PushBack(XmlNode::MakeElement(childResult.ValueUnsafe()));
+                    element->children.PushBack(XmlNode::MakeElement(childResult.Value()));
                     continue;
                 }
 
                 auto textResult = ParseText(ctx);
                 if (!textResult.HasValue())
-                    return NGIN::Utilities::Expected<XmlElement*, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(textResult.ErrorUnsafe())));
-                if (!textResult.ValueUnsafe().empty())
-                    element->children.PushBack(XmlNode::MakeText(textResult.ValueUnsafe()));
+                    return NGIN::Utilities::Expected<XmlElement*, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(textResult.Error())));
+                if (!textResult.Value().empty())
+                    element->children.PushBack(XmlNode::MakeText(textResult.Value()));
             }
 
             return NGIN::Utilities::Expected<XmlElement*, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
@@ -933,9 +933,9 @@ namespace NGIN::Serialization
 
             auto nameResult = ParseName(ctx);
             if (!nameResult.HasValue())
-                return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(nameResult.ErrorUnsafe())));
+                return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(nameResult.Error())));
 
-            const std::string_view elementName = nameResult.ValueUnsafe();
+            const std::string_view elementName = nameResult.Value();
             if (!reader.OnStartElement(elementName))
             {
                 return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
@@ -965,7 +965,7 @@ namespace NGIN::Serialization
 
                 auto attrNameResult = ParseName(ctx);
                 if (!attrNameResult.HasValue())
-                    return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(attrNameResult.ErrorUnsafe())));
+                    return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(attrNameResult.Error())));
 
                 SkipWhitespace(ctx.cursor);
                 if (ctx.cursor.Peek() != '=')
@@ -978,9 +978,9 @@ namespace NGIN::Serialization
 
                 auto attrValueResult = ParseAttributeValue(ctx);
                 if (!attrValueResult.HasValue())
-                    return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(attrValueResult.ErrorUnsafe())));
+                    return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(attrValueResult.Error())));
 
-                if (!reader.OnAttribute(attrNameResult.ValueUnsafe(), attrValueResult.ValueUnsafe()))
+                if (!reader.OnAttribute(attrNameResult.Value(), attrValueResult.Value()))
                 {
                     return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
                             MakeError(ctx, ParseErrorCode::HandlerRejected, "Handler rejected attribute")));
@@ -996,7 +996,7 @@ namespace NGIN::Serialization
                         ctx.cursor.Advance(2);
                         auto endNameResult = ParseName(ctx);
                         if (!endNameResult.HasValue())
-                            return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(endNameResult.ErrorUnsafe())));
+                            return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(endNameResult.Error())));
                         SkipWhitespace(ctx.cursor);
                         if (ctx.cursor.Peek() != '>')
                         {
@@ -1004,7 +1004,7 @@ namespace NGIN::Serialization
                                     MakeError(ctx, ParseErrorCode::InvalidToken, "Expected '>'")));
                         }
                         ctx.cursor.Advance();
-                        if (endNameResult.ValueUnsafe() != elementName)
+                        if (endNameResult.Value() != elementName)
                         {
                             return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
                                     MakeError(ctx, ParseErrorCode::MismatchedTag, "Mismatched end tag")));
@@ -1029,7 +1029,7 @@ namespace NGIN::Serialization
                             ctx.cursor.Advance(4);
                             auto commentResult = SkipComment(ctx);
                             if (!commentResult.HasValue())
-                                return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(commentResult.ErrorUnsafe())));
+                                return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(commentResult.Error())));
                             continue;
                         }
                         if (ctx.cursor.Peek(2) == '[' && ctx.cursor.Peek(3) == 'C' && ctx.cursor.Peek(4) == 'D' && ctx.cursor.Peek(5) == 'A' && ctx.cursor.Peek(6) == 'T' && ctx.cursor.Peek(7) == 'A' && ctx.cursor.Peek(8) == '[')
@@ -1038,7 +1038,7 @@ namespace NGIN::Serialization
                             const char* start       = ctx.cursor.CurrentPtr();
                             auto        cdataResult = SkipUntil(ctx, "]]>");
                             if (!cdataResult.HasValue())
-                                return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(cdataResult.ErrorUnsafe())));
+                                return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(cdataResult.Error())));
                             const char*      end = ctx.cursor.CurrentPtr() - 3;
                             std::string_view cdata(start, static_cast<UIntSize>(end - start));
                             if (!reader.OnCData(cdata))
@@ -1053,7 +1053,7 @@ namespace NGIN::Serialization
                             ctx.cursor.Advance(9);
                             auto doctypeResult = SkipDoctype(ctx);
                             if (!doctypeResult.HasValue())
-                                return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(doctypeResult.ErrorUnsafe())));
+                                return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(doctypeResult.Error())));
                             continue;
                         }
                         return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
@@ -1069,7 +1069,7 @@ namespace NGIN::Serialization
                         ctx.cursor.Advance(2);
                         auto piResult = SkipProcessingInstruction(ctx);
                         if (!piResult.HasValue())
-                            return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(piResult.ErrorUnsafe())));
+                            return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(piResult.Error())));
                         continue;
                     }
 
@@ -1081,10 +1081,10 @@ namespace NGIN::Serialization
 
                 auto textResult = ParseText(ctx);
                 if (!textResult.HasValue())
-                    return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(textResult.ErrorUnsafe())));
-                if (!textResult.ValueUnsafe().empty())
+                    return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(textResult.Error())));
+                if (!textResult.Value().empty())
                 {
-                    if (!reader.OnText(textResult.ValueUnsafe()))
+                    if (!reader.OnText(textResult.Value()))
                     {
                         return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
                                 MakeError(ctx, ParseErrorCode::HandlerRejected, "Handler rejected text")));
@@ -1167,7 +1167,7 @@ namespace NGIN::Serialization
         const UIntSize arenaBytes = options.arenaBytes != 0 ? options.arenaBytes : (input.size() * 2 + 4096);
         XmlDocument    document(arenaBytes);
 
-        const bool doPrecompute = ShouldPrecomputeContainers(options, static_cast<UIntSize>(input.size()));
+        const bool                                doPrecompute = ShouldPrecomputeContainers(options, static_cast<UIntSize>(input.size()));
         NGIN::Containers::Vector<XmlElementCount> elementCounts;
         if (doPrecompute)
         {
@@ -1185,7 +1185,7 @@ namespace NGIN::Serialization
 
             auto countResult = CountDocument(countCtx, elementCounts);
             if (!countResult.HasValue())
-                return NGIN::Utilities::Expected<XmlDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(countResult.ErrorUnsafe())));
+                return NGIN::Utilities::Expected<XmlDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(countResult.Error())));
         }
 
         XmlParseContext ctx {
@@ -1209,7 +1209,7 @@ namespace NGIN::Serialization
                 ctx.cursor.Advance(2);
                 auto piResult = SkipProcessingInstruction(ctx);
                 if (!piResult.HasValue())
-                    return NGIN::Utilities::Expected<XmlDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(piResult.ErrorUnsafe())));
+                    return NGIN::Utilities::Expected<XmlDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(piResult.Error())));
                 SkipWhitespace(ctx.cursor);
                 continue;
             }
@@ -1223,7 +1223,7 @@ namespace NGIN::Serialization
                 ctx.cursor.Advance(4);
                 auto commentResult = SkipComment(ctx);
                 if (!commentResult.HasValue())
-                    return NGIN::Utilities::Expected<XmlDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(commentResult.ErrorUnsafe())));
+                    return NGIN::Utilities::Expected<XmlDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(commentResult.Error())));
                 SkipWhitespace(ctx.cursor);
                 continue;
             }
@@ -1232,7 +1232,7 @@ namespace NGIN::Serialization
                 ctx.cursor.Advance(9);
                 auto doctypeResult = SkipDoctype(ctx);
                 if (!doctypeResult.HasValue())
-                    return NGIN::Utilities::Expected<XmlDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(doctypeResult.ErrorUnsafe())));
+                    return NGIN::Utilities::Expected<XmlDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(doctypeResult.Error())));
                 SkipWhitespace(ctx.cursor);
                 continue;
             }
@@ -1243,8 +1243,8 @@ namespace NGIN::Serialization
         {
             auto rootResult = ParseElement(ctx, document.Allocator());
             if (!rootResult.HasValue())
-                return NGIN::Utilities::Expected<XmlDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(rootResult.ErrorUnsafe())));
-            document.SetRoot(rootResult.ValueUnsafe());
+                return NGIN::Utilities::Expected<XmlDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(rootResult.Error())));
+            document.SetRoot(rootResult.Value());
         } catch (const std::bad_alloc&)
         {
             return NGIN::Utilities::Expected<XmlDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
@@ -1275,7 +1275,7 @@ namespace NGIN::Serialization
         const UIntSize arenaBytes     = inSituOptions.arenaBytes != 0 ? inSituOptions.arenaBytes : (input.size() * 2 + 4096);
         XmlDocument    document(arenaBytes);
 
-        const bool doPrecompute = ShouldPrecomputeContainers(inSituOptions, static_cast<UIntSize>(input.size()));
+        const bool                                doPrecompute = ShouldPrecomputeContainers(inSituOptions, static_cast<UIntSize>(input.size()));
         NGIN::Containers::Vector<XmlElementCount> elementCounts;
         if (doPrecompute)
         {
@@ -1293,7 +1293,7 @@ namespace NGIN::Serialization
 
             auto countResult = CountDocument(countCtx, elementCounts);
             if (!countResult.HasValue())
-                return NGIN::Utilities::Expected<XmlDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(countResult.ErrorUnsafe())));
+                return NGIN::Utilities::Expected<XmlDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(countResult.Error())));
         }
 
         XmlParseContext ctx {
@@ -1317,7 +1317,7 @@ namespace NGIN::Serialization
                 ctx.cursor.Advance(2);
                 auto piResult = SkipProcessingInstruction(ctx);
                 if (!piResult.HasValue())
-                    return NGIN::Utilities::Expected<XmlDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(piResult.ErrorUnsafe())));
+                    return NGIN::Utilities::Expected<XmlDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(piResult.Error())));
                 SkipWhitespace(ctx.cursor);
                 continue;
             }
@@ -1331,7 +1331,7 @@ namespace NGIN::Serialization
                 ctx.cursor.Advance(4);
                 auto commentResult = SkipComment(ctx);
                 if (!commentResult.HasValue())
-                    return NGIN::Utilities::Expected<XmlDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(commentResult.ErrorUnsafe())));
+                    return NGIN::Utilities::Expected<XmlDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(commentResult.Error())));
                 SkipWhitespace(ctx.cursor);
                 continue;
             }
@@ -1340,7 +1340,7 @@ namespace NGIN::Serialization
                 ctx.cursor.Advance(9);
                 auto doctypeResult = SkipDoctype(ctx);
                 if (!doctypeResult.HasValue())
-                    return NGIN::Utilities::Expected<XmlDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(doctypeResult.ErrorUnsafe())));
+                    return NGIN::Utilities::Expected<XmlDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(doctypeResult.Error())));
                 SkipWhitespace(ctx.cursor);
                 continue;
             }
@@ -1351,8 +1351,8 @@ namespace NGIN::Serialization
         {
             auto rootResult = ParseElement(ctx, document.Allocator());
             if (!rootResult.HasValue())
-                return NGIN::Utilities::Expected<XmlDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(rootResult.ErrorUnsafe())));
-            document.SetRoot(rootResult.ValueUnsafe());
+                return NGIN::Utilities::Expected<XmlDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(rootResult.Error())));
+            document.SetRoot(rootResult.Value());
         } catch (const std::bad_alloc&)
         {
             return NGIN::Utilities::Expected<XmlDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
@@ -1385,7 +1385,7 @@ namespace NGIN::Serialization
                 err.message = "Failed to read from reader";
                 return NGIN::Utilities::Expected<XmlDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(err)));
             }
-            const UIntSize readBytes = readResult.ValueUnsafe();
+            const UIntSize readBytes = readResult.Value();
             if (readBytes == 0)
                 break;
             for (UIntSize i = 0; i < readBytes; ++i)
@@ -1395,7 +1395,7 @@ namespace NGIN::Serialization
                               ? Parse(std::span<NGIN::Byte>(buffer.data(), buffer.Size()), options)
                               : Parse(std::span<const NGIN::Byte>(buffer.data(), buffer.Size()), options);
         if (result.HasValue())
-            result.ValueUnsafe().AdoptInput(std::move(buffer));
+            result.Value().AdoptInput(std::move(buffer));
         return result;
     }
 
@@ -1426,7 +1426,7 @@ namespace NGIN::Serialization
                 ctx.cursor.Advance(2);
                 auto piResult = SkipProcessingInstruction(ctx);
                 if (!piResult.HasValue())
-                    return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(piResult.ErrorUnsafe())));
+                    return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(piResult.Error())));
                 SkipWhitespace(ctx.cursor);
                 continue;
             }
@@ -1440,7 +1440,7 @@ namespace NGIN::Serialization
                 ctx.cursor.Advance(4);
                 auto commentResult = SkipComment(ctx);
                 if (!commentResult.HasValue())
-                    return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(commentResult.ErrorUnsafe())));
+                    return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(commentResult.Error())));
                 SkipWhitespace(ctx.cursor);
                 continue;
             }
@@ -1449,7 +1449,7 @@ namespace NGIN::Serialization
                 ctx.cursor.Advance(9);
                 auto doctypeResult = SkipDoctype(ctx);
                 if (!doctypeResult.HasValue())
-                    return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(doctypeResult.ErrorUnsafe())));
+                    return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(doctypeResult.Error())));
                 SkipWhitespace(ctx.cursor);
                 continue;
             }
@@ -1516,7 +1516,7 @@ namespace NGIN::Serialization
     XmlParser::DecodeText(XmlDocument& document, std::string_view input, bool normalizeWhitespace)
     {
         XmlParseOptions options;
-        options.decodeEntities     = true;
+        options.decodeEntities      = true;
         options.normalizeWhitespace = normalizeWhitespace;
 
         XmlParseContext ctx {
@@ -1538,7 +1538,7 @@ namespace NGIN::Serialization
         if (!normalizeWhitespace)
             return decoded;
 
-        return NormalizeWhitespaceInternal(ctx, decoded.ValueUnsafe());
+        return NormalizeWhitespaceInternal(ctx, decoded.Value());
     }
 
 }// namespace NGIN::Serialization

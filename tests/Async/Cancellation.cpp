@@ -58,7 +58,7 @@ namespace
         auto delayResult = co_await ctx.Delay(NGIN::Units::Seconds(60.0));
         if (!delayResult)
         {
-            co_await NGIN::Async::Task<void>::ReturnError(delayResult.error());
+            co_await NGIN::Async::Task<void>::ReturnError(delayResult.Error());
             co_return;
         }
         co_return;
@@ -84,10 +84,10 @@ TEST_CASE("Linked cancellation token wakes Delay")
 
     NGIN::Async::CancellationSource a;
     NGIN::Async::CancellationSource b;
-    auto linked = NGIN::Async::CreateLinkedCancellationSource({a.GetToken(), b.GetToken()});
+    auto                            linked = NGIN::Async::CreateLinkedCancellationSource({a.GetToken(), b.GetToken()});
 
     NGIN::Async::TaskContext ctx(exec, linked.GetToken());
-    auto task = DelayForever(ctx);
+    auto                     task = DelayForever(ctx);
     task.Schedule(ctx);
 
     exec.RunUntilIdle();
@@ -100,12 +100,12 @@ TEST_CASE("Linked cancellation token wakes Delay")
     REQUIRE(task.IsCanceled());
     auto result = task.Get();
     REQUIRE_FALSE(result);
-    REQUIRE(result.error().code == NGIN::Async::AsyncErrorCode::Canceled);
+    REQUIRE(result.Error().code == NGIN::Async::AsyncErrorCode::Canceled);
 }
 
 TEST_CASE("CancelAfter schedules cancellation via executor")
 {
-    ManualTimerExecutor exec;
+    ManualTimerExecutor             exec;
     NGIN::Async::CancellationSource src;
 
     src.CancelAfter(NGIN::Execution::ExecutorRef::From(exec), NGIN::Units::Milliseconds(1.0));

@@ -99,7 +99,7 @@ namespace
         auto thenResult = co_await parent.ContinueWith(ctx, [&](int) { return Noop(ctx); });
         if (!thenResult)
         {
-            co_await NGIN::Async::Task<void>::ReturnError(thenResult.error());
+            co_await NGIN::Async::Task<void>::ReturnError(thenResult.Error());
             co_return;
         }
         co_return;
@@ -112,7 +112,7 @@ namespace
         auto thenResult = co_await parent.ContinueWith(ctx, [&](int) { return ContinuationThrows(ctx); });
         if (!thenResult)
         {
-            co_await NGIN::Async::Task<void>::ReturnError(thenResult.error());
+            co_await NGIN::Async::Task<void>::ReturnError(thenResult.Error());
             co_return;
         }
         co_return;
@@ -123,7 +123,7 @@ namespace
         auto thenResult = co_await parent.ContinueWith(ctx, [&](int) { return Noop(ctx); });
         if (!thenResult)
         {
-            co_await NGIN::Async::Task<void>::ReturnError(thenResult.error());
+            co_await NGIN::Async::Task<void>::ReturnError(thenResult.Error());
             co_return;
         }
         co_return;
@@ -134,9 +134,9 @@ namespace
         auto yieldResult = co_await ctx.YieldNow();
         if (!yieldResult)
         {
-            co_return NGIN::Utilities::Unexpected(yieldResult.error());
+            co_return NGIN::Utilities::Unexpected(yieldResult.Error());
         }
-        co_return value * factor;
+        co_return value* factor;
     }
 
     NGIN::Async::Task<int> ContinueWithSuccess(NGIN::Async::TaskContext& ctx)
@@ -147,7 +147,7 @@ namespace
         auto thenResult = co_await parent.ContinueWith(ctx, [&](int v) { return MultiplyAfterYield(ctx, v, 3); });
         if (!thenResult)
         {
-            co_return NGIN::Utilities::Unexpected(thenResult.error());
+            co_return NGIN::Utilities::Unexpected(thenResult.Error());
         }
         co_return 21;
     }
@@ -166,7 +166,7 @@ TEST_CASE("Task::ContinueWith propagates parent fault")
     REQUIRE(task.IsFaulted());
     auto result = task.Get();
     REQUIRE_FALSE(result);
-    REQUIRE(result.error().code == NGIN::Async::AsyncErrorCode::Fault);
+    REQUIRE(result.Error().code == NGIN::Async::AsyncErrorCode::Fault);
 }
 
 TEST_CASE("Task::ContinueWith propagates continuation fault")
@@ -182,14 +182,14 @@ TEST_CASE("Task::ContinueWith propagates continuation fault")
     REQUIRE(task.IsFaulted());
     auto result = task.Get();
     REQUIRE_FALSE(result);
-    REQUIRE(result.error().code == NGIN::Async::AsyncErrorCode::Fault);
+    REQUIRE(result.Error().code == NGIN::Async::AsyncErrorCode::Fault);
 }
 
 TEST_CASE("Task::ContinueWith is woken by cancellation even if parent never completes")
 {
-    ManualTimerExecutor exec;
+    ManualTimerExecutor             exec;
     NGIN::Async::CancellationSource source;
-    NGIN::Async::TaskContext ctx(exec, source.GetToken());
+    NGIN::Async::TaskContext        ctx(exec, source.GetToken());
 
     auto parent = SuspendForever(ctx);
     parent.Schedule(ctx);
@@ -207,7 +207,7 @@ TEST_CASE("Task::ContinueWith is woken by cancellation even if parent never comp
     REQUIRE(task.IsCanceled());
     auto result = task.Get();
     REQUIRE_FALSE(result);
-    REQUIRE(result.error().code == NGIN::Async::AsyncErrorCode::Canceled);
+    REQUIRE(result.Error().code == NGIN::Async::AsyncErrorCode::Canceled);
 }
 
 TEST_CASE("Task::ContinueWith runs continuation on success")

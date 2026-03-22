@@ -11,30 +11,30 @@ namespace NGIN::IO
         [[nodiscard]] IOError MakeError(IOErrorCode code, std::string_view message, const Path& path = {}) noexcept
         {
             IOError error;
-            error.code = code;
-            error.path = path;
+            error.code    = code;
+            error.path    = path;
             error.message = message;
             return error;
         }
-    }
+    }// namespace
 
     Result<NGIN::Containers::Vector<NGIN::Byte>> ReadAllBytes(IFileSystem& fs, const Path& path) noexcept
     {
         FileOpenOptions options;
-        options.access = FileAccess::Read;
+        options.access      = FileAccess::Read;
         options.disposition = FileCreateDisposition::OpenExisting;
 
         auto fileResult = fs.OpenFile(path, options);
         if (!fileResult.HasValue())
-            return Result<NGIN::Containers::Vector<NGIN::Byte>>(NGIN::Utilities::Unexpected<IOError>(std::move(fileResult.ErrorUnsafe())));
+            return Result<NGIN::Containers::Vector<NGIN::Byte>>(NGIN::Utilities::Unexpected<IOError>(std::move(fileResult.Error())));
 
-        auto& file = *fileResult.ValueUnsafe();
-        auto sizeResult = file.Size();
+        auto& file       = *fileResult.Value();
+        auto  sizeResult = file.Size();
         if (!sizeResult.HasValue())
-            return Result<NGIN::Containers::Vector<NGIN::Byte>>(NGIN::Utilities::Unexpected<IOError>(std::move(sizeResult.ErrorUnsafe())));
+            return Result<NGIN::Containers::Vector<NGIN::Byte>>(NGIN::Utilities::Unexpected<IOError>(std::move(sizeResult.Error())));
 
         NGIN::Containers::Vector<NGIN::Byte> bytes;
-        const auto fileSize = static_cast<UIntSize>(sizeResult.ValueUnsafe());
+        const auto                           fileSize = static_cast<UIntSize>(sizeResult.Value());
         if (fileSize > 0)
             bytes.Reserve(fileSize);
 
@@ -43,8 +43,8 @@ namespace NGIN::IO
         {
             auto read = file.Read(std::span<NGIN::Byte>(temp, sizeof(temp)));
             if (!read.HasValue())
-                return Result<NGIN::Containers::Vector<NGIN::Byte>>(NGIN::Utilities::Unexpected<IOError>(std::move(read.ErrorUnsafe())));
-            const UIntSize n = read.ValueUnsafe();
+                return Result<NGIN::Containers::Vector<NGIN::Byte>>(NGIN::Utilities::Unexpected<IOError>(std::move(read.Error())));
+            const UIntSize n = read.Value();
             if (n == 0)
                 break;
             for (UIntSize i = 0; i < n; ++i)
@@ -58,10 +58,10 @@ namespace NGIN::IO
     {
         auto bytes = ReadAllBytes(fs, path);
         if (!bytes.HasValue())
-            return Result<NGIN::Text::String>(NGIN::Utilities::Unexpected<IOError>(std::move(bytes.ErrorUnsafe())));
+            return Result<NGIN::Text::String>(NGIN::Utilities::Unexpected<IOError>(std::move(bytes.Error())));
 
         NGIN::Text::String text;
-        auto& data = bytes.ValueUnsafe();
+        auto&              data = bytes.Value();
         if (data.Size() > 0)
             text.Append(std::string_view(reinterpret_cast<const char*>(data.data()), data.Size()));
         return Result<NGIN::Text::String>(std::move(text));
@@ -70,21 +70,21 @@ namespace NGIN::IO
     ResultVoid WriteAllBytes(IFileSystem& fs, const Path& path, std::span<const NGIN::Byte> bytes) noexcept
     {
         FileOpenOptions options;
-        options.access = FileAccess::Write;
+        options.access      = FileAccess::Write;
         options.disposition = FileCreateDisposition::CreateAlways;
 
         auto fileResult = fs.OpenFile(path, options);
         if (!fileResult.HasValue())
-            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(fileResult.ErrorUnsafe())));
+            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(fileResult.Error())));
 
-        auto& file = *fileResult.ValueUnsafe();
+        auto&    file  = *fileResult.Value();
         UIntSize total = 0;
         while (total < bytes.size())
         {
             auto write = file.Write(bytes.subspan(total));
             if (!write.HasValue())
-                return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(write.ErrorUnsafe())));
-            const UIntSize n = write.ValueUnsafe();
+                return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(write.Error())));
+            const UIntSize n = write.Value();
             if (n == 0)
                 return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::SystemError, "short write", path)));
             total += n;
@@ -100,23 +100,23 @@ namespace NGIN::IO
     ResultVoid AppendAllText(IFileSystem& fs, const Path& path, std::string_view text) noexcept
     {
         FileOpenOptions options;
-        options.access = FileAccess::Append;
+        options.access      = FileAccess::Append;
         options.disposition = FileCreateDisposition::OpenAlways;
 
         auto fileResult = fs.OpenFile(path, options);
         if (!fileResult.HasValue())
-            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(fileResult.ErrorUnsafe())));
-        auto& file = *fileResult.ValueUnsafe();
-        auto write = file.Write(std::span<const NGIN::Byte>(reinterpret_cast<const NGIN::Byte*>(text.data()), text.size()));
+            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(fileResult.Error())));
+        auto& file  = *fileResult.Value();
+        auto  write = file.Write(std::span<const NGIN::Byte>(reinterpret_cast<const NGIN::Byte*>(text.data()), text.size()));
         if (!write.HasValue())
-            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(write.ErrorUnsafe())));
+            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(write.Error())));
         return file.Flush();
     }
 
     ResultVoid EnsureDirectory(IFileSystem& fs, const Path& path) noexcept
     {
         DirectoryCreateOptions options;
-        options.recursive = true;
+        options.recursive      = true;
         options.ignoreIfExists = true;
         return fs.CreateDirectories(path, options);
     }
@@ -124,34 +124,34 @@ namespace NGIN::IO
     AsyncTask<NGIN::Containers::Vector<NGIN::Byte>> ReadAllBytesAsync(IAsyncFileSystem& fs, NGIN::Async::TaskContext& ctx, const Path& path)
     {
         FileOpenOptions options;
-        options.access = FileAccess::Read;
+        options.access      = FileAccess::Read;
         options.disposition = FileCreateDisposition::OpenExisting;
 
         auto fileExpected = co_await fs.OpenFileAsync(ctx, path, options);
         if (!fileExpected)
         {
-            co_await AsyncTask<NGIN::Containers::Vector<NGIN::Byte>>::ReturnError(fileExpected.error());
+            co_await AsyncTask<NGIN::Containers::Vector<NGIN::Byte>>::ReturnError(fileExpected.Error());
             co_return AsyncResult<NGIN::Containers::Vector<NGIN::Byte>>(NGIN::Containers::Vector<NGIN::Byte> {});
         }
         auto fileResult = std::move(*fileExpected);
         if (!fileResult)
-            co_return AsyncResult<NGIN::Containers::Vector<NGIN::Byte>>(NGIN::Utilities::Unexpected<IOError>(std::move(fileResult.ErrorUnsafe())));
+            co_return AsyncResult<NGIN::Containers::Vector<NGIN::Byte>>(NGIN::Utilities::Unexpected<IOError>(std::move(fileResult.Error())));
 
-        auto& file = *fileResult.ValueUnsafe();
+        auto&                                file = *fileResult.Value();
         NGIN::Containers::Vector<NGIN::Byte> bytes;
-        NGIN::Byte temp[64 * 1024];
+        NGIN::Byte                           temp[64 * 1024];
         for (;;)
         {
             auto readExpected = co_await file.ReadAsync(ctx, std::span<NGIN::Byte>(temp, sizeof(temp)));
             if (!readExpected)
             {
-                co_await AsyncTask<NGIN::Containers::Vector<NGIN::Byte>>::ReturnError(readExpected.error());
+                co_await AsyncTask<NGIN::Containers::Vector<NGIN::Byte>>::ReturnError(readExpected.Error());
                 co_return AsyncResult<NGIN::Containers::Vector<NGIN::Byte>>(NGIN::Containers::Vector<NGIN::Byte> {});
             }
             auto readResult = std::move(*readExpected);
             if (!readResult)
-                co_return AsyncResult<NGIN::Containers::Vector<NGIN::Byte>>(NGIN::Utilities::Unexpected<IOError>(std::move(readResult.ErrorUnsafe())));
-            const UIntSize n = readResult.ValueUnsafe();
+                co_return AsyncResult<NGIN::Containers::Vector<NGIN::Byte>>(NGIN::Utilities::Unexpected<IOError>(std::move(readResult.Error())));
+            const UIntSize n = readResult.Value();
             if (n == 0)
                 break;
             for (UIntSize i = 0; i < n; ++i)
@@ -164,33 +164,33 @@ namespace NGIN::IO
     AsyncTaskVoid WriteAllBytesAsync(IAsyncFileSystem& fs, NGIN::Async::TaskContext& ctx, const Path& path, std::span<const NGIN::Byte> bytes)
     {
         FileOpenOptions options;
-        options.access = FileAccess::Write;
+        options.access      = FileAccess::Write;
         options.disposition = FileCreateDisposition::CreateAlways;
 
         auto fileExpected = co_await fs.OpenFileAsync(ctx, path, options);
         if (!fileExpected)
         {
-            co_await AsyncTaskVoid::ReturnError(fileExpected.error());
+            co_await AsyncTaskVoid::ReturnError(fileExpected.Error());
             co_return AsyncResult<void> {};
         }
         auto fileResult = std::move(*fileExpected);
         if (!fileResult)
-            co_return AsyncResult<void>(NGIN::Utilities::Unexpected<IOError>(std::move(fileResult.ErrorUnsafe())));
+            co_return AsyncResult<void>(NGIN::Utilities::Unexpected<IOError>(std::move(fileResult.Error())));
 
-        auto& file = *fileResult.ValueUnsafe();
+        auto&    file  = *fileResult.Value();
         UIntSize total = 0;
         while (total < bytes.size())
         {
             auto writeExpected = co_await file.WriteAsync(ctx, bytes.subspan(total));
             if (!writeExpected)
             {
-                co_await AsyncTaskVoid::ReturnError(writeExpected.error());
+                co_await AsyncTaskVoid::ReturnError(writeExpected.Error());
                 co_return AsyncResult<void> {};
             }
             auto writeResult = std::move(*writeExpected);
             if (!writeResult)
-                co_return AsyncResult<void>(NGIN::Utilities::Unexpected<IOError>(std::move(writeResult.ErrorUnsafe())));
-            const UIntSize n = writeResult.ValueUnsafe();
+                co_return AsyncResult<void>(NGIN::Utilities::Unexpected<IOError>(std::move(writeResult.Error())));
+            const UIntSize n = writeResult.Value();
             if (n == 0)
                 co_return AsyncResult<void>(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::SystemError, "short write", path)));
             total += n;
@@ -199,7 +199,7 @@ namespace NGIN::IO
         auto flushExpected = co_await file.FlushAsync(ctx);
         if (!flushExpected)
         {
-            co_await AsyncTaskVoid::ReturnError(flushExpected.error());
+            co_await AsyncTaskVoid::ReturnError(flushExpected.Error());
             co_return AsyncResult<void> {};
         }
         co_return *flushExpected;

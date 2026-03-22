@@ -16,21 +16,20 @@ namespace NGIN::Net::Transport
     {
     public:
         TcpByteStream(TcpSocket&& socket, NetworkDriver& driver) noexcept
-            : m_socket(std::move(socket))
-            , m_driver(&driver)
+            : m_socket(std::move(socket)), m_driver(&driver)
         {
         }
 
-        NGIN::Async::Task<NGIN::UInt32> ReadAsync(NGIN::Async::TaskContext& ctx,
-                                                 NGIN::Net::ByteSpan destination,
-                                                 NGIN::Async::CancellationToken token) override
+        NGIN::Async::Task<NGIN::UInt32> ReadAsync(NGIN::Async::TaskContext&      ctx,
+                                                  NGIN::Net::ByteSpan            destination,
+                                                  NGIN::Async::CancellationToken token) override
         {
             return ReadImpl(ctx, m_socket, m_driver, destination, token);
         }
 
-        NGIN::Async::Task<NGIN::UInt32> WriteAsync(NGIN::Async::TaskContext& ctx,
-                                                  NGIN::Net::ConstByteSpan source,
-                                                  NGIN::Async::CancellationToken token) override
+        NGIN::Async::Task<NGIN::UInt32> WriteAsync(NGIN::Async::TaskContext&      ctx,
+                                                   NGIN::Net::ConstByteSpan       source,
+                                                   NGIN::Async::CancellationToken token) override
         {
             return WriteImpl(ctx, m_socket, m_driver, source, token);
         }
@@ -41,15 +40,15 @@ namespace NGIN::Net::Transport
             return {};
         }
 
-        [[nodiscard]] TcpSocket& Socket() noexcept { return m_socket; }
+        [[nodiscard]] TcpSocket&       Socket() noexcept { return m_socket; }
         [[nodiscard]] const TcpSocket& Socket() const noexcept { return m_socket; }
 
     private:
-        static NGIN::Async::Task<NGIN::UInt32> ReadImpl(NGIN::Async::TaskContext& ctx,
-                                                       TcpSocket& socket,
-                                                       NetworkDriver* driver,
-                                                       NGIN::Net::ByteSpan destination,
-                                                       NGIN::Async::CancellationToken token)
+        static NGIN::Async::Task<NGIN::UInt32> ReadImpl(NGIN::Async::TaskContext&      ctx,
+                                                        TcpSocket&                     socket,
+                                                        NetworkDriver*                 driver,
+                                                        NGIN::Net::ByteSpan            destination,
+                                                        NGIN::Async::CancellationToken token)
         {
             if (!driver)
             {
@@ -60,16 +59,16 @@ namespace NGIN::Net::Transport
             auto result = co_await task;
             if (!result)
             {
-                co_return NGIN::Utilities::Unexpected(result.error());
+                co_return NGIN::Utilities::Unexpected(result.Error());
             }
             co_return *result;
         }
 
-        static NGIN::Async::Task<NGIN::UInt32> WriteImpl(NGIN::Async::TaskContext& ctx,
-                                                        TcpSocket& socket,
-                                                        NetworkDriver* driver,
-                                                        NGIN::Net::ConstByteSpan source,
-                                                        NGIN::Async::CancellationToken token)
+        static NGIN::Async::Task<NGIN::UInt32> WriteImpl(NGIN::Async::TaskContext&      ctx,
+                                                         TcpSocket&                     socket,
+                                                         NetworkDriver*                 driver,
+                                                         NGIN::Net::ConstByteSpan       source,
+                                                         NGIN::Async::CancellationToken token)
         {
             if (!driver)
             {
@@ -80,7 +79,7 @@ namespace NGIN::Net::Transport
             auto result = co_await task;
             if (!result)
             {
-                co_return NGIN::Utilities::Unexpected(result.error());
+                co_return NGIN::Utilities::Unexpected(result.Error());
             }
             co_return *result;
         }

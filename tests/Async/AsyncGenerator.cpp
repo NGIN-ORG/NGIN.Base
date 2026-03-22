@@ -16,13 +16,13 @@ namespace
         co_yield 1;
         if (auto yieldResult = co_await ctx.YieldNow(); !yieldResult)
         {
-            co_await NGIN::Async::AsyncGenerator<int>::ReturnError(yieldResult.error());
+            co_await NGIN::Async::AsyncGenerator<int>::ReturnError(yieldResult.Error());
             co_return;
         }
         co_yield 2;
         if (auto yieldResult = co_await ctx.YieldNow(); !yieldResult)
         {
-            co_await NGIN::Async::AsyncGenerator<int>::ReturnError(yieldResult.error());
+            co_await NGIN::Async::AsyncGenerator<int>::ReturnError(yieldResult.Error());
             co_return;
         }
         co_yield 3;
@@ -34,7 +34,7 @@ namespace
         co_yield 1;
         if (auto yieldResult = co_await ctx.YieldNow(); !yieldResult)
         {
-            co_await NGIN::Async::AsyncGenerator<int>::ReturnError(yieldResult.error());
+            co_await NGIN::Async::AsyncGenerator<int>::ReturnError(yieldResult.Error());
             co_return;
         }
         throw std::runtime_error("boom");
@@ -43,7 +43,7 @@ namespace
 
     NGIN::Async::AsyncGenerator<int> YieldOnceThenNever(NGIN::Async::TaskContext& ctx)
     {
-        (void)ctx;
+        (void) ctx;
         co_yield 1;
         while (true)
         {
@@ -59,7 +59,7 @@ namespace
             auto nextResult = co_await gen.Next(ctx);
             if (!nextResult)
             {
-                co_return NGIN::Utilities::Unexpected(nextResult.error());
+                co_return NGIN::Utilities::Unexpected(nextResult.Error());
             }
             if (!*nextResult)
             {
@@ -75,18 +75,18 @@ namespace
         auto firstResult = co_await gen.Next(ctx);
         if (!firstResult)
         {
-            co_await NGIN::Async::Task<void>::ReturnError(firstResult.error());
+            co_await NGIN::Async::Task<void>::ReturnError(firstResult.Error());
             co_return;
         }
         if (*firstResult)
         {
-            (void)**firstResult;
+            (void) **firstResult;
         }
 
         auto secondResult = co_await gen.Next(ctx);
         if (!secondResult)
         {
-            co_await NGIN::Async::Task<void>::ReturnError(secondResult.error());
+            co_await NGIN::Async::Task<void>::ReturnError(secondResult.Error());
             co_return;
         }
         co_return;
@@ -153,6 +153,5 @@ TEST_CASE("AsyncGenerator Next observes TaskContext cancellation")
     REQUIRE(task.IsCanceled());
     auto result = task.Get();
     REQUIRE_FALSE(result);
-    REQUIRE(result.error().code == NGIN::Async::AsyncErrorCode::Canceled);
+    REQUIRE(result.Error().code == NGIN::Async::AsyncErrorCode::Canceled);
 }
-

@@ -8,7 +8,7 @@
 #include <NGIN/Net/Runtime/NetworkDriver.hpp>
 
 #if !defined(NGIN_PLATFORM_WINDOWS)
-  #include <sys/uio.h>
+#include <sys/uio.h>
 #endif
 
 #include <array>
@@ -23,11 +23,20 @@ namespace NGIN::Net
         AsyncErrorCode code = AsyncErrorCode::Fault;
         switch (error.code)
         {
-            case NetErrorCode::TimedOut: code = AsyncErrorCode::TimedOut; break;
-            case NetErrorCode::MessageTooLarge: code = AsyncErrorCode::InvalidArgument; break;
-            case NetErrorCode::WouldBlock: code = AsyncErrorCode::InvalidState; break;
-            case NetErrorCode::Ok: code = AsyncErrorCode::Ok; break;
-            default: break;
+            case NetErrorCode::TimedOut:
+                code = AsyncErrorCode::TimedOut;
+                break;
+            case NetErrorCode::MessageTooLarge:
+                code = AsyncErrorCode::InvalidArgument;
+                break;
+            case NetErrorCode::WouldBlock:
+                code = AsyncErrorCode::InvalidState;
+                break;
+            case NetErrorCode::Ok:
+                code = AsyncErrorCode::Ok;
+                break;
+            default:
+                break;
         }
 
         const int native = (error.native != 0) ? error.native : static_cast<int>(error.code);
@@ -49,7 +58,7 @@ namespace NGIN::Net
         if (!optionResult)
         {
             m_handle.Close();
-            return NGIN::Utilities::Unexpected(optionResult.error());
+            return NGIN::Utilities::Unexpected(optionResult.Error());
         }
         return {};
     }
@@ -57,7 +66,7 @@ namespace NGIN::Net
     NetExpected<bool> TcpSocket::TryConnect(Endpoint remoteEndpoint) noexcept
     {
         sockaddr_storage storage {};
-        socklen_t length = 0;
+        socklen_t        length = 0;
         if (!detail::ToSockAddr(remoteEndpoint, storage, length))
         {
             return NGIN::Utilities::Unexpected(NetError {NetErrorCode::Unknown, 0});
@@ -78,9 +87,9 @@ namespace NGIN::Net
         return NGIN::Utilities::Unexpected(err);
     }
 
-    NGIN::Async::Task<void> TcpSocket::ConnectAsync(NGIN::Async::TaskContext& ctx,
-                                                    NetworkDriver& driver,
-                                                    Endpoint remoteEndpoint,
+    NGIN::Async::Task<void> TcpSocket::ConnectAsync(NGIN::Async::TaskContext&      ctx,
+                                                    NetworkDriver&                 driver,
+                                                    Endpoint                       remoteEndpoint,
                                                     NGIN::Async::CancellationToken token)
     {
 #if defined(NGIN_PLATFORM_WINDOWS)
@@ -93,7 +102,7 @@ namespace NGIN::Net
         auto result = co_await driver.SubmitConnect(ctx, m_handle, remoteEndpoint, token);
         if (!result)
         {
-            co_await NGIN::Async::Task<void>::ReturnError(result.error());
+            co_await NGIN::Async::Task<void>::ReturnError(result.Error());
             co_return;
         }
         co_return;
@@ -106,16 +115,16 @@ namespace NGIN::Net
                 co_return;
             }
 
-            if (result.error().code != NetErrorCode::WouldBlock)
+            if (result.Error().code != NetErrorCode::WouldBlock)
             {
-                co_await NGIN::Async::Task<void>::ReturnError(ToAsyncError(result.error()));
+                co_await NGIN::Async::Task<void>::ReturnError(ToAsyncError(result.Error()));
                 co_return;
             }
 
             auto waitResult = co_await driver.WaitUntilWritable(ctx, m_handle, token);
             if (!waitResult)
             {
-                co_await NGIN::Async::Task<void>::ReturnError(waitResult.error());
+                co_await NGIN::Async::Task<void>::ReturnError(waitResult.Error());
                 co_return;
             }
             auto connectResult = detail::CheckConnectResult(m_handle);
@@ -124,9 +133,9 @@ namespace NGIN::Net
                 co_return;
             }
 
-            if (connectResult.error().code != NetErrorCode::WouldBlock)
+            if (connectResult.Error().code != NetErrorCode::WouldBlock)
             {
-                co_await NGIN::Async::Task<void>::ReturnError(ToAsyncError(connectResult.error()));
+                co_await NGIN::Async::Task<void>::ReturnError(ToAsyncError(connectResult.Error()));
                 co_return;
             }
         }
@@ -138,7 +147,7 @@ namespace NGIN::Net
         const bool restoreNonBlocking = m_nonBlocking;
         static_cast<void>(detail::SetNonBlocking(m_handle, false));
         sockaddr_storage storage {};
-        socklen_t length = 0;
+        socklen_t        length = 0;
         if (!detail::ToSockAddr(remoteEndpoint, storage, length))
         {
             static_cast<void>(detail::SetNonBlocking(m_handle, restoreNonBlocking));
@@ -221,8 +230,8 @@ namespace NGIN::Net
         }
 
         std::array<WSABUF, kStackBuffers> stackBuffers {};
-        std::vector<WSABUF> heapBuffers {};
-        WSABUF* buffers = stackBuffers.data();
+        std::vector<WSABUF>               heapBuffers {};
+        WSABUF*                           buffers = stackBuffers.data();
         if (data.size() > stackBuffers.size())
         {
             heapBuffers.resize(data.size());
@@ -239,10 +248,10 @@ namespace NGIN::Net
             buffers[i].len = static_cast<ULONG>(data[i].size);
         }
 
-        DWORD bytes = 0;
-        DWORD flags = 0;
-        const auto sock = detail::ToNative(m_handle);
-        const int result = ::WSASend(sock, buffers, static_cast<DWORD>(data.size()), &bytes, flags, nullptr, nullptr);
+        DWORD      bytes  = 0;
+        DWORD      flags  = 0;
+        const auto sock   = detail::ToNative(m_handle);
+        const int  result = ::WSASend(sock, buffers, static_cast<DWORD>(data.size()), &bytes, flags, nullptr, nullptr);
         if (result != 0)
         {
             return NGIN::Utilities::Unexpected(detail::LastError());
@@ -250,15 +259,15 @@ namespace NGIN::Net
         return static_cast<NGIN::UInt32>(bytes);
 #else
         constexpr std::size_t kStackBuffers = 16;
-        const auto maxIov = static_cast<std::size_t>(IOV_MAX);
+        const auto            maxIov        = static_cast<std::size_t>(IOV_MAX);
         if (data.size() > maxIov)
         {
             return NGIN::Utilities::Unexpected(NetError {NetErrorCode::MessageTooLarge, 0});
         }
 
         std::array<iovec, kStackBuffers> stackBuffers {};
-        std::vector<iovec> heapBuffers {};
-        iovec* buffers = stackBuffers.data();
+        std::vector<iovec>               heapBuffers {};
+        iovec*                           buffers = stackBuffers.data();
         if (data.size() > stackBuffers.size())
         {
             heapBuffers.resize(data.size());
@@ -268,10 +277,10 @@ namespace NGIN::Net
         for (std::size_t i = 0; i < data.size(); ++i)
         {
             buffers[i].iov_base = const_cast<NGIN::Byte*>(data[i].data);
-            buffers[i].iov_len = data[i].size;
+            buffers[i].iov_len  = data[i].size;
         }
 
-        const auto sock = detail::ToNative(m_handle);
+        const auto sock  = detail::ToNative(m_handle);
         const auto bytes = ::writev(sock, buffers, static_cast<int>(data.size()));
         if (bytes < 0)
         {
@@ -296,8 +305,8 @@ namespace NGIN::Net
         }
 
         std::array<WSABUF, kStackBuffers> stackBuffers {};
-        std::vector<WSABUF> heapBuffers {};
-        WSABUF* buffers = stackBuffers.data();
+        std::vector<WSABUF>               heapBuffers {};
+        WSABUF*                           buffers = stackBuffers.data();
         if (destination.size() > stackBuffers.size())
         {
             heapBuffers.resize(destination.size());
@@ -314,10 +323,10 @@ namespace NGIN::Net
             buffers[i].len = static_cast<ULONG>(destination[i].size);
         }
 
-        DWORD bytes = 0;
-        DWORD flags = 0;
-        const auto sock = detail::ToNative(m_handle);
-        const int result = ::WSARecv(sock, buffers, static_cast<DWORD>(destination.size()), &bytes, &flags, nullptr, nullptr);
+        DWORD      bytes  = 0;
+        DWORD      flags  = 0;
+        const auto sock   = detail::ToNative(m_handle);
+        const int  result = ::WSARecv(sock, buffers, static_cast<DWORD>(destination.size()), &bytes, &flags, nullptr, nullptr);
         if (result != 0)
         {
             return NGIN::Utilities::Unexpected(detail::LastError());
@@ -325,15 +334,15 @@ namespace NGIN::Net
         return static_cast<NGIN::UInt32>(bytes);
 #else
         constexpr std::size_t kStackBuffers = 16;
-        const auto maxIov = static_cast<std::size_t>(IOV_MAX);
+        const auto            maxIov        = static_cast<std::size_t>(IOV_MAX);
         if (destination.size() > maxIov)
         {
             return NGIN::Utilities::Unexpected(NetError {NetErrorCode::MessageTooLarge, 0});
         }
 
         std::array<iovec, kStackBuffers> stackBuffers {};
-        std::vector<iovec> heapBuffers {};
-        iovec* buffers = stackBuffers.data();
+        std::vector<iovec>               heapBuffers {};
+        iovec*                           buffers = stackBuffers.data();
         if (destination.size() > stackBuffers.size())
         {
             heapBuffers.resize(destination.size());
@@ -343,10 +352,10 @@ namespace NGIN::Net
         for (std::size_t i = 0; i < destination.size(); ++i)
         {
             buffers[i].iov_base = destination[i].data;
-            buffers[i].iov_len = destination[i].size;
+            buffers[i].iov_len  = destination[i].size;
         }
 
-        const auto sock = detail::ToNative(m_handle);
+        const auto sock  = detail::ToNative(m_handle);
         const auto bytes = ::readv(sock, buffers, static_cast<int>(destination.size()));
         if (bytes < 0)
         {
@@ -356,10 +365,10 @@ namespace NGIN::Net
 #endif
     }
 
-    NGIN::Async::Task<NGIN::UInt32> TcpSocket::SendAsync(NGIN::Async::TaskContext& ctx,
-                                                        NetworkDriver& driver,
-                                                        ConstByteSpan data,
-                                                        NGIN::Async::CancellationToken token)
+    NGIN::Async::Task<NGIN::UInt32> TcpSocket::SendAsync(NGIN::Async::TaskContext&      ctx,
+                                                         NetworkDriver&                 driver,
+                                                         ConstByteSpan                  data,
+                                                         NGIN::Async::CancellationToken token)
     {
 #if defined(NGIN_PLATFORM_WINDOWS)
         co_return co_await driver.SubmitSend(ctx, m_handle, data, token);
@@ -372,24 +381,24 @@ namespace NGIN::Net
                 co_return *result;
             }
 
-            if (result.error().code != NetErrorCode::WouldBlock)
+            if (result.Error().code != NetErrorCode::WouldBlock)
             {
-                co_return NGIN::Utilities::Unexpected(ToAsyncError(result.error()));
+                co_return NGIN::Utilities::Unexpected(ToAsyncError(result.Error()));
             }
 
             auto waitResult = co_await driver.WaitUntilWritable(ctx, m_handle, token);
             if (!waitResult)
             {
-                co_return NGIN::Utilities::Unexpected(waitResult.error());
+                co_return NGIN::Utilities::Unexpected(waitResult.Error());
             }
         }
 #endif
     }
 
-    NGIN::Async::Task<NGIN::UInt32> TcpSocket::ReceiveAsync(NGIN::Async::TaskContext& ctx,
-                                                           NetworkDriver& driver,
-                                                           ByteSpan destination,
-                                                           NGIN::Async::CancellationToken token)
+    NGIN::Async::Task<NGIN::UInt32> TcpSocket::ReceiveAsync(NGIN::Async::TaskContext&      ctx,
+                                                            NetworkDriver&                 driver,
+                                                            ByteSpan                       destination,
+                                                            NGIN::Async::CancellationToken token)
     {
 #if defined(NGIN_PLATFORM_WINDOWS)
         co_return co_await driver.SubmitReceive(ctx, m_handle, destination, token);
@@ -402,15 +411,15 @@ namespace NGIN::Net
                 co_return *result;
             }
 
-            if (result.error().code != NetErrorCode::WouldBlock)
+            if (result.Error().code != NetErrorCode::WouldBlock)
             {
-                co_return NGIN::Utilities::Unexpected(ToAsyncError(result.error()));
+                co_return NGIN::Utilities::Unexpected(ToAsyncError(result.Error()));
             }
 
             auto waitResult = co_await driver.WaitUntilReadable(ctx, m_handle, token);
             if (!waitResult)
             {
-                co_return NGIN::Utilities::Unexpected(waitResult.error());
+                co_return NGIN::Utilities::Unexpected(waitResult.Error());
             }
         }
 #endif
@@ -425,4 +434,4 @@ namespace NGIN::Net
     {
         m_handle.Close();
     }
-}
+}// namespace NGIN::Net

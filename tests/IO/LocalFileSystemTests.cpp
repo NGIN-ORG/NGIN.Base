@@ -29,7 +29,7 @@ namespace
         REQUIRE(tempDirectory.HasValue());
 
         const auto uniqueValue = std::chrono::steady_clock::now().time_since_epoch().count();
-        const auto path        = tempDirectory.ValueUnsafe().Join("ngin_base_fs_test_" + std::to_string(uniqueValue));
+        const auto path        = tempDirectory.Value().Join("ngin_base_fs_test_" + std::to_string(uniqueValue));
 
         REQUIRE(fs.CreateDirectories(path).HasValue());
         return path;
@@ -69,24 +69,24 @@ TEST_CASE("IO.LocalFileSystem basic read write enumerate", "[IO][LocalFileSystem
 
     auto text = NGIN::IO::ReadAllText(fs, filePath);
     REQUIRE(text.HasValue());
-    REQUIRE(std::string(text.ValueUnsafe().Data(), text.ValueUnsafe().Size()) == "hello world");
+    REQUIRE(std::string(text.Value().Data(), text.Value().Size()) == "hello world");
 
     auto info = fs.GetInfo(filePath);
     REQUIRE(info.HasValue());
-    REQUIRE(info.ValueUnsafe().exists);
-    REQUIRE(info.ValueUnsafe().type == NGIN::IO::EntryType::File);
+    REQUIRE(info.Value().exists);
+    REQUIRE(info.Value().type == NGIN::IO::EntryType::File);
 
     NGIN::IO::EnumerateOptions options;
     options.populateInfo = true;
     auto enumerator      = fs.Enumerate(root, options);
     REQUIRE(enumerator.HasValue());
 
-    auto next = enumerator.ValueUnsafe()->Next();
+    auto next = enumerator.Value()->Next();
     REQUIRE(next.HasValue());
-    REQUIRE(next.ValueUnsafe());
-    REQUIRE(enumerator.ValueUnsafe()->Current().name.View() == "hello.txt");
-    REQUIRE(enumerator.ValueUnsafe()->Current().info.has_value());
-    REQUIRE(enumerator.ValueUnsafe()->Current().info->type == NGIN::IO::EntryType::File);
+    REQUIRE(next.Value());
+    REQUIRE(enumerator.Value()->Current().name.View() == "hello.txt");
+    REQUIRE(enumerator.Value()->Current().info.has_value());
+    REQUIRE(enumerator.Value()->Current().info->type == NGIN::IO::EntryType::File);
 
     const auto capabilities = fs.GetCapabilities();
     REQUIRE(capabilities.memoryMappedFiles);
@@ -108,50 +108,50 @@ TEST_CASE("IO.LocalFileSystem directory handles scope relative operations", "[IO
     auto directory = fs.OpenDirectory(nestedDir);
     REQUIRE(directory.HasValue());
 
-    auto exists = directory.ValueUnsafe()->Exists(NGIN::IO::Path {"seed.txt"});
+    auto exists = directory.Value()->Exists(NGIN::IO::Path {"seed.txt"});
     REQUIRE(exists.HasValue());
-    REQUIRE(exists.ValueUnsafe());
+    REQUIRE(exists.Value());
 
-    auto info = directory.ValueUnsafe()->GetInfo(NGIN::IO::Path {"seed.txt"});
+    auto info = directory.Value()->GetInfo(NGIN::IO::Path {"seed.txt"});
     REQUIRE(info.HasValue());
-    REQUIRE(info.ValueUnsafe().type == NGIN::IO::EntryType::File);
+    REQUIRE(info.Value().type == NGIN::IO::EntryType::File);
 
-    auto child = directory.ValueUnsafe()->OpenDirectory(NGIN::IO::Path {"child"});
+    auto child = directory.Value()->OpenDirectory(NGIN::IO::Path {"child"});
     REQUIRE(child.HasValue());
-    auto childInfo = child.ValueUnsafe()->GetInfo(NGIN::IO::Path {"."});
+    auto childInfo = child.Value()->GetInfo(NGIN::IO::Path {"."});
     REQUIRE(childInfo.HasValue());
-    REQUIRE(childInfo.ValueUnsafe().type == NGIN::IO::EntryType::Directory);
+    REQUIRE(childInfo.Value().type == NGIN::IO::EntryType::Directory);
 
     NGIN::IO::FileOpenOptions openOptions;
     openOptions.access      = NGIN::IO::FileAccess::Write;
     openOptions.share       = NGIN::IO::FileShare::Read;
     openOptions.disposition = NGIN::IO::FileCreateDisposition::CreateAlways;
 
-    auto openedFile = directory.ValueUnsafe()->OpenFile(NGIN::IO::Path {"from_handle.txt"}, openOptions);
+    auto openedFile = directory.Value()->OpenFile(NGIN::IO::Path {"from_handle.txt"}, openOptions);
     REQUIRE(openedFile.HasValue());
 
     const std::string payload = "dir-handle";
     const auto        writeResult =
-            openedFile.ValueUnsafe()->Write({reinterpret_cast<const NGIN::Byte*>(payload.data()), payload.size()});
+            openedFile.Value()->Write({reinterpret_cast<const NGIN::Byte*>(payload.data()), payload.size()});
     REQUIRE(writeResult.HasValue());
-    REQUIRE(writeResult.ValueUnsafe() == payload.size());
-    openedFile.ValueUnsafe()->Close();
+    REQUIRE(writeResult.Value() == payload.size());
+    openedFile.Value()->Close();
 
     auto writtenText = NGIN::IO::ReadAllText(fs, nestedDir.Join("from_handle.txt"));
     REQUIRE(writtenText.HasValue());
-    REQUIRE(std::string(writtenText.ValueUnsafe().Data(), writtenText.ValueUnsafe().Size()) == payload);
+    REQUIRE(std::string(writtenText.Value().Data(), writtenText.Value().Size()) == payload);
 
-    REQUIRE(directory.ValueUnsafe()->CreateDirectory(NGIN::IO::Path {"created"}).HasValue());
-    REQUIRE(fs.Exists(nestedDir.Join("created")).ValueUnsafe());
-    REQUIRE(directory.ValueUnsafe()->RemoveDirectory(NGIN::IO::Path {"created"}).HasValue());
-    REQUIRE_FALSE(fs.Exists(nestedDir.Join("created")).ValueUnsafe());
+    REQUIRE(directory.Value()->CreateDirectory(NGIN::IO::Path {"created"}).HasValue());
+    REQUIRE(fs.Exists(nestedDir.Join("created")).Value());
+    REQUIRE(directory.Value()->RemoveDirectory(NGIN::IO::Path {"created"}).HasValue());
+    REQUIRE_FALSE(fs.Exists(nestedDir.Join("created")).Value());
 
-    REQUIRE(directory.ValueUnsafe()->RemoveFile(NGIN::IO::Path {"from_handle.txt"}).HasValue());
-    REQUIRE_FALSE(fs.Exists(nestedDir.Join("from_handle.txt")).ValueUnsafe());
+    REQUIRE(directory.Value()->RemoveFile(NGIN::IO::Path {"from_handle.txt"}).HasValue());
+    REQUIRE_FALSE(fs.Exists(nestedDir.Join("from_handle.txt")).Value());
 
-    auto escaped = directory.ValueUnsafe()->Exists(NGIN::IO::Path {"../outside.txt"});
+    auto escaped = directory.Value()->Exists(NGIN::IO::Path {"../outside.txt"});
     REQUIRE_FALSE(escaped.HasValue());
-    REQUIRE(escaped.ErrorUnsafe().code == NGIN::IO::IOErrorCode::InvalidPath);
+    REQUIRE(escaped.Error().code == NGIN::IO::IOErrorCode::InvalidPath);
 
     RemoveTempDir(fs, root);
 }
@@ -175,23 +175,23 @@ TEST_CASE("IO.LocalFileSystem extended operations", "[IO][LocalFileSystem][posix
 
     auto absolute = fs.Absolute(NGIN::IO::Path {"file.txt"}, nestedDir);
     REQUIRE(absolute.HasValue());
-    REQUIRE(absolute.ValueUnsafe().View() == filePath.View());
+    REQUIRE(absolute.Value().View() == filePath.View());
 
     auto canonical = fs.Canonical(symlinkPath);
     REQUIRE(canonical.HasValue());
-    REQUIRE(canonical.ValueUnsafe().View() == filePath.View());
+    REQUIRE(canonical.Value().View() == filePath.View());
 
     auto weaklyCanonical = fs.WeaklyCanonical(root.Join("nested/missing/child.txt"));
     REQUIRE(weaklyCanonical.HasValue());
-    REQUIRE(weaklyCanonical.ValueUnsafe().View() == root.Join("nested/missing/child.txt").LexicallyNormal().View());
+    REQUIRE(weaklyCanonical.Value().View() == root.Join("nested/missing/child.txt").LexicallyNormal().View());
 
     auto symlinkTarget = fs.ReadSymlink(symlinkPath);
     REQUIRE(symlinkTarget.HasValue());
-    REQUIRE(symlinkTarget.ValueUnsafe().View() == filePath.View());
+    REQUIRE(symlinkTarget.Value().View() == filePath.View());
 
     auto sameFile = fs.SameFile(filePath, hardLinkPath);
     REQUIRE(sameFile.HasValue());
-    REQUIRE(sameFile.ValueUnsafe());
+    REQUIRE(sameFile.Value());
 
     NGIN::IO::FilePermissions readOnlyPermissions;
     readOnlyPermissions.nativeBits = 0444;
@@ -199,21 +199,21 @@ TEST_CASE("IO.LocalFileSystem extended operations", "[IO][LocalFileSystem][posix
 
     auto info = fs.GetInfo(filePath);
     REQUIRE(info.HasValue());
-    REQUIRE((info.ValueUnsafe().permissions.nativeBits & 0222u) == 0);
+    REQUIRE((info.Value().permissions.nativeBits & 0222u) == 0);
 
     REQUIRE(fs.CreateDirectories(tempBase).HasValue());
     auto tempDirectory = fs.CreateTempDirectory(tempBase, "dir_");
     REQUIRE(tempDirectory.HasValue());
     auto tempFile = fs.CreateTempFile(tempBase, "file_");
     REQUIRE(tempFile.HasValue());
-    REQUIRE(fs.Exists(tempDirectory.ValueUnsafe()).ValueUnsafe());
-    REQUIRE(fs.Exists(tempFile.ValueUnsafe()).ValueUnsafe());
+    REQUIRE(fs.Exists(tempDirectory.Value()).Value());
+    REQUIRE(fs.Exists(tempFile.Value()).Value());
 
     REQUIRE(NGIN::IO::WriteAllText(fs, replacementSrc, "replacement").HasValue());
     REQUIRE(fs.ReplaceFile(replacementSrc, filePath).HasValue());
     auto replaced = NGIN::IO::ReadAllText(fs, filePath);
     REQUIRE(replaced.HasValue());
-    REQUIRE(std::string(replaced.ValueUnsafe().Data(), replaced.ValueUnsafe().Size()) == "replacement");
+    REQUIRE(std::string(replaced.Value().Data(), replaced.Value().Size()) == "replacement");
 
     RemoveTempDir(fs, root);
 }
@@ -251,49 +251,49 @@ TEST_CASE("IO.LocalFileSystem POSIX metadata and file types", "[IO][LocalFileSys
 
     auto fileInfo = fs.GetInfo(filePath, noFollow);
     REQUIRE(fileInfo.HasValue());
-    REQUIRE(fileInfo.ValueUnsafe().type == NGIN::IO::EntryType::File);
-    REQUIRE(fileInfo.ValueUnsafe().ownership.valid);
-    REQUIRE(fileInfo.ValueUnsafe().ownership.userId == static_cast<NGIN::UInt32>(::geteuid()));
-    REQUIRE(fileInfo.ValueUnsafe().ownership.groupId == static_cast<NGIN::UInt32>(::getegid()));
-    REQUIRE(fileInfo.ValueUnsafe().identity.valid);
-    REQUIRE(fileInfo.ValueUnsafe().identity.hardLinkCount >= 2);
-    REQUIRE(fileInfo.ValueUnsafe().permissions.nativeBits != 0);
-    REQUIRE(fileInfo.ValueUnsafe().changed.valid);
+    REQUIRE(fileInfo.Value().type == NGIN::IO::EntryType::File);
+    REQUIRE(fileInfo.Value().ownership.valid);
+    REQUIRE(fileInfo.Value().ownership.userId == static_cast<NGIN::UInt32>(::geteuid()));
+    REQUIRE(fileInfo.Value().ownership.groupId == static_cast<NGIN::UInt32>(::getegid()));
+    REQUIRE(fileInfo.Value().identity.valid);
+    REQUIRE(fileInfo.Value().identity.hardLinkCount >= 2);
+    REQUIRE(fileInfo.Value().permissions.nativeBits != 0);
+    REQUIRE(fileInfo.Value().changed.valid);
 
     auto hardLinkInfo = fs.GetInfo(hardLinkPath, noFollow);
     REQUIRE(hardLinkInfo.HasValue());
-    REQUIRE(hardLinkInfo.ValueUnsafe().identity.hardLinkCount >= 2);
+    REQUIRE(hardLinkInfo.Value().identity.hardLinkCount >= 2);
 
     auto symlinkInfo = fs.GetInfo(symlinkPath, noFollow);
     REQUIRE(symlinkInfo.HasValue());
-    REQUIRE(symlinkInfo.ValueUnsafe().type == NGIN::IO::EntryType::Symlink);
-    REQUIRE(symlinkInfo.ValueUnsafe().exists);
-    REQUIRE(symlinkInfo.ValueUnsafe().symlinkTargetExists);
+    REQUIRE(symlinkInfo.Value().type == NGIN::IO::EntryType::Symlink);
+    REQUIRE(symlinkInfo.Value().exists);
+    REQUIRE(symlinkInfo.Value().symlinkTargetExists);
 
     auto followedSymlinkInfo = fs.GetInfo(symlinkPath, follow);
     REQUIRE(followedSymlinkInfo.HasValue());
-    REQUIRE(followedSymlinkInfo.ValueUnsafe().type == NGIN::IO::EntryType::File);
-    REQUIRE(followedSymlinkInfo.ValueUnsafe().exists);
+    REQUIRE(followedSymlinkInfo.Value().type == NGIN::IO::EntryType::File);
+    REQUIRE(followedSymlinkInfo.Value().exists);
 
     auto danglingSymlinkInfo = fs.GetInfo(danglingSymlinkPath, noFollow);
     REQUIRE(danglingSymlinkInfo.HasValue());
-    REQUIRE(danglingSymlinkInfo.ValueUnsafe().type == NGIN::IO::EntryType::Symlink);
-    REQUIRE(danglingSymlinkInfo.ValueUnsafe().exists);
-    REQUIRE_FALSE(danglingSymlinkInfo.ValueUnsafe().symlinkTargetExists);
+    REQUIRE(danglingSymlinkInfo.Value().type == NGIN::IO::EntryType::Symlink);
+    REQUIRE(danglingSymlinkInfo.Value().exists);
+    REQUIRE_FALSE(danglingSymlinkInfo.Value().symlinkTargetExists);
 
     auto danglingFollowInfo = fs.GetInfo(danglingSymlinkPath, follow);
     REQUIRE(danglingFollowInfo.HasValue());
-    REQUIRE(danglingFollowInfo.ValueUnsafe().type == NGIN::IO::EntryType::Symlink);
-    REQUIRE(danglingFollowInfo.ValueUnsafe().exists);
-    REQUIRE_FALSE(danglingFollowInfo.ValueUnsafe().symlinkTargetExists);
+    REQUIRE(danglingFollowInfo.Value().type == NGIN::IO::EntryType::Symlink);
+    REQUIRE(danglingFollowInfo.Value().exists);
+    REQUIRE_FALSE(danglingFollowInfo.Value().symlinkTargetExists);
 
     auto fifoInfo = fs.GetInfo(fifoPath, noFollow);
     REQUIRE(fifoInfo.HasValue());
-    REQUIRE(fifoInfo.ValueUnsafe().type == NGIN::IO::EntryType::Fifo);
+    REQUIRE(fifoInfo.Value().type == NGIN::IO::EntryType::Fifo);
 
     auto socketInfo = fs.GetInfo(socketPath, noFollow);
     REQUIRE(socketInfo.HasValue());
-    REQUIRE(socketInfo.ValueUnsafe().type == NGIN::IO::EntryType::Socket);
+    REQUIRE(socketInfo.Value().type == NGIN::IO::EntryType::Socket);
 
     NGIN::IO::EnumerateOptions enumerateOptions;
     enumerateOptions.includeSymlinks = true;
@@ -306,12 +306,12 @@ TEST_CASE("IO.LocalFileSystem POSIX metadata and file types", "[IO][LocalFileSys
     bool sawSymlink = false;
     while (true)
     {
-        auto next = enumerator.ValueUnsafe()->Next();
+        auto next = enumerator.Value()->Next();
         REQUIRE(next.HasValue());
-        if (!next.ValueUnsafe())
+        if (!next.Value())
             break;
 
-        const auto& entry = enumerator.ValueUnsafe()->Current();
+        const auto& entry = enumerator.Value()->Current();
         REQUIRE(entry.info.has_value());
         sawFifo    = sawFifo || entry.type == NGIN::IO::EntryType::Fifo;
         sawSocket  = sawSocket || entry.type == NGIN::IO::EntryType::Socket;
@@ -341,9 +341,9 @@ TEST_CASE("IO.LocalFileSystem directory handles can read symlinks", "[IO][LocalF
     auto directory = fs.OpenDirectory(nestedDir);
     REQUIRE(directory.HasValue());
 
-    auto targetPath = directory.ValueUnsafe()->ReadSymlink(NGIN::IO::Path {"target.sym"});
+    auto targetPath = directory.Value()->ReadSymlink(NGIN::IO::Path {"target.sym"});
     REQUIRE(targetPath.HasValue());
-    REQUIRE(targetPath.ValueUnsafe().View() == "target.txt");
+    REQUIRE(targetPath.Value().View() == "target.txt");
 
     RemoveTempDir(fs, root);
 }

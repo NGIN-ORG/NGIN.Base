@@ -3,14 +3,14 @@
 /// </summary>
 #pragma once
 
-#include <coroutine>
-#include <utility>
 #include <atomic>
 #include <cassert>
-#include <type_traits>
+#include <coroutine>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <type_traits>
+#include <utility>
 
 #include <exception>
 
@@ -41,13 +41,13 @@ namespace NGIN::Async
     public:
         struct promise_type
         {
-            std::optional<T>        m_value {};
-            AsyncError              m_error {};
-            bool                    m_hasError {false};
+            std::optional<T> m_value {};
+            AsyncError       m_error {};
+            bool             m_hasError {false};
 #if NGIN_ASYNC_CAPTURE_EXCEPTIONS
-            std::exception_ptr      m_exception {};
+            std::exception_ptr m_exception {};
             using ExceptionPropagator = void (*)(std::exception_ptr, std::coroutine_handle<>) noexcept;
-            ExceptionPropagator      m_setChildException {};
+            ExceptionPropagator m_setChildException {};
 
             void SetChildException(std::exception_ptr ex) noexcept
             {
@@ -57,17 +57,16 @@ namespace NGIN::Async
                 }
             }
 #endif
-            std::atomic<bool>       m_finished {false};
-            NGIN::Sync::AtomicCondition m_finishedCondition {};
-            std::coroutine_handle<> m_continuation {};
-            TaskContext*            m_ctx {nullptr};
+            std::atomic<bool>            m_finished {false};
+            NGIN::Sync::AtomicCondition  m_finishedCondition {};
+            std::coroutine_handle<>      m_continuation {};
+            TaskContext*                 m_ctx {nullptr};
             NGIN::Execution::ExecutorRef m_executor {};
 
             promise_type() = default;
 
             explicit promise_type(TaskContext& ctx) noexcept
-                : m_ctx(&ctx)
-                , m_executor(ctx.GetExecutor())
+                : m_ctx(&ctx), m_executor(ctx.GetExecutor())
             {
             }
 
@@ -128,7 +127,7 @@ namespace NGIN::Async
             {
                 if (!result)
                 {
-                    m_error = result.error();
+                    m_error    = result.Error();
                     m_hasError = true;
                     return;
                 }
@@ -137,14 +136,14 @@ namespace NGIN::Async
 
             void return_value(NGIN::Utilities::Unexpected<AsyncError> error) noexcept
             {
-                m_error = error.error();
+                m_error    = error.Error();
                 m_hasError = true;
             }
 
             void unhandled_exception() noexcept
             {
 #if NGIN_ASYNC_HAS_EXCEPTIONS
-                m_error = AsyncError {AsyncErrorCode::Fault, 0};
+                m_error    = AsyncError {AsyncErrorCode::Fault, 0};
                 m_hasError = true;
 #if NGIN_ASYNC_CAPTURE_EXCEPTIONS
                 m_exception = std::current_exception();
@@ -158,18 +157,16 @@ namespace NGIN::Async
         using handle_type = std::coroutine_handle<promise_type>;
 
         explicit Task(handle_type h) noexcept
-            : m_handle(h)
-            , m_executor(h ? h.promise().m_executor : NGIN::Execution::ExecutorRef {})
-            , m_started(false)
+            : m_handle(h), m_executor(h ? h.promise().m_executor : NGIN::Execution::ExecutorRef {}), m_started(false)
         {
         }
 
         Task(Task&& o) noexcept
             : m_handle(o.m_handle), m_executor(o.m_executor), m_started(o.m_started.load())
         {
-            o.m_handle    = nullptr;
-            o.m_executor  = {};
-            o.m_started   = false;
+            o.m_handle   = nullptr;
+            o.m_executor = {};
+            o.m_started  = false;
         }
         Task& operator=(Task&& o) noexcept
         {
@@ -177,12 +174,12 @@ namespace NGIN::Async
             {
                 if (m_handle)
                     m_handle.destroy();
-                m_handle      = o.m_handle;
-                m_executor    = o.m_executor;
-                m_started     = o.m_started.load();
-                o.m_handle    = nullptr;
-                o.m_executor  = {};
-                o.m_started   = false;
+                m_handle     = o.m_handle;
+                m_executor   = o.m_executor;
+                m_started    = o.m_started.load();
+                o.m_handle   = nullptr;
+                o.m_executor = {};
+                o.m_started  = false;
             }
             return *this;
         }
@@ -226,7 +223,7 @@ namespace NGIN::Async
             {
                 if (!m_executor.IsValid())
                 {
-                    prom.m_error = MakeAsyncError(AsyncErrorCode::InvalidState);
+                    prom.m_error    = MakeAsyncError(AsyncErrorCode::InvalidState);
                     prom.m_hasError = true;
                     prom.m_finished.store(true, std::memory_order_release);
                     prom.m_finishedCondition.NotifyAll();
@@ -269,14 +266,14 @@ namespace NGIN::Async
                 return false;
             }
 
-            m_executor = ctx.GetExecutor();
-            auto& p = m_handle.promise();
+            m_executor   = ctx.GetExecutor();
+            auto& p      = m_handle.promise();
             p.m_executor = m_executor;
             p.m_ctx      = &ctx;
 
             if (!m_executor.IsValid())
             {
-                p.m_error = MakeAsyncError(AsyncErrorCode::InvalidState);
+                p.m_error    = MakeAsyncError(AsyncErrorCode::InvalidState);
                 p.m_hasError = true;
                 p.m_finished.store(true, std::memory_order_release);
                 p.m_finishedCondition.NotifyAll();
@@ -289,7 +286,7 @@ namespace NGIN::Async
 
         void Schedule(TaskContext& ctx) noexcept
         {
-            (void)TrySchedule(ctx);
+            (void) TrySchedule(ctx);
         }
 
         void Wait()
@@ -298,7 +295,7 @@ namespace NGIN::Async
             {
                 return;
             }
-            auto&            p = m_handle.promise();
+            auto& p = m_handle.promise();
             while (!p.m_finished.load(std::memory_order_acquire))
             {
                 const auto gen = p.m_finishedCondition.Load();
@@ -335,7 +332,7 @@ namespace NGIN::Async
             {
                 return false;
             }
-            auto&           p = m_handle.promise();
+            auto& p = m_handle.promise();
             return p.m_finished.load(std::memory_order_acquire);
         }
 
@@ -345,7 +342,7 @@ namespace NGIN::Async
             {
                 return false;
             }
-            auto&           p = m_handle.promise();
+            auto& p = m_handle.promise();
             return !p.m_finished.load(std::memory_order_acquire) && m_handle && !m_handle.done();
         }
 
@@ -355,7 +352,7 @@ namespace NGIN::Async
             {
                 return false;
             }
-            auto&           p = m_handle.promise();
+            auto& p = m_handle.promise();
             return p.m_hasError;
         }
 
@@ -387,8 +384,8 @@ namespace NGIN::Async
             bool await_ready() const noexcept { return false; }
             bool await_suspend(std::coroutine_handle<promise_type> h) const noexcept
             {
-                auto& p = h.promise();
-                p.m_error = error;
+                auto& p      = h.promise();
+                p.m_error    = error;
                 p.m_hasError = true;
                 return false;
             }
@@ -415,7 +412,7 @@ namespace NGIN::Async
                 std::atomic<bool>            done {false};
                 NGIN::Execution::ExecutorRef exec {};
                 std::coroutine_handle<>      awaiting {};
-                CancellationRegistration      cancellationRegistration {};
+                CancellationRegistration     cancellationRegistration {};
                 AsyncError                   error {};
                 bool                         hasError {false};
             };
@@ -450,8 +447,8 @@ namespace NGIN::Async
                                 void await_resume() noexcept {}
                             };
                             Final final_suspend() noexcept { return {}; }
-                            void return_void() noexcept {}
-                            void unhandled_exception() noexcept {}
+                            void  return_void() noexcept {}
+                            void  unhandled_exception() noexcept {}
                         };
 
                         using handle_type = std::coroutine_handle<promise_type>;
@@ -480,8 +477,8 @@ namespace NGIN::Async
                         return awaiting;
                     }
 
-                    state          = std::make_shared<SharedState>();
-                    state->exec    = ctx.GetExecutor();
+                    state           = std::make_shared<SharedState>();
+                    state->exec     = ctx.GetExecutor();
                     state->awaiting = awaiting;
                     ctx.GetCancellationToken().Register(
                             state->cancellationRegistration,
@@ -489,13 +486,13 @@ namespace NGIN::Async
                             awaiting,
                             +[](void* callbackContext) noexcept -> bool {
                                 auto* sharedState = static_cast<SharedState*>(callbackContext);
-                                bool  expected = false;
+                                bool  expected    = false;
                                 if (!sharedState->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
                                 {
                                     return false;
                                 }
 
-                                sharedState->error = MakeAsyncError(AsyncErrorCode::Canceled);
+                                sharedState->error    = MakeAsyncError(AsyncErrorCode::Canceled);
                                 sharedState->hasError = true;
                                 return true;
                             },
@@ -508,7 +505,7 @@ namespace NGIN::Async
 
                         if (taskCtx.IsCancellationRequested())
                         {
-                            error = MakeAsyncError(AsyncErrorCode::Canceled);
+                            error    = MakeAsyncError(AsyncErrorCode::Canceled);
                             hasError = true;
                         }
                         else
@@ -517,12 +514,12 @@ namespace NGIN::Async
                             auto parentResult = co_await parentTask;
                             if (!parentResult)
                             {
-                                error = parentResult.error();
+                                error    = parentResult.Error();
                                 hasError = true;
                             }
                             else if (taskCtx.IsCancellationRequested())
                             {
-                                error = MakeAsyncError(AsyncErrorCode::Canceled);
+                                error    = MakeAsyncError(AsyncErrorCode::Canceled);
                                 hasError = true;
                             }
                             else
@@ -532,7 +529,7 @@ namespace NGIN::Async
                                 auto nextResult = co_await nextTask;
                                 if (!nextResult)
                                 {
-                                    error = nextResult.error();
+                                    error    = nextResult.Error();
                                     hasError = true;
                                 }
                             }
@@ -541,7 +538,7 @@ namespace NGIN::Async
                         bool expected = false;
                         if (sharedState->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
                         {
-                            sharedState->error = error;
+                            sharedState->error    = error;
                             sharedState->hasError = hasError;
                             if (sharedState->awaiting)
                             {
@@ -580,9 +577,9 @@ namespace NGIN::Async
         }
 
     private:
-        handle_type      m_handle;
+        handle_type                  m_handle;
         NGIN::Execution::ExecutorRef m_executor;
-        std::atomic_bool m_started;
+        std::atomic_bool             m_started;
 
 #if NGIN_ASYNC_CAPTURE_EXCEPTIONS
         template<typename Promise>
@@ -599,7 +596,7 @@ namespace NGIN::Async
             }
             else
             {
-                (void)cont;
+                (void) cont;
             }
         }
 #endif
@@ -614,12 +611,12 @@ namespace NGIN::Async
     public:
         struct promise_type
         {
-            AsyncError              m_error {};
-            bool                    m_hasError {false};
+            AsyncError m_error {};
+            bool       m_hasError {false};
 #if NGIN_ASYNC_CAPTURE_EXCEPTIONS
-            std::exception_ptr      m_exception {};
+            std::exception_ptr m_exception {};
             using ExceptionPropagator = void (*)(std::exception_ptr, std::coroutine_handle<>) noexcept;
-            ExceptionPropagator      m_setChildException {};
+            ExceptionPropagator m_setChildException {};
 
             void SetChildException(std::exception_ptr ex) noexcept
             {
@@ -630,17 +627,16 @@ namespace NGIN::Async
             }
 #endif
 
-            std::atomic<bool>       m_finished {false};
-            NGIN::Sync::AtomicCondition m_finishedCondition {};
-            std::coroutine_handle<> m_continuation {};
-            TaskContext*            m_ctx {nullptr};
+            std::atomic<bool>            m_finished {false};
+            NGIN::Sync::AtomicCondition  m_finishedCondition {};
+            std::coroutine_handle<>      m_continuation {};
+            TaskContext*                 m_ctx {nullptr};
             NGIN::Execution::ExecutorRef m_executor {};
 
             promise_type() = default;
 
             explicit promise_type(TaskContext& ctx) noexcept
-                : m_ctx(&ctx)
-                , m_executor(ctx.GetExecutor())
+                : m_ctx(&ctx), m_executor(ctx.GetExecutor())
             {
             }
 
@@ -698,7 +694,7 @@ namespace NGIN::Async
             void unhandled_exception() noexcept
             {
 #if NGIN_ASYNC_HAS_EXCEPTIONS
-                m_error = AsyncError {AsyncErrorCode::Fault, 0};
+                m_error    = AsyncError {AsyncErrorCode::Fault, 0};
                 m_hasError = true;
 #if NGIN_ASYNC_CAPTURE_EXCEPTIONS
                 m_exception = std::current_exception();
@@ -712,18 +708,16 @@ namespace NGIN::Async
         using handle_type = std::coroutine_handle<promise_type>;
 
         explicit Task(handle_type h) noexcept
-            : m_handle(h)
-            , m_executor(h ? h.promise().m_executor : NGIN::Execution::ExecutorRef {})
-            , m_started(false)
+            : m_handle(h), m_executor(h ? h.promise().m_executor : NGIN::Execution::ExecutorRef {}), m_started(false)
         {
         }
 
         Task(Task&& o) noexcept
             : m_handle(o.m_handle), m_executor(o.m_executor), m_started(o.m_started.load())
         {
-            o.m_handle    = nullptr;
-            o.m_executor  = {};
-            o.m_started   = false;
+            o.m_handle   = nullptr;
+            o.m_executor = {};
+            o.m_started  = false;
         }
         Task& operator=(Task&& o) noexcept
         {
@@ -731,12 +725,12 @@ namespace NGIN::Async
             {
                 if (m_handle)
                     m_handle.destroy();
-                m_handle      = o.m_handle;
-                m_executor    = o.m_executor;
-                m_started     = o.m_started.load();
-                o.m_handle    = nullptr;
-                o.m_executor  = {};
-                o.m_started   = false;
+                m_handle     = o.m_handle;
+                m_executor   = o.m_executor;
+                m_started    = o.m_started.load();
+                o.m_handle   = nullptr;
+                o.m_executor = {};
+                o.m_started  = false;
             }
             return *this;
         }
@@ -780,7 +774,7 @@ namespace NGIN::Async
             {
                 if (!m_executor.IsValid())
                 {
-                    prom.m_error = MakeAsyncError(AsyncErrorCode::InvalidState);
+                    prom.m_error    = MakeAsyncError(AsyncErrorCode::InvalidState);
                     prom.m_hasError = true;
                     prom.m_finished.store(true, std::memory_order_release);
                     prom.m_finishedCondition.NotifyAll();
@@ -819,14 +813,14 @@ namespace NGIN::Async
                 return false;
             }
 
-            m_executor = ctx.GetExecutor();
-            auto& p = m_handle.promise();
+            m_executor   = ctx.GetExecutor();
+            auto& p      = m_handle.promise();
             p.m_executor = m_executor;
             p.m_ctx      = &ctx;
 
             if (!m_executor.IsValid())
             {
-                p.m_error = MakeAsyncError(AsyncErrorCode::InvalidState);
+                p.m_error    = MakeAsyncError(AsyncErrorCode::InvalidState);
                 p.m_hasError = true;
                 p.m_finished.store(true, std::memory_order_release);
                 p.m_finishedCondition.NotifyAll();
@@ -839,7 +833,7 @@ namespace NGIN::Async
 
         void Schedule(TaskContext& ctx) noexcept
         {
-            (void)TrySchedule(ctx);
+            (void) TrySchedule(ctx);
         }
 
         void Wait()
@@ -848,7 +842,7 @@ namespace NGIN::Async
             {
                 return;
             }
-            auto&            p = m_handle.promise();
+            auto& p = m_handle.promise();
             while (!p.m_finished.load(std::memory_order_acquire))
             {
                 const auto gen = p.m_finishedCondition.Load();
@@ -881,7 +875,7 @@ namespace NGIN::Async
             {
                 return false;
             }
-            auto&           p = m_handle.promise();
+            auto& p = m_handle.promise();
             return p.m_finished.load(std::memory_order_acquire);
         }
 
@@ -891,7 +885,7 @@ namespace NGIN::Async
             {
                 return false;
             }
-            auto&           p = m_handle.promise();
+            auto& p = m_handle.promise();
             return !p.m_finished.load(std::memory_order_acquire) && m_handle && !m_handle.done();
         }
 
@@ -901,7 +895,7 @@ namespace NGIN::Async
             {
                 return false;
             }
-            auto&           p = m_handle.promise();
+            auto& p = m_handle.promise();
             return p.m_hasError;
         }
 
@@ -933,8 +927,8 @@ namespace NGIN::Async
             bool await_ready() const noexcept { return false; }
             bool await_suspend(std::coroutine_handle<promise_type> h) const noexcept
             {
-                auto& p = h.promise();
-                p.m_error = error;
+                auto& p      = h.promise();
+                p.m_error    = error;
                 p.m_hasError = true;
                 return false;
             }
@@ -962,7 +956,7 @@ namespace NGIN::Async
                 std::atomic<bool>            done {false};
                 NGIN::Execution::ExecutorRef exec {};
                 std::coroutine_handle<>      awaiting {};
-                CancellationRegistration      cancellationRegistration {};
+                CancellationRegistration     cancellationRegistration {};
                 AsyncError                   error {};
                 bool                         hasError {false};
             };
@@ -997,8 +991,8 @@ namespace NGIN::Async
                                 void await_resume() noexcept {}
                             };
                             Final final_suspend() noexcept { return {}; }
-                            void return_void() noexcept {}
-                            void unhandled_exception() noexcept {}
+                            void  return_void() noexcept {}
+                            void  unhandled_exception() noexcept {}
                         };
 
                         using handle_type = std::coroutine_handle<promise_type>;
@@ -1027,8 +1021,8 @@ namespace NGIN::Async
                         return awaiting;
                     }
 
-                    state          = std::make_shared<SharedState>();
-                    state->exec    = ctx.GetExecutor();
+                    state           = std::make_shared<SharedState>();
+                    state->exec     = ctx.GetExecutor();
                     state->awaiting = awaiting;
                     ctx.GetCancellationToken().Register(
                             state->cancellationRegistration,
@@ -1036,13 +1030,13 @@ namespace NGIN::Async
                             awaiting,
                             +[](void* callbackContext) noexcept -> bool {
                                 auto* sharedState = static_cast<SharedState*>(callbackContext);
-                                bool  expected = false;
+                                bool  expected    = false;
                                 if (!sharedState->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
                                 {
                                     return false;
                                 }
 
-                                sharedState->error = MakeAsyncError(AsyncErrorCode::Canceled);
+                                sharedState->error    = MakeAsyncError(AsyncErrorCode::Canceled);
                                 sharedState->hasError = true;
                                 return true;
                             },
@@ -1055,7 +1049,7 @@ namespace NGIN::Async
 
                         if (taskCtx.IsCancellationRequested())
                         {
-                            error = MakeAsyncError(AsyncErrorCode::Canceled);
+                            error    = MakeAsyncError(AsyncErrorCode::Canceled);
                             hasError = true;
                         }
                         else
@@ -1064,12 +1058,12 @@ namespace NGIN::Async
                             auto parentResult = co_await parentTask;
                             if (!parentResult)
                             {
-                                error = parentResult.error();
+                                error    = parentResult.Error();
                                 hasError = true;
                             }
                             else if (taskCtx.IsCancellationRequested())
                             {
-                                error = MakeAsyncError(AsyncErrorCode::Canceled);
+                                error    = MakeAsyncError(AsyncErrorCode::Canceled);
                                 hasError = true;
                             }
                             else
@@ -1079,7 +1073,7 @@ namespace NGIN::Async
                                 auto nextResult = co_await nextTask;
                                 if (!nextResult)
                                 {
-                                    error = nextResult.error();
+                                    error    = nextResult.Error();
                                     hasError = true;
                                 }
                             }
@@ -1088,7 +1082,7 @@ namespace NGIN::Async
                         bool expected = false;
                         if (sharedState->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
                         {
-                            sharedState->error = error;
+                            sharedState->error    = error;
                             sharedState->hasError = hasError;
                             if (sharedState->awaiting)
                             {
@@ -1127,9 +1121,9 @@ namespace NGIN::Async
         }
 
     private:
-        handle_type      m_handle;
+        handle_type                  m_handle;
         NGIN::Execution::ExecutorRef m_executor;
-        std::atomic_bool m_started;
+        std::atomic_bool             m_started;
 
     public:
         /// Static delay: returns a Task<void> that completes after duration.
@@ -1140,7 +1134,7 @@ namespace NGIN::Async
             auto result = co_await ctx.Delay(duration);
             if (!result)
             {
-                co_await ReturnError(result.error());
+                co_await ReturnError(result.Error());
                 co_return;
             }
             co_return;
@@ -1162,7 +1156,7 @@ namespace NGIN::Async
             }
             else
             {
-                (void)cont;
+                (void) cont;
             }
         }
 #endif

@@ -145,8 +145,8 @@ namespace NGIN::IO
         auto readResult = file.ReadAll();
         file.Close();
         if (!readResult.HasValue())
-            return NGIN::Utilities::Expected<void, IOError>(NGIN::Utilities::Unexpected<IOError>(std::move(readResult.ErrorUnsafe())));
-        m_buffer     = std::move(readResult.ValueUnsafe());
+            return NGIN::Utilities::Expected<void, IOError>(NGIN::Utilities::Unexpected<IOError>(std::move(readResult.Error())));
+        m_buffer     = std::move(readResult.Value());
         m_data       = m_buffer.data();
         m_size       = m_buffer.Size();
         m_ownsBuffer = true;

@@ -5,8 +5,8 @@
 #include <NGIN/Defines.hpp>
 #include <NGIN/Memory/StorageFor.hpp>
 #include <NGIN/Meta/TypeTraits.hpp>
-#include <NGIN/Utilities/Tags.hpp>
 #include <NGIN/Primitives.hpp>
+#include <NGIN/Utilities/Tags.hpp>
 
 #include <cstdint>
 #include <utility>
@@ -19,10 +19,10 @@ namespace NGIN::Utilities
     /// - Empty state is represented by an internal flag.
     /// - Construction/destruction happens in-place using `NGIN::Memory::StorageFor<T>`.
     /// - Checked accessors (`Value()`) follow a contract-fatal policy: assert in debug, abort in release.
-    /// - Unsafe accessors (`ValueUnsafe()`, `operator*`, `operator->`) are undefined behavior if empty.
+    /// - Unsafe accessors (`Value()`, `operator*`, `operator->`) are undefined behavior if empty.
     ///
     /// @tparam T Stored value type. References are not supported.
-    template <class T>
+    template<class T>
     class Optional
     {
         static_assert(!NGIN::Meta::TypeTraits<T>::IsReference(), "Optional<T&> is not supported.");
@@ -36,8 +36,7 @@ namespace NGIN::Utilities
 
         /// @brief Constructs an empty optional from `nullopt`.
         constexpr Optional(nullopt_t) noexcept
-            : m_value {}
-            , m_hasValue {false}
+            : m_value {}, m_hasValue {false}
         {
         }
 
@@ -62,9 +61,8 @@ namespace NGIN::Utilities
         /// @brief Constructs an engaged optional in-place from `args...`.
         ///
         /// @param args Forwarded constructor arguments for `T`.
-        template <class... Args>
-        constexpr explicit Optional(InPlaceType<T>, Args&&... args)
-            noexcept(NGIN::Meta::TypeTraits<T>::template IsNothrowConstructible<Args...>())
+        template<class... Args>
+        constexpr explicit Optional(InPlaceType<T>, Args&&... args) noexcept(NGIN::Meta::TypeTraits<T>::template IsNothrowConstructible<Args...>())
             requires(NGIN::Meta::TypeTraits<T>::template IsConstructible<Args...>())
         {
             Emplace(std::forward<Args>(args)...);
@@ -79,8 +77,7 @@ namespace NGIN::Utilities
 
         constexpr Optional(const Optional& other) noexcept(NGIN::Meta::TypeTraits<T>::IsNothrowCopyConstructible())
             requires(!NGIN::Meta::TypeTraits<T>::IsTriviallyCopyable() && NGIN::Meta::TypeTraits<T>::IsCopyConstructible())
-            : m_value {}
-            , m_hasValue {false}
+            : m_value {}, m_hasValue {false}
         {
             if (other.m_hasValue)
             {
@@ -98,8 +95,7 @@ namespace NGIN::Utilities
 
         constexpr Optional(Optional&& other) noexcept(NGIN::Meta::TypeTraits<T>::IsNothrowMoveConstructible())
             requires(!NGIN::Meta::TypeTraits<T>::IsTriviallyCopyable() && NGIN::Meta::TypeTraits<T>::IsMoveConstructible())
-            : m_value {}
-            , m_hasValue {false}
+            : m_value {}, m_hasValue {false}
         {
             if (other.m_hasValue)
             {
@@ -115,8 +111,7 @@ namespace NGIN::Utilities
             requires(NGIN::Meta::TypeTraits<T>::IsTriviallyCopyable())
         = default;
 
-        constexpr Optional& operator=(const Optional& other)
-            noexcept(
+        constexpr Optional& operator=(const Optional& other) noexcept(
                 NGIN::Meta::TypeTraits<T>::IsNothrowCopyConstructible() &&
                 NGIN::Meta::TypeTraits<T>::IsNothrowDestructible() &&
                 (!NGIN::Meta::TypeTraits<T>::IsCopyAssignable() || NGIN::Meta::TypeTraits<T>::IsNothrowCopyAssignable()))
@@ -167,8 +162,7 @@ namespace NGIN::Utilities
             requires(NGIN::Meta::TypeTraits<T>::IsTriviallyCopyable())
         = default;
 
-        constexpr Optional& operator=(Optional&& other)
-            noexcept(
+        constexpr Optional& operator=(Optional&& other) noexcept(
                 NGIN::Meta::TypeTraits<T>::IsNothrowMoveConstructible() &&
                 NGIN::Meta::TypeTraits<T>::IsNothrowDestructible() &&
                 (!NGIN::Meta::TypeTraits<T>::IsMoveAssignable() || NGIN::Meta::TypeTraits<T>::IsNothrowMoveAssignable()))
@@ -287,12 +281,12 @@ namespace NGIN::Utilities
         /// @brief Unsafe dereference operator.
         ///
         /// @warning Undefined behavior if the optional is empty.
-        constexpr T& operator*() noexcept { return ValueUnsafe(); }
+        constexpr T& operator*() noexcept { return Value(); }
 
         /// @brief Unsafe dereference operator (const).
         ///
         /// @warning Undefined behavior if the optional is empty.
-        constexpr const T& operator*() const noexcept { return ValueUnsafe(); }
+        constexpr const T& operator*() const noexcept { return Value(); }
 
         /// @brief Unsafe member access operator.
         ///
@@ -318,7 +312,7 @@ namespace NGIN::Utilities
         [[nodiscard]] constexpr T ValueOr(T fallback) && noexcept(NGIN::Meta::TypeTraits<T>::IsNothrowMoveConstructible())
             requires(NGIN::Meta::TypeTraits<T>::IsMoveConstructible())
         {
-            return m_hasValue ? std::move(ValueUnsafe()) : std::move(fallback);
+            return m_hasValue ? std::move(Value()) : std::move(fallback);
         }
 
         /// @brief Destroys the contained value (if any) and makes the optional empty.
@@ -338,10 +332,9 @@ namespace NGIN::Utilities
         ///
         /// @param args Forwarded constructor arguments for `T`.
         /// @return Reference to the newly constructed `T`.
-        template <class... Args>
-        constexpr T& Emplace(Args&&... args)
-            noexcept(NGIN::Meta::TypeTraits<T>::template IsNothrowConstructible<Args...>() &&
-                NGIN::Meta::TypeTraits<T>::IsNothrowDestructible())
+        template<class... Args>
+        constexpr T& Emplace(Args&&... args) noexcept(NGIN::Meta::TypeTraits<T>::template IsNothrowConstructible<Args...>() &&
+                                                      NGIN::Meta::TypeTraits<T>::IsNothrowDestructible())
             requires(NGIN::Meta::TypeTraits<T>::template IsConstructible<Args...>())
         {
             Reset();
@@ -353,8 +346,7 @@ namespace NGIN::Utilities
         /// @details
         /// If both are engaged, swaps their contained values.
         /// If only one is engaged, moves the engaged value into the empty one.
-        constexpr void Swap(Optional& other)
-            noexcept(
+        constexpr void Swap(Optional& other) noexcept(
                 NGIN::Meta::TypeTraits<T>::IsNothrowMoveConstructible() &&
                 NGIN::Meta::TypeTraits<T>::IsNothrowMoveAssignable() &&
                 NGIN::Meta::TypeTraits<T>::IsNothrowDestructible())
@@ -389,16 +381,16 @@ namespace NGIN::Utilities
             NGIN_ABORT("NGIN::Utilities::Optional::Value called when empty");
         }
 
-        template <class... Args>
+        template<class... Args>
         constexpr T& Engage(Args&&... args) noexcept(NGIN::Meta::TypeTraits<T>::template IsNothrowConstructible<Args...>())
             requires(NGIN::Meta::TypeTraits<T>::template IsConstructible<Args...>())
         {
-            T& ref = m_value.Construct(std::forward<Args>(args)...);
+            T& ref     = m_value.Construct(std::forward<Args>(args)...);
             m_hasValue = 1;
             return ref;
         }
 
         [[no_unique_address]] NGIN::Memory::StorageFor<T> m_value {};
-        NGIN::UInt8 m_hasValue {0};
+        NGIN::UInt8                                       m_hasValue {0};
     };
-}
+}// namespace NGIN::Utilities

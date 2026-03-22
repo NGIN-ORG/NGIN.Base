@@ -18,11 +18,20 @@ namespace NGIN::Net
         AsyncErrorCode code = AsyncErrorCode::Fault;
         switch (error.code)
         {
-            case NetErrorCode::TimedOut: code = AsyncErrorCode::TimedOut; break;
-            case NetErrorCode::MessageTooLarge: code = AsyncErrorCode::InvalidArgument; break;
-            case NetErrorCode::WouldBlock: code = AsyncErrorCode::InvalidState; break;
-            case NetErrorCode::Ok: code = AsyncErrorCode::Ok; break;
-            default: break;
+            case NetErrorCode::TimedOut:
+                code = AsyncErrorCode::TimedOut;
+                break;
+            case NetErrorCode::MessageTooLarge:
+                code = AsyncErrorCode::InvalidArgument;
+                break;
+            case NetErrorCode::WouldBlock:
+                code = AsyncErrorCode::InvalidState;
+                break;
+            case NetErrorCode::Ok:
+                code = AsyncErrorCode::Ok;
+                break;
+            default:
+                break;
         }
 
         const int native = (error.native != 0) ? error.native : static_cast<int>(error.code);
@@ -44,7 +53,7 @@ namespace NGIN::Net
         if (!optionResult)
         {
             m_handle.Close();
-            return NGIN::Utilities::Unexpected(optionResult.error());
+            return NGIN::Utilities::Unexpected(optionResult.Error());
         }
         return {};
     }
@@ -52,7 +61,7 @@ namespace NGIN::Net
     NetExpected<void> TcpListener::Bind(Endpoint localEndpoint) noexcept
     {
         sockaddr_storage storage {};
-        socklen_t length = 0;
+        socklen_t        length = 0;
         if (!detail::ToSockAddr(localEndpoint, storage, length))
         {
             return NGIN::Utilities::Unexpected(NetError {NetErrorCode::Unknown, 0});
@@ -77,27 +86,27 @@ namespace NGIN::Net
     NetExpected<TcpSocket> TcpListener::TryAccept() noexcept
     {
         sockaddr_storage storage {};
-        socklen_t length = static_cast<socklen_t>(sizeof(storage));
-        const auto sock = ::accept(detail::ToNative(m_handle), reinterpret_cast<sockaddr*>(&storage), &length);
+        socklen_t        length = static_cast<socklen_t>(sizeof(storage));
+        const auto       sock   = ::accept(detail::ToNative(m_handle), reinterpret_cast<sockaddr*>(&storage), &length);
         if (sock == detail::InvalidNativeSocket)
         {
             return NGIN::Utilities::Unexpected(detail::LastError());
         }
 
         TcpSocket socket(std::move(detail::FromNative(sock)), true);
-        (void)detail::SetNonBlocking(socket.Handle(), true);
+        (void) detail::SetNonBlocking(socket.Handle(), true);
         return socket;
     }
 
-    NGIN::Async::Task<TcpSocket> TcpListener::AcceptAsync(NGIN::Async::TaskContext& ctx,
-                                                          NetworkDriver& driver,
+    NGIN::Async::Task<TcpSocket> TcpListener::AcceptAsync(NGIN::Async::TaskContext&      ctx,
+                                                          NetworkDriver&                 driver,
                                                           NGIN::Async::CancellationToken token)
     {
 #if defined(NGIN_PLATFORM_WINDOWS)
         auto handleResult = co_await driver.SubmitAccept(ctx, m_handle, token);
         if (!handleResult)
         {
-            co_return NGIN::Utilities::Unexpected(handleResult.error());
+            co_return NGIN::Utilities::Unexpected(handleResult.Error());
         }
         co_return TcpSocket(std::move(*handleResult), true);
 #else
@@ -109,15 +118,15 @@ namespace NGIN::Net
                 co_return std::move(*result);
             }
 
-            if (result.error().code != NetErrorCode::WouldBlock)
+            if (result.Error().code != NetErrorCode::WouldBlock)
             {
-                co_return NGIN::Utilities::Unexpected(ToAsyncError(result.error()));
+                co_return NGIN::Utilities::Unexpected(ToAsyncError(result.Error()));
             }
 
             auto waitResult = co_await driver.WaitUntilReadable(ctx, m_handle, token);
             if (!waitResult)
             {
-                co_return NGIN::Utilities::Unexpected(waitResult.error());
+                co_return NGIN::Utilities::Unexpected(waitResult.Error());
             }
         }
 #endif
@@ -127,4 +136,4 @@ namespace NGIN::Net
     {
         m_handle.Close();
     }
-}
+}// namespace NGIN::Net

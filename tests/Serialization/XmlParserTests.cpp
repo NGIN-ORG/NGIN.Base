@@ -10,7 +10,7 @@ TEST_CASE("XmlParser parses basic document", "[serialization][xml]")
     auto        result = XmlParser::Parse(std::string_view {input});
     REQUIRE(result.HasValue());
 
-    const XmlElement* root = result.ValueUnsafe().Root();
+    const XmlElement* root = result.Value().Root();
     REQUIRE(root != nullptr);
     REQUIRE(root->name == "root");
 
@@ -33,13 +33,13 @@ TEST_CASE("XmlParser decodes entities", "[serialization][xml]")
 {
     using namespace NGIN::Serialization;
 
-    const char* input  = R"(<root>Tom &amp; Jerry</root>)";
+    const char*     input = R"(<root>Tom &amp; Jerry</root>)";
     XmlParseOptions options;
     options.decodeEntities = true;
-    auto result = XmlParser::Parse(std::string_view {input}, options);
+    auto result            = XmlParser::Parse(std::string_view {input}, options);
     REQUIRE(result.HasValue());
 
-    const XmlElement* root = result.ValueUnsafe().Root();
+    const XmlElement* root = result.Value().Root();
     REQUIRE(root != nullptr);
     REQUIRE(root->children.Size() == 1);
     REQUIRE(root->children[0].type == XmlNode::Type::Text);

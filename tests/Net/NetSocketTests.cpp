@@ -14,9 +14,9 @@
 #include <sys/socket.h>
 #endif
 
+#include <NGIN/Async/Cancellation.hpp>
 #include <NGIN/Async/Task.hpp>
 #include <NGIN/Async/TaskContext.hpp>
-#include <NGIN/Async/Cancellation.hpp>
 #include <NGIN/Execution/CooperativeScheduler.hpp>
 #include <NGIN/Execution/ThisThread.hpp>
 #include <NGIN/Net/Runtime/NetworkDriver.hpp>
@@ -107,7 +107,7 @@ namespace NGIN::Net
         std::array<NGIN::Byte, 256> storage {};
         auto                        recvResult = socket.TryReceiveFrom(ByteSpan {storage.data(), storage.size()});
         REQUIRE_FALSE(recvResult);
-        REQUIRE(recvResult.error().code == NetErrorCode::WouldBlock);
+        REQUIRE(recvResult.Error().code == NetErrorCode::WouldBlock);
 
         socket.Close();
     }
@@ -127,7 +127,7 @@ namespace NGIN::Net
 
         auto acceptResult = listener.TryAccept();
         REQUIRE_FALSE(acceptResult);
-        REQUIRE(acceptResult.error().code == NetErrorCode::WouldBlock);
+        REQUIRE(acceptResult.Error().code == NetErrorCode::WouldBlock);
 
         listener.Close();
     }
@@ -172,7 +172,7 @@ namespace NGIN::Net
                 received = true;
                 break;
             }
-            REQUIRE(recvResult.error().code == NetErrorCode::WouldBlock);
+            REQUIRE(recvResult.Error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
 
@@ -207,7 +207,7 @@ namespace NGIN::Net
                 accepted = true;
                 break;
             }
-            REQUIRE(acceptResult.error().code == NetErrorCode::WouldBlock);
+            REQUIRE(acceptResult.Error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(accepted);
@@ -229,7 +229,7 @@ namespace NGIN::Net
                 received = true;
                 break;
             }
-            REQUIRE(recvResult.error().code == NetErrorCode::WouldBlock);
+            REQUIRE(recvResult.Error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(received);
@@ -363,49 +363,49 @@ namespace NGIN::Net
         REQUIRE(client.Connect({IpAddress::LoopbackV4(), port}));
 
         TcpSocket server;
-        bool accepted = false;
+        bool      accepted = false;
         for (int attempt = 0; attempt < 128; ++attempt)
         {
             auto acceptResult = listener.TryAccept();
             if (acceptResult)
             {
-                server = std::move(*acceptResult);
+                server   = std::move(*acceptResult);
                 accepted = true;
                 break;
             }
-            REQUIRE(acceptResult.error().code == NetErrorCode::WouldBlock);
+            REQUIRE(acceptResult.Error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(accepted);
 
-        const char partA[] = "vec-";
-        const char partB[] = "tcp";
+        const char            partA[]    = "vec-";
+        const char            partB[]    = "tcp";
         constexpr std::size_t totalBytes = sizeof(partA) - 1 + sizeof(partB) - 1;
 
         std::size_t sent = 0;
         while (sent < totalBytes)
         {
             std::array<BufferSegment, 2> iovecs {};
-            std::size_t count = 0;
+            std::size_t                  count = 0;
             if (sent < (sizeof(partA) - 1))
             {
                 const auto offsetA = sent;
-                iovecs[count++] = BufferSegment {reinterpret_cast<const NGIN::Byte*>(partA) + offsetA,
+                iovecs[count++]    = BufferSegment {reinterpret_cast<const NGIN::Byte*>(partA) + offsetA,
                                                  static_cast<NGIN::UInt32>((sizeof(partA) - 1) - offsetA)};
-                iovecs[count++] = BufferSegment {reinterpret_cast<const NGIN::Byte*>(partB),
+                iovecs[count++]    = BufferSegment {reinterpret_cast<const NGIN::Byte*>(partB),
                                                  static_cast<NGIN::UInt32>(sizeof(partB) - 1)};
             }
             else
             {
                 const auto offsetB = sent - (sizeof(partA) - 1);
-                iovecs[count++] = BufferSegment {reinterpret_cast<const NGIN::Byte*>(partB) + offsetB,
+                iovecs[count++]    = BufferSegment {reinterpret_cast<const NGIN::Byte*>(partB) + offsetB,
                                                  static_cast<NGIN::UInt32>((sizeof(partB) - 1) - offsetB)};
             }
 
             auto sendResult = client.TrySendSegments(BufferSegmentSpan {iovecs.data(), count});
             if (!sendResult)
             {
-                REQUIRE(sendResult.error().code == NetErrorCode::WouldBlock);
+                REQUIRE(sendResult.Error().code == NetErrorCode::WouldBlock);
                 SleepBrief();
                 continue;
             }
@@ -414,31 +414,31 @@ namespace NGIN::Net
 
         std::array<NGIN::Byte, sizeof(partA) - 1> recvA {};
         std::array<NGIN::Byte, sizeof(partB) - 1> recvB {};
-        std::size_t received = 0;
+        std::size_t                               received = 0;
 
         while (received < totalBytes)
         {
             std::array<MutableBufferSegment, 2> iovecs {};
-            std::size_t count = 0;
+            std::size_t                         count = 0;
             if (received < recvA.size())
             {
                 const auto offsetA = received;
-                iovecs[count++] = MutableBufferSegment {recvA.data() + offsetA,
+                iovecs[count++]    = MutableBufferSegment {recvA.data() + offsetA,
                                                         static_cast<NGIN::UInt32>(recvA.size() - offsetA)};
-                iovecs[count++] = MutableBufferSegment {recvB.data(),
+                iovecs[count++]    = MutableBufferSegment {recvB.data(),
                                                         static_cast<NGIN::UInt32>(recvB.size())};
             }
             else
             {
                 const auto offsetB = received - recvA.size();
-                iovecs[count++] = MutableBufferSegment {recvB.data() + offsetB,
+                iovecs[count++]    = MutableBufferSegment {recvB.data() + offsetB,
                                                         static_cast<NGIN::UInt32>(recvB.size() - offsetB)};
             }
 
             auto recvResult = server.TryReceiveSegments(MutableBufferSegmentSpan {iovecs.data(), count});
             if (!recvResult)
             {
-                REQUIRE(recvResult.error().code == NetErrorCode::WouldBlock);
+                REQUIRE(recvResult.Error().code == NetErrorCode::WouldBlock);
                 SleepBrief();
                 continue;
             }
@@ -482,7 +482,7 @@ namespace NGIN::Net
                 accepted = true;
                 break;
             }
-            REQUIRE(acceptResult.error().code == NetErrorCode::WouldBlock);
+            REQUIRE(acceptResult.Error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(accepted);
@@ -491,7 +491,7 @@ namespace NGIN::Net
                                           .FromTcpSocket(std::move(client), *driver)
                                           .Build();
         REQUIRE(clientStreamResult);
-        auto clientStream = std::move(*clientStreamResult);
+        auto clientStream       = std::move(*clientStreamResult);
         auto serverStreamResult = Transport::ByteStreamBuilder()
                                           .FromTcpSocket(std::move(server), *driver)
                                           .Build();
@@ -556,7 +556,7 @@ namespace NGIN::Net
                 accepted = true;
                 break;
             }
-            REQUIRE(acceptResult.error().code == NetErrorCode::WouldBlock);
+            REQUIRE(acceptResult.Error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(accepted);
@@ -565,7 +565,7 @@ namespace NGIN::Net
                                           .FromTcpSocket(std::move(client), *driver)
                                           .BuildLengthPrefixed();
         REQUIRE(clientStreamResult);
-        auto clientStream = std::move(*clientStreamResult);
+        auto clientStream       = std::move(*clientStreamResult);
         auto serverStreamResult = Transport::ByteStreamBuilder()
                                           .FromTcpSocket(std::move(server), *driver)
                                           .BuildLengthPrefixed();
@@ -614,8 +614,8 @@ namespace NGIN::Net
         UdpSocket sender;
         REQUIRE(sender.Open(AddressFamily::V4));
 
-        const char partA[] = "udp-";
-        const char partB[] = "vec";
+        const char            partA[]    = "udp-";
+        const char            partB[]    = "vec";
         constexpr std::size_t totalBytes = sizeof(partA) - 1 + sizeof(partB) - 1;
 
         std::array<BufferSegment, 2> sendIov {};
@@ -635,14 +635,14 @@ namespace NGIN::Net
                 sent = true;
                 break;
             }
-            REQUIRE(sendResult.error().code == NetErrorCode::WouldBlock);
+            REQUIRE(sendResult.Error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(sent);
 
         std::array<NGIN::Byte, sizeof(partA) - 1> recvA {};
         std::array<NGIN::Byte, sizeof(partB) - 1> recvB {};
-        std::array<MutableBufferSegment, 2> recvIov {};
+        std::array<MutableBufferSegment, 2>       recvIov {};
         recvIov[0] = MutableBufferSegment {recvA.data(), static_cast<NGIN::UInt32>(recvA.size())};
         recvIov[1] = MutableBufferSegment {recvB.data(), static_cast<NGIN::UInt32>(recvB.size())};
 
@@ -658,7 +658,7 @@ namespace NGIN::Net
                 received = true;
                 break;
             }
-            REQUIRE(recvResult.error().code == NetErrorCode::WouldBlock);
+            REQUIRE(recvResult.Error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(received);
@@ -687,7 +687,7 @@ namespace NGIN::Net
                                          .FromUdpSocket(std::move(receiver), *driver)
                                          .Build();
         REQUIRE(recvChannelResult);
-        auto recvChannel = std::move(*recvChannelResult);
+        auto recvChannel       = std::move(*recvChannelResult);
         auto sendChannelResult = Transport::DatagramBuilder()
                                          .FromUdpSocket(std::move(sender), *driver)
                                          .Build();
@@ -753,7 +753,7 @@ namespace NGIN::Net
         REQUIRE(PumpUntil(scheduler, *driver, [&]() { return recvTask.IsCompleted(); }));
         auto recvResult = recvTask.Get();
         REQUIRE_FALSE(recvResult);
-        REQUIRE(recvResult.error().code == NGIN::Async::AsyncErrorCode::Canceled);
+        REQUIRE(recvResult.Error().code == NGIN::Async::AsyncErrorCode::Canceled);
 
         socket.Close();
     }
@@ -781,7 +781,7 @@ namespace NGIN::Net
         REQUIRE(PumpUntil(scheduler, *driver, [&]() { return acceptTask.IsCompleted(); }));
         auto acceptResult = acceptTask.Get();
         REQUIRE_FALSE(acceptResult);
-        REQUIRE(acceptResult.error().code == NGIN::Async::AsyncErrorCode::Canceled);
+        REQUIRE(acceptResult.Error().code == NGIN::Async::AsyncErrorCode::Canceled);
 
         listener.Close();
     }
@@ -815,7 +815,7 @@ namespace NGIN::Net
                 accepted = true;
                 break;
             }
-            REQUIRE(acceptResult.error().code == NetErrorCode::WouldBlock);
+            REQUIRE(acceptResult.Error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(accepted);
@@ -837,7 +837,7 @@ namespace NGIN::Net
         REQUIRE(PumpUntil(scheduler, *driver, [&]() { return recvTask.IsCompleted(); }));
         auto recvResult = recvTask.Get();
         REQUIRE_FALSE(recvResult);
-        REQUIRE(recvResult.error().code == NGIN::Async::AsyncErrorCode::Canceled);
+        REQUIRE(recvResult.Error().code == NGIN::Async::AsyncErrorCode::Canceled);
 
         client.Close();
         server.Close();
@@ -873,7 +873,7 @@ namespace NGIN::Net
                 accepted = true;
                 break;
             }
-            REQUIRE(acceptResult.error().code == NetErrorCode::WouldBlock);
+            REQUIRE(acceptResult.Error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(accepted);
@@ -928,7 +928,7 @@ namespace NGIN::Net
                 accepted = true;
                 break;
             }
-            REQUIRE(acceptResult.error().code == NetErrorCode::WouldBlock);
+            REQUIRE(acceptResult.Error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(accepted);
@@ -989,8 +989,8 @@ namespace NGIN::Net
         REQUIRE(client.Open(AddressFamily::V4));
         auto result = client.Connect({IpAddress::LoopbackV4(), port});
         REQUIRE_FALSE(result);
-        const bool refused = result.error().code == NetErrorCode::Disconnected ||
-                             result.error().code == NetErrorCode::ConnectionReset;
+        const bool refused = result.Error().code == NetErrorCode::Disconnected ||
+                             result.Error().code == NetErrorCode::ConnectionReset;
         REQUIRE(refused);
 
         client.Close();
@@ -1051,7 +1051,7 @@ namespace NGIN::Net
                 accepted = true;
                 break;
             }
-            REQUIRE(acceptResult.error().code == NetErrorCode::WouldBlock);
+            REQUIRE(acceptResult.Error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(accepted);
@@ -1115,7 +1115,7 @@ namespace NGIN::Net
                 accepted = true;
                 break;
             }
-            REQUIRE(acceptResult.error().code == NetErrorCode::WouldBlock);
+            REQUIRE(acceptResult.Error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(accepted);
@@ -1135,7 +1135,7 @@ namespace NGIN::Net
                 received = true;
                 break;
             }
-            REQUIRE(recvResult.error().code == NetErrorCode::WouldBlock);
+            REQUIRE(recvResult.Error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(received);
@@ -1169,9 +1169,8 @@ namespace NGIN::Net
         REQUIRE(PumpUntil(scheduler, *driver, [&]() { return connectTask.IsCompleted(); }));
         auto connectResult = connectTask.Get();
         REQUIRE_FALSE(connectResult);
-        REQUIRE(connectResult.error().code == NGIN::Async::AsyncErrorCode::Fault);
+        REQUIRE(connectResult.Error().code == NGIN::Async::AsyncErrorCode::Fault);
 
         client.Close();
     }
 }// namespace NGIN::Net
-
