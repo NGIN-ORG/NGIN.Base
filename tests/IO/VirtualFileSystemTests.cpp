@@ -103,11 +103,11 @@ TEST_CASE("IO.VirtualFileSystem directory handles scope relative operations", "[
     auto directory = vfs.OpenDirectory(nestedDir);
     REQUIRE(directory.HasValue());
 
-    auto exists = directory.Value()->Exists(NGIN::IO::Path {"seed.txt"});
+    auto exists = directory->Exists(NGIN::IO::Path {"seed.txt"});
     REQUIRE(exists.HasValue());
     REQUIRE(exists.Value());
 
-    auto child = directory.Value()->OpenDirectory(NGIN::IO::Path {"child"});
+    auto child = directory->OpenDirectory(NGIN::IO::Path {"child"});
     REQUIRE(child.HasValue());
 
     NGIN::IO::FileOpenOptions openOptions;
@@ -115,29 +115,28 @@ TEST_CASE("IO.VirtualFileSystem directory handles scope relative operations", "[
     openOptions.share       = NGIN::IO::FileShare::Read;
     openOptions.disposition = NGIN::IO::FileCreateDisposition::CreateAlways;
 
-    auto openedFile = directory.Value()->OpenFile(NGIN::IO::Path {"from_handle.txt"}, openOptions);
+    auto openedFile = directory->OpenFile(NGIN::IO::Path {"from_handle.txt"}, openOptions);
     REQUIRE(openedFile.HasValue());
 
-    const std::string payload = "virtual-dir-handle";
-    const auto        writeResult =
-            openedFile.Value()->Write({reinterpret_cast<const NGIN::Byte*>(payload.data()), payload.size()});
+    const std::string payload     = "virtual-dir-handle";
+    const auto        writeResult = openedFile->Write({reinterpret_cast<const NGIN::Byte*>(payload.data()), payload.size()});
     REQUIRE(writeResult.HasValue());
     REQUIRE(writeResult.Value() == payload.size());
-    openedFile.Value()->Close();
+    openedFile->Close();
 
     auto writtenText = NGIN::IO::ReadAllText(vfs, nestedDir.Join("from_handle.txt"));
     REQUIRE(writtenText.HasValue());
     REQUIRE(std::string(writtenText.Value().Data(), writtenText.Value().Size()) == payload);
 
-    REQUIRE(directory.Value()->CreateDirectory(NGIN::IO::Path {"created"}).HasValue());
+    REQUIRE(directory->CreateDirectory(NGIN::IO::Path {"created"}).HasValue());
     REQUIRE(vfs.Exists(nestedDir.Join("created")).Value());
-    REQUIRE(directory.Value()->RemoveDirectory(NGIN::IO::Path {"created"}).HasValue());
+    REQUIRE(directory->RemoveDirectory(NGIN::IO::Path {"created"}).HasValue());
     REQUIRE_FALSE(vfs.Exists(nestedDir.Join("created")).Value());
 
-    REQUIRE(directory.Value()->RemoveFile(NGIN::IO::Path {"from_handle.txt"}).HasValue());
+    REQUIRE(directory->RemoveFile(NGIN::IO::Path {"from_handle.txt"}).HasValue());
     REQUIRE_FALSE(vfs.Exists(nestedDir.Join("from_handle.txt")).Value());
 
-    auto escaped = directory.Value()->Exists(NGIN::IO::Path {"../outside.txt"});
+    auto escaped = directory->Exists(NGIN::IO::Path {"../outside.txt"});
     REQUIRE_FALSE(escaped.HasValue());
     REQUIRE(escaped.Error().code == NGIN::IO::IOErrorCode::InvalidPath);
 

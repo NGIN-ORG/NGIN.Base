@@ -1,13 +1,11 @@
 #pragma once
 
+#include <NGIN/IO/DirectoryEnumerator.hpp>
+#include <NGIN/IO/DirectoryHandle.hpp>
+#include <NGIN/IO/FileHandle.hpp>
 #include <NGIN/IO/FileSystemTypes.hpp>
 #include <NGIN/IO/FileView.hpp>
-#include <NGIN/IO/IDirectoryEnumerator.hpp>
-#include <NGIN/IO/IDirectoryHandle.hpp>
-#include <NGIN/IO/IFileHandle.hpp>
 #include <NGIN/IO/IOResult.hpp>
-
-#include <memory>
 #include <string_view>
 
 namespace NGIN::IO
@@ -40,10 +38,10 @@ namespace NGIN::IO
         virtual ResultVoid CopyFile(const Path& from, const Path& to, const CopyOptions& options = {}) noexcept = 0;
         virtual ResultVoid Move(const Path& from, const Path& to, const CopyOptions& options = {}) noexcept     = 0;
 
-        virtual Result<std::unique_ptr<IFileHandle>>          OpenFile(const Path& path, const FileOpenOptions& options) noexcept        = 0;
-        virtual Result<std::unique_ptr<IDirectoryHandle>>     OpenDirectory(const Path& path) noexcept                                   = 0;
-        virtual Result<FileView>                              OpenFileView(const Path& path) noexcept                                    = 0;
-        virtual Result<std::unique_ptr<IDirectoryEnumerator>> Enumerate(const Path& path, const EnumerateOptions& options = {}) noexcept = 0;
+        virtual Result<FileHandle>          OpenFile(const Path& path, const FileOpenOptions& options) noexcept        = 0;
+        virtual Result<DirectoryHandle>     OpenDirectory(const Path& path) noexcept                                   = 0;
+        virtual Result<FileView>            OpenFileView(const Path& path) noexcept                                    = 0;
+        virtual Result<DirectoryEnumerator> Enumerate(const Path& path, const EnumerateOptions& options = {}) noexcept = 0;
 
         virtual Result<Path>      CurrentWorkingDirectory() noexcept                                                         = 0;
         virtual ResultVoid        SetCurrentWorkingDirectory(const Path& path) noexcept                                      = 0;

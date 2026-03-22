@@ -735,32 +735,31 @@ namespace NGIN::IO
                 return m_fileSystem.GetInfo(JoinHandlePath(m_path, normalized.Value()), options);
             }
 
-            Result<std::unique_ptr<IFileHandle>> OpenFile(const Path& path, const FileOpenOptions& options) noexcept override
+            Result<FileHandle> OpenFile(const Path& path, const FileOpenOptions& options) noexcept override
             {
                 auto normalized = NormalizeRelativeHandlePath(path);
                 if (!normalized.HasValue())
                 {
-                    return Result<std::unique_ptr<IFileHandle>>(NGIN::Utilities::Unexpected<IOError>(std::move(normalized.Error())));
+                    return Result<FileHandle>(NGIN::Utilities::Unexpected<IOError>(std::move(normalized.Error())));
                 }
                 return m_fileSystem.OpenFile(JoinHandlePath(m_path, normalized.Value()), options);
             }
 
-            Result<std::unique_ptr<IDirectoryHandle>> OpenDirectory(const Path& path) noexcept override
+            Result<DirectoryHandle> OpenDirectory(const Path& path) noexcept override
             {
                 auto normalized = NormalizeRelativeHandlePath(path);
                 if (!normalized.HasValue())
                 {
-                    return Result<std::unique_ptr<IDirectoryHandle>>(NGIN::Utilities::Unexpected<IOError>(std::move(normalized.Error())));
+                    return Result<DirectoryHandle>(NGIN::Utilities::Unexpected<IOError>(std::move(normalized.Error())));
                 }
 
                 auto opened = Open(JoinHandlePath(m_path, normalized.Value()));
                 if (!opened.HasValue())
                 {
-                    return Result<std::unique_ptr<IDirectoryHandle>>(NGIN::Utilities::Unexpected<IOError>(std::move(opened.Error())));
+                    return Result<DirectoryHandle>(NGIN::Utilities::Unexpected<IOError>(std::move(opened.Error())));
                 }
 
-                std::unique_ptr<IDirectoryHandle> result(opened.Value().release());
-                return Result<std::unique_ptr<IDirectoryHandle>>(std::move(result));
+                return Result<DirectoryHandle>(DirectoryHandle(std::move(opened).TakeValue()));
             }
 
             ResultVoid CreateDirectory(const Path& path, const DirectoryCreateOptions& options = {}) noexcept override
@@ -1161,39 +1160,34 @@ namespace NGIN::IO
                 NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::NotSupported, "native recursive copy not implemented on Windows", from, to)));
     }
 
-    Result<std::unique_ptr<IFileHandle>> LocalFileSystem::OpenFile(const Path& path, const FileOpenOptions& options) noexcept
+    Result<FileHandle> LocalFileSystem::OpenFile(const Path& path, const FileOpenOptions& options) noexcept
     {
         auto opened = LocalFileHandle::Open(path, options);
         if (!opened.HasValue())
-            return Result<std::unique_ptr<IFileHandle>>(NGIN::Utilities::Unexpected<IOError>(std::move(opened.Error())));
-
-        std::unique_ptr<IFileHandle> result(opened.Value().release());
-        return Result<std::unique_ptr<IFileHandle>>(std::move(result));
+            return Result<FileHandle>(NGIN::Utilities::Unexpected<IOError>(std::move(opened.Error())));
+        return Result<FileHandle>(FileHandle(std::move(opened).TakeValue()));
     }
 
-    Result<std::unique_ptr<IDirectoryHandle>> LocalFileSystem::OpenDirectory(const Path& path) noexcept
+    Result<DirectoryHandle> LocalFileSystem::OpenDirectory(const Path& path) noexcept
     {
         auto opened = LocalDirectoryHandle::Open(path);
         if (!opened.HasValue())
-            return Result<std::unique_ptr<IDirectoryHandle>>(NGIN::Utilities::Unexpected<IOError>(std::move(opened.Error())));
-
-        std::unique_ptr<IDirectoryHandle> result(opened.Value().release());
-        return Result<std::unique_ptr<IDirectoryHandle>>(std::move(result));
+            return Result<DirectoryHandle>(NGIN::Utilities::Unexpected<IOError>(std::move(opened.Error())));
+        return Result<DirectoryHandle>(DirectoryHandle(std::move(opened).TakeValue()));
     }
 
-    Result<std::unique_ptr<IDirectoryEnumerator>> LocalFileSystem::Enumerate(const Path& path, const EnumerateOptions& options) noexcept
+    Result<DirectoryEnumerator> LocalFileSystem::Enumerate(const Path& path, const EnumerateOptions& options) noexcept
     {
         auto entries = EnumerateEntries(path, options);
         if (!entries.HasValue())
-            return Result<std::unique_ptr<IDirectoryEnumerator>>(NGIN::Utilities::Unexpected<IOError>(std::move(entries.Error())));
+            return Result<DirectoryEnumerator>(NGIN::Utilities::Unexpected<IOError>(std::move(entries.Error())));
 
         try
         {
-            std::unique_ptr<IDirectoryEnumerator> result(new VectorDirectoryEnumerator(std::move(entries.Value())));
-            return Result<std::unique_ptr<IDirectoryEnumerator>>(std::move(result));
+            return Result<DirectoryEnumerator>(DirectoryEnumerator(std::unique_ptr<IDirectoryEnumerator>(new VectorDirectoryEnumerator(std::move(entries.Value())))));
         } catch (const std::bad_alloc&)
         {
-            return Result<std::unique_ptr<IDirectoryEnumerator>>(
+            return Result<DirectoryEnumerator>(
                     NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::SystemError, "allocation failed", path)));
         }
     }

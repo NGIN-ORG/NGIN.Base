@@ -132,32 +132,31 @@ namespace NGIN::IO
                 return m_system->GetInfo(JoinHandlePath(m_path, normalized.Value()), options);
             }
 
-            Result<std::unique_ptr<IFileHandle>> OpenFile(const Path& path, const FileOpenOptions& options) noexcept override
+            Result<FileHandle> OpenFile(const Path& path, const FileOpenOptions& options) noexcept override
             {
                 auto normalized = NormalizeRelativeHandlePath(path);
                 if (!normalized.HasValue())
                 {
-                    return Result<std::unique_ptr<IFileHandle>>(NGIN::Utilities::Unexpected<IOError>(std::move(normalized.Error())));
+                    return Result<FileHandle>(NGIN::Utilities::Unexpected<IOError>(std::move(normalized.Error())));
                 }
                 return m_system->OpenFile(JoinHandlePath(m_path, normalized.Value()), options);
             }
 
-            Result<std::unique_ptr<IDirectoryHandle>> OpenDirectory(const Path& path) noexcept override
+            Result<DirectoryHandle> OpenDirectory(const Path& path) noexcept override
             {
                 auto normalized = NormalizeRelativeHandlePath(path);
                 if (!normalized.HasValue())
                 {
-                    return Result<std::unique_ptr<IDirectoryHandle>>(NGIN::Utilities::Unexpected<IOError>(std::move(normalized.Error())));
+                    return Result<DirectoryHandle>(NGIN::Utilities::Unexpected<IOError>(std::move(normalized.Error())));
                 }
 
                 auto opened = Open(*m_system, JoinHandlePath(m_path, normalized.Value()));
                 if (!opened.HasValue())
                 {
-                    return Result<std::unique_ptr<IDirectoryHandle>>(NGIN::Utilities::Unexpected<IOError>(std::move(opened.Error())));
+                    return Result<DirectoryHandle>(NGIN::Utilities::Unexpected<IOError>(std::move(opened.Error())));
                 }
 
-                std::unique_ptr<IDirectoryHandle> result(opened.Value().release());
-                return Result<std::unique_ptr<IDirectoryHandle>>(std::move(result));
+                return Result<DirectoryHandle>(DirectoryHandle(std::move(opened).TakeValue()));
             }
 
             ResultVoid CreateDirectory(const Path& path, const DirectoryCreateOptions& options = {}) noexcept override
@@ -605,27 +604,25 @@ namespace NGIN::IO
         return fromResolved.Value().mount->GetFileSystem().Move(fromResolved.Value().translatedPath, toResolved.Value().translatedPath, options);
     }
 
-    Result<std::unique_ptr<IFileHandle>> VirtualFileSystem::OpenFile(const Path& path, const FileOpenOptions& options) noexcept
+    Result<FileHandle> VirtualFileSystem::OpenFile(const Path& path, const FileOpenOptions& options) noexcept
     {
         auto resolved = ResolvePath(path);
         if (!resolved.HasValue())
-            return Result<std::unique_ptr<IFileHandle>>(NGIN::Utilities::Unexpected<IOError>(std::move(resolved.Error())));
+            return Result<FileHandle>(NGIN::Utilities::Unexpected<IOError>(std::move(resolved.Error())));
         if ((options.access == FileAccess::Write || options.access == FileAccess::ReadWrite || options.access == FileAccess::Append) &&
             resolved.Value().mount->GetMountPoint().readOnly)
         {
-            return Result<std::unique_ptr<IFileHandle>>(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::PermissionDenied, "mount is read-only", path)));
+            return Result<FileHandle>(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::PermissionDenied, "mount is read-only", path)));
         }
         return resolved.Value().mount->GetFileSystem().OpenFile(resolved.Value().translatedPath, options);
     }
 
-    Result<std::unique_ptr<IDirectoryHandle>> VirtualFileSystem::OpenDirectory(const Path& path) noexcept
+    Result<DirectoryHandle> VirtualFileSystem::OpenDirectory(const Path& path) noexcept
     {
         auto opened = VirtualDirectoryHandle::Open(*this, path);
         if (!opened.HasValue())
-            return Result<std::unique_ptr<IDirectoryHandle>>(NGIN::Utilities::Unexpected<IOError>(std::move(opened.Error())));
-
-        std::unique_ptr<IDirectoryHandle> result(opened.Value().release());
-        return Result<std::unique_ptr<IDirectoryHandle>>(std::move(result));
+            return Result<DirectoryHandle>(NGIN::Utilities::Unexpected<IOError>(std::move(opened.Error())));
+        return Result<DirectoryHandle>(DirectoryHandle(std::move(opened).TakeValue()));
     }
 
     Result<FileView> VirtualFileSystem::OpenFileView(const Path& path) noexcept
@@ -636,11 +633,11 @@ namespace NGIN::IO
         return resolved.Value().mount->GetFileSystem().OpenFileView(resolved.Value().translatedPath);
     }
 
-    Result<std::unique_ptr<IDirectoryEnumerator>> VirtualFileSystem::Enumerate(const Path& path, const EnumerateOptions& options) noexcept
+    Result<DirectoryEnumerator> VirtualFileSystem::Enumerate(const Path& path, const EnumerateOptions& options) noexcept
     {
         auto resolved = ResolvePath(path);
         if (!resolved.HasValue())
-            return Result<std::unique_ptr<IDirectoryEnumerator>>(NGIN::Utilities::Unexpected<IOError>(std::move(resolved.Error())));
+            return Result<DirectoryEnumerator>(NGIN::Utilities::Unexpected<IOError>(std::move(resolved.Error())));
         return resolved.Value().mount->GetFileSystem().Enumerate(resolved.Value().translatedPath, options);
     }
 
