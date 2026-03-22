@@ -28,6 +28,28 @@ namespace NGIN::IO
                 return a.priority > b.priority;
             return a.virtualPrefix.View() < b.virtualPrefix.View();
         }
+
+        [[nodiscard]] FileSystemCapabilities IntersectCapabilities(
+                const FileSystemCapabilities& lhs, const FileSystemCapabilities& rhs) noexcept
+        {
+            FileSystemCapabilities out;
+            out.symlinks             = lhs.symlinks && rhs.symlinks;
+            out.hardLinks            = lhs.hardLinks && rhs.hardLinks;
+            out.blockDevices         = lhs.blockDevices && rhs.blockDevices;
+            out.characterDevices     = lhs.characterDevices && rhs.characterDevices;
+            out.fifos                = lhs.fifos && rhs.fifos;
+            out.sockets              = lhs.sockets && rhs.sockets;
+            out.posixModeBits        = lhs.posixModeBits && rhs.posixModeBits;
+            out.ownership            = lhs.ownership && rhs.ownership;
+            out.setIdBits            = lhs.setIdBits && rhs.setIdBits;
+            out.stickyBit            = lhs.stickyBit && rhs.stickyBit;
+            out.fileIdentity         = lhs.fileIdentity && rhs.fileIdentity;
+            out.hardLinkCount        = lhs.hardLinkCount && rhs.hardLinkCount;
+            out.memoryMappedFiles    = lhs.memoryMappedFiles && rhs.memoryMappedFiles;
+            out.nanosecondTimestamps = lhs.nanosecondTimestamps && rhs.nanosecondTimestamps;
+            out.metadataNoFollow     = lhs.metadataNoFollow && rhs.metadataNoFollow;
+            return out;
+        }
     }
 
     LocalMount::LocalMount(Path realRoot, MountPoint mountPoint)
@@ -108,6 +130,19 @@ namespace NGIN::IO
         m_mounts.clear();
     }
 
+    FileSystemCapabilities VirtualFileSystem::GetCapabilities() const noexcept
+    {
+        if (m_mounts.empty())
+            return {};
+
+        FileSystemCapabilities capabilities = m_mounts.front()->GetFileSystem().GetCapabilities();
+        for (std::size_t i = 1; i < m_mounts.size(); ++i)
+        {
+            capabilities = IntersectCapabilities(capabilities, m_mounts[i]->GetFileSystem().GetCapabilities());
+        }
+        return capabilities;
+    }
+
     Result<VirtualFileSystem::ResolvedMount> VirtualFileSystem::ResolvePath(const Path& virtualPath) noexcept
     {
         for (auto& mount: m_mounts)
@@ -136,12 +171,12 @@ namespace NGIN::IO
         return resolved.ValueUnsafe().mount->GetFileSystem().Exists(resolved.ValueUnsafe().translatedPath);
     }
 
-    Result<FileInfo> VirtualFileSystem::GetInfo(const Path& path) noexcept
+    Result<FileInfo> VirtualFileSystem::GetInfo(const Path& path, const MetadataOptions& options) noexcept
     {
         auto resolved = ResolvePath(path);
         if (!resolved.HasValue())
             return Result<FileInfo>(NGIN::Utilities::Unexpected<IOError>(std::move(resolved.ErrorUnsafe())));
-        auto info = resolved.ValueUnsafe().mount->GetFileSystem().GetInfo(resolved.ValueUnsafe().translatedPath);
+        auto info = resolved.ValueUnsafe().mount->GetFileSystem().GetInfo(resolved.ValueUnsafe().translatedPath, options);
         if (info.HasValue())
             info.ValueUnsafe().path = path;
         return info;
@@ -315,7 +350,8 @@ namespace NGIN::IO
         co_return co_await asyncFs->OpenFileAsync(ctx, resolved.ValueUnsafe().translatedPath, options);
     }
 
-    AsyncTask<FileInfo> VirtualFileSystem::GetInfoAsync(NGIN::Async::TaskContext& ctx, const Path& path)
+    AsyncTask<FileInfo> VirtualFileSystem::GetInfoAsync(
+            NGIN::Async::TaskContext& ctx, const Path& path, const MetadataOptions& options)
     {
         auto resolved = ResolvePath(path);
         if (!resolved.HasValue())
@@ -328,7 +364,7 @@ namespace NGIN::IO
             co_return AsyncResult<FileInfo>(NGIN::Utilities::Unexpected<IOError>(
                     MakeError(IOErrorCode::Unsupported, "mount has no async filesystem", path)));
         }
-        auto awaited = co_await asyncFs->GetInfoAsync(ctx, resolved.ValueUnsafe().translatedPath);
+        auto awaited = co_await asyncFs->GetInfoAsync(ctx, resolved.ValueUnsafe().translatedPath, options);
         if (!awaited)
         {
             co_await AsyncTask<FileInfo>::ReturnError(awaited.error());

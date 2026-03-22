@@ -8,8 +8,9 @@ namespace NGIN::IO
     class NGIN_BASE_API LocalFileSystem final : public IFileSystem, public IAsyncFileSystem
     {
     public:
+        [[nodiscard]] FileSystemCapabilities GetCapabilities() const noexcept override;
         Result<bool> Exists(const Path& path) noexcept override;
-        Result<FileInfo> GetInfo(const Path& path) noexcept override;
+        Result<FileInfo> GetInfo(const Path& path, const MetadataOptions& options = {}) noexcept override;
 
         ResultVoid CreateDirectory(const Path& path, const DirectoryCreateOptions& options = {}) noexcept override;
         ResultVoid CreateDirectories(const Path& path, const DirectoryCreateOptions& options = {}) noexcept override;
@@ -32,8 +33,8 @@ namespace NGIN::IO
 
         AsyncTask<std::unique_ptr<IAsyncFileHandle>> OpenFileAsync(
                 NGIN::Async::TaskContext& ctx, const Path& path, const FileOpenOptions& options) override;
-        AsyncTask<FileInfo>  GetInfoAsync(NGIN::Async::TaskContext& ctx, const Path& path) override;
+        AsyncTask<FileInfo>  GetInfoAsync(
+                NGIN::Async::TaskContext& ctx, const Path& path, const MetadataOptions& options = {}) override;
         AsyncTaskVoid        CopyFileAsync(NGIN::Async::TaskContext& ctx, const Path& from, const Path& to, const CopyOptions& options = {}) override;
     };
 }// namespace NGIN::IO
-

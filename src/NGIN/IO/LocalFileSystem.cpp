@@ -5,6 +5,7 @@
 #include <NGIN/Utilities/Expected.hpp>
 
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -12,6 +13,11 @@
 #include <string>
 #include <system_error>
 #include <vector>
+
+#if !defined(_WIN32)
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 namespace NGIN::IO
 {
@@ -80,24 +86,42 @@ namespace NGIN::IO
             return out;
         }
 
+#if defined(_WIN32)
         [[nodiscard]] FilePermissions ToPermissions(fs::perms p) noexcept
         {
             FilePermissions out;
-            out.nativeBits = static_cast<UInt32>(p);
-            out.readable = (p & (fs::perms::owner_read | fs::perms::group_read | fs::perms::others_read)) != fs::perms::none;
-            out.writable = (p & (fs::perms::owner_write | fs::perms::group_write | fs::perms::others_write)) != fs::perms::none;
-            out.executable = (p & (fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec)) != fs::perms::none;
+            out.nativeBits  = static_cast<UInt32>(p);
+            out.readable    = (p & (fs::perms::owner_read | fs::perms::group_read | fs::perms::others_read)) != fs::perms::none;
+            out.writable    = (p & (fs::perms::owner_write | fs::perms::group_write | fs::perms::others_write)) != fs::perms::none;
+            out.executable  = (p & (fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec)) != fs::perms::none;
             return out;
         }
+#endif
 
+#if !defined(_WIN32)
+        [[nodiscard]] FilePermissions ToPermissions(const mode_t mode) noexcept
+        {
+            FilePermissions out;
+            out.nativeBits  = static_cast<UInt32>(mode);
+            out.readable    = (mode & (S_IRUSR | S_IRGRP | S_IROTH)) != 0;
+            out.writable    = (mode & (S_IWUSR | S_IWGRP | S_IWOTH)) != 0;
+            out.executable  = (mode & (S_IXUSR | S_IXGRP | S_IXOTH)) != 0;
+            out.setUserId   = (mode & S_ISUID) != 0;
+            out.setGroupId  = (mode & S_ISGID) != 0;
+            out.sticky      = (mode & S_ISVTX) != 0;
+            return out;
+        }
+#endif
+
+#if defined(_WIN32)
         [[nodiscard]] FileTime ToFileTime(const fs::file_time_type& value) noexcept
         {
             FileTime out;
             try
             {
-                const auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(value.time_since_epoch()).count();
+                const auto ns       = std::chrono::duration_cast<std::chrono::nanoseconds>(value.time_since_epoch()).count();
                 out.unixNanoseconds = static_cast<Int64>(ns);
-                out.valid = true;
+                out.valid           = true;
             }
             catch (...)
             {
@@ -105,6 +129,17 @@ namespace NGIN::IO
             }
             return out;
         }
+#endif
+
+#if !defined(_WIN32)
+        [[nodiscard]] FileTime ToFileTime(const struct timespec& value) noexcept
+        {
+            FileTime out;
+            out.unixNanoseconds = static_cast<Int64>(value.tv_sec) * 1000000000LL + static_cast<Int64>(value.tv_nsec);
+            out.valid           = true;
+            return out;
+        }
+#endif
 
         [[nodiscard]] EntryType ToEntryType(fs::file_type type) noexcept
         {
@@ -116,6 +151,14 @@ namespace NGIN::IO
                     return EntryType::Directory;
                 case fs::file_type::symlink:
                     return EntryType::Symlink;
+                case fs::file_type::block:
+                    return EntryType::BlockDevice;
+                case fs::file_type::character:
+                    return EntryType::CharacterDevice;
+                case fs::file_type::fifo:
+                    return EntryType::Fifo;
+                case fs::file_type::socket:
+                    return EntryType::Socket;
                 case fs::file_type::none:
                 case fs::file_type::not_found:
                     return EntryType::None;
@@ -124,14 +167,153 @@ namespace NGIN::IO
             }
         }
 
-        [[nodiscard]] Result<FileInfo> BuildFileInfo(const Path& path, const fs::path& nativePath) noexcept
+#if !defined(_WIN32)
+        [[nodiscard]] EntryType ToEntryType(const mode_t mode) noexcept
         {
+            if (S_ISREG(mode))
+                return EntryType::File;
+            if (S_ISDIR(mode))
+                return EntryType::Directory;
+            if (S_ISLNK(mode))
+                return EntryType::Symlink;
+            if (S_ISBLK(mode))
+                return EntryType::BlockDevice;
+            if (S_ISCHR(mode))
+                return EntryType::CharacterDevice;
+            if (S_ISFIFO(mode))
+                return EntryType::Fifo;
+            if (S_ISSOCK(mode))
+                return EntryType::Socket;
+            return EntryType::Other;
+        }
+
+        [[nodiscard]] bool IsSizedEntryType(const EntryType type) noexcept
+        {
+            switch (type)
+            {
+                case EntryType::File:
+                case EntryType::BlockDevice:
+                case EntryType::CharacterDevice:
+                case EntryType::Fifo:
+                case EntryType::Socket:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        [[nodiscard]] FileTime ToAccessTime(const struct stat& st) noexcept
+        {
+#if defined(__APPLE__)
+            return ToFileTime(st.st_atimespec);
+#else
+            return ToFileTime(st.st_atim);
+#endif
+        }
+
+        [[nodiscard]] FileTime ToModifyTime(const struct stat& st) noexcept
+        {
+#if defined(__APPLE__)
+            return ToFileTime(st.st_mtimespec);
+#else
+            return ToFileTime(st.st_mtim);
+#endif
+        }
+
+        [[nodiscard]] FileTime ToChangeTime(const struct stat& st) noexcept
+        {
+#if defined(__APPLE__)
+            return ToFileTime(st.st_ctimespec);
+#else
+            return ToFileTime(st.st_ctim);
+#endif
+        }
+
+        [[nodiscard]] bool TargetExists(const NGIN::Text::String& nativePath) noexcept
+        {
+            struct stat st {};
+            return ::stat(nativePath.CStr(), &st) == 0;
+        }
+#endif
+
+        [[nodiscard]] Result<FileInfo> BuildFileInfo(
+                const Path& path, [[maybe_unused]] const fs::path& nativePath, const MetadataOptions& options) noexcept
+        {
+#if !defined(_WIN32)
+            const auto nativeString = path.ToNative();
+            FileInfo   info;
+            info.path = path;
+
+            struct stat st {};
+            const int   rc = options.symlinkMode == SymlinkMode::Follow
+                                   ? ::stat(nativeString.CStr(), &st)
+                                   : ::lstat(nativeString.CStr(), &st);
+            if (rc != 0)
+            {
+                if ((errno == ENOENT || errno == ENOTDIR) && options.symlinkMode == SymlinkMode::Follow)
+                {
+                    struct stat linkStat {};
+                    if (::lstat(nativeString.CStr(), &linkStat) == 0 && S_ISLNK(linkStat.st_mode))
+                    {
+                        info.exists             = true;
+                        info.type               = EntryType::Symlink;
+                        info.permissions        = ToPermissions(linkStat.st_mode);
+                        info.ownership.userId   = static_cast<UInt32>(linkStat.st_uid);
+                        info.ownership.groupId  = static_cast<UInt32>(linkStat.st_gid);
+                        info.ownership.valid    = true;
+                        info.identity.device    = static_cast<UInt64>(linkStat.st_dev);
+                        info.identity.inode     = static_cast<UInt64>(linkStat.st_ino);
+                        info.identity.hardLinkCount = static_cast<UInt64>(linkStat.st_nlink);
+                        info.identity.valid     = true;
+                        info.accessed           = ToAccessTime(linkStat);
+                        info.modified           = ToModifyTime(linkStat);
+                        info.changed            = ToChangeTime(linkStat);
+                        info.symlinkTargetExists = false;
+                        return Result<FileInfo>(std::move(info));
+                    }
+                }
+
+                if (errno == ENOENT || errno == ENOTDIR)
+                {
+                    info.exists = false;
+                    info.type   = EntryType::None;
+                    return Result<FileInfo>(std::move(info));
+                }
+
+                return Result<FileInfo>(
+                        NGIN::Utilities::Unexpected<IOError>(MakeSystemError(std::error_code(errno, std::generic_category()), "stat failed", path)));
+            }
+
+            info.exists              = true;
+            info.type                = ToEntryType(st.st_mode);
+            info.size                = IsSizedEntryType(info.type) ? static_cast<UInt64>(st.st_size) : 0;
+            info.permissions         = ToPermissions(st.st_mode);
+            info.ownership.userId    = static_cast<UInt32>(st.st_uid);
+            info.ownership.groupId   = static_cast<UInt32>(st.st_gid);
+            info.ownership.valid     = true;
+            info.identity.device     = static_cast<UInt64>(st.st_dev);
+            info.identity.inode      = static_cast<UInt64>(st.st_ino);
+            info.identity.hardLinkCount = static_cast<UInt64>(st.st_nlink);
+            info.identity.valid      = true;
+            info.accessed            = ToAccessTime(st);
+            info.modified            = ToModifyTime(st);
+            info.changed             = ToChangeTime(st);
+            info.symlinkTargetExists = true;
+
+            if (options.symlinkMode == SymlinkMode::DoNotFollow && info.type == EntryType::Symlink)
+            {
+                info.symlinkTargetExists = TargetExists(nativeString);
+            }
+
+            return Result<FileInfo>(std::move(info));
+#else
             try
             {
                 std::error_code ec;
                 FileInfo info;
                 info.path = path;
-                const auto status = fs::symlink_status(nativePath, ec);
+                const auto status =
+                        options.symlinkMode == SymlinkMode::Follow ? fs::status(nativePath, ec) : fs::symlink_status(nativePath, ec);
                 if (ec)
                 {
                     if (ec == std::errc::no_such_file_or_directory)
@@ -146,6 +328,7 @@ namespace NGIN::IO
                 info.exists = fs::exists(status);
                 info.type = ToEntryType(status.type());
                 info.permissions = ToPermissions(status.permissions());
+                info.symlinkTargetExists = info.exists;
 
                 if (info.type == EntryType::File)
                 {
@@ -168,6 +351,7 @@ namespace NGIN::IO
             {
                 return Result<FileInfo>(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::SystemError, "filesystem exception", path)));
             }
+#endif
         }
 
         class LocalFileHandle final : public IFileHandle, public IAsyncFileHandle
@@ -607,6 +791,10 @@ namespace NGIN::IO
             switch (entry.type)
             {
                 case EntryType::File:
+                case EntryType::BlockDevice:
+                case EntryType::CharacterDevice:
+                case EntryType::Fifo:
+                case EntryType::Socket:
                     return options.includeFiles;
                 case EntryType::Directory:
                     return options.includeDirectories;
@@ -617,6 +805,33 @@ namespace NGIN::IO
             }
         }
     }// namespace
+
+    FileSystemCapabilities LocalFileSystem::GetCapabilities() const noexcept
+    {
+        FileSystemCapabilities capabilities;
+        capabilities.symlinks          = true;
+        capabilities.hardLinks         = true;
+        capabilities.memoryMappedFiles = true;
+        capabilities.metadataNoFollow  = true;
+
+#if defined(_WIN32)
+        capabilities.nanosecondTimestamps = true;
+#else
+        capabilities.blockDevices       = true;
+        capabilities.characterDevices   = true;
+        capabilities.fifos              = true;
+        capabilities.sockets            = true;
+        capabilities.posixModeBits      = true;
+        capabilities.ownership          = true;
+        capabilities.setIdBits          = true;
+        capabilities.stickyBit          = true;
+        capabilities.fileIdentity       = true;
+        capabilities.hardLinkCount      = true;
+        capabilities.nanosecondTimestamps = true;
+#endif
+
+        return capabilities;
+    }
 
     Result<bool> LocalFileSystem::Exists(const Path& path) noexcept
     {
@@ -634,9 +849,9 @@ namespace NGIN::IO
         }
     }
 
-    Result<FileInfo> LocalFileSystem::GetInfo(const Path& path) noexcept
+    Result<FileInfo> LocalFileSystem::GetInfo(const Path& path, const MetadataOptions& options) noexcept
     {
-        return BuildFileInfo(path, ToFsPath(path));
+        return BuildFileInfo(path, ToFsPath(path), options);
     }
 
     ResultVoid LocalFileSystem::CreateDirectory(const Path& path, const DirectoryCreateOptions& options) noexcept
@@ -847,14 +1062,28 @@ namespace NGIN::IO
                 }
 
                 DirectoryEntry entry;
-                entry.path = FromFsPath(e.path());
-                entry.name = Path {e.path().filename().generic_string()};
-                entry.type = ToEntryType(status.type());
-                if (!IncludeEntry(entry, options))
+                    entry.path = FromFsPath(e.path());
+                    entry.name = Path {e.path().filename().generic_string()};
+                    entry.type = ToEntryType(status.type());
+                    if (!IncludeEntry(entry, options))
+                        return true;
+                    if (options.populateInfo)
+                    {
+                        MetadataOptions metadataOptions;
+                        metadataOptions.symlinkMode = options.followSymlinks ? SymlinkMode::Follow : SymlinkMode::DoNotFollow;
+                        auto info = BuildFileInfo(entry.path, e.path(), metadataOptions);
+                        if (!info.HasValue())
+                        {
+                            ec = std::error_code(info.ErrorUnsafe().systemCode, std::generic_category());
+                            if (!ec)
+                                ec = std::make_error_code(std::errc::io_error);
+                            return false;
+                        }
+                        entry.info = std::move(info.ValueUnsafe());
+                    }
+                    entries.push_back(std::move(entry));
                     return true;
-                entries.push_back(std::move(entry));
-                return true;
-            };
+                };
 
             if (options.recursive)
             {
@@ -982,7 +1211,8 @@ namespace NGIN::IO
         co_return AsyncResult<std::unique_ptr<IAsyncFileHandle>>(std::move(out));
     }
 
-    AsyncTask<FileInfo> LocalFileSystem::GetInfoAsync(NGIN::Async::TaskContext& ctx, const Path& path)
+    AsyncTask<FileInfo> LocalFileSystem::GetInfoAsync(
+            NGIN::Async::TaskContext& ctx, const Path& path, const MetadataOptions& options)
     {
         auto yielded = co_await ctx.YieldNow();
         if (!yielded)
@@ -990,7 +1220,7 @@ namespace NGIN::IO
             co_await AsyncTask<FileInfo>::ReturnError(yielded.error());
             co_return AsyncResult<FileInfo>(FileInfo {});
         }
-        co_return ToAsyncResult(GetInfo(path));
+        co_return ToAsyncResult(GetInfo(path, options));
     }
 
     AsyncTaskVoid LocalFileSystem::CopyFileAsync(NGIN::Async::TaskContext& ctx, const Path& from, const Path& to, const CopyOptions& options)

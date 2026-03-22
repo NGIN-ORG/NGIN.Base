@@ -16,7 +16,8 @@ namespace NGIN::IO
 
         virtual AsyncTask<std::unique_ptr<IAsyncFileHandle>> OpenFileAsync(
                 NGIN::Async::TaskContext& ctx, const Path& path, const FileOpenOptions& options) = 0;
-        virtual AsyncTask<FileInfo>  GetInfoAsync(NGIN::Async::TaskContext& ctx, const Path& path) = 0;
+        virtual AsyncTask<FileInfo>  GetInfoAsync(
+                NGIN::Async::TaskContext& ctx, const Path& path, const MetadataOptions& options = {}) = 0;
         virtual AsyncTaskVoid        CopyFileAsync(NGIN::Async::TaskContext& ctx, const Path& from, const Path& to, const CopyOptions& options = {}) = 0;
     };
 }// namespace NGIN::IO

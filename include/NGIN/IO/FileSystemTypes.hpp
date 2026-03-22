@@ -14,7 +14,17 @@ namespace NGIN::IO
         File,
         Directory,
         Symlink,
+        BlockDevice,
+        CharacterDevice,
+        Fifo,
+        Socket,
         Other,
+    };
+
+    enum class SymlinkMode : UInt8
+    {
+        DoNotFollow,
+        Follow,
     };
 
     enum class SeekOrigin : UInt8
@@ -120,7 +130,13 @@ namespace NGIN::IO
         bool includeDirectories {true};
         bool includeSymlinks {false};
         bool followSymlinks {false};
+        bool populateInfo {false};
         bool stableSort {false};
+    };
+
+    struct MetadataOptions
+    {
+        SymlinkMode symlinkMode {SymlinkMode::DoNotFollow};
     };
 
     struct FilePermissions
@@ -129,6 +145,24 @@ namespace NGIN::IO
         bool   readable {false};
         bool   writable {false};
         bool   executable {false};
+        bool   setUserId {false};
+        bool   setGroupId {false};
+        bool   sticky {false};
+    };
+
+    struct FileOwnership
+    {
+        UInt32 userId {0};
+        UInt32 groupId {0};
+        bool   valid {false};
+    };
+
+    struct FileIdentity
+    {
+        UInt64 device {0};
+        UInt64 inode {0};
+        UInt64 hardLinkCount {0};
+        bool   valid {false};
     };
 
     struct FileTime
@@ -145,8 +179,12 @@ namespace NGIN::IO
         FileTime        created {};
         FileTime        modified {};
         FileTime        accessed {};
+        FileTime        changed {};
         FilePermissions permissions {};
+        FileOwnership   ownership {};
+        FileIdentity    identity {};
         bool            exists {false};
+        bool            symlinkTargetExists {false};
     };
 
     struct SpaceInfo
@@ -163,5 +201,23 @@ namespace NGIN::IO
         EntryType               type {EntryType::None};
         std::optional<FileInfo> info {};
     };
-}// namespace NGIN::IO
 
+    struct FileSystemCapabilities
+    {
+        bool symlinks {false};
+        bool hardLinks {false};
+        bool blockDevices {false};
+        bool characterDevices {false};
+        bool fifos {false};
+        bool sockets {false};
+        bool posixModeBits {false};
+        bool ownership {false};
+        bool setIdBits {false};
+        bool stickyBit {false};
+        bool fileIdentity {false};
+        bool hardLinkCount {false};
+        bool memoryMappedFiles {false};
+        bool nanosecondTimestamps {false};
+        bool metadataNoFollow {false};
+    };
+}// namespace NGIN::IO

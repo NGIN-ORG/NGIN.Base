@@ -54,8 +54,9 @@ namespace NGIN::IO
         void ClearMounts() noexcept;
         [[nodiscard]] std::size_t MountCount() const noexcept { return m_mounts.size(); }
 
+        [[nodiscard]] FileSystemCapabilities GetCapabilities() const noexcept override;
         Result<bool> Exists(const Path& path) noexcept override;
-        Result<FileInfo> GetInfo(const Path& path) noexcept override;
+        Result<FileInfo> GetInfo(const Path& path, const MetadataOptions& options = {}) noexcept override;
 
         ResultVoid CreateDirectory(const Path& path, const DirectoryCreateOptions& options = {}) noexcept override;
         ResultVoid CreateDirectories(const Path& path, const DirectoryCreateOptions& options = {}) noexcept override;
@@ -78,7 +79,8 @@ namespace NGIN::IO
 
         AsyncTask<std::unique_ptr<IAsyncFileHandle>> OpenFileAsync(
                 NGIN::Async::TaskContext& ctx, const Path& path, const FileOpenOptions& options) override;
-        AsyncTask<FileInfo>  GetInfoAsync(NGIN::Async::TaskContext& ctx, const Path& path) override;
+        AsyncTask<FileInfo>  GetInfoAsync(
+                NGIN::Async::TaskContext& ctx, const Path& path, const MetadataOptions& options = {}) override;
         AsyncTaskVoid        CopyFileAsync(NGIN::Async::TaskContext& ctx, const Path& from, const Path& to, const CopyOptions& options = {}) override;
 
     private:
@@ -92,4 +94,3 @@ namespace NGIN::IO
         std::vector<std::shared_ptr<IVirtualMount>> m_mounts {};
     };
 }// namespace NGIN::IO
-

@@ -15,8 +15,9 @@ namespace NGIN::IO
     public:
         virtual ~IFileSystem() = default;
 
+        [[nodiscard]] virtual FileSystemCapabilities GetCapabilities() const noexcept = 0;
         virtual Result<bool> Exists(const Path& path) noexcept = 0;
-        virtual Result<FileInfo> GetInfo(const Path& path) noexcept = 0;
+        virtual Result<FileInfo> GetInfo(const Path& path, const MetadataOptions& options = {}) noexcept = 0;
 
         virtual ResultVoid CreateDirectory(const Path& path, const DirectoryCreateOptions& options = {}) noexcept = 0;
         virtual ResultVoid CreateDirectories(const Path& path, const DirectoryCreateOptions& options = {}) noexcept = 0;
@@ -38,4 +39,3 @@ namespace NGIN::IO
         virtual Result<SpaceInfo> GetSpaceInfo(const Path& path) noexcept = 0;
     };
 }// namespace NGIN::IO
-
