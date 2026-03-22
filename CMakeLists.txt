@@ -204,6 +204,16 @@ list(APPEND NGIN_BASE_CORE_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Serialization/XML/XmlArchive.cpp
 )
 
+if(WIN32)
+  list(APPEND NGIN_BASE_CORE_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/LocalFileSystem.win32.cpp
+  )
+elseif(UNIX)
+  list(APPEND NGIN_BASE_CORE_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/LocalFileSystem.posix.cpp
+  )
+endif()
+
 if(NGIN_BASE_BUILD_STATIC OR NGIN_BASE_BUILD_SHARED)
   add_library(NGIN.Base.Object OBJECT ${NGIN_BASE_CORE_SOURCES})
   target_compile_features(NGIN.Base.Object PRIVATE cxx_std_23)

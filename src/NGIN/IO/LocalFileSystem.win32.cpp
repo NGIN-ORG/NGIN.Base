@@ -1,0 +1,1159 @@
+#include <NGIN/IO/LocalFileSystem.hpp>
+
+#define NOMINMAX
+#include <windows.h>
+
+#include <NGIN/Utilities/Expected.hpp>
+
+#include <algorithm>
+#include <memory>
+#include <mutex>
+#include <new>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace NGIN::IO
+{
+    namespace
+    {
+        using NativePath = std::wstring;
+
+        [[nodiscard]] IOError MakeError(IOErrorCode code, std::string_view message, const Path& path = {}, const Path& secondary = {}) noexcept
+        {
+            IOError error;
+            error.code          = code;
+            error.path          = path;
+            error.secondaryPath = secondary;
+            error.message       = message;
+            return error;
+        }
+
+        [[nodiscard]] IOErrorCode MapWindowsErrorCode(const DWORD code) noexcept
+        {
+            switch (code)
+            {
+                case ERROR_SUCCESS:
+                    return IOErrorCode::None;
+                case ERROR_FILE_NOT_FOUND:
+                case ERROR_PATH_NOT_FOUND:
+                case ERROR_INVALID_NAME:
+                    return IOErrorCode::NotFound;
+                case ERROR_ALREADY_EXISTS:
+                case ERROR_FILE_EXISTS:
+                    return IOErrorCode::AlreadyExists;
+                case ERROR_ACCESS_DENIED:
+                case ERROR_PRIVILEGE_NOT_HELD:
+                    return IOErrorCode::PermissionDenied;
+                case ERROR_DIRECTORY:
+                    return IOErrorCode::NotDirectory;
+                case ERROR_DIR_NOT_EMPTY:
+                    return IOErrorCode::DirectoryNotEmpty;
+                case ERROR_BUFFER_OVERFLOW:
+                case ERROR_FILENAME_EXCED_RANGE:
+                    return IOErrorCode::PathTooLong;
+                case ERROR_NOT_SAME_DEVICE:
+                    return IOErrorCode::CrossDevice;
+                case ERROR_BUSY:
+                case ERROR_SHARING_VIOLATION:
+                case ERROR_LOCK_VIOLATION:
+                    return IOErrorCode::Busy;
+                default:
+                    return IOErrorCode::SystemError;
+            }
+        }
+
+        [[nodiscard]] IOError MakeWindowsError(const DWORD code, std::string_view message, const Path& path = {}, const Path& secondary = {}) noexcept
+        {
+            IOError error;
+            error.code          = MapWindowsErrorCode(code);
+            error.systemCode    = static_cast<int>(code);
+            error.path          = path;
+            error.secondaryPath = secondary;
+            error.message       = message;
+            return error;
+        }
+
+        [[nodiscard]] NativePath ToNativePath(const Path& path) noexcept
+        {
+            const auto utf8 = path.View();
+            if (utf8.empty())
+                return {};
+
+            const int wideLength = MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()), nullptr, 0);
+            if (wideLength <= 0)
+                return {};
+
+            NativePath result(static_cast<std::size_t>(wideLength), L'\0');
+            (void) MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()), result.data(), wideLength);
+            for (auto& ch: result)
+            {
+                if (ch == L'/')
+                    ch = L'\\';
+            }
+            return result;
+        }
+
+        [[nodiscard]] Path FromNativePath(std::wstring_view nativePath)
+        {
+            if (nativePath.empty())
+                return {};
+
+            const int utf8Length = WideCharToMultiByte(CP_UTF8, 0, nativePath.data(), static_cast<int>(nativePath.size()), nullptr, 0, nullptr, nullptr);
+            if (utf8Length <= 0)
+                return {};
+
+            std::string utf8(static_cast<std::size_t>(utf8Length), '\0');
+            (void) WideCharToMultiByte(CP_UTF8, 0, nativePath.data(), static_cast<int>(nativePath.size()), utf8.data(), utf8Length, nullptr, nullptr);
+            Path path {utf8};
+            path.Normalize();
+            return path;
+        }
+
+        [[nodiscard]] FileTime ToFileTime(const FILETIME& fileTime) noexcept
+        {
+            ULARGE_INTEGER value {};
+            value.LowPart  = fileTime.dwLowDateTime;
+            value.HighPart = fileTime.dwHighDateTime;
+
+            static constexpr UInt64 WindowsEpochDifference100ns = 116444736000000000ULL;
+            FileTime                out;
+            if (value.QuadPart >= WindowsEpochDifference100ns)
+            {
+                out.unixNanoseconds = static_cast<Int64>((value.QuadPart - WindowsEpochDifference100ns) * 100ULL);
+                out.valid           = true;
+            }
+            return out;
+        }
+
+        [[nodiscard]] FilePermissions ToPermissions(const DWORD attributes) noexcept
+        {
+            FilePermissions permissions;
+            permissions.nativeBits = attributes;
+            permissions.readable   = true;
+            permissions.writable   = (attributes & FILE_ATTRIBUTE_READONLY) == 0;
+            permissions.executable = true;
+            return permissions;
+        }
+
+        [[nodiscard]] EntryType ToEntryType(const DWORD attributes) noexcept
+        {
+            if ((attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0)
+                return EntryType::Symlink;
+            if ((attributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
+                return EntryType::Directory;
+            return EntryType::File;
+        }
+
+        [[nodiscard]] bool IncludeEntry(const DirectoryEntry& entry, const EnumerateOptions& options) noexcept
+        {
+            switch (entry.type)
+            {
+                case EntryType::File:
+                case EntryType::BlockDevice:
+                case EntryType::CharacterDevice:
+                case EntryType::Fifo:
+                case EntryType::Socket:
+                    return options.includeFiles;
+                case EntryType::Directory:
+                    return options.includeDirectories;
+                case EntryType::Symlink:
+                    return options.includeSymlinks;
+                default:
+                    return true;
+            }
+        }
+
+        [[nodiscard]] Result<FileInfo> BuildFileInfo(const Path& path, const MetadataOptions& options) noexcept
+        {
+            const NativePath nativePath = ToNativePath(path);
+            if (nativePath.empty())
+            {
+                FileInfo info;
+                info.path = path;
+                return Result<FileInfo>(std::move(info));
+            }
+
+            const DWORD flags = FILE_FLAG_BACKUP_SEMANTICS |
+                                (options.symlinkMode == SymlinkMode::DoNotFollow ? FILE_FLAG_OPEN_REPARSE_POINT : 0);
+            HANDLE handle = CreateFileW(
+                    nativePath.c_str(),
+                    FILE_READ_ATTRIBUTES,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                    nullptr,
+                    OPEN_EXISTING,
+                    flags,
+                    nullptr);
+            if (handle == INVALID_HANDLE_VALUE)
+            {
+                const DWORD error = GetLastError();
+                FileInfo    info;
+                info.path = path;
+                if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND || error == ERROR_INVALID_NAME)
+                {
+                    info.exists = false;
+                    info.type   = EntryType::None;
+                    return Result<FileInfo>(std::move(info));
+                }
+                return Result<FileInfo>(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(error, "CreateFileW failed", path)));
+            }
+
+            FileInfo info;
+            info.path = path;
+
+            BY_HANDLE_FILE_INFORMATION byHandle {};
+            if (!GetFileInformationByHandle(handle, &byHandle))
+            {
+                const DWORD error = GetLastError();
+                CloseHandle(handle);
+                return Result<FileInfo>(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(error, "GetFileInformationByHandle failed", path)));
+            }
+
+            const DWORD attributes      = byHandle.dwFileAttributes;
+            info.exists                 = true;
+            info.type                   = ToEntryType(attributes);
+            info.permissions            = ToPermissions(attributes);
+            info.modified               = ToFileTime(byHandle.ftLastWriteTime);
+            info.accessed               = ToFileTime(byHandle.ftLastAccessTime);
+            info.created                = ToFileTime(byHandle.ftCreationTime);
+            info.identity.device        = byHandle.dwVolumeSerialNumber;
+            info.identity.inode         = (static_cast<UInt64>(byHandle.nFileIndexHigh) << 32u) | byHandle.nFileIndexLow;
+            info.identity.hardLinkCount = byHandle.nNumberOfLinks;
+            info.identity.valid         = true;
+            info.symlinkTargetExists    = true;
+            if (info.type == EntryType::File)
+                info.size = (static_cast<UInt64>(byHandle.nFileSizeHigh) << 32u) | byHandle.nFileSizeLow;
+
+            CloseHandle(handle);
+            return Result<FileInfo>(std::move(info));
+        }
+
+        [[nodiscard]] Result<Path> MakeAbsolutePath(const Path& path, const Path& base) noexcept
+        {
+            Path input = path;
+            if (!base.IsEmpty() && input.IsRelative())
+            {
+                input = base.Join(path.View());
+                input.Normalize();
+            }
+
+            const auto nativeInput = ToNativePath(input);
+            DWORD      required    = GetFullPathNameW(nativeInput.c_str(), 0, nullptr, nullptr);
+            if (required == 0)
+                return Result<Path>(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "GetFullPathNameW failed", path)));
+
+            std::wstring buffer(static_cast<std::size_t>(required), L'\0');
+            const DWORD  count = GetFullPathNameW(nativeInput.c_str(), required, buffer.data(), nullptr);
+            if (count == 0)
+                return Result<Path>(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "GetFullPathNameW failed", path)));
+            if (!buffer.empty() && buffer.back() == L'\0')
+                buffer.pop_back();
+            return Result<Path>(FromNativePath(buffer));
+        }
+
+        [[nodiscard]] Result<Path> CanonicalizeExistingPath(const Path& path) noexcept
+        {
+            HANDLE handle = CreateFileW(
+                    ToNativePath(path).c_str(),
+                    0,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                    nullptr,
+                    OPEN_EXISTING,
+                    FILE_FLAG_BACKUP_SEMANTICS,
+                    nullptr);
+            if (handle == INVALID_HANDLE_VALUE)
+                return Result<Path>(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "CreateFileW failed", path)));
+
+            DWORD required = GetFinalPathNameByHandleW(handle, nullptr, 0, FILE_NAME_NORMALIZED);
+            if (required == 0)
+            {
+                const DWORD error = GetLastError();
+                CloseHandle(handle);
+                return Result<Path>(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(error, "GetFinalPathNameByHandleW failed", path)));
+            }
+
+            std::wstring buffer(static_cast<std::size_t>(required), L'\0');
+            if (GetFinalPathNameByHandleW(handle, buffer.data(), required, FILE_NAME_NORMALIZED) == 0)
+            {
+                const DWORD error = GetLastError();
+                CloseHandle(handle);
+                return Result<Path>(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(error, "GetFinalPathNameByHandleW failed", path)));
+            }
+            CloseHandle(handle);
+
+            if (!buffer.empty() && buffer.back() == L'\0')
+                buffer.pop_back();
+            constexpr std::wstring_view verbatimPrefix = LR"(\\?\)";
+            if (buffer.starts_with(verbatimPrefix))
+                buffer.erase(0, verbatimPrefix.size());
+            return Result<Path>(FromNativePath(buffer));
+        }
+
+        class VectorDirectoryEnumerator final : public IDirectoryEnumerator
+        {
+        public:
+            explicit VectorDirectoryEnumerator(std::vector<DirectoryEntry> entries)
+                : m_entries(std::move(entries))
+            {
+            }
+
+            Result<bool> Next() noexcept override
+            {
+                if (m_index >= m_entries.size())
+                    return Result<bool>(false);
+                m_current = m_index;
+                ++m_index;
+                return Result<bool>(true);
+            }
+
+            [[nodiscard]] const DirectoryEntry& Current() const noexcept override
+            {
+                static const DirectoryEntry empty {};
+                if (m_current >= m_entries.size())
+                    return empty;
+                return m_entries[m_current];
+            }
+
+        private:
+            std::vector<DirectoryEntry> m_entries {};
+            std::size_t                 m_index {0};
+            std::size_t                 m_current {static_cast<std::size_t>(-1)};
+        };
+
+        class LocalFileHandle final : public IFileHandle, public IAsyncFileHandle
+        {
+        public:
+            static Result<std::unique_ptr<LocalFileHandle>> Open(const Path& path, const FileOpenOptions& options) noexcept
+            {
+                try
+                {
+                    auto handle = std::unique_ptr<LocalFileHandle>(new LocalFileHandle());
+                    auto result = handle->OpenImpl(path, options);
+                    if (!result.HasValue())
+                    {
+                        return Result<std::unique_ptr<LocalFileHandle>>(
+                                NGIN::Utilities::Unexpected<IOError>(std::move(result.ErrorUnsafe())));
+                    }
+                    return Result<std::unique_ptr<LocalFileHandle>>(std::move(handle));
+                } catch (const std::bad_alloc&)
+                {
+                    return Result<std::unique_ptr<LocalFileHandle>>(
+                            NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::SystemError, "allocation failed", path)));
+                }
+            }
+
+            ~LocalFileHandle() override
+            {
+                Close();
+            }
+
+            Result<UIntSize> Read(std::span<NGIN::Byte> destination) noexcept override
+            {
+                std::lock_guard<std::mutex> guard(m_mutex);
+                if (!IsOpenUnlocked())
+                    return Result<UIntSize>(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::InvalidArgument, "file not open", m_path)));
+                if (!m_canRead)
+                    return Result<UIntSize>(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::NotSupported, "file not opened for read", m_path)));
+                if (destination.empty())
+                    return Result<UIntSize>(UIntSize {0});
+
+                DWORD bytesRead = 0;
+                if (!ReadFile(m_handle, destination.data(), static_cast<DWORD>(destination.size()), &bytesRead, nullptr))
+                    return Result<UIntSize>(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "ReadFile failed", m_path)));
+                return Result<UIntSize>(static_cast<UIntSize>(bytesRead));
+            }
+
+            Result<UIntSize> Write(std::span<const NGIN::Byte> source) noexcept override
+            {
+                std::lock_guard<std::mutex> guard(m_mutex);
+                if (!IsOpenUnlocked())
+                    return Result<UIntSize>(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::InvalidArgument, "file not open", m_path)));
+                if (!m_canWrite)
+                    return Result<UIntSize>(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::NotSupported, "file not opened for write", m_path)));
+                if (source.empty())
+                    return Result<UIntSize>(UIntSize {0});
+
+                DWORD bytesWritten = 0;
+                if (!WriteFile(m_handle, source.data(), static_cast<DWORD>(source.size()), &bytesWritten, nullptr))
+                    return Result<UIntSize>(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "WriteFile failed", m_path)));
+                return Result<UIntSize>(static_cast<UIntSize>(bytesWritten));
+            }
+
+            Result<UIntSize> ReadAt(UInt64 offset, std::span<NGIN::Byte> destination) noexcept override
+            {
+                std::lock_guard<std::mutex> guard(m_mutex);
+                if (!IsOpenUnlocked())
+                    return Result<UIntSize>(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::InvalidArgument, "file not open", m_path)));
+                if (!m_canRead)
+                    return Result<UIntSize>(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::NotSupported, "file not opened for read", m_path)));
+                if (destination.empty())
+                    return Result<UIntSize>(UIntSize {0});
+
+                OVERLAPPED overlapped {};
+                overlapped.Offset     = static_cast<DWORD>(offset & 0xffffffffULL);
+                overlapped.OffsetHigh = static_cast<DWORD>((offset >> 32u) & 0xffffffffULL);
+                DWORD bytesRead       = 0;
+                if (!ReadFile(m_handle, destination.data(), static_cast<DWORD>(destination.size()), &bytesRead, &overlapped))
+                {
+                    return Result<UIntSize>(
+                            NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "ReadFile overlapped failed", m_path)));
+                }
+                return Result<UIntSize>(static_cast<UIntSize>(bytesRead));
+            }
+
+            Result<UIntSize> WriteAt(UInt64 offset, std::span<const NGIN::Byte> source) noexcept override
+            {
+                std::lock_guard<std::mutex> guard(m_mutex);
+                if (!IsOpenUnlocked())
+                    return Result<UIntSize>(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::InvalidArgument, "file not open", m_path)));
+                if (!m_canWrite)
+                    return Result<UIntSize>(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::NotSupported, "file not opened for write", m_path)));
+                if (source.empty())
+                    return Result<UIntSize>(UIntSize {0});
+
+                OVERLAPPED overlapped {};
+                overlapped.Offset     = static_cast<DWORD>(offset & 0xffffffffULL);
+                overlapped.OffsetHigh = static_cast<DWORD>((offset >> 32u) & 0xffffffffULL);
+                DWORD bytesWritten    = 0;
+                if (!WriteFile(m_handle, source.data(), static_cast<DWORD>(source.size()), &bytesWritten, &overlapped))
+                {
+                    return Result<UIntSize>(
+                            NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "WriteFile overlapped failed", m_path)));
+                }
+                return Result<UIntSize>(static_cast<UIntSize>(bytesWritten));
+            }
+
+            ResultVoid Flush() noexcept override
+            {
+                std::lock_guard<std::mutex> guard(m_mutex);
+                if (!IsOpenUnlocked())
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::InvalidArgument, "file not open", m_path)));
+                if (!FlushFileBuffers(m_handle))
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "FlushFileBuffers failed", m_path)));
+                return {};
+            }
+
+            ResultVoid Seek(Int64 offset, SeekOrigin origin) noexcept override
+            {
+                std::lock_guard<std::mutex> guard(m_mutex);
+                if (!IsOpenUnlocked())
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::InvalidArgument, "file not open", m_path)));
+
+                LARGE_INTEGER move {};
+                move.QuadPart = offset;
+                DWORD method  = FILE_BEGIN;
+                if (origin == SeekOrigin::Current)
+                    method = FILE_CURRENT;
+                else if (origin == SeekOrigin::End)
+                    method = FILE_END;
+
+                LARGE_INTEGER ignored {};
+                if (!SetFilePointerEx(m_handle, move, &ignored, method))
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "SetFilePointerEx failed", m_path)));
+                return {};
+            }
+
+            Result<UInt64> Tell() const noexcept override
+            {
+                std::lock_guard<std::mutex> guard(m_mutex);
+                if (!IsOpenUnlocked())
+                    return Result<UInt64>(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::InvalidArgument, "file not open", m_path)));
+
+                LARGE_INTEGER zero {};
+                LARGE_INTEGER position {};
+                if (!SetFilePointerEx(m_handle, zero, &position, FILE_CURRENT))
+                    return Result<UInt64>(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "SetFilePointerEx failed", m_path)));
+                return Result<UInt64>(static_cast<UInt64>(position.QuadPart));
+            }
+
+            Result<UInt64> Size() const noexcept override
+            {
+                std::lock_guard<std::mutex> guard(m_mutex);
+                if (!IsOpenUnlocked())
+                    return Result<UInt64>(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::InvalidArgument, "file not open", m_path)));
+
+                LARGE_INTEGER size {};
+                if (!GetFileSizeEx(m_handle, &size))
+                    return Result<UInt64>(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "GetFileSizeEx failed", m_path)));
+                return Result<UInt64>(static_cast<UInt64>(size.QuadPart));
+            }
+
+            ResultVoid SetSize(UInt64 size) noexcept override
+            {
+                std::lock_guard<std::mutex> guard(m_mutex);
+                if (!IsOpenUnlocked())
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::InvalidArgument, "file not open", m_path)));
+
+                LARGE_INTEGER position {};
+                position.QuadPart = static_cast<LONGLONG>(size);
+                if (!SetFilePointerEx(m_handle, position, nullptr, FILE_BEGIN))
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "SetFilePointerEx failed", m_path)));
+                if (!SetEndOfFile(m_handle))
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "SetEndOfFile failed", m_path)));
+                return {};
+            }
+
+            void Close() noexcept override
+            {
+                std::lock_guard<std::mutex> guard(m_mutex);
+                if (m_handle != INVALID_HANDLE_VALUE)
+                {
+                    CloseHandle(m_handle);
+                    m_handle = INVALID_HANDLE_VALUE;
+                }
+            }
+
+            [[nodiscard]] bool IsOpen() const noexcept override
+            {
+                std::lock_guard<std::mutex> guard(m_mutex);
+                return IsOpenUnlocked();
+            }
+
+            AsyncTask<UIntSize> ReadAsync(NGIN::Async::TaskContext& ctx, std::span<NGIN::Byte> destination) override
+            {
+                auto yielded = co_await ctx.YieldNow();
+                if (!yielded)
+                {
+                    co_await AsyncTask<UIntSize>::ReturnError(yielded.error());
+                    co_return AsyncResult<UIntSize>(UIntSize {0});
+                }
+                co_return ToAsyncResult(Read(destination));
+            }
+
+            AsyncTask<UIntSize> WriteAsync(NGIN::Async::TaskContext& ctx, std::span<const NGIN::Byte> source) override
+            {
+                auto yielded = co_await ctx.YieldNow();
+                if (!yielded)
+                {
+                    co_await AsyncTask<UIntSize>::ReturnError(yielded.error());
+                    co_return AsyncResult<UIntSize>(UIntSize {0});
+                }
+                co_return ToAsyncResult(Write(source));
+            }
+
+            AsyncTask<UIntSize> ReadAtAsync(NGIN::Async::TaskContext& ctx, UInt64 offset, std::span<NGIN::Byte> destination) override
+            {
+                auto yielded = co_await ctx.YieldNow();
+                if (!yielded)
+                {
+                    co_await AsyncTask<UIntSize>::ReturnError(yielded.error());
+                    co_return AsyncResult<UIntSize>(UIntSize {0});
+                }
+                co_return ToAsyncResult(ReadAt(offset, destination));
+            }
+
+            AsyncTask<UIntSize> WriteAtAsync(NGIN::Async::TaskContext& ctx, UInt64 offset, std::span<const NGIN::Byte> source) override
+            {
+                auto yielded = co_await ctx.YieldNow();
+                if (!yielded)
+                {
+                    co_await AsyncTask<UIntSize>::ReturnError(yielded.error());
+                    co_return AsyncResult<UIntSize>(UIntSize {0});
+                }
+                co_return ToAsyncResult(WriteAt(offset, source));
+            }
+
+            AsyncTaskVoid FlushAsync(NGIN::Async::TaskContext& ctx) override
+            {
+                auto yielded = co_await ctx.YieldNow();
+                if (!yielded)
+                {
+                    co_await AsyncTaskVoid::ReturnError(yielded.error());
+                    co_return AsyncResult<void> {};
+                }
+                co_return ToAsyncResult(Flush());
+            }
+
+            AsyncTaskVoid CloseAsync(NGIN::Async::TaskContext& ctx) override
+            {
+                auto yielded = co_await ctx.YieldNow();
+                if (!yielded)
+                {
+                    co_await AsyncTaskVoid::ReturnError(yielded.error());
+                    co_return AsyncResult<void> {};
+                }
+                Close();
+                co_return AsyncResult<void> {};
+            }
+
+        private:
+            [[nodiscard]] bool IsOpenUnlocked() const noexcept
+            {
+                return m_handle != INVALID_HANDLE_VALUE;
+            }
+
+            ResultVoid OpenImpl(const Path& path, const FileOpenOptions& options) noexcept
+            {
+                m_path     = path;
+                m_canRead  = options.access == FileAccess::Read || options.access == FileAccess::ReadWrite;
+                m_canWrite = options.access == FileAccess::Write || options.access == FileAccess::ReadWrite || options.access == FileAccess::Append;
+
+                DWORD desiredAccess = 0;
+                switch (options.access)
+                {
+                    case FileAccess::Read:
+                        desiredAccess = GENERIC_READ;
+                        break;
+                    case FileAccess::Write:
+                        desiredAccess = GENERIC_WRITE;
+                        break;
+                    case FileAccess::ReadWrite:
+                        desiredAccess = GENERIC_READ | GENERIC_WRITE;
+                        break;
+                    case FileAccess::Append:
+                        desiredAccess = FILE_APPEND_DATA;
+                        break;
+                }
+
+                DWORD shareMode = 0;
+                if ((options.share & FileShare::Read) == FileShare::Read)
+                    shareMode |= FILE_SHARE_READ;
+                if ((options.share & FileShare::Write) == FileShare::Write)
+                    shareMode |= FILE_SHARE_WRITE;
+                if ((options.share & FileShare::Delete) == FileShare::Delete)
+                    shareMode |= FILE_SHARE_DELETE;
+
+                DWORD creationDisposition = OPEN_EXISTING;
+                switch (options.disposition)
+                {
+                    case FileCreateDisposition::OpenExisting:
+                        creationDisposition = OPEN_EXISTING;
+                        break;
+                    case FileCreateDisposition::CreateAlways:
+                        creationDisposition = CREATE_ALWAYS;
+                        break;
+                    case FileCreateDisposition::CreateNew:
+                        creationDisposition = CREATE_NEW;
+                        break;
+                    case FileCreateDisposition::OpenAlways:
+                        creationDisposition = OPEN_ALWAYS;
+                        break;
+                    case FileCreateDisposition::TruncateExisting:
+                        creationDisposition = TRUNCATE_EXISTING;
+                        break;
+                }
+
+                DWORD flags = FILE_ATTRIBUTE_NORMAL;
+                if ((options.flags & FileOpenFlags::WriteThrough) == FileOpenFlags::WriteThrough)
+                    flags |= FILE_FLAG_WRITE_THROUGH;
+                if ((options.flags & FileOpenFlags::DeleteOnClose) == FileOpenFlags::DeleteOnClose)
+                    flags |= FILE_FLAG_DELETE_ON_CLOSE;
+                if ((options.flags & FileOpenFlags::Sequential) == FileOpenFlags::Sequential)
+                    flags |= FILE_FLAG_SEQUENTIAL_SCAN;
+                if ((options.flags & FileOpenFlags::RandomAccess) == FileOpenFlags::RandomAccess)
+                    flags |= FILE_FLAG_RANDOM_ACCESS;
+
+                m_handle = CreateFileW(ToNativePath(path).c_str(), desiredAccess, shareMode, nullptr, creationDisposition, flags, nullptr);
+                if (m_handle == INVALID_HANDLE_VALUE)
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "CreateFileW failed", m_path)));
+                return {};
+            }
+
+            mutable std::mutex m_mutex {};
+            Path               m_path {};
+            bool               m_canRead {false};
+            bool               m_canWrite {false};
+            HANDLE             m_handle {INVALID_HANDLE_VALUE};
+        };
+
+        [[nodiscard]] Result<bool> ExistsNative(const Path& path) noexcept
+        {
+            const auto attributes = GetFileAttributesW(ToNativePath(path).c_str());
+            if (attributes == INVALID_FILE_ATTRIBUTES)
+            {
+                const DWORD error = GetLastError();
+                if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND || error == ERROR_INVALID_NAME)
+                    return Result<bool>(false);
+                return Result<bool>(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(error, "GetFileAttributesW failed", path)));
+            }
+            return Result<bool>(true);
+        }
+
+        ResultVoid CreateDirectoryNative(const Path& path, const DirectoryCreateOptions& options) noexcept
+        {
+            if (CreateDirectoryW(ToNativePath(path).c_str(), nullptr) != 0)
+                return {};
+
+            const DWORD error = GetLastError();
+            if (options.ignoreIfExists && (error == ERROR_ALREADY_EXISTS || error == ERROR_FILE_EXISTS))
+            {
+                auto existing = BuildFileInfo(path, {});
+                if (existing.HasValue() && existing.ValueUnsafe().exists && existing.ValueUnsafe().type == EntryType::Directory)
+                    return {};
+            }
+            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(error, "CreateDirectoryW failed", path)));
+        }
+
+        ResultVoid CreateDirectoriesNative(const Path& path, const DirectoryCreateOptions& options) noexcept
+        {
+            Path normalized = path.LexicallyNormal();
+            if (normalized.IsEmpty() || normalized.IsRoot())
+                return {};
+
+            auto parent = normalized.Parent();
+            if (!parent.IsEmpty() && parent.View() != normalized.View())
+            {
+                auto parentCreated = CreateDirectoriesNative(parent, options);
+                if (!parentCreated.HasValue())
+                    return parentCreated;
+            }
+
+            return CreateDirectoryNative(normalized, options);
+        }
+
+        ResultVoid RemoveFileNative(const Path& path, const RemoveOptions& options) noexcept
+        {
+            if (DeleteFileW(ToNativePath(path).c_str()) != 0)
+                return {};
+
+            const DWORD error = GetLastError();
+            if (options.ignoreMissing && (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND || error == ERROR_INVALID_NAME))
+                return {};
+            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(error, "DeleteFileW failed", path)));
+        }
+
+        ResultVoid     RemoveDirectoryNative(const Path& path, const RemoveOptions& options) noexcept;
+        Result<UInt64> RemoveAllNative(const Path& path, const RemoveOptions& options) noexcept;
+
+        [[nodiscard]] Result<std::vector<DirectoryEntry>> EnumerateEntries(const Path& path, const EnumerateOptions& options) noexcept
+        {
+            std::vector<DirectoryEntry> entries;
+
+            const auto collect = [&](const auto& self, const Path& directoryPath) -> ResultVoid {
+                std::wstring pattern = ToNativePath(directoryPath);
+                if (!pattern.empty() && pattern.back() != L'\\' && pattern.back() != L'/')
+                    pattern.push_back(L'\\');
+                pattern.push_back(L'*');
+
+                WIN32_FIND_DATAW findData {};
+                HANDLE           handle = FindFirstFileW(pattern.c_str(), &findData);
+                if (handle == INVALID_HANDLE_VALUE)
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "FindFirstFileW failed", directoryPath)));
+
+                do
+                {
+                    const std::wstring_view nameView {findData.cFileName};
+                    if (nameView == L"." || nameView == L"..")
+                        continue;
+
+                    const Path childName = FromNativePath(nameView);
+                    Path       childPath = directoryPath.Join(childName.View());
+
+                    MetadataOptions metadataOptions;
+                    metadataOptions.symlinkMode = options.followSymlinks ? SymlinkMode::Follow : SymlinkMode::DoNotFollow;
+                    auto infoResult             = BuildFileInfo(childPath, metadataOptions);
+                    if (!infoResult.HasValue())
+                    {
+                        const IOError error = std::move(infoResult.ErrorUnsafe());
+                        FindClose(handle);
+                        return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(error)));
+                    }
+
+                    DirectoryEntry entry;
+                    entry.path = childPath;
+                    entry.name = childName;
+                    entry.type = infoResult.ValueUnsafe().type;
+                    if (options.populateInfo)
+                        entry.info = std::move(infoResult.ValueUnsafe());
+
+                    if (IncludeEntry(entry, options))
+                        entries.push_back(std::move(entry));
+
+                    if (options.recursive && infoResult.ValueUnsafe().type == EntryType::Directory)
+                    {
+                        auto childResult = self(self, childPath);
+                        if (!childResult.HasValue())
+                        {
+                            const IOError error = std::move(childResult.ErrorUnsafe());
+                            FindClose(handle);
+                            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(error)));
+                        }
+                    }
+                } while (FindNextFileW(handle, &findData) != 0);
+
+                const DWORD lastError = GetLastError();
+                FindClose(handle);
+                if (lastError != ERROR_NO_MORE_FILES)
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(lastError, "FindNextFileW failed", directoryPath)));
+                return {};
+            };
+
+            auto collectResult = collect(collect, path);
+            if (!collectResult.HasValue())
+                return Result<std::vector<DirectoryEntry>>(NGIN::Utilities::Unexpected<IOError>(std::move(collectResult.ErrorUnsafe())));
+
+            if (options.stableSort)
+            {
+                std::sort(entries.begin(), entries.end(), [](const DirectoryEntry& left, const DirectoryEntry& right) {
+                    return left.path.View() < right.path.View();
+                });
+            }
+
+            return Result<std::vector<DirectoryEntry>>(std::move(entries));
+        }
+
+        Result<UInt64> RemoveAllNative(const Path& path, const RemoveOptions& options) noexcept
+        {
+            EnumerateOptions enumerateOptions;
+            enumerateOptions.recursive       = true;
+            enumerateOptions.includeSymlinks = true;
+            enumerateOptions.stableSort      = true;
+            auto entries                     = EnumerateEntries(path, enumerateOptions);
+            if (!entries.HasValue())
+                return Result<UInt64>(NGIN::Utilities::Unexpected<IOError>(std::move(entries.ErrorUnsafe())));
+
+            UInt64 removed = 0;
+            auto&  values  = entries.ValueUnsafe();
+            for (auto it = values.rbegin(); it != values.rend(); ++it)
+            {
+                auto entryInfo = BuildFileInfo(it->path, {});
+                if (!entryInfo.HasValue())
+                    return Result<UInt64>(NGIN::Utilities::Unexpected<IOError>(std::move(entryInfo.ErrorUnsafe())));
+
+                ResultVoid result;
+                if (entryInfo.ValueUnsafe().type == EntryType::Directory)
+                    result = RemoveDirectoryNative(it->path, options);
+                else
+                    result = RemoveFileNative(it->path, options);
+                if (!result.HasValue())
+                    return Result<UInt64>(NGIN::Utilities::Unexpected<IOError>(std::move(result.ErrorUnsafe())));
+                ++removed;
+            }
+
+            auto rootInfo = BuildFileInfo(path, {});
+            if (!rootInfo.HasValue())
+                return Result<UInt64>(NGIN::Utilities::Unexpected<IOError>(std::move(rootInfo.ErrorUnsafe())));
+            if (!rootInfo.ValueUnsafe().exists)
+            {
+                if (options.ignoreMissing)
+                    return Result<UInt64>(UInt64 {0});
+                return Result<UInt64>(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::NotFound, "path not found", path)));
+            }
+
+            ResultVoid removeRoot;
+            if (rootInfo.ValueUnsafe().type == EntryType::Directory)
+                removeRoot = RemoveDirectoryNative(path, options);
+            else
+                removeRoot = RemoveFileNative(path, options);
+            if (!removeRoot.HasValue())
+                return Result<UInt64>(NGIN::Utilities::Unexpected<IOError>(std::move(removeRoot.ErrorUnsafe())));
+
+            return Result<UInt64>(removed + 1);
+        }
+
+        ResultVoid RemoveDirectoryNative(const Path& path, const RemoveOptions& options) noexcept
+        {
+            if (options.recursive)
+            {
+                auto removed = RemoveAllNative(path, options);
+                if (!removed.HasValue())
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(removed.ErrorUnsafe())));
+                return {};
+            }
+
+            if (RemoveDirectoryW(ToNativePath(path).c_str()) != 0)
+                return {};
+            const DWORD error = GetLastError();
+            if (options.ignoreMissing && (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND || error == ERROR_INVALID_NAME))
+                return {};
+            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(error, "RemoveDirectoryW failed", path)));
+        }
+    }// namespace
+
+    FileSystemCapabilities LocalFileSystem::GetCapabilities() const noexcept
+    {
+        FileSystemCapabilities capabilities;
+        capabilities.symlinks             = true;
+        capabilities.hardLinks            = true;
+        capabilities.memoryMappedFiles    = true;
+        capabilities.nanosecondTimestamps = true;
+        capabilities.metadataNoFollow     = true;
+        return capabilities;
+    }
+
+    Result<bool> LocalFileSystem::Exists(const Path& path) noexcept
+    {
+        return ExistsNative(path);
+    }
+
+    Result<FileInfo> LocalFileSystem::GetInfo(const Path& path, const MetadataOptions& options) noexcept
+    {
+        return BuildFileInfo(path, options);
+    }
+
+    Result<Path> LocalFileSystem::Absolute(const Path& path, const Path& base) noexcept
+    {
+        return MakeAbsolutePath(path, base);
+    }
+
+    Result<Path> LocalFileSystem::Canonical(const Path& path) noexcept
+    {
+        return CanonicalizeExistingPath(path);
+    }
+
+    Result<Path> LocalFileSystem::WeaklyCanonical(const Path& path) noexcept
+    {
+        auto canonical = CanonicalizeExistingPath(path);
+        if (canonical.HasValue())
+            return canonical;
+        return MakeAbsolutePath(path, {});
+    }
+
+    Result<bool> LocalFileSystem::SameFile(const Path& lhs, const Path& rhs) noexcept
+    {
+        auto lhsInfo = BuildFileInfo(lhs, MetadataOptions {.symlinkMode = SymlinkMode::Follow});
+        if (!lhsInfo.HasValue())
+            return Result<bool>(NGIN::Utilities::Unexpected<IOError>(std::move(lhsInfo.ErrorUnsafe())));
+
+        auto rhsInfo = BuildFileInfo(rhs, MetadataOptions {.symlinkMode = SymlinkMode::Follow});
+        if (!rhsInfo.HasValue())
+            return Result<bool>(NGIN::Utilities::Unexpected<IOError>(std::move(rhsInfo.ErrorUnsafe())));
+
+        if (!lhsInfo.ValueUnsafe().exists || !rhsInfo.ValueUnsafe().exists)
+            return Result<bool>(false);
+        if (!lhsInfo.ValueUnsafe().identity.valid || !rhsInfo.ValueUnsafe().identity.valid)
+            return Result<bool>(false);
+
+        return Result<bool>(
+                lhsInfo.ValueUnsafe().identity.device == rhsInfo.ValueUnsafe().identity.device &&
+                lhsInfo.ValueUnsafe().identity.inode == rhsInfo.ValueUnsafe().identity.inode);
+    }
+
+    Result<Path> LocalFileSystem::ReadSymlink(const Path& path) noexcept
+    {
+        return Result<Path>(
+                NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::Unsupported, "read symlink is not implemented on Windows", path)));
+    }
+
+    ResultVoid LocalFileSystem::CreateDirectory(const Path& path, const DirectoryCreateOptions& options) noexcept
+    {
+        return CreateDirectoryNative(path, options);
+    }
+
+    ResultVoid LocalFileSystem::CreateDirectories(const Path& path, const DirectoryCreateOptions& options) noexcept
+    {
+        return CreateDirectoriesNative(path, options);
+    }
+
+    ResultVoid LocalFileSystem::CreateSymlink(const Path& target, const Path& linkPath) noexcept
+    {
+        DWORD flags      = 0;
+        auto  targetInfo = BuildFileInfo(target, MetadataOptions {});
+        if (targetInfo.HasValue() && targetInfo.ValueUnsafe().exists && targetInfo.ValueUnsafe().type == EntryType::Directory)
+            flags |= SYMBOLIC_LINK_FLAG_DIRECTORY;
+#if defined(SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE)
+        flags |= SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE;
+#endif
+        if (CreateSymbolicLinkW(ToNativePath(linkPath).c_str(), ToNativePath(target).c_str(), flags) != 0)
+            return {};
+        return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "CreateSymbolicLinkW failed", linkPath, target)));
+    }
+
+    ResultVoid LocalFileSystem::CreateHardLink(const Path& target, const Path& linkPath) noexcept
+    {
+        if (CreateHardLinkW(ToNativePath(linkPath).c_str(), ToNativePath(target).c_str(), nullptr) != 0)
+            return {};
+        return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "CreateHardLinkW failed", linkPath, target)));
+    }
+
+    ResultVoid LocalFileSystem::SetPermissions(const Path& path, const FilePermissions& permissions, const SymlinkMode) noexcept
+    {
+        DWORD attributes = GetFileAttributesW(ToNativePath(path).c_str());
+        if (attributes == INVALID_FILE_ATTRIBUTES)
+            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "GetFileAttributesW failed", path)));
+
+        if (permissions.writable)
+            attributes &= ~FILE_ATTRIBUTE_READONLY;
+        else
+            attributes |= FILE_ATTRIBUTE_READONLY;
+
+        if (SetFileAttributesW(ToNativePath(path).c_str(), attributes) != 0)
+            return {};
+        return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "SetFileAttributesW failed", path)));
+    }
+
+    ResultVoid LocalFileSystem::RemoveFile(const Path& path, const RemoveOptions& options) noexcept
+    {
+        return RemoveFileNative(path, options);
+    }
+
+    ResultVoid LocalFileSystem::RemoveDirectory(const Path& path, const RemoveOptions& options) noexcept
+    {
+        return RemoveDirectoryNative(path, options);
+    }
+
+    Result<UInt64> LocalFileSystem::RemoveAll(const Path& path, const RemoveOptions& options) noexcept
+    {
+        return RemoveAllNative(path, options);
+    }
+
+    ResultVoid LocalFileSystem::Rename(const Path& from, const Path& to) noexcept
+    {
+        if (MoveFileExW(ToNativePath(from).c_str(), ToNativePath(to).c_str(), MOVEFILE_REPLACE_EXISTING) != 0)
+            return {};
+        return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "MoveFileExW failed", from, to)));
+    }
+
+    ResultVoid LocalFileSystem::ReplaceFile(const Path& source, const Path& destination) noexcept
+    {
+        if (MoveFileExW(ToNativePath(source).c_str(), ToNativePath(destination).c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0)
+            return {};
+        return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "MoveFileExW replace failed", source, destination)));
+    }
+
+    ResultVoid LocalFileSystem::CopyFile(const Path& from, const Path& to, const CopyOptions& options) noexcept
+    {
+        if (!options.recursive)
+        {
+            const BOOL failIfExists = options.overwriteExisting ? FALSE : TRUE;
+            if (CopyFileW(ToNativePath(from).c_str(), ToNativePath(to).c_str(), failIfExists) != 0)
+                return {};
+        }
+        return ResultVoid(
+                NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::NotSupported, "native recursive copy not implemented on Windows", from, to)));
+    }
+
+    Result<std::unique_ptr<IFileHandle>> LocalFileSystem::OpenFile(const Path& path, const FileOpenOptions& options) noexcept
+    {
+        auto opened = LocalFileHandle::Open(path, options);
+        if (!opened.HasValue())
+            return Result<std::unique_ptr<IFileHandle>>(NGIN::Utilities::Unexpected<IOError>(std::move(opened.ErrorUnsafe())));
+
+        std::unique_ptr<IFileHandle> result(opened.ValueUnsafe().release());
+        return Result<std::unique_ptr<IFileHandle>>(std::move(result));
+    }
+
+    Result<std::unique_ptr<IDirectoryEnumerator>> LocalFileSystem::Enumerate(const Path& path, const EnumerateOptions& options) noexcept
+    {
+        auto entries = EnumerateEntries(path, options);
+        if (!entries.HasValue())
+            return Result<std::unique_ptr<IDirectoryEnumerator>>(NGIN::Utilities::Unexpected<IOError>(std::move(entries.ErrorUnsafe())));
+
+        try
+        {
+            std::unique_ptr<IDirectoryEnumerator> result(new VectorDirectoryEnumerator(std::move(entries.ValueUnsafe())));
+            return Result<std::unique_ptr<IDirectoryEnumerator>>(std::move(result));
+        } catch (const std::bad_alloc&)
+        {
+            return Result<std::unique_ptr<IDirectoryEnumerator>>(
+                    NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::SystemError, "allocation failed", path)));
+        }
+    }
+
+    Result<Path> LocalFileSystem::CurrentWorkingDirectory() noexcept
+    {
+        DWORD required = GetCurrentDirectoryW(0, nullptr);
+        if (required == 0)
+            return Result<Path>(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "GetCurrentDirectoryW failed")));
+
+        std::wstring buffer(static_cast<std::size_t>(required), L'\0');
+        const DWORD  count = GetCurrentDirectoryW(required, buffer.data());
+        if (count == 0)
+            return Result<Path>(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "GetCurrentDirectoryW failed")));
+        if (!buffer.empty() && buffer.back() == L'\0')
+            buffer.pop_back();
+        return Result<Path>(FromNativePath(buffer));
+    }
+
+    ResultVoid LocalFileSystem::SetCurrentWorkingDirectory(const Path& path) noexcept
+    {
+        if (SetCurrentDirectoryW(ToNativePath(path).c_str()) != 0)
+            return {};
+        return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "SetCurrentDirectoryW failed", path)));
+    }
+
+    Result<Path> LocalFileSystem::TempDirectory() noexcept
+    {
+        std::wstring buffer(MAX_PATH, L'\0');
+        const DWORD  count = GetTempPathW(static_cast<DWORD>(buffer.size()), buffer.data());
+        if (count == 0 || count > buffer.size())
+            return Result<Path>(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "GetTempPathW failed")));
+        buffer.resize(count);
+        if (!buffer.empty() && (buffer.back() == L'\\' || buffer.back() == L'/'))
+            buffer.pop_back();
+        return Result<Path>(FromNativePath(buffer));
+    }
+
+    Result<Path> LocalFileSystem::CreateTempDirectory(const Path& directory, std::string_view prefix) noexcept
+    {
+        Path baseDirectory = directory;
+        if (baseDirectory.IsEmpty())
+        {
+            auto tempDirectory = TempDirectory();
+            if (!tempDirectory.HasValue())
+                return Result<Path>(NGIN::Utilities::Unexpected<IOError>(std::move(tempDirectory.ErrorUnsafe())));
+            baseDirectory = std::move(tempDirectory.ValueUnsafe());
+        }
+
+        for (unsigned int attempt = 0; attempt < 128; ++attempt)
+        {
+            const auto candidate =
+                    baseDirectory.Join(std::string(prefix) + "_" + std::to_string(GetTickCount64()) + "_" + std::to_string(attempt));
+            if (CreateDirectoryW(ToNativePath(candidate).c_str(), nullptr) != 0)
+                return Result<Path>(candidate);
+
+            const DWORD error = GetLastError();
+            if (error != ERROR_ALREADY_EXISTS && error != ERROR_FILE_EXISTS)
+                return Result<Path>(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(error, "CreateDirectoryW temp failed", candidate)));
+        }
+
+        return Result<Path>(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::Busy, "unable to allocate unique temp directory", baseDirectory)));
+    }
+
+    Result<Path> LocalFileSystem::CreateTempFile(const Path& directory, std::string_view prefix) noexcept
+    {
+        Path baseDirectory = directory;
+        if (baseDirectory.IsEmpty())
+        {
+            auto tempDirectory = TempDirectory();
+            if (!tempDirectory.HasValue())
+                return Result<Path>(NGIN::Utilities::Unexpected<IOError>(std::move(tempDirectory.ErrorUnsafe())));
+            baseDirectory = std::move(tempDirectory.ValueUnsafe());
+        }
+
+        wchar_t    tempBuffer[MAX_PATH] {};
+        const auto baseNative = ToNativePath(baseDirectory);
+        if (GetTempFileNameW(baseNative.c_str(), std::wstring(prefix.begin(), prefix.end()).c_str(), 0, tempBuffer) == 0)
+        {
+            return Result<Path>(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "GetTempFileNameW failed", baseDirectory)));
+        }
+        return Result<Path>(FromNativePath(std::wstring_view(tempBuffer)));
+    }
+
+    Result<SpaceInfo> LocalFileSystem::GetSpaceInfo(const Path& path) noexcept
+    {
+        ULARGE_INTEGER available {};
+        ULARGE_INTEGER capacity {};
+        ULARGE_INTEGER free {};
+        if (GetDiskFreeSpaceExW(ToNativePath(path).c_str(), &available, &capacity, &free) == 0)
+        {
+            return Result<SpaceInfo>(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "GetDiskFreeSpaceExW failed", path)));
+        }
+
+        SpaceInfo info;
+        info.available = available.QuadPart;
+        info.capacity  = capacity.QuadPart;
+        info.free      = free.QuadPart;
+        return Result<SpaceInfo>(info);
+    }
+
+    AsyncTask<std::unique_ptr<IAsyncFileHandle>> LocalFileSystem::OpenFileAsync(
+            NGIN::Async::TaskContext& ctx, const Path& path, const FileOpenOptions& options)
+    {
+        auto yielded = co_await ctx.YieldNow();
+        if (!yielded)
+        {
+            co_await AsyncTask<std::unique_ptr<IAsyncFileHandle>>::ReturnError(yielded.error());
+            co_return AsyncResult<std::unique_ptr<IAsyncFileHandle>>(std::unique_ptr<IAsyncFileHandle> {});
+        }
+
+        auto opened = LocalFileHandle::Open(path, options);
+        if (!opened.HasValue())
+        {
+            co_return AsyncResult<std::unique_ptr<IAsyncFileHandle>>(NGIN::Utilities::Unexpected<IOError>(std::move(opened.ErrorUnsafe())));
+        }
+
+        std::unique_ptr<IAsyncFileHandle> result(opened.ValueUnsafe().release());
+        co_return AsyncResult<std::unique_ptr<IAsyncFileHandle>>(std::move(result));
+    }
+}// namespace NGIN::IO

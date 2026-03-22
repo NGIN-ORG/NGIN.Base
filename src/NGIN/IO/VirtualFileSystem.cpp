@@ -11,10 +11,10 @@ namespace NGIN::IO
         [[nodiscard]] IOError MakeError(IOErrorCode code, std::string_view message, const Path& path = {}, const Path& secondary = {}) noexcept
         {
             IOError error;
-            error.code = code;
-            error.path = path;
+            error.code          = code;
+            error.path          = path;
             error.secondaryPath = secondary;
-            error.message = message;
+            error.message       = message;
             return error;
         }
 
@@ -50,15 +50,14 @@ namespace NGIN::IO
             out.metadataNoFollow     = lhs.metadataNoFollow && rhs.metadataNoFollow;
             return out;
         }
-    }
+    }// namespace
 
     LocalMount::LocalMount(Path realRoot, MountPoint mountPoint)
-        : m_realRoot(std::move(realRoot))
-        , m_mountPoint(std::move(mountPoint))
+        : m_realRoot(std::move(realRoot)), m_mountPoint(std::move(mountPoint))
     {
         m_realRoot.Normalize();
         if (m_mountPoint.virtualPrefix.IsEmpty())
-            m_mountPoint.virtualPrefix = Path{"/"};
+            m_mountPoint.virtualPrefix = Path {"/"};
         m_mountPoint.virtualPrefix.Normalize();
     }
 
@@ -81,7 +80,7 @@ namespace NGIN::IO
             return Result<Path>(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::InvalidPath, "path does not match mount", virtualPath)));
         }
 
-        const auto full = normalized.View();
+        const auto full   = normalized.View();
         const auto prefix = m_mountPoint.virtualPrefix.View();
 
         std::string_view suffix {};
@@ -102,6 +101,33 @@ namespace NGIN::IO
             return Result<Path>(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::InvalidPath, "resolved path escapes mount root", virtualPath)));
         }
 
+        return Result<Path>(std::move(out));
+    }
+
+    Result<Path> LocalMount::Virtualize(const Path& realPath) noexcept
+    {
+        Path normalized = realPath.LexicallyNormal();
+        if (!normalized.StartsWith(m_realRoot))
+        {
+            return Result<Path>(NGIN::Utilities::Unexpected<IOError>(
+                    MakeError(IOErrorCode::InvalidPath, "real path is outside mount root", realPath)));
+        }
+
+        const auto full   = normalized.View();
+        const auto prefix = m_realRoot.View();
+
+        std::string_view suffix {};
+        if (full.size() > prefix.size())
+        {
+            suffix = full.substr(prefix.size());
+            while (!suffix.empty() && (suffix.front() == '/' || suffix.front() == '\\'))
+                suffix.remove_prefix(1);
+        }
+
+        Path out = m_mountPoint.virtualPrefix;
+        if (!suffix.empty())
+            out.Append(suffix);
+        out.Normalize();
         return Result<Path>(std::move(out));
     }
 
@@ -156,7 +182,7 @@ namespace NGIN::IO
                 return Result<ResolvedMount>(NGIN::Utilities::Unexpected<IOError>(std::move(translated.ErrorUnsafe())));
             }
             ResolvedMount out;
-            out.mount = mount.get();
+            out.mount          = mount.get();
             out.translatedPath = std::move(translated.ValueUnsafe());
             return Result<ResolvedMount>(std::move(out));
         }
@@ -182,6 +208,80 @@ namespace NGIN::IO
         return info;
     }
 
+    Result<Path> VirtualFileSystem::Absolute(const Path& path, const Path& base) noexcept
+    {
+        if (path.IsAbsolute())
+            return Result<Path>(path.LexicallyNormal());
+        if (base.IsEmpty())
+            return Result<Path>(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::Unsupported, "virtual cwd is not defined", path)));
+
+        Path absolute = base.Join(path.View());
+        absolute.Normalize();
+        return Result<Path>(std::move(absolute));
+    }
+
+    Result<Path> VirtualFileSystem::Canonical(const Path& path) noexcept
+    {
+        auto resolved = ResolvePath(path);
+        if (!resolved.HasValue())
+            return Result<Path>(NGIN::Utilities::Unexpected<IOError>(std::move(resolved.ErrorUnsafe())));
+
+        auto canonical = resolved.ValueUnsafe().mount->GetFileSystem().Canonical(resolved.ValueUnsafe().translatedPath);
+        if (!canonical.HasValue())
+            return Result<Path>(NGIN::Utilities::Unexpected<IOError>(std::move(canonical.ErrorUnsafe())));
+
+        return resolved.ValueUnsafe().mount->Virtualize(canonical.ValueUnsafe());
+    }
+
+    Result<Path> VirtualFileSystem::WeaklyCanonical(const Path& path) noexcept
+    {
+        auto resolved = ResolvePath(path);
+        if (!resolved.HasValue())
+            return Result<Path>(NGIN::Utilities::Unexpected<IOError>(std::move(resolved.ErrorUnsafe())));
+
+        auto canonical = resolved.ValueUnsafe().mount->GetFileSystem().WeaklyCanonical(resolved.ValueUnsafe().translatedPath);
+        if (!canonical.HasValue())
+            return Result<Path>(NGIN::Utilities::Unexpected<IOError>(std::move(canonical.ErrorUnsafe())));
+
+        return resolved.ValueUnsafe().mount->Virtualize(canonical.ValueUnsafe());
+    }
+
+    Result<bool> VirtualFileSystem::SameFile(const Path& lhs, const Path& rhs) noexcept
+    {
+        auto lhsResolved = ResolvePath(lhs);
+        if (!lhsResolved.HasValue())
+            return Result<bool>(NGIN::Utilities::Unexpected<IOError>(std::move(lhsResolved.ErrorUnsafe())));
+
+        auto rhsResolved = ResolvePath(rhs);
+        if (!rhsResolved.HasValue())
+            return Result<bool>(NGIN::Utilities::Unexpected<IOError>(std::move(rhsResolved.ErrorUnsafe())));
+
+        if (lhsResolved.ValueUnsafe().mount != rhsResolved.ValueUnsafe().mount)
+            return Result<bool>(false);
+
+        return lhsResolved.ValueUnsafe().mount->GetFileSystem().SameFile(
+                lhsResolved.ValueUnsafe().translatedPath, rhsResolved.ValueUnsafe().translatedPath);
+    }
+
+    Result<Path> VirtualFileSystem::ReadSymlink(const Path& path) noexcept
+    {
+        auto resolved = ResolvePath(path);
+        if (!resolved.HasValue())
+            return Result<Path>(NGIN::Utilities::Unexpected<IOError>(std::move(resolved.ErrorUnsafe())));
+
+        auto target = resolved.ValueUnsafe().mount->GetFileSystem().ReadSymlink(resolved.ValueUnsafe().translatedPath);
+        if (!target.HasValue())
+            return Result<Path>(NGIN::Utilities::Unexpected<IOError>(std::move(target.ErrorUnsafe())));
+
+        if (target.ValueUnsafe().IsAbsolute())
+        {
+            auto virtualized = resolved.ValueUnsafe().mount->Virtualize(target.ValueUnsafe());
+            if (virtualized.HasValue())
+                return virtualized;
+        }
+        return target;
+    }
+
     ResultVoid VirtualFileSystem::CreateDirectory(const Path& path, const DirectoryCreateOptions& options) noexcept
     {
         auto resolved = ResolvePath(path);
@@ -200,6 +300,60 @@ namespace NGIN::IO
         if (resolved.ValueUnsafe().mount->GetMountPoint().readOnly)
             return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::PermissionDenied, "mount is read-only", path)));
         return resolved.ValueUnsafe().mount->GetFileSystem().CreateDirectories(resolved.ValueUnsafe().translatedPath, options);
+    }
+
+    ResultVoid VirtualFileSystem::CreateSymlink(const Path& target, const Path& linkPath) noexcept
+    {
+        auto resolved = ResolvePath(linkPath);
+        if (!resolved.HasValue())
+            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(resolved.ErrorUnsafe())));
+        if (resolved.ValueUnsafe().mount->GetMountPoint().readOnly)
+            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::PermissionDenied, "mount is read-only", linkPath)));
+
+        Path translatedTarget = target;
+        if (target.IsAbsolute())
+        {
+            auto targetResolved = ResolvePath(target);
+            if (!targetResolved.HasValue())
+                return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(targetResolved.ErrorUnsafe())));
+            if (targetResolved.ValueUnsafe().mount != resolved.ValueUnsafe().mount)
+            {
+                return ResultVoid(NGIN::Utilities::Unexpected<IOError>(
+                        MakeError(IOErrorCode::CrossDevice, "cross-mount symlink target is not supported", target, linkPath)));
+            }
+            translatedTarget = targetResolved.ValueUnsafe().translatedPath;
+        }
+
+        return resolved.ValueUnsafe().mount->GetFileSystem().CreateSymlink(translatedTarget, resolved.ValueUnsafe().translatedPath);
+    }
+
+    ResultVoid VirtualFileSystem::CreateHardLink(const Path& target, const Path& linkPath) noexcept
+    {
+        auto targetResolved = ResolvePath(target);
+        if (!targetResolved.HasValue())
+            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(targetResolved.ErrorUnsafe())));
+        auto linkResolved = ResolvePath(linkPath);
+        if (!linkResolved.HasValue())
+            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(linkResolved.ErrorUnsafe())));
+        if (linkResolved.ValueUnsafe().mount->GetMountPoint().readOnly)
+            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::PermissionDenied, "mount is read-only", linkPath)));
+        if (targetResolved.ValueUnsafe().mount != linkResolved.ValueUnsafe().mount)
+        {
+            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(
+                    MakeError(IOErrorCode::CrossDevice, "cross-mount hard link is not supported", target, linkPath)));
+        }
+        return targetResolved.ValueUnsafe().mount->GetFileSystem().CreateHardLink(
+                targetResolved.ValueUnsafe().translatedPath, linkResolved.ValueUnsafe().translatedPath);
+    }
+
+    ResultVoid VirtualFileSystem::SetPermissions(const Path& path, const FilePermissions& permissions, const SymlinkMode symlinkMode) noexcept
+    {
+        auto resolved = ResolvePath(path);
+        if (!resolved.HasValue())
+            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(resolved.ErrorUnsafe())));
+        if (resolved.ValueUnsafe().mount->GetMountPoint().readOnly)
+            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::PermissionDenied, "mount is read-only", path)));
+        return resolved.ValueUnsafe().mount->GetFileSystem().SetPermissions(resolved.ValueUnsafe().translatedPath, permissions, symlinkMode);
     }
 
     ResultVoid VirtualFileSystem::RemoveFile(const Path& path, const RemoveOptions& options) noexcept
@@ -245,6 +399,28 @@ namespace NGIN::IO
         if (fromResolved.ValueUnsafe().mount->GetMountPoint().readOnly)
             return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::PermissionDenied, "mount is read-only", from, to)));
         return fromResolved.ValueUnsafe().mount->GetFileSystem().Rename(fromResolved.ValueUnsafe().translatedPath, toResolved.ValueUnsafe().translatedPath);
+    }
+
+    ResultVoid VirtualFileSystem::ReplaceFile(const Path& source, const Path& destination) noexcept
+    {
+        auto sourceResolved = ResolvePath(source);
+        if (!sourceResolved.HasValue())
+            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(sourceResolved.ErrorUnsafe())));
+        auto destinationResolved = ResolvePath(destination);
+        if (!destinationResolved.HasValue())
+            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(destinationResolved.ErrorUnsafe())));
+        if (sourceResolved.ValueUnsafe().mount != destinationResolved.ValueUnsafe().mount)
+        {
+            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(
+                    MakeError(IOErrorCode::CrossDevice, "cross-mount replace is not supported", source, destination)));
+        }
+        if (destinationResolved.ValueUnsafe().mount->GetMountPoint().readOnly)
+        {
+            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(
+                    MakeError(IOErrorCode::PermissionDenied, "destination mount is read-only", source, destination)));
+        }
+        return sourceResolved.ValueUnsafe().mount->GetFileSystem().ReplaceFile(
+                sourceResolved.ValueUnsafe().translatedPath, destinationResolved.ValueUnsafe().translatedPath);
     }
 
     ResultVoid VirtualFileSystem::CopyFile(const Path& from, const Path& to, const CopyOptions& options) noexcept
@@ -323,6 +499,68 @@ namespace NGIN::IO
         if (m_mounts.empty())
             return Result<Path>(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::NotFound, "no mounts configured")));
         return m_mounts.front()->GetFileSystem().TempDirectory();
+    }
+
+    Result<Path> VirtualFileSystem::CreateTempDirectory(const Path& directory, std::string_view prefix) noexcept
+    {
+        if (!directory.IsEmpty())
+        {
+            auto resolved = ResolvePath(directory);
+            if (!resolved.HasValue())
+                return Result<Path>(NGIN::Utilities::Unexpected<IOError>(std::move(resolved.ErrorUnsafe())));
+            if (resolved.ValueUnsafe().mount->GetMountPoint().readOnly)
+                return Result<Path>(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::PermissionDenied, "mount is read-only", directory)));
+            auto created = resolved.ValueUnsafe().mount->GetFileSystem().CreateTempDirectory(resolved.ValueUnsafe().translatedPath, prefix);
+            if (!created.HasValue())
+                return Result<Path>(NGIN::Utilities::Unexpected<IOError>(std::move(created.ErrorUnsafe())));
+            return resolved.ValueUnsafe().mount->Virtualize(created.ValueUnsafe());
+        }
+
+        for (auto& mount: m_mounts)
+        {
+            if (!mount || mount->GetMountPoint().readOnly)
+                continue;
+            auto translatedRoot = mount->Translate(mount->GetMountPoint().virtualPrefix);
+            if (!translatedRoot.HasValue())
+                continue;
+            auto created = mount->GetFileSystem().CreateTempDirectory(translatedRoot.ValueUnsafe(), prefix);
+            if (!created.HasValue())
+                return Result<Path>(NGIN::Utilities::Unexpected<IOError>(std::move(created.ErrorUnsafe())));
+            return mount->Virtualize(created.ValueUnsafe());
+        }
+
+        return Result<Path>(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::NotFound, "no writable mounts configured")));
+    }
+
+    Result<Path> VirtualFileSystem::CreateTempFile(const Path& directory, std::string_view prefix) noexcept
+    {
+        if (!directory.IsEmpty())
+        {
+            auto resolved = ResolvePath(directory);
+            if (!resolved.HasValue())
+                return Result<Path>(NGIN::Utilities::Unexpected<IOError>(std::move(resolved.ErrorUnsafe())));
+            if (resolved.ValueUnsafe().mount->GetMountPoint().readOnly)
+                return Result<Path>(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::PermissionDenied, "mount is read-only", directory)));
+            auto created = resolved.ValueUnsafe().mount->GetFileSystem().CreateTempFile(resolved.ValueUnsafe().translatedPath, prefix);
+            if (!created.HasValue())
+                return Result<Path>(NGIN::Utilities::Unexpected<IOError>(std::move(created.ErrorUnsafe())));
+            return resolved.ValueUnsafe().mount->Virtualize(created.ValueUnsafe());
+        }
+
+        for (auto& mount: m_mounts)
+        {
+            if (!mount || mount->GetMountPoint().readOnly)
+                continue;
+            auto translatedRoot = mount->Translate(mount->GetMountPoint().virtualPrefix);
+            if (!translatedRoot.HasValue())
+                continue;
+            auto created = mount->GetFileSystem().CreateTempFile(translatedRoot.ValueUnsafe(), prefix);
+            if (!created.HasValue())
+                return Result<Path>(NGIN::Utilities::Unexpected<IOError>(std::move(created.ErrorUnsafe())));
+            return mount->Virtualize(created.ValueUnsafe());
+        }
+
+        return Result<Path>(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::NotFound, "no writable mounts configured")));
     }
 
     Result<SpaceInfo> VirtualFileSystem::GetSpaceInfo(const Path& path) noexcept
