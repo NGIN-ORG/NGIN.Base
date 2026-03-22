@@ -395,7 +395,7 @@ namespace NGIN::Async
 
             if (ctx.IsCancellationRequested())
             {
-                co_return Canceled;
+                co_return Sentinels::Canceled;
             }
 
             if (!m_handle)
@@ -413,7 +413,7 @@ namespace NGIN::Async
 
             if (promise.canceled)
             {
-                co_return Canceled;
+                co_return Sentinels::Canceled;
             }
 
             if (promise.domainError.has_value())

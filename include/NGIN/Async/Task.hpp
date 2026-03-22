@@ -1822,7 +1822,7 @@ namespace NGIN::Async
                 }
                 else
                 {
-                    co_return Canceled;
+                    co_return Sentinels::Canceled;
                 }
             }
 
@@ -1848,7 +1848,7 @@ namespace NGIN::Async
                 }
                 else
                 {
-                    co_return Canceled;
+                    co_return Sentinels::Canceled;
                 }
             }
             if (parentOutcome.IsFault())
@@ -1875,7 +1875,7 @@ namespace NGIN::Async
                 }
                 else
                 {
-                    co_return Canceled;
+                    co_return Sentinels::Canceled;
                 }
             }
 
@@ -1901,7 +1901,7 @@ namespace NGIN::Async
                 }
                 else
                 {
-                    co_return Canceled;
+                    co_return Sentinels::Canceled;
                 }
             }
             if (nextOutcome.IsFault())
@@ -1945,7 +1945,7 @@ namespace NGIN::Async
                 }
                 else
                 {
-                    co_return Canceled;
+                    co_return Sentinels::Canceled;
                 }
             }
 
@@ -1971,7 +1971,7 @@ namespace NGIN::Async
                 }
                 else
                 {
-                    co_return Canceled;
+                    co_return Sentinels::Canceled;
                 }
             }
             if (parentOutcome.IsFault())
@@ -1998,7 +1998,7 @@ namespace NGIN::Async
                 }
                 else
                 {
-                    co_return Canceled;
+                    co_return Sentinels::Canceled;
                 }
             }
 
@@ -2024,7 +2024,7 @@ namespace NGIN::Async
                 }
                 else
                 {
-                    co_return Canceled;
+                    co_return Sentinels::Canceled;
                 }
             }
             if (nextOutcome.IsFault())

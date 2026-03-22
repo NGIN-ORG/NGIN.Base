@@ -183,7 +183,7 @@ namespace NGIN::Async
     {
         if (ctx.IsCancellationRequested())
         {
-            co_return Canceled;
+            co_return Sentinels::Canceled;
         }
 
         auto state = std::make_shared<detail::when_any::SharedState>();
@@ -193,7 +193,7 @@ namespace NGIN::Async
                 std::tuple<TFirstTask&, TOtherTasks&...>(firstTask, otherTasks...)};
         if (ctx.IsCancellationRequested() || index == static_cast<NGIN::UIntSize>(-1))
         {
-            co_return Canceled;
+            co_return Sentinels::Canceled;
         }
 
         co_return index;

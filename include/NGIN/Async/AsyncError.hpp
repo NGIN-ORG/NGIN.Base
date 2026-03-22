@@ -88,7 +88,10 @@ namespace NGIN::Async
     {
     };
 
-    inline constexpr CanceledTag Canceled {};
+    namespace Sentinels
+    {
+        inline constexpr CanceledTag Canceled {};
+    }
 
     struct FaultResult final
     {
