@@ -32,6 +32,7 @@ namespace NGIN::IO
         ResultVoid Move(const Path& from, const Path& to, const CopyOptions& options = {}) noexcept override;
 
         Result<std::unique_ptr<IFileHandle>>          OpenFile(const Path& path, const FileOpenOptions& options) noexcept override;
+        Result<std::unique_ptr<IDirectoryHandle>>     OpenDirectory(const Path& path) noexcept override;
         Result<FileView>                              OpenFileView(const Path& path) noexcept override;
         Result<std::unique_ptr<IDirectoryEnumerator>> Enumerate(const Path& path, const EnumerateOptions& options = {}) noexcept override;
 

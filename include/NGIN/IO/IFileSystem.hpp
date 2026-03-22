@@ -3,6 +3,7 @@
 #include <NGIN/IO/FileSystemTypes.hpp>
 #include <NGIN/IO/FileView.hpp>
 #include <NGIN/IO/IDirectoryEnumerator.hpp>
+#include <NGIN/IO/IDirectoryHandle.hpp>
 #include <NGIN/IO/IFileHandle.hpp>
 #include <NGIN/IO/IOResult.hpp>
 
@@ -40,6 +41,7 @@ namespace NGIN::IO
         virtual ResultVoid Move(const Path& from, const Path& to, const CopyOptions& options = {}) noexcept     = 0;
 
         virtual Result<std::unique_ptr<IFileHandle>>          OpenFile(const Path& path, const FileOpenOptions& options) noexcept        = 0;
+        virtual Result<std::unique_ptr<IDirectoryHandle>>     OpenDirectory(const Path& path) noexcept                                   = 0;
         virtual Result<FileView>                              OpenFileView(const Path& path) noexcept                                    = 0;
         virtual Result<std::unique_ptr<IDirectoryEnumerator>> Enumerate(const Path& path, const EnumerateOptions& options = {}) noexcept = 0;
 

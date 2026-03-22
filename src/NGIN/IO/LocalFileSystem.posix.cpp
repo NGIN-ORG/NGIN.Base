@@ -367,6 +367,156 @@ namespace NGIN::IO
             return Result<Path>(std::move(output));
         }
 
+        [[nodiscard]] Result<Path> NormalizeRelativeHandlePath(const Path& path) noexcept
+        {
+            Path normalized = path.LexicallyNormal();
+            if (normalized.IsAbsolute())
+            {
+                return Result<Path>(
+                        NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::InvalidPath, "directory handle path must be relative", path)));
+            }
+
+            if (normalized.IsEmpty())
+                return Result<Path>(Path {"."});
+            if (normalized.StartsWith(Path {".."}))
+            {
+                return Result<Path>(
+                        NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::InvalidPath, "directory handle path escapes handle root", path)));
+            }
+
+            return Result<Path>(std::move(normalized));
+        }
+
+        [[nodiscard]] Path JoinHandlePath(const Path& base, const Path& relativePath)
+        {
+            if (relativePath.View() == ".")
+                return base;
+            Path joined = base.Join(relativePath.View());
+            joined.Normalize();
+            return joined;
+        }
+
+        [[nodiscard]] int BuildOpenFlags(const FileOpenOptions& options) noexcept
+        {
+            int openFlags = 0;
+            switch (options.access)
+            {
+                case FileAccess::Read:
+                    openFlags |= O_RDONLY;
+                    break;
+                case FileAccess::Write:
+                    openFlags |= O_WRONLY;
+                    break;
+                case FileAccess::ReadWrite:
+                    openFlags |= O_RDWR;
+                    break;
+                case FileAccess::Append:
+                    openFlags |= O_WRONLY | O_APPEND;
+                    break;
+            }
+
+            switch (options.disposition)
+            {
+                case FileCreateDisposition::OpenExisting:
+                    break;
+                case FileCreateDisposition::CreateAlways:
+                    openFlags |= O_CREAT | O_TRUNC;
+                    break;
+                case FileCreateDisposition::CreateNew:
+                    openFlags |= O_CREAT | O_EXCL;
+                    break;
+                case FileCreateDisposition::OpenAlways:
+                    openFlags |= O_CREAT;
+                    break;
+                case FileCreateDisposition::TruncateExisting:
+                    openFlags |= O_TRUNC;
+                    break;
+            }
+
+#if defined(O_CLOEXEC)
+            openFlags |= O_CLOEXEC;
+#endif
+#if defined(O_SYNC)
+            if ((options.flags & FileOpenFlags::WriteThrough) == FileOpenFlags::WriteThrough)
+                openFlags |= O_SYNC;
+#endif
+            return openFlags;
+        }
+
+        [[nodiscard]] Result<FileInfo> BuildFileInfoAt(
+                const int directoryFd, const Path& resolvedPath, const Path& relativePath, const MetadataOptions& options) noexcept
+        {
+            auto relativeResult = NormalizeRelativeHandlePath(relativePath);
+            if (!relativeResult.HasValue())
+                return Result<FileInfo>(NGIN::Utilities::Unexpected<IOError>(std::move(relativeResult.ErrorUnsafe())));
+
+            const auto nativeRelative = relativeResult.ValueUnsafe().ToNative();
+            FileInfo   info;
+            info.path = resolvedPath;
+
+            struct stat st {};
+            const int   flags = options.symlinkMode == SymlinkMode::DoNotFollow ? AT_SYMLINK_NOFOLLOW : 0;
+            if (::fstatat(directoryFd, nativeRelative.CStr(), &st, flags) != 0)
+            {
+                if ((errno == ENOENT || errno == ENOTDIR) && options.symlinkMode == SymlinkMode::Follow)
+                {
+                    struct stat linkStat {};
+                    if (::fstatat(directoryFd, nativeRelative.CStr(), &linkStat, AT_SYMLINK_NOFOLLOW) == 0 && S_ISLNK(linkStat.st_mode))
+                    {
+                        info.exists                 = true;
+                        info.type                   = EntryType::Symlink;
+                        info.permissions            = ToPermissions(linkStat.st_mode);
+                        info.ownership.userId       = static_cast<UInt32>(linkStat.st_uid);
+                        info.ownership.groupId      = static_cast<UInt32>(linkStat.st_gid);
+                        info.ownership.valid        = true;
+                        info.identity.device        = static_cast<UInt64>(linkStat.st_dev);
+                        info.identity.inode         = static_cast<UInt64>(linkStat.st_ino);
+                        info.identity.hardLinkCount = static_cast<UInt64>(linkStat.st_nlink);
+                        info.identity.valid         = true;
+                        info.accessed               = ToAccessTime(linkStat);
+                        info.modified               = ToModifyTime(linkStat);
+                        info.changed                = ToChangeTime(linkStat);
+                        info.symlinkTargetExists    = false;
+                        return Result<FileInfo>(std::move(info));
+                    }
+                }
+
+                if (errno == ENOENT || errno == ENOTDIR)
+                {
+                    info.exists = false;
+                    info.type   = EntryType::None;
+                    return Result<FileInfo>(std::move(info));
+                }
+
+                return Result<FileInfo>(
+                        NGIN::Utilities::Unexpected<IOError>(MakeErrnoError(errno, "fstatat failed", resolvedPath)));
+            }
+
+            info.exists                 = true;
+            info.type                   = ToEntryType(st.st_mode);
+            info.size                   = IsSizedEntryType(info.type) ? static_cast<UInt64>(st.st_size) : 0;
+            info.permissions            = ToPermissions(st.st_mode);
+            info.ownership.userId       = static_cast<UInt32>(st.st_uid);
+            info.ownership.groupId      = static_cast<UInt32>(st.st_gid);
+            info.ownership.valid        = true;
+            info.identity.device        = static_cast<UInt64>(st.st_dev);
+            info.identity.inode         = static_cast<UInt64>(st.st_ino);
+            info.identity.hardLinkCount = static_cast<UInt64>(st.st_nlink);
+            info.identity.valid         = true;
+            info.accessed               = ToAccessTime(st);
+            info.modified               = ToModifyTime(st);
+            info.changed                = ToChangeTime(st);
+            info.symlinkTargetExists    = true;
+
+            if (options.symlinkMode == SymlinkMode::DoNotFollow && info.type == EntryType::Symlink)
+            {
+                struct stat target {};
+                info.symlinkTargetExists = ::fstatat(directoryFd, nativeRelative.CStr(), &target, 0) == 0;
+            }
+
+            return Result<FileInfo>(std::move(info));
+        }
+
         class VectorDirectoryEnumerator final : public IDirectoryEnumerator
         {
         public:
@@ -417,6 +567,34 @@ namespace NGIN::IO
                 {
                     return Result<std::unique_ptr<LocalFileHandle>>(
                             NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::SystemError, "allocation failed", path)));
+                }
+            }
+
+            static Result<std::unique_ptr<LocalFileHandle>> OpenAt(
+                    const int directoryFd, const Path& basePath, const Path& relativePath, const FileOpenOptions& options) noexcept
+            {
+                auto normalizedRelative = NormalizeRelativeHandlePath(relativePath);
+                if (!normalizedRelative.HasValue())
+                {
+                    return Result<std::unique_ptr<LocalFileHandle>>(
+                            NGIN::Utilities::Unexpected<IOError>(std::move(normalizedRelative.ErrorUnsafe())));
+                }
+
+                const Path resolvedPath = JoinHandlePath(basePath, normalizedRelative.ValueUnsafe());
+                try
+                {
+                    auto handle = std::unique_ptr<LocalFileHandle>(new LocalFileHandle());
+                    auto result = handle->OpenAtImpl(directoryFd, resolvedPath, normalizedRelative.ValueUnsafe(), options);
+                    if (!result.HasValue())
+                    {
+                        return Result<std::unique_ptr<LocalFileHandle>>(
+                                NGIN::Utilities::Unexpected<IOError>(std::move(result.ErrorUnsafe())));
+                    }
+                    return Result<std::unique_ptr<LocalFileHandle>>(std::move(handle));
+                } catch (const std::bad_alloc&)
+                {
+                    return Result<std::unique_ptr<LocalFileHandle>>(
+                            NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::SystemError, "allocation failed", resolvedPath)));
                 }
             }
 
@@ -664,53 +842,22 @@ namespace NGIN::IO
                 m_path     = path;
                 m_canRead  = options.access == FileAccess::Read || options.access == FileAccess::ReadWrite;
                 m_canWrite = options.access == FileAccess::Write || options.access == FileAccess::ReadWrite || options.access == FileAccess::Append;
-
-                int openFlags = 0;
-                switch (options.access)
-                {
-                    case FileAccess::Read:
-                        openFlags |= O_RDONLY;
-                        break;
-                    case FileAccess::Write:
-                        openFlags |= O_WRONLY;
-                        break;
-                    case FileAccess::ReadWrite:
-                        openFlags |= O_RDWR;
-                        break;
-                    case FileAccess::Append:
-                        openFlags |= O_WRONLY | O_APPEND;
-                        break;
-                }
-
-                switch (options.disposition)
-                {
-                    case FileCreateDisposition::OpenExisting:
-                        break;
-                    case FileCreateDisposition::CreateAlways:
-                        openFlags |= O_CREAT | O_TRUNC;
-                        break;
-                    case FileCreateDisposition::CreateNew:
-                        openFlags |= O_CREAT | O_EXCL;
-                        break;
-                    case FileCreateDisposition::OpenAlways:
-                        openFlags |= O_CREAT;
-                        break;
-                    case FileCreateDisposition::TruncateExisting:
-                        openFlags |= O_TRUNC;
-                        break;
-                }
-
-#if defined(O_CLOEXEC)
-                openFlags |= O_CLOEXEC;
-#endif
-#if defined(O_SYNC)
-                if ((options.flags & FileOpenFlags::WriteThrough) == FileOpenFlags::WriteThrough)
-                    openFlags |= O_SYNC;
-#endif
-
-                m_fd = ::open(ToNativePath(path).CStr(), openFlags, 0666);
+                m_fd       = ::open(ToNativePath(path).CStr(), BuildOpenFlags(options), 0666);
                 if (m_fd < 0)
                     return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeErrnoError(errno, "open failed", m_path)));
+                return {};
+            }
+
+            ResultVoid OpenAtImpl(const int directoryFd, const Path& resolvedPath, const Path& relativePath, const FileOpenOptions& options) noexcept
+            {
+                m_path     = resolvedPath;
+                m_canRead  = options.access == FileAccess::Read || options.access == FileAccess::ReadWrite;
+                m_canWrite = options.access == FileAccess::Write || options.access == FileAccess::ReadWrite || options.access == FileAccess::Append;
+
+                const auto nativeRelative = relativePath.ToNative();
+                m_fd                      = ::openat(directoryFd, nativeRelative.CStr(), BuildOpenFlags(options), 0666);
+                if (m_fd < 0)
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeErrnoError(errno, "openat failed", m_path)));
                 return {};
             }
 
@@ -719,6 +866,203 @@ namespace NGIN::IO
             bool               m_canRead {false};
             bool               m_canWrite {false};
             int                m_fd {-1};
+        };
+
+        class LocalDirectoryHandle final : public IDirectoryHandle
+        {
+        public:
+            static Result<std::unique_ptr<LocalDirectoryHandle>> Open(const Path& path) noexcept
+            {
+                try
+                {
+                    auto handle = std::unique_ptr<LocalDirectoryHandle>(new LocalDirectoryHandle());
+                    auto result = handle->OpenImpl(path);
+                    if (!result.HasValue())
+                    {
+                        return Result<std::unique_ptr<LocalDirectoryHandle>>(
+                                NGIN::Utilities::Unexpected<IOError>(std::move(result.ErrorUnsafe())));
+                    }
+                    return Result<std::unique_ptr<LocalDirectoryHandle>>(std::move(handle));
+                } catch (const std::bad_alloc&)
+                {
+                    return Result<std::unique_ptr<LocalDirectoryHandle>>(
+                            NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::SystemError, "allocation failed", path)));
+                }
+            }
+
+            static Result<std::unique_ptr<LocalDirectoryHandle>> OpenAt(const int directoryFd, const Path& basePath, const Path& relativePath) noexcept
+            {
+                auto normalized = NormalizeRelativeHandlePath(relativePath);
+                if (!normalized.HasValue())
+                {
+                    return Result<std::unique_ptr<LocalDirectoryHandle>>(
+                            NGIN::Utilities::Unexpected<IOError>(std::move(normalized.ErrorUnsafe())));
+                }
+
+                const Path resolvedPath = JoinHandlePath(basePath, normalized.ValueUnsafe());
+                try
+                {
+                    auto handle = std::unique_ptr<LocalDirectoryHandle>(new LocalDirectoryHandle());
+                    auto result = handle->OpenAtImpl(directoryFd, resolvedPath, normalized.ValueUnsafe());
+                    if (!result.HasValue())
+                    {
+                        return Result<std::unique_ptr<LocalDirectoryHandle>>(
+                                NGIN::Utilities::Unexpected<IOError>(std::move(result.ErrorUnsafe())));
+                    }
+                    return Result<std::unique_ptr<LocalDirectoryHandle>>(std::move(handle));
+                } catch (const std::bad_alloc&)
+                {
+                    return Result<std::unique_ptr<LocalDirectoryHandle>>(
+                            NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::SystemError, "allocation failed", resolvedPath)));
+                }
+            }
+
+            ~LocalDirectoryHandle() override
+            {
+                if (m_directoryFd >= 0)
+                    ::close(m_directoryFd);
+            }
+
+            Result<bool> Exists(const Path& path) noexcept override
+            {
+                auto normalized = NormalizeRelativeHandlePath(path);
+                if (!normalized.HasValue())
+                    return Result<bool>(NGIN::Utilities::Unexpected<IOError>(std::move(normalized.ErrorUnsafe())));
+
+                struct stat st {};
+                const auto  nativeRelative = normalized.ValueUnsafe().ToNative();
+                if (::fstatat(m_directoryFd, nativeRelative.CStr(), &st, AT_SYMLINK_NOFOLLOW) == 0)
+                    return Result<bool>(true);
+                if (errno == ENOENT || errno == ENOTDIR)
+                    return Result<bool>(false);
+                return Result<bool>(NGIN::Utilities::Unexpected<IOError>(MakeErrnoError(errno, "fstatat failed", JoinHandlePath(m_path, normalized.ValueUnsafe()))));
+            }
+
+            Result<FileInfo> GetInfo(const Path& path, const MetadataOptions& options = {}) noexcept override
+            {
+                auto normalized = NormalizeRelativeHandlePath(path);
+                if (!normalized.HasValue())
+                    return Result<FileInfo>(NGIN::Utilities::Unexpected<IOError>(std::move(normalized.ErrorUnsafe())));
+                return BuildFileInfoAt(m_directoryFd, JoinHandlePath(m_path, normalized.ValueUnsafe()), normalized.ValueUnsafe(), options);
+            }
+
+            Result<std::unique_ptr<IFileHandle>> OpenFile(const Path& path, const FileOpenOptions& options) noexcept override
+            {
+                auto opened = LocalFileHandle::OpenAt(m_directoryFd, m_path, path, options);
+                if (!opened.HasValue())
+                    return Result<std::unique_ptr<IFileHandle>>(NGIN::Utilities::Unexpected<IOError>(std::move(opened.ErrorUnsafe())));
+
+                std::unique_ptr<IFileHandle> result(opened.ValueUnsafe().release());
+                return Result<std::unique_ptr<IFileHandle>>(std::move(result));
+            }
+
+            Result<std::unique_ptr<IDirectoryHandle>> OpenDirectory(const Path& path) noexcept override
+            {
+                auto opened = OpenAt(m_directoryFd, m_path, path);
+                if (!opened.HasValue())
+                    return Result<std::unique_ptr<IDirectoryHandle>>(NGIN::Utilities::Unexpected<IOError>(std::move(opened.ErrorUnsafe())));
+
+                std::unique_ptr<IDirectoryHandle> result(opened.ValueUnsafe().release());
+                return Result<std::unique_ptr<IDirectoryHandle>>(std::move(result));
+            }
+
+            ResultVoid CreateDirectory(const Path& path, const DirectoryCreateOptions& options = {}) noexcept override
+            {
+                auto normalized = NormalizeRelativeHandlePath(path);
+                if (!normalized.HasValue())
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(normalized.ErrorUnsafe())));
+
+                if (options.recursive)
+                    return m_fileSystem.CreateDirectories(JoinHandlePath(m_path, normalized.ValueUnsafe()), options);
+
+                const auto nativeRelative = normalized.ValueUnsafe().ToNative();
+                if (::mkdirat(m_directoryFd, nativeRelative.CStr(), 0777) == 0)
+                    return {};
+                if (options.ignoreIfExists && errno == EEXIST)
+                {
+                    auto existing = BuildFileInfoAt(m_directoryFd, JoinHandlePath(m_path, normalized.ValueUnsafe()), normalized.ValueUnsafe(), {});
+                    if (existing.HasValue() && existing.ValueUnsafe().exists && existing.ValueUnsafe().type == EntryType::Directory)
+                        return {};
+                }
+                return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeErrnoError(errno, "mkdirat failed", JoinHandlePath(m_path, normalized.ValueUnsafe()))));
+            }
+
+            ResultVoid RemoveFile(const Path& path, const RemoveOptions& options = {}) noexcept override
+            {
+                auto normalized = NormalizeRelativeHandlePath(path);
+                if (!normalized.HasValue())
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(normalized.ErrorUnsafe())));
+
+                const auto nativeRelative = normalized.ValueUnsafe().ToNative();
+                if (::unlinkat(m_directoryFd, nativeRelative.CStr(), 0) == 0)
+                    return {};
+                if (options.ignoreMissing && (errno == ENOENT || errno == ENOTDIR))
+                    return {};
+                return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeErrnoError(errno, "unlinkat failed", JoinHandlePath(m_path, normalized.ValueUnsafe()))));
+            }
+
+            ResultVoid RemoveDirectory(const Path& path, const RemoveOptions& options = {}) noexcept override
+            {
+                auto normalized = NormalizeRelativeHandlePath(path);
+                if (!normalized.HasValue())
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(normalized.ErrorUnsafe())));
+
+                if (options.recursive)
+                    return m_fileSystem.RemoveDirectory(JoinHandlePath(m_path, normalized.ValueUnsafe()), options);
+
+                const auto nativeRelative = normalized.ValueUnsafe().ToNative();
+                if (::unlinkat(m_directoryFd, nativeRelative.CStr(), AT_REMOVEDIR) == 0)
+                    return {};
+                if (options.ignoreMissing && (errno == ENOENT || errno == ENOTDIR))
+                    return {};
+                return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeErrnoError(errno, "unlinkat directory failed", JoinHandlePath(m_path, normalized.ValueUnsafe()))));
+            }
+
+            Result<Path> ReadSymlink(const Path& path) noexcept override
+            {
+                auto normalized = NormalizeRelativeHandlePath(path);
+                if (!normalized.HasValue())
+                    return Result<Path>(NGIN::Utilities::Unexpected<IOError>(std::move(normalized.ErrorUnsafe())));
+
+                const auto        nativeRelative = normalized.ValueUnsafe().ToNative();
+                std::vector<char> buffer(256, '\0');
+                for (;;)
+                {
+                    const ssize_t count = ::readlinkat(m_directoryFd, nativeRelative.CStr(), buffer.data(), buffer.size());
+                    if (count < 0)
+                    {
+                        return Result<Path>(NGIN::Utilities::Unexpected<IOError>(
+                                MakeErrnoError(errno, "readlinkat failed", JoinHandlePath(m_path, normalized.ValueUnsafe()))));
+                    }
+                    if (static_cast<std::size_t>(count) < buffer.size())
+                        return Result<Path>(Path::FromNative(std::string_view(buffer.data(), static_cast<std::size_t>(count))));
+                    buffer.resize(buffer.size() * 2);
+                }
+            }
+
+        private:
+            ResultVoid OpenImpl(const Path& path) noexcept
+            {
+                m_path        = path.LexicallyNormal();
+                m_directoryFd = ::open(ToNativePath(m_path).CStr(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+                if (m_directoryFd < 0)
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeErrnoError(errno, "open directory failed", m_path)));
+                return {};
+            }
+
+            ResultVoid OpenAtImpl(const int directoryFd, const Path& resolvedPath, const Path& relativePath) noexcept
+            {
+                m_path                    = resolvedPath;
+                const auto nativeRelative = relativePath.ToNative();
+                m_directoryFd             = ::openat(directoryFd, nativeRelative.CStr(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+                if (m_directoryFd < 0)
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeErrnoError(errno, "openat directory failed", m_path)));
+                return {};
+            }
+
+            Path            m_path {};
+            int             m_directoryFd {-1};
+            LocalFileSystem m_fileSystem {};
         };
 
         [[nodiscard]] Result<bool> ExistsNative(const Path& path) noexcept
@@ -1255,6 +1599,16 @@ namespace NGIN::IO
 
         std::unique_ptr<IFileHandle> result(opened.ValueUnsafe().release());
         return Result<std::unique_ptr<IFileHandle>>(std::move(result));
+    }
+
+    Result<std::unique_ptr<IDirectoryHandle>> LocalFileSystem::OpenDirectory(const Path& path) noexcept
+    {
+        auto opened = LocalDirectoryHandle::Open(path);
+        if (!opened.HasValue())
+            return Result<std::unique_ptr<IDirectoryHandle>>(NGIN::Utilities::Unexpected<IOError>(std::move(opened.ErrorUnsafe())));
+
+        std::unique_ptr<IDirectoryHandle> result(opened.ValueUnsafe().release());
+        return Result<std::unique_ptr<IDirectoryHandle>>(std::move(result));
     }
 
     Result<std::unique_ptr<IDirectoryEnumerator>> LocalFileSystem::Enumerate(const Path& path, const EnumerateOptions& options) noexcept

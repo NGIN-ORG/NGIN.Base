@@ -95,6 +95,67 @@ TEST_CASE("IO.LocalFileSystem basic read write enumerate", "[IO][LocalFileSystem
     RemoveTempDir(fs, root);
 }
 
+TEST_CASE("IO.LocalFileSystem directory handles scope relative operations", "[IO][LocalFileSystem]")
+{
+    NGIN::IO::LocalFileSystem fs;
+    const auto                root      = MakeTempDir(fs);
+    const auto                nestedDir = root.Join("nested");
+    const auto                childDir  = nestedDir.Join("child");
+
+    REQUIRE(fs.CreateDirectories(childDir).HasValue());
+    REQUIRE(NGIN::IO::WriteAllText(fs, nestedDir.Join("seed.txt"), "seed").HasValue());
+
+    auto directory = fs.OpenDirectory(nestedDir);
+    REQUIRE(directory.HasValue());
+
+    auto exists = directory.ValueUnsafe()->Exists(NGIN::IO::Path {"seed.txt"});
+    REQUIRE(exists.HasValue());
+    REQUIRE(exists.ValueUnsafe());
+
+    auto info = directory.ValueUnsafe()->GetInfo(NGIN::IO::Path {"seed.txt"});
+    REQUIRE(info.HasValue());
+    REQUIRE(info.ValueUnsafe().type == NGIN::IO::EntryType::File);
+
+    auto child = directory.ValueUnsafe()->OpenDirectory(NGIN::IO::Path {"child"});
+    REQUIRE(child.HasValue());
+    auto childInfo = child.ValueUnsafe()->GetInfo(NGIN::IO::Path {"."});
+    REQUIRE(childInfo.HasValue());
+    REQUIRE(childInfo.ValueUnsafe().type == NGIN::IO::EntryType::Directory);
+
+    NGIN::IO::FileOpenOptions openOptions;
+    openOptions.access      = NGIN::IO::FileAccess::Write;
+    openOptions.share       = NGIN::IO::FileShare::Read;
+    openOptions.disposition = NGIN::IO::FileCreateDisposition::CreateAlways;
+
+    auto openedFile = directory.ValueUnsafe()->OpenFile(NGIN::IO::Path {"from_handle.txt"}, openOptions);
+    REQUIRE(openedFile.HasValue());
+
+    const std::string payload = "dir-handle";
+    const auto        writeResult =
+            openedFile.ValueUnsafe()->Write({reinterpret_cast<const NGIN::Byte*>(payload.data()), payload.size()});
+    REQUIRE(writeResult.HasValue());
+    REQUIRE(writeResult.ValueUnsafe() == payload.size());
+    openedFile.ValueUnsafe()->Close();
+
+    auto writtenText = NGIN::IO::ReadAllText(fs, nestedDir.Join("from_handle.txt"));
+    REQUIRE(writtenText.HasValue());
+    REQUIRE(std::string(writtenText.ValueUnsafe().Data(), writtenText.ValueUnsafe().Size()) == payload);
+
+    REQUIRE(directory.ValueUnsafe()->CreateDirectory(NGIN::IO::Path {"created"}).HasValue());
+    REQUIRE(fs.Exists(nestedDir.Join("created")).ValueUnsafe());
+    REQUIRE(directory.ValueUnsafe()->RemoveDirectory(NGIN::IO::Path {"created"}).HasValue());
+    REQUIRE_FALSE(fs.Exists(nestedDir.Join("created")).ValueUnsafe());
+
+    REQUIRE(directory.ValueUnsafe()->RemoveFile(NGIN::IO::Path {"from_handle.txt"}).HasValue());
+    REQUIRE_FALSE(fs.Exists(nestedDir.Join("from_handle.txt")).ValueUnsafe());
+
+    auto escaped = directory.ValueUnsafe()->Exists(NGIN::IO::Path {"../outside.txt"});
+    REQUIRE_FALSE(escaped.HasValue());
+    REQUIRE(escaped.ErrorUnsafe().code == NGIN::IO::IOErrorCode::InvalidPath);
+
+    RemoveTempDir(fs, root);
+}
+
 #if !defined(_WIN32)
 TEST_CASE("IO.LocalFileSystem extended operations", "[IO][LocalFileSystem][posix]")
 {
@@ -262,6 +323,28 @@ TEST_CASE("IO.LocalFileSystem POSIX metadata and file types", "[IO][LocalFileSys
     REQUIRE(sawSymlink);
 
     ::close(socketFd);
+    RemoveTempDir(fs, root);
+}
+
+TEST_CASE("IO.LocalFileSystem directory handles can read symlinks", "[IO][LocalFileSystem][posix]")
+{
+    NGIN::IO::LocalFileSystem fs;
+    const auto                root      = MakeTempDir(fs);
+    const auto                nestedDir = root.Join("nested");
+    const auto                target    = nestedDir.Join("target.txt");
+    const auto                linkPath  = nestedDir.Join("target.sym");
+
+    REQUIRE(fs.CreateDirectories(nestedDir).HasValue());
+    REQUIRE(NGIN::IO::WriteAllText(fs, target, "hello").HasValue());
+    REQUIRE(::symlink("target.txt", ToNativeString(linkPath).c_str()) == 0);
+
+    auto directory = fs.OpenDirectory(nestedDir);
+    REQUIRE(directory.HasValue());
+
+    auto targetPath = directory.ValueUnsafe()->ReadSymlink(NGIN::IO::Path {"target.sym"});
+    REQUIRE(targetPath.HasValue());
+    REQUIRE(targetPath.ValueUnsafe().View() == "target.txt");
+
     RemoveTempDir(fs, root);
 }
 #endif

@@ -3,6 +3,7 @@
 #include <NGIN/Utilities/Expected.hpp>
 
 #include <algorithm>
+#include <new>
 
 namespace NGIN::IO
 {
@@ -50,6 +51,155 @@ namespace NGIN::IO
             out.metadataNoFollow     = lhs.metadataNoFollow && rhs.metadataNoFollow;
             return out;
         }
+
+        [[nodiscard]] Result<Path> NormalizeRelativeHandlePath(const Path& path) noexcept
+        {
+            Path normalized = path.LexicallyNormal();
+            if (normalized.IsAbsolute())
+            {
+                return Result<Path>(
+                        NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::InvalidPath, "directory handle path must be relative", path)));
+            }
+
+            if (normalized.IsEmpty())
+                return Result<Path>(Path {"."});
+            if (normalized.StartsWith(Path {".."}))
+            {
+                return Result<Path>(
+                        NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::InvalidPath, "directory handle path escapes handle root", path)));
+            }
+
+            return Result<Path>(std::move(normalized));
+        }
+
+        [[nodiscard]] Path JoinHandlePath(const Path& base, const Path& relativePath)
+        {
+            if (relativePath.View() == ".")
+                return base;
+            Path joined = base.Join(relativePath.View());
+            joined.Normalize();
+            return joined;
+        }
+
+        class VirtualDirectoryHandle final : public IDirectoryHandle
+        {
+        public:
+            static Result<std::unique_ptr<VirtualDirectoryHandle>> Open(VirtualFileSystem& fileSystem, const Path& path) noexcept
+            {
+                auto info = fileSystem.GetInfo(path);
+                if (!info.HasValue())
+                {
+                    return Result<std::unique_ptr<VirtualDirectoryHandle>>(
+                            NGIN::Utilities::Unexpected<IOError>(std::move(info.ErrorUnsafe())));
+                }
+                if (!info.ValueUnsafe().exists)
+                {
+                    return Result<std::unique_ptr<VirtualDirectoryHandle>>(
+                            NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::NotFound, "directory not found", path)));
+                }
+                if (info.ValueUnsafe().type != EntryType::Directory)
+                {
+                    return Result<std::unique_ptr<VirtualDirectoryHandle>>(
+                            NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::NotDirectory, "path is not a directory", path)));
+                }
+
+                try
+                {
+                    auto handle      = std::unique_ptr<VirtualDirectoryHandle>(new VirtualDirectoryHandle());
+                    handle->m_path   = path.LexicallyNormal();
+                    handle->m_system = &fileSystem;
+                    return Result<std::unique_ptr<VirtualDirectoryHandle>>(std::move(handle));
+                } catch (const std::bad_alloc&)
+                {
+                    return Result<std::unique_ptr<VirtualDirectoryHandle>>(
+                            NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::SystemError, "allocation failed", path)));
+                }
+            }
+
+            Result<bool> Exists(const Path& path) noexcept override
+            {
+                auto normalized = NormalizeRelativeHandlePath(path);
+                if (!normalized.HasValue())
+                    return Result<bool>(NGIN::Utilities::Unexpected<IOError>(std::move(normalized.ErrorUnsafe())));
+                return m_system->Exists(JoinHandlePath(m_path, normalized.ValueUnsafe()));
+            }
+
+            Result<FileInfo> GetInfo(const Path& path, const MetadataOptions& options) noexcept override
+            {
+                auto normalized = NormalizeRelativeHandlePath(path);
+                if (!normalized.HasValue())
+                    return Result<FileInfo>(NGIN::Utilities::Unexpected<IOError>(std::move(normalized.ErrorUnsafe())));
+                return m_system->GetInfo(JoinHandlePath(m_path, normalized.ValueUnsafe()), options);
+            }
+
+            Result<std::unique_ptr<IFileHandle>> OpenFile(const Path& path, const FileOpenOptions& options) noexcept override
+            {
+                auto normalized = NormalizeRelativeHandlePath(path);
+                if (!normalized.HasValue())
+                {
+                    return Result<std::unique_ptr<IFileHandle>>(NGIN::Utilities::Unexpected<IOError>(std::move(normalized.ErrorUnsafe())));
+                }
+                return m_system->OpenFile(JoinHandlePath(m_path, normalized.ValueUnsafe()), options);
+            }
+
+            Result<std::unique_ptr<IDirectoryHandle>> OpenDirectory(const Path& path) noexcept override
+            {
+                auto normalized = NormalizeRelativeHandlePath(path);
+                if (!normalized.HasValue())
+                {
+                    return Result<std::unique_ptr<IDirectoryHandle>>(NGIN::Utilities::Unexpected<IOError>(std::move(normalized.ErrorUnsafe())));
+                }
+
+                auto opened = Open(*m_system, JoinHandlePath(m_path, normalized.ValueUnsafe()));
+                if (!opened.HasValue())
+                {
+                    return Result<std::unique_ptr<IDirectoryHandle>>(NGIN::Utilities::Unexpected<IOError>(std::move(opened.ErrorUnsafe())));
+                }
+
+                std::unique_ptr<IDirectoryHandle> result(opened.ValueUnsafe().release());
+                return Result<std::unique_ptr<IDirectoryHandle>>(std::move(result));
+            }
+
+            ResultVoid CreateDirectory(const Path& path, const DirectoryCreateOptions& options = {}) noexcept override
+            {
+                auto normalized = NormalizeRelativeHandlePath(path);
+                if (!normalized.HasValue())
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(normalized.ErrorUnsafe())));
+
+                const Path resolvedPath = JoinHandlePath(m_path, normalized.ValueUnsafe());
+                if (options.recursive)
+                    return m_system->CreateDirectories(resolvedPath, options);
+                return m_system->CreateDirectory(resolvedPath, options);
+            }
+
+            ResultVoid RemoveFile(const Path& path, const RemoveOptions& options = {}) noexcept override
+            {
+                auto normalized = NormalizeRelativeHandlePath(path);
+                if (!normalized.HasValue())
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(normalized.ErrorUnsafe())));
+                return m_system->RemoveFile(JoinHandlePath(m_path, normalized.ValueUnsafe()), options);
+            }
+
+            ResultVoid RemoveDirectory(const Path& path, const RemoveOptions& options = {}) noexcept override
+            {
+                auto normalized = NormalizeRelativeHandlePath(path);
+                if (!normalized.HasValue())
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(normalized.ErrorUnsafe())));
+                return m_system->RemoveDirectory(JoinHandlePath(m_path, normalized.ValueUnsafe()), options);
+            }
+
+            Result<Path> ReadSymlink(const Path& path) noexcept override
+            {
+                auto normalized = NormalizeRelativeHandlePath(path);
+                if (!normalized.HasValue())
+                    return Result<Path>(NGIN::Utilities::Unexpected<IOError>(std::move(normalized.ErrorUnsafe())));
+                return m_system->ReadSymlink(JoinHandlePath(m_path, normalized.ValueUnsafe()));
+            }
+
+        private:
+            Path               m_path {};
+            VirtualFileSystem* m_system {nullptr};
+        };
     }// namespace
 
     LocalMount::LocalMount(Path realRoot, MountPoint mountPoint)
@@ -466,6 +616,16 @@ namespace NGIN::IO
             return Result<std::unique_ptr<IFileHandle>>(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::PermissionDenied, "mount is read-only", path)));
         }
         return resolved.ValueUnsafe().mount->GetFileSystem().OpenFile(resolved.ValueUnsafe().translatedPath, options);
+    }
+
+    Result<std::unique_ptr<IDirectoryHandle>> VirtualFileSystem::OpenDirectory(const Path& path) noexcept
+    {
+        auto opened = VirtualDirectoryHandle::Open(*this, path);
+        if (!opened.HasValue())
+            return Result<std::unique_ptr<IDirectoryHandle>>(NGIN::Utilities::Unexpected<IOError>(std::move(opened.ErrorUnsafe())));
+
+        std::unique_ptr<IDirectoryHandle> result(opened.ValueUnsafe().release());
+        return Result<std::unique_ptr<IDirectoryHandle>>(std::move(result));
     }
 
     Result<FileView> VirtualFileSystem::OpenFileView(const Path& path) noexcept
