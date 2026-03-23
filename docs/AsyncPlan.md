@@ -1,9 +1,12 @@
 # AsyncPlan
 
-Purpose: define the major redesign of `NGIN::Async` so async code has a typed domain-error model, explicit
+Status: implemented redesign with continuing polish and follow-up work. This document now serves as the contract and
+follow-up plan for the typed async model in `NGIN.Base`.
+
+Purpose: document the `NGIN::Async` redesign so async code has a typed domain-error model, explicit
 cancellation/runtime semantics, and clean coroutine flow without depending on exceptions or nested result types.
 
-This plan replaces the current `Task<T>` + `AsyncExpected<T>` design as the primary async model.
+This document records the replacement of the old `Task<T>` + `AsyncExpected<T>` design as the primary async model.
 
 ## Summary
 
@@ -221,7 +224,7 @@ Cancellation should arise from:
 
 - explicit cancellation tokens
 - cancellation-aware await points
-- explicit coroutine decisions such as `if (ctx.CheckCancellation()) co_return Canceled;`
+- explicit coroutine decisions such as `if (ctx.CheckCancellation()) co_return Sentinels::Canceled;`
 
 ## Fault
 
@@ -297,7 +300,7 @@ Primary terminal coroutine forms:
 
 - `co_return value`
 - `co_return NGIN::Utilities::Unexpected<E>{...}`
-- `co_return Canceled`
+- `co_return Sentinels::Canceled`
 - `co_return Fault(...)`
 
 Helpers such as `ReturnError`, `ReturnCanceled`, and `ReturnFault` may exist as optional convenience helpers, but they
@@ -321,7 +324,7 @@ It does not directly complete the current task.
 Intended use:
 
 - long-running CPU loops poll `CheckCancellation()`
-- if cancellation has been requested, the coroutine explicitly `co_return Canceled`
+- if cancellation has been requested, the coroutine explicitly `co_return Sentinels::Canceled`
 
 ## `YieldNow()` and `Delay(...)`
 

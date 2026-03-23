@@ -1,213 +1,279 @@
 # Network
 
-NGIN::Net is the low-level networking layer for NGIN. It provides socket wrappers, a small set of value types, and an
-explicit async runtime. The public headers define the API; platform-specific work lives in src.
+`NGIN::Net` is a low-level non-blocking socket library with an explicit async driver.
 
-The key idea is to keep IO explicit and deterministic: non-blocking Try* calls for fast paths, and coroutine-friendly
-async calls that are driven by an explicit NetworkDriver. There are no hidden global threads or background runtimes.
+Use it when you want:
 
-## Design Goals
+- direct control over TCP or UDP sockets
+- non-blocking `Try*` calls in your own loop
+- coroutine-based async socket operations without hidden runtime threads
+- transport adapters for byte streams or framed messages
 
-- Explicit runtime control: no hidden threads or globals; you drive or run NetworkDriver yourself.
-- Non-blocking by default: sockets open in non-blocking mode and Try* calls surface WouldBlock.
-- Clear error boundaries: NetExpected for fast-path results, typed `Task<T, NetError>` for async operations.
-- Minimal allocations: buffer pooling and stack-first I/O vectoring for hot paths.
-- Portable async: IOCP on Windows and readiness polling on other platforms.
+The two main styles are:
 
-## How It Fits Together
+- manual non-blocking:
+  - open sockets
+  - call `Try*`
+  - handle `WouldBlock`
+  - integrate with your own readiness loop
+- coroutine async:
+  - create a `NetworkDriver`
+  - run or poll it
+  - use `ConnectAsync`, `AcceptAsync`, `SendAsync`, and `ReceiveAsync`
 
-- Use TcpSocket or UdpSocket directly for low-level, non-blocking operations.
-- Use NetworkDriver to wait for readability/writability in async workflows.
-- Wrap sockets in transport adapters (TcpByteStream, UdpDatagramChannel) for higher-level protocols.
-- Optionally layer filters such as LengthPrefixedMessageStream for framing.
+## When To Use It
 
-## Core Types and Errors
+Use `NGIN::Net` when:
 
-### AddressFamily
+- you want explicit control over socket IO
+- you already use the `NGIN::Async` task model
+- you need a transport layer that stays close to the underlying socket behavior
 
-Selects the address family when opening sockets: V4, V6, or DualStack. DualStack chooses IPv6 sockets that can also
-accept IPv4 where the platform supports it.
+## When Not To Use It
+
+You probably do not need it when:
+
+- a higher-level framework already owns networking in your application
+- you want a batteries-included networking stack with its own hidden runtime
+- you do not need non-blocking or coroutine-based networking
+
+## Stability
+
+- Stable and central:
+  - low-level TCP/UDP socket wrappers
+  - explicit `NetworkDriver`
+  - `WouldBlock`-based non-blocking flow
+- Usable and maturing:
+  - higher-level transport guidance and end-to-end examples
+  - some builder/adaptor ergonomics
 
-### IpAddress
+## Which API Should I Use?
 
-Value type that stores IPv4 or IPv6 bytes in a fixed 16-byte array. This keeps the type trivially copyable and avoids
-variant allocations. Bytes() returns a span sized to the active family (4 or 16). Helpers like AnyV4/AnyV6 and
-LoopbackV4/LoopbackV6 provide common addresses.
+- Need raw TCP control:
+  - use `TcpSocket`
+- Need to accept incoming TCP connections:
+  - use `TcpListener`
+- Need UDP datagrams:
+  - use `UdpSocket`
+- Need coroutine-based socket async:
+  - use a `NetworkDriver` plus the async socket methods
+- Need byte-stream semantics on top of TCP:
+  - use `TcpByteStream`
+- Need framed messages:
+  - use `LengthPrefixedMessageStream`
 
-### Endpoint
+## Most Important Rule
 
-Simple pair of IpAddress and port. It is passed by value through the API to keep call sites explicit and avoid hidden
-DNS or resolver behavior.
+Sockets are non-blocking by default.
 
-### NetErrorCode, NetError, NetExpected, ToErrorCode
+That means:
 
-- NetErrorCode is a compact, library-level error enum used for fast-path decisions.
-- NetError pairs NetErrorCode with an optional native error code for diagnostic detail.
-- NetExpected<T> is std::expected<T, NetError>, used by Try* APIs.
-- ToErrorCode prefers native error codes when present, otherwise maps NetErrorCode to std::errc for std::system_error.
+- `Try*` methods may return `NetErrorCode::WouldBlock`
+- `WouldBlock` means “not ready yet”, not “fatal error”
+- async socket operations require a `NetworkDriver`
 
-This split keeps Try* fast and allocation-free while preserving OS error details when needed.
+If you forget to run or poll the `NetworkDriver`, async network tasks will not make progress.
 
-### SocketOptions
+## Smallest Useful Examples
 
-Common socket option flags used during Open/Bind. Defaults favor non-blocking sockets and address reuse. The v6Only
-flag is honored for IPv6 sockets; when AddressFamily::V6 is requested it is forced on.
+### Manual non-blocking TCP client
 
-### ShutdownMode
+```cpp
+NGIN::Net::TcpSocket socket;
 
-Used for TcpSocket::Shutdown to select receive, send, or both directions.
+auto opened = socket.Open();
+if (!opened)
+{
+    return;
+}
 
-### BufferSegment, MutableBufferSegment, and spans
+auto connect = socket.TryConnect(
+    {NGIN::Net::IpAddress::LoopbackV4(), 9000});
 
-Small POD descriptors for scatter/gather IO. They map directly to WSABUF or iovec/recvmsg usage, avoiding per-call
-allocations. Spans (BufferSegmentSpan, MutableBufferSegmentSpan) capture arrays of segments.
+if (!connect)
+{
+    if (connect.Error().code == NGIN::Net::NetErrorCode::WouldBlock)
+    {
+        // wait for writability in your own loop, then try again
+        return;
+    }
 
-### Buffer
+    return;
+}
+```
 
-Move-only owning buffer with an optional release callback. This design lets buffers be returned to a pool without
-allocations or virtual dispatch. Buffer::Release is idempotent and resets the handle; BufferPool sets the release
-function so releasing returns the memory to the pool.
+Use this style when you already have your own event loop or readiness model.
 
-### BufferPool<Allocator>
+### Coroutine-based TCP client
 
-A simple, non-thread-safe pool that rents and reuses buffers. It uses an allocator (SystemAllocator by default) and
-returns Buffer objects that know how to return themselves to the pool. The pool is not thread-safe to keep hot paths
-lean; use one pool per thread or add external synchronization.
+```cpp
+NGIN::Execution::CooperativeScheduler scheduler;
+NGIN::Async::TaskContext ctx(scheduler);
+auto driver = NGIN::Net::NetworkDriver::Create({});
 
-## Socket Layer
+NGIN::Net::TcpSocket socket;
+auto opened = socket.Open();
+if (!opened)
+{
+    return;
+}
 
-### SocketHandle
+auto task = [&]() -> NGIN::Async::Task<void, NGIN::Net::NetError>
+{
+    co_await socket.ConnectAsync(
+        ctx,
+        *driver,
+        {NGIN::Net::IpAddress::LoopbackV4(), 9000},
+        ctx.GetCancellationToken());
+    co_return;
+}();
 
-RAII wrapper over the native socket handle. It owns the lifetime, closes on destruction, and supports move-only
-transfer. It intentionally exposes Native() for platform calls and keeps InvalidHandle() internal.
+task.Start(ctx);
+while (!task.IsCompleted())
+{
+    driver->PollOnce();
+    scheduler.RunUntilIdle();
+}
+```
 
-### TcpSocket
+Use this style when the rest of your code already uses `Task<T, E>`.
 
-Non-blocking TCP wrapper with Try* operations and async helpers.
+## Common Workflows
 
-- Open() creates a socket with SocketOptions applied.
-- TryConnect() returns WouldBlock when a non-blocking connect is in progress.
-- ConnectAsync() uses ConnectEx on Windows and readiness polling elsewhere.
-- Send/Receive have both byte-span and segment-based overloads using WSASend/WSARecv or writev/readv.
-- Connect() temporarily switches to blocking mode for a synchronous call, then restores non-blocking state.
+### Use `Try*` when you own the loop
 
-### TcpListener
+The manual path is:
 
-Non-blocking TCP listener.
+1. call `Open`
+2. call a `Try*` method
+3. if it succeeds, continue
+4. if it returns `WouldBlock`, wait for readiness and try again
+5. if it returns another error, handle failure
 
-- Open()/Bind()/Listen() configure the listen socket.
-- TryAccept() returns WouldBlock when no connection is ready.
-- AcceptAsync() uses AcceptEx on Windows and readiness polling elsewhere.
-- Accepted sockets are set to non-blocking mode.
+This applies to:
 
-### UdpSocket
+- `TryConnect`
+- `TryAccept`
+- `TrySend`
+- `TryReceive`
 
-Non-blocking UDP wrapper with both connected and unconnected workflows.
+### Use async methods when you already have a driver
 
-- Open()/Bind()/Connect() mirror the OS primitives.
-- TrySendTo/TryReceiveFrom work on address+payload pairs.
-- Segment variants use WSASendTo/WSARecvFrom or sendmsg/recvmsg.
-- Async methods submit IOCP work on Windows and use readiness polling elsewhere.
+The coroutine path is:
 
-### DatagramReceiveResult
+1. create a `NetworkDriver`
+2. make sure it is being run or polled
+3. create a `TaskContext`
+4. call the async socket methods from tasks
 
-Result type for UdpSocket receive operations. It carries the remote endpoint and bytes received.
+Examples:
 
-## Runtime
+- `TcpSocket::ConnectAsync`
+- `TcpSocket::SendAsync`
+- `TcpSocket::ReceiveAsync`
+- `TcpListener::AcceptAsync`
 
-### NetworkDriverOptions
+### Accept incoming TCP connections
 
-Options for the explicit runtime:
+Use `TcpListener` for a listening socket.
 
-- workerThreads: 0 runs the driver on the current thread; non-zero spawns worker threads that call PollOnce.
-- busyPoll: when true, polling uses a zero timeout for low latency.
-- pollInterval: idle wait duration when busyPoll is false.
+Manual flow:
 
-### NetworkDriver
+- `Open`
+- `Bind`
+- `Listen`
+- `TryAccept`
 
-The explicit async runtime used by socket awaitables.
+Async flow:
 
-- Create() constructs a driver with options; the constructor is private to enforce explicit creation.
-- Run() loops until Stop() is called. PollOnce() performs a single readiness cycle.
-- WaitUntilReadable/Writable provide awaitables for non-Windows async loops.
-- On Windows, IOCP-backed submit methods are used by TcpSocket/UdpSocket for overlapped send/receive/connect/accept.
-- On non-Windows platforms, PollOnce uses epoll (Linux), kqueue (BSD/macOS), or select as a fallback.
+- same setup
+- then `AcceptAsync(ctx, driver, token)`
 
-Cancellation integrates with the async system: waiters unregister themselves, IOCP operations are canceled with
-CancelIoEx, and awaiting tasks complete as canceled rather than surfacing cancellation as `NetError`.
+### Use transport adapters at the right level
 
-## Transport Layer
+Use `TcpSocket` directly when you want raw socket control.
 
-### IByteStream
+Use `TcpByteStream` when you want async read/write stream semantics.
 
-Abstract async byte-stream interface used by higher-level protocols. Implementations provide typed async tasks for
-reads/writes and `NetExpected<void>` for `Close`.
+Use `LengthPrefixedMessageStream` when your protocol is message-oriented and every message has a 32-bit big-endian
+length prefix.
 
-### TcpByteStream
+## Error Handling
 
-Adapter that implements IByteStream over a TcpSocket. It forwards ReadAsync/WriteAsync to the socket and requires a
-NetworkDriver. A missing driver is treated as a logic error because the adapter depends on it for async scheduling.
+There are two distinct styles:
 
-### IDatagramChannel
+### Manual non-blocking style
 
-Abstract async datagram interface for message-based transports. SendAsync sends a payload to a remote endpoint; the
-ReceiveAsync result is a ReceivedDatagram containing the payload view.
+Use `NetExpected<T>` and branch on `NetErrorCode`.
 
-### ReceivedDatagram
+Most importantly:
 
-Result type for IDatagramChannel receives. The payload is a view into the provided Buffer, so the Buffer must outlive
-the returned span.
+- `WouldBlock` means try again after readiness
+- it is not the same thing as connection failure or EOF
 
-### UdpDatagramChannel
+### Coroutine async style
 
-Adapter that implements IDatagramChannel over a UdpSocket. It uses a user-provided Buffer for receives and returns a
-payload span that points into that buffer to avoid allocations.
+Use `Task<T, NetError>`.
 
-### ByteStreamBuilder
+At the root of the program or in tests:
 
-Builder for stream adapters. It binds a TcpSocket and NetworkDriver, then produces either a TcpByteStream or a
-LengthPrefixedMessageStream. Build() returns NetExpected<std::unique_ptr<...>> and clears the stored socket to avoid
-accidental reuse.
+- `TaskOutcome<T, NetError>::IsDomainError()` means a networking-domain failure
+- `IsCanceled()` means cancellation
+- `IsFault()` means async/runtime failure
 
-### DatagramBuilder
+Cancellation is not reported as `NetError`.
 
-Builder for datagram adapters. It binds a UdpSocket and NetworkDriver, then produces a UdpDatagramChannel. Build()
-returns NetExpected<std::unique_ptr<...>> and resets internal state after use.
+## `NetworkDriver` In Practice
 
-### Filters::LengthPrefixedMessageStream
+`NetworkDriver` is the explicit async runtime for socket readiness.
 
-A framing filter over IByteStream that prepends a 32-bit big-endian length prefix to each message.
+You need it for:
 
-- WriteMessageAsync() writes the length header followed by the payload.
-- ReadMessageAsync() reads exactly 4 bytes for the header and then reads the declared payload length.
-- The caller supplies the Buffer used for message storage to avoid allocations.
-- Zero-length messages are supported and return an empty span.
+- socket async methods
+- transport adapters that depend on async socket operations
 
-The length prefix is big-endian to match common network conventions. Read/Write are strict: if the stream returns
-zero bytes mid-transfer, the filter completes with a fault to avoid silent truncation.
+You do not need it for:
+
+- plain `Try*` socket usage in your own loop
+
+Operationally:
+
+- `Create(options)` constructs the driver
+- `Run()` blocks and drives the runtime continuously
+- `PollOnce()` performs one readiness cycle
+- `Stop()` ends a running driver loop
+
+Choose `Run()` when the driver owns a thread or dedicated loop.
+Choose `PollOnce()` when you want to integrate it into an existing loop.
+
+## Common Mistakes
+
+- Using async socket methods without a running or polled `NetworkDriver`.
+- Treating `WouldBlock` as a fatal error.
+- Reaching for transport adapters when raw sockets are the right level.
+- Reaching for raw sockets when a byte-stream or message-stream adapter is the right level.
+- Mixing manual non-blocking flow and coroutine flow without being clear which side owns readiness.
 
 ## Platform Notes
 
-- Windows: IOCP is used for async IO. AcceptEx and ConnectEx are loaded lazily and used for accept/connect.
-- Non-Windows: sockets stay non-blocking; async methods loop Try* calls and wait for readiness via NetworkDriver.
-- All platforms: Try* APIs return NetExpected with WouldBlock for in-progress operations.
+- Windows uses IOCP-backed async operations.
+- Non-Windows platforms use readiness polling.
+- All platforms expose non-blocking `Try*` APIs.
 
-## Usage Sketch
+Platform differences should not change the basic usage model:
 
-TCP client with length-prefixed framing:
+- manual non-blocking flow uses `Try*`
+- coroutine async flow uses `NetworkDriver`
 
-```cpp
-auto driver = NGIN::Net::NetworkDriver::Create({});
-NGIN::Net::TcpSocket socket;
-NGIN::Net::Endpoint endpoint {NGIN::Net::IpAddress::LoopbackV4(), 9000};
+## Reference Notes
 
-socket.Open();
-// ConnectAsync uses TaskContext and NetworkDriver.
-```
+Important types:
 
-The expected flow is:
+- `TcpSocket`
+- `TcpListener`
+- `UdpSocket`
+- `NetworkDriver`
+- `TcpByteStream`
+- `LengthPrefixedMessageStream`
 
-1. Create a NetworkDriver and run it (Run() on a thread, or PollOnce() manually).
-2. Open/bind/connect sockets and use Try* calls for non-blocking integration.
-3. Use async methods from coroutines with a TaskContext bound to the driver.
-4. Wrap sockets in transport adapters when you want byte-stream or message semantics.
+For design notes and follow-up work, read [NetworkPlan.md](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/NetworkPlan.md).

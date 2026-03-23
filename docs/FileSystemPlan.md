@@ -1,6 +1,8 @@
 # FileSystemPlan
 
-Status: draft planning/specification document for evolving `NGIN.Base` IO into a production-grade filesystem subsystem.
+Status: living plan/specification document. Core sync filesystem, native local backend, richer metadata, value-handle
+wrappers, and major path/VFS work are implemented; the remaining sections capture follow-up work needed for a fully
+complete production-grade subsystem.
 
 ## Purpose
 
@@ -17,9 +19,10 @@ Today `NGIN.Base` already contains:
 - `NGIN::IO::FileSystemUtilities`
 
 That is a strong architectural starting point, but it is not yet a production-grade alternative to `std::filesystem`.
-The implementation still relies heavily on `std::filesystem` and `std::fstream`, the async surface is a facade rather
-than a true async backend, several option fields are not honored, and coverage is too narrow for a core foundation
-library.
+The production sync backend now uses native OS facilities rather than `std::filesystem` or `std::fstream`, but the
+subsystem is still not complete: the async surface still needs deeper backend work, some option/capability areas are
+not fully realized, Windows validation is still thinner than Linux validation, and coverage still needs to grow around
+edge cases and backend-specific semantics.
 
 This plan defines how to close that gap.
 
@@ -53,17 +56,17 @@ Those can be added later, but they are not required to make the local filesystem
 - The design already allows dependency injection through `IFileSystem`.
 - `VirtualFileSystem` is the right direction for mounts, overlays, and tests.
 - `FileView` provides a useful zero-copy or buffered file access abstraction.
+- `LocalFileSystem` now uses native backend code paths rather than `std::filesystem`/`std::fstream`.
+- Sync file, directory, and enumerator APIs use value-style handle wrappers instead of nested `Expected<std::unique_ptr<...>>`.
 
 ## Weaknesses
 
-- `LocalFileSystem` is backed by `std::filesystem` and `std::fstream`, which limits control over semantics and options.
-- `FileOpenOptions::share` and most `FileOpenFlags` are not honored by the current implementation.
-- Async operations yield and then perform blocking work instead of using a real backend or explicit worker offload.
-- `Path` is currently a minimal lexical helper rather than a fully specified path contract.
-- `VirtualFileSystem` has partial semantics only; several declared mount options are not enforced.
-- Metadata reporting is incomplete.
-- Windows path and encoding support is not yet production-grade.
-- Test coverage is far too small for a foundational IO layer.
+- Some `FileOpenOptions` and backend capability semantics still need tighter documentation and broader cross-platform validation.
+- Async operations still need deeper backend work and clearer execution-policy guarantees to fully satisfy the plan.
+- `Path` is much stronger now, but the full contract still needs continued documentation and edge-case coverage.
+- `VirtualFileSystem` has partial semantics only; several declared mount policies still need fuller enforcement and coverage.
+- Windows path, metadata, and behavior validation are not yet as mature as the Linux path.
+- Test coverage has improved substantially, but it is still too narrow for the full long-term scope of the subsystem.
 
 ## Core Design Principles
 
@@ -114,7 +117,7 @@ The long-term filesystem stack should look like this:
 
 - OS-handle based file and directory operations
 - no `std::fstream` in the production backend
-- minimal dependence on `std::filesystem`, ideally limited to transitional helpers only
+- no `std::filesystem` in the production backend
 
 3. `IFileSystem`
 

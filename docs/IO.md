@@ -1,253 +1,78 @@
 # IO
 
-`NGIN::IO` is the filesystem and low-level file access layer in `NGIN.Base`.
+`NGIN::IO` is the filesystem and file-access layer in `NGIN.Base`.
 
-It provides:
+Use it when you want:
 
-- lexical path handling through `NGIN::IO::Path`
-- synchronous filesystem access through `NGIN::IO::IFileSystem`
-- async filesystem access through `NGIN::IO::IAsyncFileSystem`
-- local/native filesystem access through `NGIN::IO::LocalFileSystem`
-- mount-based composition through `NGIN::IO::VirtualFileSystem`
-- convenience helpers such as `ReadAllText`, `WriteAllText`, and `EnsureDirectory`
+- a lexical path type that is separate from real filesystem access
+- sync file and directory operations through a consistent interface
+- scoped directory-relative operations
+- utility helpers for whole-file reads and writes
+- async filesystem APIs in code that already uses the async runtime
 
-This document is the practical API overview. The broader design and migration roadmap lives in
-[`FileSystemPlan.md`](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/FileSystemPlan.md).
+Most users should start with:
 
-## Mental Model
+- `Path` for lexical path manipulation
+- `LocalFileSystem` for sync filesystem access
+- `FileSystemUtilities` for whole-file helpers such as `ReadAllText`
 
-There are two different layers in `NGIN::IO`:
+## When To Use It
 
-- lexical path manipulation
-  - string-level path operations that do not touch the real filesystem
-- physical filesystem operations
-  - metadata queries, file open, directory creation, copy, remove, enumeration, and related work
+Use `NGIN::IO` when:
 
-`Path` belongs to the lexical layer.
-`IFileSystem` and its implementations belong to the physical layer.
+- you want the same path/file abstraction across your own code
+- you want filesystem work behind an interface instead of raw platform calls
+- you need directory-scoped operations through `DirectoryHandle`
+- you already use `TaskContext` and need async file work
 
-Do not assume that a lexical path operation tells you whether a path exists or whether it is a file or a directory.
-That comes from filesystem metadata.
+## When Not To Use It
 
-## Key Types
+You probably do not need it when:
 
-### `Path`
+- you only need a couple of trivial path joins and the STL already solves the problem
+- you do not need an abstraction layer for filesystem work
+- your code does not use the async runtime and async file access would add complexity without benefit
 
-`NGIN::IO::Path` is a lightweight lexical path value type.
+## Stability
 
-Main operations:
+- Stable and central:
+  - `Path`
+  - sync `IFileSystem` / `LocalFileSystem`
+  - `FileHandle`
+  - `DirectoryHandle`
+  - whole-file utility helpers
+- Usable and maturing:
+  - async filesystem surface
+  - advanced `VirtualFileSystem` semantics
+  - deeper Windows validation and edge-case coverage
 
-- `Normalize()`
-- `LexicallyNormal()`
-- `LexicallyRelativeTo(base)`
-- `Filename()`
-- `Stem()`
-- `Extension()`
-- `Parent()`
-- `Join(...)`
-- `Append(...)`
-- `ReplaceExtension(...)`
-- `RemoveFilename()`
-- `StartsWith(...)`
-- `EndsWith(...)`
-- `FromNative(...)`
-- `ToNative()`
+## Which API Should I Use?
 
-Important current behavior:
+- Need to manipulate a path string only:
+  - use `Path`
+- Need to read or write an entire file:
+  - use `ReadAllText`, `WriteAllText`, `ReadAllBytes`, or `WriteAllBytes`
+- Need general synchronous filesystem operations:
+  - use `IFileSystem` or `LocalFileSystem`
+- Need operations relative to an open directory:
+  - use `DirectoryHandle`
+- Need fine-grained file IO:
+  - use `FileHandle`
+- Need async filesystem operations:
+  - use `IAsyncFileSystem`, but only if your code already uses the async runtime
 
-- The public separator is `/`.
-- Input may contain `/` or `\\`; normalization canonicalizes separators.
-- Trailing separators are treated as lexical noise for decomposition.
-  - `"a/b/c"` and `"a/b/c/"` both report filename `"c"`.
-- `Path` is lexical only.
-  - It does not resolve symlinks.
-  - It does not check existence.
-  - It does not know whether a path is actually a directory.
+## Sync-First Recommendation
 
-### `IFileSystem`
+Most code should start with the synchronous APIs.
 
-`IFileSystem` is the synchronous filesystem contract.
+Use async filesystem APIs only when:
 
-Main categories of operations:
+- your surrounding code already uses `TaskContext` and an executor
+- avoiding blocking is materially important to the design
 
-- metadata
-  - `Exists`
-  - `GetInfo`
-  - `SameFile`
-- path resolution
-  - `Absolute`
-  - `Canonical`
-  - `WeaklyCanonical`
-  - `ReadSymlink`
-- mutation
-  - `CreateDirectory`
-  - `CreateDirectories`
-  - `CreateSymlink`
-  - `CreateHardLink`
-  - `SetPermissions`
-  - `RemoveFile`
-  - `RemoveDirectory`
-  - `RemoveAll`
-  - `Rename`
-  - `ReplaceFile`
-  - `CopyFile`
-  - `Move`
-- open and enumeration
-  - `OpenFile`
-  - `OpenDirectory`
-  - `OpenFileView`
-  - `Enumerate`
-- process/temp/space helpers
-  - `CurrentWorkingDirectory`
-  - `SetCurrentWorkingDirectory`
-  - `TempDirectory`
-  - `CreateTempDirectory`
-  - `CreateTempFile`
-  - `GetSpaceInfo`
+For straightforward tools and ordinary application startup code, the sync APIs are usually the better first choice.
 
-### `FileHandle`
-
-`FileHandle` is a move-only RAII wrapper returned by `OpenFile`.
-
-It exposes:
-
-- `Read`
-- `Write`
-- `ReadAt`
-- `WriteAt`
-- `Flush`
-- `Seek`
-- `Tell`
-- `Size`
-- `SetSize`
-- `Close`
-- `IsOpen`
-
-The public API no longer exposes `Expected<std::unique_ptr<...>>` for synchronous file handles.
-
-### `DirectoryHandle`
-
-`DirectoryHandle` is a move-only RAII wrapper returned by `OpenDirectory`.
-
-It allows relative operations scoped to an opened directory:
-
-- `Exists`
-- `GetInfo`
-- `OpenFile`
-- `OpenDirectory`
-- `CreateDirectory`
-- `RemoveFile`
-- `RemoveDirectory`
-- `ReadSymlink`
-
-This is the preferred API when code should operate relative to a directory rather than constantly joining strings.
-
-### `DirectoryEnumerator`
-
-`DirectoryEnumerator` is a move-only RAII wrapper returned by `Enumerate`.
-
-It exposes:
-
-- `Next()`
-- `Current()`
-
-The enumeration model is explicit pull-based iteration.
-
-## Implementations
-
-### `LocalFileSystem`
-
-`LocalFileSystem` is the native local-disk backend.
-
-Current direction:
-
-- uses native OS facilities rather than `std::filesystem` in the production backend
-- supports Linux/POSIX and Windows backends with separate platform implementation files
-- exposes capability reporting through `GetCapabilities()`
-
-On POSIX-like systems, current metadata coverage includes:
-
-- regular files
-- directories
-- symlinks
-- hard-link count
-- FIFOs
-- Unix domain sockets
-- ownership
-- POSIX mode bits
-- inode/device identity
-
-### `VirtualFileSystem`
-
-`VirtualFileSystem` composes one or more mounts under virtual prefixes.
-
-Typical uses:
-
-- overlaying multiple roots
-- tests and controlled mount layouts
-- routing code through a filesystem abstraction instead of the process filesystem directly
-
-Current features:
-
-- virtual prefix resolution
-- forwarding of most core filesystem operations
-- directory handles scoped to virtual paths
-
-Important note:
-
-- `VirtualFileSystem` is useful now, but it is still evolving.
-- Read the filesystem plan before depending on advanced mount semantics.
-
-## Metadata
-
-`GetInfo` returns `FileInfo`.
-
-Depending on backend and capability support, it may include:
-
-- entry type
-- size
-- permissions
-- created / modified / accessed / changed timestamps
-- ownership
-- file identity
-- hard-link count
-- symlink target existence information
-
-Use `MetadataOptions` when you need explicit symlink-follow behavior.
-
-Example:
-
-```cpp
-NGIN::IO::MetadataOptions options;
-options.symlinkMode = NGIN::IO::SymlinkMode::DoNotFollow;
-
-auto info = fs.GetInfo(path, options);
-if (!info)
-{
-    return;
-}
-
-if (info->type == NGIN::IO::EntryType::Symlink)
-{
-    // inspect the link itself, not the target
-}
-```
-
-## Convenience Helpers
-
-`NGIN::IO::FileSystemUtilities` contains common helpers:
-
-- `ReadAllBytes`
-- `ReadAllText`
-- `WriteAllBytes`
-- `WriteAllText`
-- `AppendAllText`
-- `EnsureDirectory`
-- async variants for common read/write flows
-
-These helpers are useful when you do not need fine-grained control over handle lifetime or partial IO.
-
-## Basic Examples
+## Smallest Useful Examples
 
 ### Read a text file
 
@@ -260,37 +85,29 @@ if (!text)
     return;
 }
 
-// use text.Value()
+Use(text.Value());
 ```
 
-### Open and write through a file handle
+### Write a text file
 
 ```cpp
 NGIN::IO::LocalFileSystem fs;
 
-NGIN::IO::FileOpenOptions options;
-options.access = NGIN::IO::FileAccess::Write;
-options.disposition = NGIN::IO::FileCreateDisposition::CreateAlways;
+auto wrote = NGIN::IO::WriteAllText(
+    fs,
+    NGIN::IO::Path {"output.txt"},
+    "hello\n");
 
-auto file = fs.OpenFile(NGIN::IO::Path {"out.txt"}, options);
-if (!file)
+if (!wrote)
 {
     return;
 }
-
-const std::string_view payload = "hello";
-file->Write({
-    reinterpret_cast<const NGIN::Byte*>(payload.data()),
-    payload.size()
-});
-file->Flush();
 ```
 
 ### Enumerate a directory
 
 ```cpp
 NGIN::IO::LocalFileSystem fs;
-
 NGIN::IO::EnumerateOptions options;
 options.populateInfo = true;
 
@@ -309,207 +126,177 @@ while (true)
     }
 
     const auto& entry = entries->Current();
-    // use entry.name / entry.type / entry.info
+    Use(entry.name);
 }
 ```
 
-### Use a directory handle
+## Common Workflows
+
+### Use `Path` for lexical work
+
+`Path` only manipulates path strings.
+
+Use it for:
+
+- normalization
+- extracting filename, extension, and parent
+- joining or appending path components
+- lexical relative-path computation
+
+Do not use it to answer:
+
+- does this path exist?
+- is it a file or a directory?
+- where does this symlink resolve?
+
+Those are filesystem questions, not lexical path questions.
+
+### Work through `IFileSystem` or `LocalFileSystem`
+
+Use the filesystem object for:
+
+- metadata queries
+- file open
+- directory creation/removal
+- copy, move, rename
+- canonicalization
+- symlink-aware operations
+
+`LocalFileSystem` is the concrete local-disk backend most users should start with.
+
+### Use `DirectoryHandle` for relative operations
+
+If your code should stay rooted inside a directory, prefer `DirectoryHandle` over repeated string joins.
 
 ```cpp
 NGIN::IO::LocalFileSystem fs;
 
-auto dir = fs.OpenDirectory(NGIN::IO::Path {"workspace"});
+auto dir = fs.OpenDirectory(NGIN::IO::Path {"assets"});
 if (!dir)
 {
     return;
 }
 
-auto file = dir->OpenFile(NGIN::IO::Path {"manifest.json"}, {
-    .access = NGIN::IO::FileAccess::Read,
-    .disposition = NGIN::IO::FileCreateDisposition::OpenExisting
-});
-
-if (!file)
+auto info = dir->GetInfo(NGIN::IO::Path {"textures/logo.png"});
+if (!info)
 {
     return;
 }
 ```
 
-## Error Model
+This is the right API for:
 
-Most synchronous filesystem operations return:
+- scoped relative operations
+- reducing accidental path escape logic
+- code that naturally works “inside this directory”
 
-- `NGIN::IO::Result<T>`
-- `NGIN::IO::ResultVoid`
+### Use metadata explicitly
 
-These are `Expected<..., IOError>` aliases.
+When you need real filesystem facts, call `GetInfo`.
 
-`IOError` carries:
+`FileInfo` can expose:
 
-- stable `IOErrorCode`
-- native system error code when available
-- primary and secondary path context
-- message text
+- entry type
+- size
+- permissions
+- timestamps
+- ownership
+- file identity
+- hard-link count
 
-This means callers can branch on stable library-level errors without losing native error data.
-
-## Async
-
-The async surface exists through `IAsyncFileSystem` and `IAsyncFileHandle`.
-
-Async filesystem APIs now follow the same typed async model as the rest of `NGIN.Base`:
-
-- `Task<T, IOError>` for domain IO failures
-- canceled as a distinct async completion state
-- fault as a distinct async runtime completion state
-
-If your code only needs synchronous filesystem access, prefer `IFileSystem`, `FileHandle`, `DirectoryHandle`, and the
-utility helpers.
-
-## Basic Async Start
-
-The easiest way to get started is:
-
-1. use `LocalFileSystem` as an `IAsyncFileSystem`
-2. create a `TaskContext` on an executor
-3. use the async convenience helpers from `FileSystemUtilities`
-4. schedule the root task and run the executor
-
-### Smallest useful example
-
-This is the recommended starting point because it avoids dealing with async file handles directly:
+Use `MetadataOptions` when symlink-follow behavior matters.
 
 ```cpp
-#include <NGIN/Async/Task.hpp>
-#include <NGIN/Async/TaskContext.hpp>
-#include <NGIN/Execution/CooperativeScheduler.hpp>
-#include <NGIN/IO/FileSystemUtilities.hpp>
-#include <NGIN/IO/LocalFileSystem.hpp>
+NGIN::IO::MetadataOptions options;
+options.symlinkMode = NGIN::IO::SymlinkMode::DoNotFollow;
 
+auto info = fs.GetInfo(path, options);
+```
+
+### Use async only when it fits the rest of your program
+
+If your code already uses `TaskContext`, the async helpers are the easiest entry point:
+
+```cpp
 NGIN::Async::Task<void, NGIN::IO::IOError> LoadConfig(
-        NGIN::Async::TaskContext& ctx,
-        NGIN::IO::IAsyncFileSystem& fs)
+    NGIN::Async::TaskContext& ctx,
+    NGIN::IO::IAsyncFileSystem& fs)
 {
     auto bytes = co_await NGIN::IO::ReadAllBytesAsync(
-            fs,
-            ctx,
-            NGIN::IO::Path {"config.json"});
+        fs,
+        ctx,
+        NGIN::IO::Path {"config.json"});
 
-    // use bytes
-    co_return;
-}
-
-int main()
-{
-    NGIN::Execution::CooperativeScheduler scheduler;
-    NGIN::Async::TaskContext ctx(scheduler);
-    NGIN::IO::LocalFileSystem fs;
-
-    auto task = LoadConfig(ctx, fs);
-    task.Start(ctx);
-    scheduler.RunUntilIdle();
-
-    auto result = task.Get();
-    if (!result)
-    {
-        return 1;
-    }
-
-    return 0;
-}
-```
-
-### What is happening here
-
-- `LoadConfig(...)` is a coroutine returning `Task<void, IOError>`
-- `ReadAllBytesAsync(...)` performs the file open/read flow asynchronously
-- `TaskContext` carries the executor and cancellation token
-- `task.Start(ctx)` schedules the root task
-- `scheduler.RunUntilIdle()` pumps the cooperative executor until work is finished
-- `task.Get()` returns `TaskOutcome<void, IOError>`
-
-### Async IO error model
-
-Async filesystem APIs no longer require double-unwrapping nested async and domain result layers.
-
-Use this mental model:
-
-- ordinary filesystem failures are `IOError`
-- cancellation is `TaskOutcome::IsCanceled()`
-- runtime failures are `TaskOutcome::IsFault()`
-
-Inside a coroutine, `co_await Task<T, IOError>` yields `T` on success and propagates non-success automatically into the
-awaiting task.
-
-### Direct handle example
-
-If you do need lower-level control, use `OpenFileAsync` and then call methods on the returned `IAsyncFileHandle`:
-
-```cpp
-NGIN::Async::Task<void, NGIN::IO::IOError> WriteLog(
-        NGIN::Async::TaskContext& ctx,
-        NGIN::IO::IAsyncFileSystem& fs)
-{
-    NGIN::IO::FileOpenOptions options;
-    options.access = NGIN::IO::FileAccess::Write;
-    options.disposition = NGIN::IO::FileCreateDisposition::CreateAlways;
-
-    auto file = co_await fs.OpenFileAsync(
-            ctx,
-            NGIN::IO::Path {"app.log"},
-            options);
-
-    constexpr std::string_view payload = "hello\n";
-    co_await file->WriteAsync(
-            ctx,
-            {
-                reinterpret_cast<const NGIN::Byte*>(payload.data()),
-                payload.size()
-            });
-    co_await file->FlushAsync(ctx);
-
+    Use(bytes);
     co_return;
 }
 ```
 
-### Current recommendation
+For lower-level control, use `OpenFileAsync` and the async file handle surface directly.
 
-Use this rule of thumb:
+## `Path` Versus `std::filesystem::path`
 
-- for basic async file reads and writes
-  - start with `ReadAllBytesAsync`, `WriteAllBytesAsync`, and `CopyFileAsync`
-- for specialized IO flows
-  - use `OpenFileAsync` and `IAsyncFileHandle`
-- for most other filesystem work
-  - prefer the synchronous API for now unless async is clearly needed
+`Path` is not a drop-in replacement for `std::filesystem::path`.
 
-If your code depends heavily on async filesystem semantics, read:
+What `Path` is:
 
-- [`Async.md`](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/Async.md)
-- [`FileSystemPlan.md`](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/FileSystemPlan.md)
+- a lightweight lexical path value type
+- intended for normalization and path composition
+- explicit about the difference between path strings and filesystem queries
 
-## Current Status
+What `Path` is not:
 
-`NGIN::IO` is already useful and increasingly test-covered, but it is still an evolving subsystem.
+- an implicit filesystem query API
+- a type that silently resolves symlinks or existence
 
-What is already solid enough to rely on:
+Why this split exists:
 
-- lexical `Path` operations
-- local filesystem read/write/copy/remove flows
-- metadata queries
-- directory handles
-- virtual filesystem basics
-- utility helpers
+- lexical operations and filesystem operations are different jobs
+- code is easier to reason about when string manipulation does not pretend to know filesystem facts
+- real filesystem access stays behind `IFileSystem`
 
-What still needs continued evolution:
+## Practical Caveats
 
-- async handle ergonomics
-- broader Windows validation
-- more virtual filesystem policy coverage
-- more complete API docs for backend-specific behavior
-- continued test growth, especially around edge cases and failure modes
+### Path normalization is lexical only
 
-If you are extending the filesystem subsystem itself, start with:
+`Path::Normalize()` does not resolve symlinks and does not check whether the path exists.
 
-- this document for the practical overview
-- [`FileSystemPlan.md`](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/FileSystemPlan.md) for design direction
+### Trailing separators are lexical noise
+
+`"a/b/c"` and `"a/b/c/"` decompose the same way for operations such as `Filename()`.
+
+### Symlink behavior should be explicit
+
+If symlink-follow behavior matters, pass `MetadataOptions` instead of relying on defaults you have not checked.
+
+### Text helpers do not solve encoding policy for you
+
+`ReadAllText` and `WriteAllText` are convenient whole-file helpers. They do not define your application’s text
+encoding policy beyond the bytes and string types you pass through them.
+
+### Metadata richness can vary by backend and platform
+
+Linux/POSIX backends currently expose richer metadata than some other environments. If your code depends on ownership,
+inode/device identity, or advanced file types, verify those expectations on the target platforms you care about.
+
+## Common Mistakes
+
+- Using `Path` as if it answered filesystem questions.
+- Reaching for async file APIs when simple sync helpers would be clearer.
+- Repeatedly hand-joining path strings instead of opening a `DirectoryHandle`.
+- Forgetting to make symlink behavior explicit when metadata correctness matters.
+
+## Reference Notes
+
+Core types:
+
+- `Path`
+- `IFileSystem`
+- `LocalFileSystem`
+- `VirtualFileSystem`
+- `FileHandle`
+- `DirectoryHandle`
+- `DirectoryEnumerator`
+
+Use the practical guide above first. For design direction and follow-up work, read
+[FileSystemPlan.md](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/FileSystemPlan.md).
