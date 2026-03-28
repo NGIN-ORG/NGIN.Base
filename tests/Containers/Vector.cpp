@@ -2,13 +2,53 @@
 /// @brief Tests for NGIN::Containers::Vector using Catch2.
 
 #include <NGIN/Containers/Vector.hpp>
+#include <NGIN/Memory/SystemAllocator.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <cstddef>
 #include <string>
 
 using NGIN::Containers::Vector;
 
 namespace
 {
+    struct AllocatorStats
+    {
+        int allocations {0};
+        int deallocations {0};
+    };
+
+    struct StatefulAllocator
+    {
+        NGIN::Memory::SystemAllocator inner {};
+        AllocatorStats*               stats {nullptr};
+        int                           id {0};
+
+        StatefulAllocator() = default;
+        StatefulAllocator(AllocatorStats& value, int allocatorId) noexcept
+            : stats(&value), id(allocatorId)
+        {
+        }
+
+        void* Allocate(std::size_t bytes, std::size_t align) noexcept
+        {
+            if (stats)
+                ++stats->allocations;
+            return inner.Allocate(bytes, align);
+        }
+
+        void Deallocate(void* ptr, std::size_t bytes, std::size_t align) noexcept
+        {
+            if (stats)
+                ++stats->deallocations;
+            inner.Deallocate(ptr, bytes, align);
+        }
+
+        friend bool operator==(const StatefulAllocator& lhs, const StatefulAllocator& rhs) noexcept
+        {
+            return lhs.stats == rhs.stats && lhs.id == rhs.id;
+        }
+    };
+
     struct NonPod
     {
         int   data;
@@ -58,6 +98,18 @@ namespace
         }
     };
 }// namespace
+
+namespace NGIN::Memory
+{
+    template<>
+    struct AllocatorPropagationTraits<StatefulAllocator>
+    {
+        static constexpr bool PropagateOnCopyAssignment = false;
+        static constexpr bool PropagateOnMoveAssignment = false;
+        static constexpr bool PropagateOnSwap           = false;
+        static constexpr bool IsAlwaysEqual             = false;
+    };
+}// namespace NGIN::Memory
 
 TEST_CASE("Vector default construction", "[Containers][Vector]")
 {
@@ -166,6 +218,20 @@ TEST_CASE("Vector erase at index", "[Containers][Vector]")
     CHECK_THROWS_AS(vec.Erase(5), std::out_of_range);
 }
 
+TEST_CASE("Vector erase handles non-trivial elements", "[Containers][Vector]")
+{
+    Vector<NonPod> vec;
+    vec.EmplaceBack(5);
+    vec.EmplaceBack(10);
+    vec.EmplaceBack(15);
+
+    vec.Erase(1);
+
+    REQUIRE(vec.Size() == 2U);
+    CHECK(vec[0].data == 5);
+    CHECK(vec[1].data == 15);
+}
+
 TEST_CASE("Vector clear resets size", "[Containers][Vector]")
 {
     Vector<int> vec;
@@ -204,6 +270,67 @@ TEST_CASE("Vector move semantics", "[Containers][Vector]")
     target = std::move(moved);
     CHECK(target.Size() == 1U);
     CHECK(target[0] == 42);
+}
+
+TEST_CASE("Vector copy assignment reuses storage when capacity is sufficient", "[Containers][Vector]")
+{
+    AllocatorStats    stats;
+    StatefulAllocator alloc {stats, 7};
+
+    Vector<int, StatefulAllocator> source(0, alloc);
+    source.PushBack(7);
+    source.PushBack(8);
+    source.PushBack(9);
+
+    Vector<int, StatefulAllocator> target(8, alloc);
+    target.PushBack(1);
+    target.PushBack(2);
+    target.PushBack(3);
+    target.PushBack(4);
+
+    auto* const dataBefore          = target.data();
+    const auto  allocationsBefore   = stats.allocations;
+    const auto  deallocationsBefore = stats.deallocations;
+
+    target = source;
+
+    REQUIRE(target.Size() == source.Size());
+    CHECK(target.data() == dataBefore);
+    CHECK(target.Capacity() == 8U);
+    CHECK(target[0] == 7);
+    CHECK(target[2] == 9);
+    CHECK(stats.allocations == allocationsBefore);
+    CHECK(stats.deallocations == deallocationsBefore);
+    CHECK(target.GetAllocator().id == 7);
+}
+
+TEST_CASE("Vector move assignment steals storage from equal allocators", "[Containers][Vector]")
+{
+    AllocatorStats    stats;
+    StatefulAllocator sourceAlloc {stats, 42};
+    StatefulAllocator targetAlloc {stats, 42};
+
+    Vector<int, StatefulAllocator> source(0, sourceAlloc);
+    source.PushBack(11);
+    source.PushBack(22);
+    source.PushBack(33);
+
+    Vector<int, StatefulAllocator> target(0, targetAlloc);
+
+    auto* const sourceData          = source.data();
+    const auto  allocationsBefore   = stats.allocations;
+    const auto  deallocationsBefore = stats.deallocations;
+
+    target = std::move(source);
+
+    REQUIRE(target.Size() == 3U);
+    CHECK(target.data() == sourceData);
+    CHECK(target[0] == 11);
+    CHECK(target[2] == 33);
+    CHECK(source.Size() == 0U);
+    CHECK(source.Capacity() == 0U);
+    CHECK(stats.allocations == allocationsBefore);
+    CHECK(stats.deallocations == deallocationsBefore);
 }
 
 TEST_CASE("Vector handles non-POD types", "[Containers][Vector]")

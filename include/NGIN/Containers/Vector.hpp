@@ -7,18 +7,19 @@
 /// reference to an allocator yourself.
 #pragma once
 
-#include <NGIN/Primitives.hpp>
 #include <NGIN/Memory/AllocatorConcept.hpp>
 #include <NGIN/Memory/SystemAllocator.hpp>
 #include <NGIN/Meta/TypeTraits.hpp>
+#include <NGIN/Primitives.hpp>
+#include <concepts>
 #include <cstddef>
+#include <cstring>
 #include <initializer_list>
+#include <limits>
+#include <memory>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
-#include <cstring>
-#include <limits>
-#include <memory>
 
 namespace NGIN::Containers
 {
@@ -31,7 +32,7 @@ namespace NGIN::Containers
         using Value     = T;
         using AllocType = Alloc;
 
-        Vector() noexcept = default;
+        Vector() noexcept(std::is_nothrow_default_constructible_v<Alloc>) = default;
         explicit Vector(std::size_t initialCapacity, Alloc alloc = Alloc {}) : m_alloc(std::move(alloc))
         {
             if (initialCapacity)
@@ -40,7 +41,7 @@ namespace NGIN::Containers
         Vector(std::initializer_list<T> init, Alloc alloc = Alloc {}) : m_alloc(std::move(alloc))
         {
             Reserve(init.size());
-            for (auto& v: init)
+            for (const auto& v: init)
                 ::new (&m_data[m_size++]) T(v);
         }
         Vector(const Vector& other) : m_alloc(other.m_alloc)
@@ -54,72 +55,56 @@ namespace NGIN::Containers
         {
             if (this != &other)
             {
-                Clear();
-                if (m_data)
-                    m_alloc.Deallocate(m_data, m_capacity * sizeof(T), alignof(T));
-                m_data     = nullptr;
-                m_capacity = m_size = 0;
-                if constexpr (NGIN::Memory::AllocatorPropagationTraits<Alloc>::PropagateOnCopyAssignment)
-                {
-                    m_alloc = other.m_alloc;
-                }
-                Reserve(other.m_size);
-                for (std::size_t i = 0; i < other.m_size; ++i)
-                    ::new (&m_data[i]) T(other.m_data[i]);
-                m_size = other.m_size;
+                AssignFromCopy(other);
             }
             return *this;
         }
-        Vector(Vector&& other) noexcept
+        Vector(Vector&& other) noexcept(std::is_nothrow_move_constructible_v<Alloc>)
             : m_alloc(std::move(other.m_alloc)), m_data(other.m_data), m_size(other.m_size), m_capacity(other.m_capacity)
         {
             other.m_data = nullptr;
             other.m_size = other.m_capacity = 0;
         }
-        Vector& operator=(Vector&& other) noexcept
+        Vector& operator=(Vector&& other) noexcept(
+                (NGIN::Memory::AllocatorPropagationTraits<Alloc>::PropagateOnMoveAssignment &&
+                 std::is_nothrow_move_assignable_v<Alloc>) ||
+                NGIN::Memory::AllocatorPropagationTraits<Alloc>::IsAlwaysEqual)
         {
             if (this != &other)
             {
-                if constexpr (NGIN::Memory::AllocatorPropagationTraits<Alloc>::PropagateOnMoveAssignment)
+                if constexpr (CanStealOnMove())
                 {
-                    Clear();
-                    if (m_data)
-                        m_alloc.Deallocate(m_data, m_capacity * sizeof(T), alignof(T));
-                    m_alloc      = std::move(other.m_alloc);
-                    m_data       = other.m_data;
-                    m_size       = other.m_size;
-                    m_capacity   = other.m_capacity;
-                    other.m_data = nullptr;
-                    other.m_size = other.m_capacity = 0;
-                }
-                else if constexpr (NGIN::Memory::AllocatorPropagationTraits<Alloc>::IsAlwaysEqual)
-                {
-                    Clear();
-                    if (m_data)
-                        m_alloc.Deallocate(m_data, m_capacity * sizeof(T), alignof(T));
-                    m_data     = other.m_data;
-                    m_size     = other.m_size;
-                    m_capacity = other.m_capacity;
-                    other.m_data = nullptr;
-                    other.m_size = other.m_capacity = 0;
+                    if constexpr (NGIN::Memory::AllocatorPropagationTraits<Alloc>::PropagateOnMoveAssignment)
+                    {
+                        ReleaseStorage();
+                        m_alloc = std::move(other.m_alloc);
+                        StealStorageFrom(other);
+                    }
+                    else if constexpr (NGIN::Memory::AllocatorPropagationTraits<Alloc>::IsAlwaysEqual)
+                    {
+                        ReleaseStorage();
+                        StealStorageFrom(other);
+                    }
+                    else if (CanStealStorageFrom(other))
+                    {
+                        ReleaseStorage();
+                        StealStorageFrom(other);
+                    }
+                    else
+                    {
+                        AssignFromMoved(other);
+                    }
                 }
                 else
                 {
-                    Clear();
-                    Reserve(other.m_size);
-                    for (std::size_t i = 0; i < other.m_size; ++i)
-                        ::new (&m_data[i]) T(std::move(other.m_data[i]));
-                    m_size = other.m_size;
-                    other.Clear();
+                    AssignFromMoved(other);
                 }
             }
             return *this;
         }
         ~Vector()
         {
-            Clear();
-            if (m_data)
-                m_alloc.Deallocate(m_data, m_capacity * sizeof(T), alignof(T));
+            ReleaseStorage();
         }
 
         //=== Element modifiers ===//
@@ -243,7 +228,10 @@ namespace NGIN::Containers
         {
             if (m_size == 0)
                 throw std::out_of_range("Vector::PopBack: vector is empty");
-            m_data[m_size - 1].~T();
+            if constexpr (!std::is_trivially_destructible_v<T>)
+            {
+                m_data[m_size - 1].~T();
+            }
             --m_size;
         }
 
@@ -259,10 +247,12 @@ namespace NGIN::Containers
             }
             else
             {
-                m_data[index].~T();
                 for (UIntSize i = index; i + 1 < m_size; ++i)
                     m_data[i] = std::move(m_data[i + 1]);
-                m_data[m_size - 1].~T();
+                if constexpr (!std::is_trivially_destructible_v<T>)
+                {
+                    m_data[m_size - 1].~T();
+                }
                 --m_size;
             }
         }
@@ -270,8 +260,7 @@ namespace NGIN::Containers
         /// @brief Remove all elements (capacity remains).
         void Clear() noexcept
         {
-            for (std::size_t i = 0; i < m_size; ++i)
-                m_data[i].~T();
+            DestroyElements(m_data, m_size);
             m_size = 0;
         }
 
@@ -315,8 +304,7 @@ namespace NGIN::Containers
             }
             if constexpr (!Meta::TypeTraits<T>::IsBitwiseRelocatable())
             {
-                for (UIntSize j = 0; j < m_size; ++j)
-                    m_data[j].~T();
+                DestroyElements(m_data, m_size);
             }
             if (m_data)
                 m_alloc.Deallocate(m_data, m_capacity * sizeof(T), alignof(T));
@@ -372,8 +360,7 @@ namespace NGIN::Containers
                     m_alloc.Deallocate(newData, m_size * sizeof(T), alignof(T));
                     throw;
                 }
-                for (UIntSize j = 0; j < m_size; ++j)
-                    m_data[j].~T();
+                DestroyElements(m_data, m_size);
             }
             m_alloc.Deallocate(m_data, m_capacity * sizeof(T), alignof(T));
             m_data     = newData;
@@ -389,6 +376,14 @@ namespace NGIN::Containers
         [[nodiscard]] UIntSize Capacity() const noexcept
         {
             return m_capacity;
+        }
+        [[nodiscard]] Alloc& GetAllocator() noexcept
+        {
+            return m_alloc;
+        }
+        [[nodiscard]] const Alloc& GetAllocator() const noexcept
+        {
+            return m_alloc;
         }
 
         T& At(UIntSize idx)
@@ -441,6 +436,183 @@ namespace NGIN::Containers
         }
 
     private:
+        static constexpr bool CanStealOnMove() noexcept
+        {
+            return NGIN::Memory::AllocatorPropagationTraits<Alloc>::PropagateOnMoveAssignment ||
+                   NGIN::Memory::AllocatorPropagationTraits<Alloc>::IsAlwaysEqual ||
+                   std::equality_comparable<Alloc>;
+        }
+
+        void DestroyElements(T* data, UIntSize count) noexcept
+        {
+            if constexpr (!std::is_trivially_destructible_v<T>)
+            {
+                for (UIntSize i = 0; i < count; ++i)
+                    data[i].~T();
+            }
+        }
+
+        void ReleaseStorage() noexcept
+        {
+            DestroyElements(m_data, m_size);
+            if (m_data)
+                m_alloc.Deallocate(m_data, m_capacity * sizeof(T), alignof(T));
+            m_data     = nullptr;
+            m_size     = 0;
+            m_capacity = 0;
+        }
+
+        void StealStorageFrom(Vector& other) noexcept
+        {
+            m_data           = other.m_data;
+            m_size           = other.m_size;
+            m_capacity       = other.m_capacity;
+            other.m_data     = nullptr;
+            other.m_size     = 0;
+            other.m_capacity = 0;
+        }
+
+        [[nodiscard]] bool CanStealStorageFrom(const Vector& other) const noexcept
+            requires std::equality_comparable<Alloc>
+        {
+            return m_alloc == other.m_alloc;
+        }
+
+        template<typename SourceType>
+        static void ConstructElements(T* destination, SourceType* source, UIntSize count)
+        {
+            UIntSize i = 0;
+            try
+            {
+                if constexpr (Meta::TypeTraits<T>::IsBitwiseRelocatable() &&
+                              std::is_same_v<std::remove_cv_t<SourceType>, T>)
+                {
+                    if (count != 0)
+                        std::memcpy(destination, source, count * sizeof(T));
+                }
+                else if constexpr (std::is_const_v<SourceType>)
+                {
+                    for (; i < count; ++i)
+                        ::new (&destination[i]) T(source[i]);
+                }
+                else if constexpr (std::is_nothrow_move_constructible_v<T> || !std::is_copy_constructible_v<T>)
+                {
+                    for (; i < count; ++i)
+                        ::new (&destination[i]) T(std::move(source[i]));
+                }
+                else
+                {
+                    for (; i < count; ++i)
+                        ::new (&destination[i]) T(source[i]);
+                }
+            } catch (...)
+            {
+                if constexpr (!Meta::TypeTraits<T>::IsBitwiseRelocatable())
+                {
+                    for (UIntSize j = 0; j < i; ++j)
+                        destination[j].~T();
+                }
+                throw;
+            }
+        }
+
+        T* AllocateStorage(UIntSize capacity)
+        {
+            void* mem = m_alloc.Allocate(capacity * sizeof(T), alignof(T));
+            if (!mem)
+                throw std::bad_alloc();
+            return static_cast<T*>(mem);
+        }
+
+        void AssignFromCopy(const Vector& other)
+        {
+            if constexpr (NGIN::Memory::AllocatorPropagationTraits<Alloc>::PropagateOnCopyAssignment)
+            {
+                ReleaseStorage();
+                m_alloc = other.m_alloc;
+                if (other.m_size == 0)
+                    return;
+
+                m_data = AllocateStorage(other.m_size);
+                try
+                {
+                    ConstructElements(m_data, other.m_data, other.m_size);
+                    m_size     = other.m_size;
+                    m_capacity = other.m_size;
+                } catch (...)
+                {
+                    m_alloc.Deallocate(m_data, other.m_size * sizeof(T), alignof(T));
+                    m_data = nullptr;
+                    throw;
+                }
+                return;
+            }
+
+            if (other.m_size > m_capacity)
+            {
+                T* newData = AllocateStorage(other.m_size);
+                try
+                {
+                    ConstructElements(newData, other.m_data, other.m_size);
+                } catch (...)
+                {
+                    m_alloc.Deallocate(newData, other.m_size * sizeof(T), alignof(T));
+                    throw;
+                }
+
+                ReleaseStorage();
+                m_data     = newData;
+                m_size     = other.m_size;
+                m_capacity = other.m_size;
+                return;
+            }
+
+            UIntSize i = 0;
+            for (; i < m_size && i < other.m_size; ++i)
+                m_data[i] = other.m_data[i];
+            for (; i < other.m_size; ++i)
+                ::new (&m_data[i]) T(other.m_data[i]);
+
+            if (m_size > other.m_size)
+                DestroyElements(m_data + other.m_size, m_size - other.m_size);
+
+            m_size = other.m_size;
+        }
+
+        void AssignFromMoved(Vector& other)
+        {
+            if (other.m_size > m_capacity)
+            {
+                T* newData = AllocateStorage(other.m_size);
+                try
+                {
+                    ConstructElements(newData, other.m_data, other.m_size);
+                } catch (...)
+                {
+                    m_alloc.Deallocate(newData, other.m_size * sizeof(T), alignof(T));
+                    throw;
+                }
+
+                ReleaseStorage();
+                m_data     = newData;
+                m_size     = other.m_size;
+                m_capacity = other.m_size;
+            }
+            else
+            {
+                UIntSize i = 0;
+                for (; i < m_size && i < other.m_size; ++i)
+                    m_data[i] = std::move(other.m_data[i]);
+                for (; i < other.m_size; ++i)
+                    ::new (&m_data[i]) T(std::move(other.m_data[i]));
+                if (m_size > other.m_size)
+                    DestroyElements(m_data + other.m_size, m_size - other.m_size);
+                m_size = other.m_size;
+            }
+
+            other.Clear();
+        }
+
         void EnsureCapacityForOne()
         {
             if (m_size < m_capacity)
@@ -451,9 +623,9 @@ namespace NGIN::Containers
                 next = m_capacity + 1;
             Reserve(next);
         }
-        Alloc    m_alloc {};
-        T*       m_data {nullptr};
-        UIntSize m_size {0};
-        UIntSize m_capacity {0};
+        [[no_unique_address]] Alloc m_alloc {};
+        T*                          m_data {nullptr};
+        UIntSize                    m_size {0};
+        UIntSize                    m_capacity {0};
     };
 }// namespace NGIN::Containers
