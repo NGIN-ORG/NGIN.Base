@@ -1,11 +1,11 @@
 /// @file ConcurrentHashMap.hpp
-/// @brief Concurrent hash map with cooperative resizing and cache-friendly bucket groups.
-
+/// @brief Sharded concurrent hash map scaffold with policy-pluggable reclamation.
 #pragma once
 
 #include <NGIN/Defines.hpp>
 #include <NGIN/Memory/AllocatorConcept.hpp>
 #include <NGIN/Memory/SystemAllocator.hpp>
+#include <NGIN/Sync/SpinLock.hpp>
 
 #include <atomic>
 #include <bit>
@@ -16,207 +16,62 @@
 #include <new>
 #include <optional>
 #include <stdexcept>
-#include <thread>
 #include <type_traits>
 #include <utility>
-
-// Optimizations (optimistic reads, spin backoff, adaptive threshold) are always enabled.
+#include <vector>
 
 namespace NGIN::Containers
 {
-    namespace detail
+    enum class ReclamationPolicy : std::uint8_t
     {
-        enum class SlotState : std::uint8_t
-        {
-            Empty = 0,
-            PendingInsert,
-            Occupied,
-            Tombstone,
-        };
+        ManualQuiesce,
+        HazardPointers,
+        LocalEpoch,
+    };
+}// namespace NGIN::Containers
 
-        constexpr bool IsPowerOfTwoTemp(std::size_t value) noexcept
-        {
-            return value && ((value & (value - 1)) == 0);
-        }
+#include <NGIN/Containers/detail/ConcurrentHashMapDetail.hpp>
 
-        constexpr std::size_t ConstLog2(std::size_t value) noexcept
-        {
-            std::size_t shift = 0;
-            while ((static_cast<std::size_t>(1) << shift) < value)
-            {
-                ++shift;
-            }
-            return shift;
-        }
+namespace NGIN::Containers
+{
 
-        struct Backoff
-        {
-            static constexpr std::size_t SPIN_BEFORE_YIELD = 32;
-
-            bool Pause() noexcept
-            {
-                if (m_spins < SPIN_BEFORE_YIELD)
-                {
-                    ++m_spins;
-                    NGIN_CPU_RELAX();
-                    return false;
-                }
-                m_spins = 0;
-                std::this_thread::yield();
-                return true;
-            }
-
-            void Reset() noexcept
-            {
-                m_spins = 0;
-            }
-
-        private:
-            std::size_t m_spins {0};
-        };
-
-        template<class Key, class Value>
-        struct SlotStorage
-        {
-            std::atomic<std::uint8_t> control {static_cast<std::uint8_t>(SlotState::Empty)};
-            std::size_t               hash {0};
-            alignas(Key) unsigned char keyStorage[sizeof(Key)] {};
-            alignas(Value) unsigned char valueStorage[sizeof(Value)] {};
-
-            constexpr SlotStorage() noexcept = default;
-
-            [[nodiscard]] SlotState State(std::memory_order order = std::memory_order_acquire) const noexcept
-            {
-                return static_cast<SlotState>(control.load(order));
-            }
-
-            void Reset() noexcept
-            {
-                hash = 0;
-                control.store(static_cast<std::uint8_t>(SlotState::Empty), std::memory_order_release);
-            }
-
-            bool TryLockFrom(SlotState expected) noexcept
-            {
-                auto expectedRaw = static_cast<std::uint8_t>(expected);
-                return control.compare_exchange_strong(
-                        expectedRaw,
-                        static_cast<std::uint8_t>(SlotState::PendingInsert),
-                        std::memory_order_acq_rel,
-                        std::memory_order_relaxed);
-            }
-
-            void UnlockTo(SlotState state) noexcept
-            {
-                control.store(static_cast<std::uint8_t>(state), std::memory_order_release);
-            }
-
-            template<class K, class V>
-            void ConstructPayload(std::size_t h, K&& key, V&& value)
-            {
-                hash = h;
-                try
-                {
-                    auto* keyPtr = ::new (static_cast<void*>(keyStorage)) Key(std::forward<K>(key));
-                    try
-                    {
-                        ::new (static_cast<void*>(valueStorage)) Value(std::forward<V>(value));
-                    } catch (...)
-                    {
-                        keyPtr->~Key();
-                        hash = 0;
-                        throw;
-                    }
-                } catch (...)
-                {
-                    hash = 0;
-                    throw;
-                }
-            }
-
-            void DestroyPayload() noexcept
-            {
-                if constexpr (!std::is_trivially_destructible_v<Value>)
-                {
-                    auto* valuePtr = std::launder(reinterpret_cast<Value*>(valueStorage));
-                    valuePtr->~Value();
-                }
-                if constexpr (!std::is_trivially_destructible_v<Key>)
-                {
-                    auto* keyPtr = std::launder(reinterpret_cast<Key*>(keyStorage));
-                    keyPtr->~Key();
-                }
-                hash = 0;
-            }
-
-            template<class V>
-            void AssignValue(V&& value)
-            {
-                ValueRef() = std::forward<V>(value);
-            }
-
-            [[nodiscard]] Key& KeyRef() noexcept
-            {
-                return *std::launder(reinterpret_cast<Key*>(keyStorage));
-            }
-
-            [[nodiscard]] const Key& KeyRef() const noexcept
-            {
-                return *std::launder(reinterpret_cast<const Key*>(keyStorage));
-            }
-
-            [[nodiscard]] Value& ValueRef() noexcept
-            {
-                return *std::launder(reinterpret_cast<Value*>(valueStorage));
-            }
-
-            [[nodiscard]] const Value& ValueRef() const noexcept
-            {
-                return *std::launder(reinterpret_cast<const Value*>(valueStorage));
-            }
-        };
-
-        template<class Key, class Value, std::size_t GroupSize>
-        struct alignas(64) BucketGroup
-        {
-            SlotStorage<Key, Value> slots[GroupSize];
-
-            constexpr BucketGroup() noexcept
-            {
-                Reset();
-            }
-
-            void Reset() noexcept
-            {
-                for (auto& slot: slots)
-                    slot.Reset();
-            }
-        };
-    }// namespace detail
-
-    /// @brief Concurrent hash map leveraging open addressing and cooperative resizing.
+    /// @brief Concurrent hash map scaffold with sharded writer locks and pinned lock-free reads.
+    ///
+    /// Current state:
+    /// - Shared core architecture is in place.
+    /// - `ManualQuiesce` now has a dedicated deferred-reclamation backend.
+    /// - `LocalEpoch` and `HazardPointers` still compile through the same scaffolded pinned-reader contract.
+    /// - Automatic policies currently use the same safe retirement path until dedicated epoch and hazard
+    ///   implementations land.
     template<class Key,
              class Value,
-             class Hash                         = std::hash<Key>,
-             class Equal                        = std::equal_to<Key>,
-             Memory::AllocatorConcept Allocator = Memory::SystemAllocator,
-             std::size_t              GroupSize = 16>
+             class Hash                          = std::hash<Key>,
+             class Equal                         = std::equal_to<Key>,
+             Memory::AllocatorConcept Allocator  = Memory::SystemAllocator,
+             ReclamationPolicy        Policy     = ReclamationPolicy::LocalEpoch,
+             std::size_t              ShardCount = 64>
     class ConcurrentHashMap
     {
-        static_assert(detail::IsPowerOfTwoTemp(GroupSize), "GroupSize must be a power of two.");
+        static_assert(ShardCount > 0, "ShardCount must be greater than zero.");
 
     public:
-        using key_type                         = Key;
-        using mapped_type                      = Value;
-        using hash_type                        = Hash;
-        using key_equal                        = Equal;
-        using allocator_type                   = Allocator;
-        using size_type                        = std::size_t;
-        using value_type                       = std::pair<const Key, Value>;
-        static constexpr size_type kGroupSize  = GroupSize;
-        static constexpr double    kLoadFactor = 0.75;
+        using key_type       = Key;
+        using mapped_type    = Value;
+        using hash_type      = Hash;
+        using key_equal      = Equal;
+        using allocator_type = Allocator;
+        using size_type      = std::size_t;
+        using value_type     = std::pair<const Key, Value>;
 
-        ConcurrentHashMap() : ConcurrentHashMap(64) {}
+        static constexpr double            kLoadFactor         = 0.75;
+        static constexpr ReclamationPolicy kReclamationPolicy  = Policy;
+        static constexpr size_type         kShardCount         = ShardCount;
+        static constexpr size_type         kMinBucketsPerShard = 8;
+
+        ConcurrentHashMap()
+            : ConcurrentHashMap(64)
+        {
+        }
 
         explicit ConcurrentHashMap(size_type        initialCapacity,
                                    const Hash&      hash      = Hash {},
@@ -224,136 +79,109 @@ namespace NGIN::Containers
                                    const Allocator& allocator = Allocator {})
             : m_hash(hash), m_equal(equal), m_allocator(allocator)
         {
-            Initialize(initialCapacity);
-        }
+            const size_type perShardCapacity = detail::CeilDivide(std::max<size_type>(initialCapacity, ShardCount), ShardCount);
+            const size_type bucketCount      = BucketCountForElements(perShardCapacity);
 
-        ConcurrentHashMap(const ConcurrentHashMap&)            = delete;
-        ConcurrentHashMap& operator=(const ConcurrentHashMap&) = delete;
-
-        ConcurrentHashMap(ConcurrentHashMap&& other) noexcept
-            : m_hash(std::move(other.m_hash)),
-              m_equal(std::move(other.m_equal)),
-              m_allocator(std::move(other.m_allocator))
-        {
-            other.DrainMigration();
-            other.FlushAllShards();
-            m_table    = other.m_table;
-            m_capacity = other.m_capacity;
-            m_mask     = other.m_mask;
-            m_size.store(other.m_size.load(std::memory_order_relaxed), std::memory_order_relaxed);
-            m_resizeThreshold = other.m_resizeThreshold;
-            m_pubGroups.store(m_table.groups, std::memory_order_relaxed);
-            std::atomic_thread_fence(std::memory_order_release);
-            m_pubMask.store(m_mask, std::memory_order_release);
-            other.m_table           = {};
-            other.m_capacity        = 0;
-            other.m_mask            = 0;
-            other.m_resizeThreshold = 0;
-            other.m_size.store(0, std::memory_order_relaxed);
-            for (auto& shard: other.m_sizeShards)
-                shard.delta.store(0, std::memory_order_relaxed);
-        }
-
-        ConcurrentHashMap& operator=(ConcurrentHashMap&& other) noexcept
-        {
-            if (this != &other)
+            for (auto& shard: m_shards)
             {
-                DrainMigration();
-                DestroyTable();
-
-                m_hash      = std::move(other.m_hash);
-                m_equal     = std::move(other.m_equal);
-                m_allocator = std::move(other.m_allocator);
-
-                other.DrainMigration();
-                other.FlushAllShards();
-                m_table    = other.m_table;
-                m_capacity = other.m_capacity;
-                m_mask     = other.m_mask;
-                m_size.store(other.m_size.load(std::memory_order_relaxed), std::memory_order_relaxed);
-                m_resizeThreshold = other.m_resizeThreshold;
-                m_pubGroups.store(m_table.groups, std::memory_order_relaxed);
-                std::atomic_thread_fence(std::memory_order_release);
-                m_pubMask.store(m_mask, std::memory_order_release);
-
-                other.m_table           = {};
-                other.m_capacity        = 0;
-                other.m_mask            = 0;
-                other.m_resizeThreshold = 0;
-                other.m_size.store(0, std::memory_order_relaxed);
-                for (auto& shard: other.m_sizeShards)
-                    shard.delta.store(0, std::memory_order_relaxed);
+                Table* table = AllocateEmptyTable(bucketCount);
+                shard.table.store(table, std::memory_order_release);
+                shard.bucketCount.store(bucketCount, std::memory_order_release);
+                shard.size = 0;
             }
-            return *this;
         }
+
+        ConcurrentHashMap(const ConcurrentHashMap&)                    = delete;
+        auto operator=(const ConcurrentHashMap&) -> ConcurrentHashMap& = delete;
+        ConcurrentHashMap(ConcurrentHashMap&&)                         = delete;
+        auto operator=(ConcurrentHashMap&&) -> ConcurrentHashMap&      = delete;
 
         ~ConcurrentHashMap()
         {
-            DrainMigration();
-            DestroyTable();
+            for (auto& shard: m_shards)
+            {
+                std::lock_guard<Sync::SpinLock> lock(shard.writeLock);
+                shard.reclaimer.Drain();
+
+                Table* table = shard.table.exchange(nullptr, std::memory_order_acq_rel);
+                shard.bucketCount.store(0, std::memory_order_release);
+                shard.size = 0;
+
+                if (table)
+                {
+                    DestroyTable(table);
+                }
+            }
         }
 
-        [[nodiscard]] size_type Size() const noexcept
+        [[nodiscard]] auto Size() const noexcept -> size_type
         {
-            return ApproxSize();
+            return m_size.load(std::memory_order_acquire);
         }
 
-        [[nodiscard]] bool Empty() const noexcept
+        [[nodiscard]] auto Empty() const noexcept -> bool
         {
             return Size() == 0;
         }
 
-        // Quiesce: drain all in-flight migrations so subsequent queries observe a stable table.
-        // Safe to call concurrently; may increase latency under contention.
-        void Quiesce() noexcept
+        [[nodiscard]] auto Capacity() const noexcept -> size_type
         {
-            DrainMigration();
-            // If last readers just dropped during DrainMigration, a second reclaim may be needed.
-            ReclaimRetired();
+            size_type capacity = 0;
+            for (const auto& shard: m_shards)
+            {
+                capacity += shard.bucketCount.load(std::memory_order_acquire);
+            }
+            return capacity;
         }
 
-        void Clear() noexcept
+        [[nodiscard]] auto LoadFactor() const noexcept -> double
         {
-            // Acquire a guarded view so groups memory stays alive while clearing.
-            ViewToken tok = AcquireGuardedView();
-            if (!tok.view.groups)
+            const size_type capacity = Capacity();
+            if (capacity == 0)
             {
-                ReleaseGuard(tok, false);
-                return;
+                return 0.0;
             }
-            const size_type cap = tok.view.mask + 1;
-            for (size_type i = 0; i < cap; ++i)
-            {
-                auto& slot  = SlotAt(tok.view, i);
-                auto  state = slot.State(std::memory_order_acquire);
-                if (state == detail::SlotState::Occupied)
-                    slot.DestroyPayload();
-                slot.Reset();
-            }
-            m_size.store(0, std::memory_order_release);
-            for (auto& shard: m_sizeShards)
-                shard.delta.store(0, std::memory_order_release);
-            ReleaseGuard(tok, false);
+            return static_cast<double>(Size()) / static_cast<double>(capacity);
         }
 
         bool Insert(const Key& key, const Value& value)
         {
-            return EmplaceOrAssignInternal(key, value);
+            return InsertOrAssignInternal(key, value);
         }
 
         bool Insert(const Key& key, Value&& value)
         {
-            return EmplaceOrAssignInternal(key, std::move(value));
+            return InsertOrAssignInternal(key, std::move(value));
         }
 
         bool Insert(Key&& key, const Value& value)
         {
-            return EmplaceOrAssignInternal(std::move(key), value);
+            return InsertOrAssignInternal(std::move(key), value);
         }
 
         bool Insert(Key&& key, Value&& value)
         {
-            return EmplaceOrAssignInternal(std::move(key), std::move(value));
+            return InsertOrAssignInternal(std::move(key), std::move(value));
+        }
+
+        bool InsertOrAssign(const Key& key, const Value& value)
+        {
+            return InsertOrAssignInternal(key, value);
+        }
+
+        bool InsertOrAssign(const Key& key, Value&& value)
+        {
+            return InsertOrAssignInternal(key, std::move(value));
+        }
+
+        bool InsertOrAssign(Key&& key, const Value& value)
+        {
+            return InsertOrAssignInternal(std::move(key), value);
+        }
+
+        bool InsertOrAssign(Key&& key, Value&& value)
+        {
+            return InsertOrAssignInternal(std::move(key), std::move(value));
         }
 
         template<class Updater>
@@ -370,1317 +198,614 @@ namespace NGIN::Containers
 
         bool Remove(const Key& key)
         {
-            const std::size_t hash      = ComputeHash(key);
-            ViewToken         token     = AcquireGuardedView();
-            TableView         primary   = token.view;
-            bool              finalized = false;
+            const std::size_t               hash  = ComputeHash(key);
+            Shard&                          shard = ShardForHash(hash);
+            std::lock_guard<Sync::SpinLock> lock(shard.writeLock);
 
-            bool removed = false;
+            Table* table = shard.table.load(std::memory_order_acquire);
+            if (!table)
+            {
+                return false;
+            }
 
-            // Attempt in primary (current published) table first
-            if (auto* primarySlot = AcquireForMutation(primary, key, hash))
+            const size_type bucketIndex = BucketIndex(hash, table->bucketCount);
+            Node* const     oldHead     = table->buckets[bucketIndex].load(std::memory_order_acquire);
+            if (!FindNodeInChain(oldHead, key, hash))
             {
-                primarySlot->DestroyPayload();
-                primarySlot->UnlockTo(detail::SlotState::Tombstone);
-                DecrementSizeShard();
-                removed = true;
-                if (token.mig)
-                {
-                    RemoveFromOld(token.mig, key, hash);
-                    HelpMigration(token.mig);
-                    finalized = FinalizeMigration(token.mig);
-                }
-                else
-                {
-                    MaybeStartMigration();
-                }
+                return false;
             }
-            else if (token.mig)
-            {
-                TableView oldView {token.mig->oldGroups, token.mig->oldMask};
-                if (auto* secondarySlot = AcquireForMutation(oldView, key, hash))
-                {
-                    secondarySlot->DestroyPayload();
-                    secondarySlot->UnlockTo(detail::SlotState::Tombstone);
-                    DecrementSizeShard();
-                    removed = true;
-                    HelpMigration(token.mig);
-                    finalized = FinalizeMigration(token.mig);
-                }
-            }
-            ReleaseGuard(token, finalized);
-            return removed;
+
+            Node* newHead = CloneChainWithoutKey(oldHead, key, hash);
+            table->buckets[bucketIndex].store(newHead, std::memory_order_release);
+            RetireChain(shard, oldHead);
+
+            --shard.size;
+            m_size.fetch_sub(1, std::memory_order_acq_rel);
+            shard.reclaimer.Poll();
+            return true;
         }
 
         [[nodiscard]] bool Contains(const Key& key) const noexcept
         {
-            const std::size_t hash  = ComputeHash(key);
-            ViewToken         token = const_cast<ConcurrentHashMap*>(this)->AcquireGuardedView();
-            if (ContainsInView(token.view, key, hash))
-            {
-                const_cast<ConcurrentHashMap*>(this)->ReleaseGuard(token, false);
-                return true;
-            }
-            bool found = false;
-            if (token.mig)
-            {
-                TableView oldView {token.mig->oldGroups, token.mig->oldMask};
-                found = ContainsInView(oldView, key, hash);
-            }
-            const_cast<ConcurrentHashMap*>(this)->ReleaseGuard(token, false);
-            return found;
+            const std::size_t  hash  = ComputeHash(key);
+            const Shard&       shard = ShardForHash(hash);
+            auto               guard = shard.reclaimer.Enter();
+            const Table* const table = shard.reclaimer.Protect(shard.table, guard);
+            return FindNodeInTable(table, key, hash) != nullptr;
         }
 
-        Value Get(const Key& key) const
+        auto Get(const Key& key) const -> Value
         {
-            Value result {};
-            if (TryGet(key, result))
-                return result;
+            if (auto value = GetOptional(key); value.has_value())
+            {
+                return std::move(*value);
+            }
             throw std::out_of_range("ConcurrentHashMap::Get - key not found");
         }
 
         bool TryGet(const Key& key, Value& outValue) const
         {
-            const std::size_t hash  = ComputeHash(key);
-            ViewToken         token = const_cast<ConcurrentHashMap*>(this)->AcquireGuardedView();
-            if (TryCopyValueInView(token.view, key, hash, outValue))
+            const std::size_t  hash  = ComputeHash(key);
+            const Shard&       shard = ShardForHash(hash);
+            auto               guard = shard.reclaimer.Enter();
+            const Table* const table = shard.reclaimer.Protect(shard.table, guard);
+            if (const Node* node = FindNodeInTable(table, key, hash))
             {
-                const_cast<ConcurrentHashMap*>(this)->ReleaseGuard(token, false);
+                outValue = node->value;
                 return true;
             }
-            bool result = false;
-            if (token.mig)
-            {
-                TableView oldView {token.mig->oldGroups, token.mig->oldMask};
-                result = TryCopyValueInView(oldView, key, hash, outValue);
-            }
-            const_cast<ConcurrentHashMap*>(this)->ReleaseGuard(token, false);
-            return result;
+            return false;
         }
 
-        [[nodiscard]] std::optional<Value> GetOptional(const Key& key) const
+        [[nodiscard]] auto GetOptional(const Key& key) const -> std::optional<Value>
         {
-            Value storage;
-            if (TryGet(key, storage))
-                return storage;
+            const std::size_t  hash  = ComputeHash(key);
+            const Shard&       shard = ShardForHash(hash);
+            auto               guard = shard.reclaimer.Enter();
+            const Table* const table = shard.reclaimer.Protect(shard.table, guard);
+            if (const Node* node = FindNodeInTable(table, key, hash))
+            {
+                return node->value;
+            }
             return std::nullopt;
+        }
+
+        void Clear()
+        {
+            for (auto& shard: m_shards)
+            {
+                std::lock_guard<Sync::SpinLock> lock(shard.writeLock);
+
+                Table* const current = shard.table.load(std::memory_order_acquire);
+                if (!current)
+                {
+                    continue;
+                }
+
+                Table* replacement = AllocateEmptyTable(current->bucketCount);
+                shard.table.store(replacement, std::memory_order_release);
+                shard.bucketCount.store(replacement->bucketCount, std::memory_order_release);
+
+                if (shard.size != 0)
+                {
+                    m_size.fetch_sub(shard.size, std::memory_order_acq_rel);
+                    shard.size = 0;
+                }
+
+                RetireTable(shard, current);
+                shard.reclaimer.Poll();
+            }
         }
 
         void Reserve(size_type desiredCapacity)
         {
-            if (desiredCapacity <= m_capacity)
-                return;
-            StartMigration(desiredCapacity);
-            MigrationState* migration = AcquireMigration();
-            if (migration)
+            const size_type perShardCapacity = detail::CeilDivide(std::max<size_type>(desiredCapacity, ShardCount), ShardCount);
+            for (auto& shard: m_shards)
             {
-                HelpMigration(migration, migration->oldGroupCount);
-                const bool finalized = FinalizeMigration(migration);
-                ReleaseAndMaybeDestroy(migration, finalized);
+                std::lock_guard<Sync::SpinLock> lock(shard.writeLock);
+                EnsureShardCapacity(shard, perShardCapacity);
+                shard.reclaimer.Poll();
             }
-        }
-
-        [[nodiscard]] size_type Capacity() const noexcept
-        {
-            return m_capacity;
-        }
-
-        [[nodiscard]] double LoadFactor() const noexcept
-        {
-            if (m_capacity == 0)
-                return 0.0;
-            return static_cast<double>(Size()) / static_cast<double>(m_capacity);
         }
 
         template<class Callback>
         void ForEach(Callback&& callback) const
         {
-            // Use guarded view; iteration sees a stable table (may miss concurrent inserts to a new resize in progress).
-            auto&           self = *const_cast<ConcurrentHashMap*>(this);
-            ViewToken       tok  = self.AcquireGuardedView();
-            const size_type cap  = tok.view.mask ? (tok.view.mask + 1) : 0;
-            for (size_type i = 0; i < cap; ++i)
+            for (const auto& shard: m_shards)
             {
-                const auto& slot = SlotAt(tok.view, i);
-                if (slot.State(std::memory_order_acquire) == detail::SlotState::Occupied)
-                    callback(slot.KeyRef(), slot.ValueRef());
+                auto               guard = shard.reclaimer.Enter();
+                const Table* const table = shard.reclaimer.Protect(shard.table, guard);
+                if (!table)
+                {
+                    continue;
+                }
+
+                for (size_type bucketIndex = 0; bucketIndex < table->bucketCount; ++bucketIndex)
+                {
+                    const Node* node = table->buckets[bucketIndex].load(std::memory_order_acquire);
+                    while (node)
+                    {
+                        callback(node->key, node->value);
+                        node = node->next;
+                    }
+                }
             }
-            self.ReleaseGuard(tok, false);
+        }
+
+        template<class Callback>
+        void SnapshotForEach(Callback&& callback) const
+        {
+            ForEach(std::forward<Callback>(callback));
+        }
+
+        void Quiesce() noexcept
+        {
+            for (auto& shard: m_shards)
+            {
+                std::lock_guard<Sync::SpinLock> lock(shard.writeLock);
+                shard.reclaimer.Quiesce();
+            }
         }
 
     private:
-        using Slot  = detail::SlotStorage<Key, Value>;
-        using Group = detail::BucketGroup<Key, Value, GroupSize>;
+        using Node      = detail::ConcurrentHashMapNode<Key, Value>;
+        using Table     = detail::ConcurrentHashMapTable<Node>;
+        using Reclaimer = detail::ConcurrentHashMapReclaimer<Policy>;
 
-        struct Table
+        struct alignas(64) Shard
         {
-            Group*    groups {nullptr};
-            size_type groupCount {0};
+            mutable Sync::SpinLock writeLock {};
+            std::atomic<Table*>    table {nullptr};
+            std::atomic<size_type> bucketCount {0};
+            Reclaimer              reclaimer {};
+            size_type              size {0};
         };
-
-        struct TableView
-        {
-            Group*    groups {nullptr};
-            size_type mask {0};
-        };
-
-        struct MigrationState
-        {
-            Group*                 oldGroups {nullptr};
-            size_type              oldGroupCount {0};
-            size_type              oldMask {0};
-            Group*                 newGroups {nullptr};
-            size_type              newGroupCount {0};
-            size_type              newMask {0};
-            size_type              newThreshold {0};
-            std::atomic<size_type> nextGroup {0};
-            std::atomic<size_type> migratedGroups {0};
-            std::atomic<size_type> activeUsers {0};
-            std::atomic<bool>      finalized {false};
-            std::atomic<bool>      destroyed {false};
-            MigrationState*        nextRetired {nullptr};// intrusive singly-linked list for deferred reclamation
-        };
-
-        Table     m_table {};
-        size_type m_capacity {0};
-        size_type m_mask {0};
-        // Global committed size (flushed deltas only). Sharded deltas amortize contention.
-        std::atomic<size_type> m_size {0};
-        struct SizeShard
-        {
-            std::atomic<std::intptr_t> delta {0};
-        };
-        static constexpr size_type kSizeShardCount = 64;// power of two, tune if needed
-        // Default flush threshold (can be tuned at runtime via SetFlushThreshold).
-        static constexpr size_type kDefaultFlushThreshold = 32;
-        std::atomic<size_type>     m_flushThreshold {kDefaultFlushThreshold};
-        alignas(64) SizeShard m_sizeShards[kSizeShardCount] {};
-        size_type m_resizeThreshold {0};
-        Hash      m_hash {};
-        Equal     m_equal {};
-        Allocator m_allocator {};
-        // Atomically published groups pointer and mask for readers to obtain a stable snapshot.
-        std::atomic<Group*>            m_pubGroups {nullptr};
-        std::atomic<size_type>         m_pubMask {0};
-        mutable std::atomic<size_type> m_readers {0};
-        std::atomic<MigrationState*>   m_migration {nullptr};
-        std::atomic<MigrationState*>   m_retired {nullptr};// list of finalized states awaiting reader drain
-                                                           // Epoch (even=stable, odd=migration) for optimistic reads.
-        std::atomic<size_type> m_epoch {0};
-
-        // Fixed load factor (adaptive logic removed): threshold uses kLoadFactor.
-
-        static constexpr size_type kGroupMask  = GroupSize - 1;
-        static constexpr size_type kGroupShift = detail::ConstLog2(GroupSize);
-
-        struct InsertProbe
-        {
-            Slot*             slot {nullptr};
-            detail::SlotState previousState {detail::SlotState::Empty};
-            bool              isNew {false};
-        };
-
-        // --- Phase 3: Sharded size accounting helpers ---
-        [[nodiscard]] size_type GetShardIndex() const noexcept
-        {
-            // Thread-local cached index; lazily initialize.
-            static thread_local size_type shardIndex = kSizeShardCount;// sentinel
-            if (shardIndex >= kSizeShardCount)
-            {
-                // Derive pseudo-random stable index from thread id pointer hash.
-                auto tid   = std::hash<std::thread::id>()(std::this_thread::get_id());
-                shardIndex = static_cast<size_type>(tid) & (kSizeShardCount - 1);
-            }
-            return shardIndex;
-        }
-
-        void FlushShard(size_type shardIndex) noexcept
-        {
-            auto&         shard = m_sizeShards[shardIndex];
-            std::intptr_t delta = shard.delta.exchange(0, std::memory_order_acq_rel);
-            if (delta != 0)
-            {
-                if (delta > 0)
-                    m_size.fetch_add(static_cast<size_type>(delta), std::memory_order_acq_rel);
-                else
-                    m_size.fetch_sub(static_cast<size_type>(-delta), std::memory_order_acq_rel);
-            }
-        }
-
-        void FlushAllShards() noexcept
-        {
-            for (size_type i = 0; i < kSizeShardCount; ++i)
-                FlushShard(i);
-        }
-
-        void IncrementSizeShard() noexcept
-        {
-            const size_type shardIndex = GetShardIndex();
-            auto&           shard      = m_sizeShards[shardIndex];
-            auto            newDelta   = shard.delta.fetch_add(1, std::memory_order_relaxed) + 1;
-            const auto      limit      = static_cast<std::intptr_t>(m_flushThreshold.load(std::memory_order_relaxed));
-            if (newDelta >= limit)
-            {
-                FlushShard(shardIndex);
-            }
-        }
-
-        void DecrementSizeShard() noexcept
-        {
-            const size_type shardIndex = GetShardIndex();
-            auto&           shard      = m_sizeShards[shardIndex];
-            auto            newDelta   = shard.delta.fetch_sub(1, std::memory_order_relaxed) - 1;
-            const auto      limit      = static_cast<std::intptr_t>(m_flushThreshold.load(std::memory_order_relaxed));
-            if (newDelta <= -limit)
-            {
-                FlushShard(shardIndex);
-            }
-        }
-
-        void SetFlushThreshold(size_type newThreshold) noexcept
-        {
-            if (newThreshold == 0)
-                newThreshold = 1;// avoid zero which would cause constant flushing
-            m_flushThreshold.store(newThreshold, std::memory_order_release);
-        }
-
-        [[nodiscard]] size_type ApproxSize() const noexcept
-        {
-            // Signed accumulation to avoid temporary underflow when negative shard deltas exceed committed base.
-            std::int64_t total = static_cast<std::int64_t>(m_size.load(std::memory_order_acquire));
-            for (size_type i = 0; i < kSizeShardCount; ++i)
-            {
-                total += m_sizeShards[i].delta.load(std::memory_order_acquire);
-            }
-            if (total < 0)
-                total = 0;
-            return static_cast<size_type>(total);
-        }
-
-        void Initialize(size_type initialCapacity)
-        {
-            DrainMigration();
-            initialCapacity      = std::max<size_type>(GroupSize, std::bit_ceil(initialCapacity));
-            size_type groupCount = initialCapacity / GroupSize;
-            Group*    groups     = AllocateGroups(groupCount);
-
-            m_table.groups     = groups;
-            m_table.groupCount = groupCount;
-            m_capacity         = groupCount * GroupSize;
-            m_mask             = m_capacity - 1;
-            m_resizeThreshold  = ComputeThreshold(m_capacity);
-            m_size.store(0, std::memory_order_relaxed);
-            for (auto& shard: m_sizeShards)
-                shard.delta.store(0, std::memory_order_relaxed);
-            // Publish initial table view: groups first, then mask.
-            // Rationale: reader will load mask (acquire) then groups; seeing the new mask implies
-            // visibility of the preceding groups store (via release on mask) preventing torn snapshot.
-            m_pubGroups.store(m_table.groups, std::memory_order_relaxed);
-            std::atomic_thread_fence(std::memory_order_release);
-            m_pubMask.store(m_mask, std::memory_order_release);
-        }
-
-        [[nodiscard]] bool ViewValid(const TableView& v) const noexcept
-        {
-            if (!v.groups)
-                return v.mask == 0;// empty table case
-            // (mask + 1) must be multiple of GroupSize.
-            const size_type span = v.mask + 1;
-            return (span & (GroupSize - 1)) == 0;// power-of-two capacity aligned to group size
-        }
-
-        Group* AllocateGroups(size_type groupCount)
-        {
-            if (groupCount == 0)
-                return nullptr;
-            const size_type bytes = sizeof(Group) * groupCount;
-            auto*           raw   = static_cast<Group*>(m_allocator.Allocate(bytes, alignof(Group)));
-            if (!raw)
-                throw std::bad_alloc();
-            for (size_type i = 0; i < groupCount; ++i)
-            {
-                ::new (static_cast<void*>(raw + i)) Group();
-            }
-            return raw;
-        }
-
-        void ReleaseGroups(Group* groups, size_type groupCount) noexcept
-        {
-            if (!groups)
-                return;
-            for (size_type i = 0; i < groupCount; ++i)
-            {
-                groups[i].~Group();
-            }
-            const size_type bytes = sizeof(Group) * groupCount;
-            m_allocator.Deallocate(static_cast<void*>(groups), bytes, alignof(Group));
-        }
-
-        void DestroyTable() noexcept
-        {
-            if (!m_table.groups)
-                return;
-
-            TableView view = CurrentView();
-            for (size_type index = 0; index < m_capacity; ++index)
-            {
-                auto& slot = SlotAt(view, index);
-                if (slot.State(std::memory_order_acquire) == detail::SlotState::Occupied)
-                {
-                    slot.DestroyPayload();
-                    slot.UnlockTo(detail::SlotState::Empty);
-                }
-            }
-
-            ReleaseGroups(m_table.groups, m_table.groupCount);
-            m_table.groups     = nullptr;
-            m_table.groupCount = 0;
-            m_capacity         = 0;
-            m_mask             = 0;
-            m_resizeThreshold  = 0;
-            m_size.store(0, std::memory_order_relaxed);
-            for (auto& shard: m_sizeShards)
-                shard.delta.store(0, std::memory_order_relaxed);
-            // Publish empty view (groups=null then mask=0) preserving ordering invariant.
-            m_pubGroups.store(nullptr, std::memory_order_relaxed);
-            std::atomic_thread_fence(std::memory_order_release);
-            m_pubMask.store(0, std::memory_order_release);
-        }
-
-        [[nodiscard]] TableView CurrentView() const noexcept
-        {
-            // Load mask first (acquire) then groups. If we observe a new mask value we are guaranteed
-            // (by release store on mask) to also observe the earlier groups pointer store.
-            size_type m = m_pubMask.load(std::memory_order_acquire);
-            Group*    g = m_pubGroups.load(std::memory_order_acquire);
-            // Invariant: either empty (g==nullptr, m==0) or both valid.
-#if defined(NGIN_DEBUG) || !defined(NDEBUG)
-            if ((g == nullptr) != (m == 0))
-            {
-                // Mask/groups publication invariant violated; force fail fast in debug.
-                std::terminate();
-            }
-#endif
-            return TableView {g, m};
-        }
-        struct ViewToken
-        {
-            TableView       view {};
-            MigrationState* mig {nullptr};
-            bool            usesReaderGuard {false};
-        };
-
-        ViewToken AcquireGuardedView() noexcept
-        {
-            // Register as passive reader first.
-            m_readers.fetch_add(1, std::memory_order_acquire);
-            for (;;)
-            {
-                // Fast path: try to pin an active migration; if successful, build view from migration state.
-                if (MigrationState* s = AcquireMigration())
-                {
-                    // Avoid using potentially torn published (groups, mask) pair.
-                    m_readers.fetch_sub(1, std::memory_order_release);
-#if defined(NGIN_DEBUG) || !defined(NDEBUG)
-                    if ((s->newGroups == nullptr) || (s->newMask == 0))
-                    {
-                        std::terminate();// new table must be non-empty when migration exists
-                    }
-#endif
-                    return ViewToken {TableView {s->newGroups, s->newMask}, s, false};
-                }
-                // No migration active. Snapshot published view.
-                TableView snap = CurrentView();
-                // Re-check that migration did not start after snapshot.
-                if (m_migration.load(std::memory_order_acquire) == nullptr)
-                {
-#if defined(NGIN_DEBUG) || !defined(NDEBUG)
-                    if ((snap.groups == nullptr) != (snap.mask == 0))
-                    {
-                        std::terminate();
-                    }
-#endif
-                    return ViewToken {snap, nullptr, true};
-                }
-                // Migration raced on: convert passive guard into active attempt by restarting.
-                m_readers.fetch_sub(1, std::memory_order_release);
-                m_readers.fetch_add(1, std::memory_order_acquire);
-            }
-        }
-
-        void ReleaseGuard(ViewToken& tok, bool finalized = false) noexcept
-        {
-            if (tok.usesReaderGuard)
-            {
-                const size_type prev = m_readers.fetch_sub(1, std::memory_order_acq_rel);
-                // If we were the last passive reader, attempt to reclaim any retired states.
-                if (prev == 1)
-                {
-                    ReclaimRetired();
-                }
-            }
-            else if (tok.mig)
-            {
-                ReleaseAndMaybeDestroy(tok.mig, finalized);
-            }
-            tok.mig             = nullptr;
-            tok.usesReaderGuard = false;
-        }
-
-        static Slot& SlotAt(const TableView& view, size_type index) noexcept
-        {
-#if defined(NGIN_DEBUG) || !defined(NDEBUG)
-            if (!view.groups)
-            {
-                std::terminate();
-            }
-#endif
-            return view.groups[index >> kGroupShift].slots[index & kGroupMask];
-        }
-
-        [[nodiscard]] size_type ComputeThreshold(size_type capacity) const noexcept
-        {
-            if (capacity <= 1)
-                return 1;
-            const double    raw       = static_cast<double>(capacity) * kLoadFactor;
-            const auto      threshold = static_cast<size_type>(raw);
-            const size_type capped    = threshold >= capacity ? capacity - 1 : threshold;
-            return capped == 0 ? 1 : capped;
-        }
-
-        void MaybeStartMigration(size_type additional = 0)
-        {
-            if (m_migration.load(std::memory_order_acquire))
-                return;
-            const size_type committed = m_size.load(std::memory_order_relaxed);
-            const size_type baseline  = (additional > (std::numeric_limits<size_type>::max() - committed))
-                                                ? std::numeric_limits<size_type>::max()
-                                                : committed + additional;
-            if (baseline <= m_resizeThreshold)
-                return;
-            const size_type projected = ApproxSize() + additional;
-            if (projected <= m_resizeThreshold)
-                return;
-            size_type       target     = m_capacity ? m_capacity * 2 : GroupSize;
-            const size_type scaledBase = projected + (projected / 3) + GroupSize;
-            const size_type scaled     = std::bit_ceil(std::max<size_type>(GroupSize, scaledBase));
-            target                     = std::max(target, scaled);
-            StartMigration(target);
-        }
-
-        MigrationState* AcquireMigration() const noexcept
-        {
-            while (true)
-            {
-                MigrationState* state = m_migration.load(std::memory_order_acquire);
-                if (!state)
-                    return nullptr;
-                state->activeUsers.fetch_add(1, std::memory_order_acquire);
-                if (state == m_migration.load(std::memory_order_acquire))
-                    return state;
-                state->activeUsers.fetch_sub(1, std::memory_order_acq_rel);
-            }
-        }
-
-        void ReleaseMigration(MigrationState* state) const noexcept
-        {
-            if (state)
-                state->activeUsers.fetch_sub(1, std::memory_order_acq_rel);
-        }
-
-        void DestroyMigrationState(MigrationState* state) noexcept
-        {
-            if (!state)
-                return;
-            // Defer if either active users or passive readers still present.
-            if (state->activeUsers.load(std::memory_order_acquire) != 0 ||
-                m_readers.load(std::memory_order_acquire) != 0)
-            {
-                MigrationState* head = m_retired.load(std::memory_order_relaxed);
-                do
-                {
-                    state->nextRetired = head;
-                } while (!m_retired.compare_exchange_weak(
-                        head,
-                        state,
-                        std::memory_order_release,
-                        std::memory_order_relaxed));
-                return;
-            }
-            ReleaseGroups(state->oldGroups, state->oldGroupCount);
-            // Now poison mask after actual release to prevent further indexing attempts.
-            state->oldMask       = 0;
-            state->oldGroups     = nullptr;
-            state->oldGroupCount = 0;
-            delete state;
-        }
-
-        void ReclaimRetired() noexcept
-        {
-            MigrationState* list     = m_retired.exchange(nullptr, std::memory_order_acq_rel);
-            MigrationState* deferred = nullptr;
-            while (list)
-            {
-                MigrationState* next = list->nextRetired;
-                // Reclaim only when no active users AND no readers remain.
-                if (list->activeUsers.load(std::memory_order_acquire) == 0 &&
-                    m_readers.load(std::memory_order_acquire) == 0)
-                {
-                    ReleaseGroups(list->oldGroups, list->oldGroupCount);
-                    list->oldMask       = 0;
-                    list->oldGroups     = nullptr;
-                    list->oldGroupCount = 0;
-                    delete list;
-                }
-                else
-                {
-                    list->nextRetired = deferred;
-                    deferred          = list;
-                }
-                list = next;
-            }
-            if (deferred)
-            {
-                // Push remaining back onto retired list head.
-                MigrationState* head = m_retired.load(std::memory_order_relaxed);
-                do
-                {
-                    // Append existing head to end of deferred chain.
-                    MigrationState* tail = deferred;
-                    while (tail->nextRetired)
-                        tail = tail->nextRetired;
-                    tail->nextRetired = head;
-                } while (!m_retired.compare_exchange_weak(
-                        head,
-                        deferred,
-                        std::memory_order_release,
-                        std::memory_order_relaxed));
-            }
-        }
-
-        void ReleaseAndMaybeDestroy(MigrationState* state, bool finalized) noexcept
-        {
-            if (!state)
-                return;
-            const bool alreadyFinalized = state->finalized.load(std::memory_order_acquire);
-            ReleaseMigration(state);
-            if (finalized)
-            {
-                if (!state->destroyed.exchange(true, std::memory_order_acq_rel))
-                {
-                    DestroyMigrationState(state);
-                }
-                return;
-            }
-            if (alreadyFinalized)
-            {
-                if (!state->destroyed.exchange(true, std::memory_order_acq_rel))
-                {
-                    DestroyMigrationState(state);
-                }
-            }
-        }
-
-        void StartMigration(size_type desiredCapacity)
-        {
-            // Use approximate size first (no full flush) to decide if a migration attempt is worthwhile.
-            const size_type approxSize = ApproxSize();
-
-            // Compute provisional target capacity using approx size; may grow again after precise flush.
-            const size_type currentSize = approxSize;
-
-            const size_type surgeBase = std::max<size_type>(GroupSize, currentSize / 2 + GroupSize);
-            size_type       demand    = currentSize + surgeBase;
-            if (demand < currentSize)// overflow check
-                demand = std::numeric_limits<size_type>::max();
-
-            size_type requiredCapacity;
-            if (demand > (std::numeric_limits<size_type>::max() - 2) / 4)
-            {
-                requiredCapacity = std::numeric_limits<size_type>::max();
-            }
-            else
-            {
-                requiredCapacity = (demand * 4 + 2) / 3;// ceil(demand / 0.75)
-            }
-
-            size_type minimumCapacity = std::max(desiredCapacity, requiredCapacity);
-            if (m_capacity)
-            {
-                const size_type growthBuffer = std::max<size_type>(m_capacity / 2, GroupSize);
-                if (m_capacity > std::numeric_limits<size_type>::max() - growthBuffer)
-                    minimumCapacity = std::numeric_limits<size_type>::max();
-                else
-                    minimumCapacity = std::max(minimumCapacity, m_capacity + growthBuffer);
-            }
-            else
-            {
-                minimumCapacity = std::max(minimumCapacity, GroupSize * 2);
-            }
-
-            minimumCapacity = std::max(minimumCapacity, static_cast<size_type>(GroupSize));
-
-            const size_type maxPowerOfTwo = size_type {1} << (std::numeric_limits<size_type>::digits - 1);
-            size_type       targetCapacity;
-            if (minimumCapacity > maxPowerOfTwo)
-            {
-                targetCapacity = maxPowerOfTwo;
-            }
-            else
-            {
-                targetCapacity = std::bit_ceil(minimumCapacity);
-            }
-
-            size_type newGroupCount = targetCapacity / GroupSize;
-            Group*    newGroups     = AllocateGroups(newGroupCount);
-
-            auto* state          = new MigrationState();
-            state->oldGroups     = m_table.groups;
-            state->oldGroupCount = m_table.groupCount;
-            state->oldMask       = m_mask;
-            state->newGroups     = newGroups;
-            state->newGroupCount = newGroupCount;
-            state->newMask       = targetCapacity - 1;
-            state->newThreshold  = ComputeThreshold(targetCapacity);
-            state->nextGroup.store(0, std::memory_order_relaxed);
-            state->migratedGroups.store(0, std::memory_order_relaxed);
-            state->activeUsers.store(1, std::memory_order_relaxed);
-            state->finalized.store(false, std::memory_order_relaxed);
-            state->destroyed.store(false, std::memory_order_relaxed);
-
-            MigrationState* expected = nullptr;
-            if (m_migration.compare_exchange_strong(
-                        expected,
-                        state,
-                        std::memory_order_acq_rel,
-                        std::memory_order_relaxed))
-            {
-                // Winner: flush shards now to capture precise size for potential future growth heuristics.
-                FlushAllShards();
-                // Flip epoch to odd to signal migration in progress (only if currently even)
-                size_type e = m_epoch.load(std::memory_order_relaxed);
-                while ((e & 1u) == 0 && !m_epoch.compare_exchange_weak(e, e | 1u, std::memory_order_acq_rel)) {}
-                m_table.groups     = newGroups;
-                m_table.groupCount = newGroupCount;
-                m_capacity         = targetCapacity;
-                m_mask             = state->newMask;
-                m_resizeThreshold  = state->newThreshold;
-                // Publish new table view (groups then mask) with release ordering.
-                m_pubGroups.store(m_table.groups, std::memory_order_relaxed);
-                std::atomic_thread_fence(std::memory_order_release);
-                m_pubMask.store(m_mask, std::memory_order_release);
-                HelpMigration(state, 1);
-                const bool finalized = FinalizeMigration(state);
-                ReleaseMigration(state);
-                if (finalized && !state->destroyed.exchange(true, std::memory_order_acq_rel))
-                    DestroyMigrationState(state);
-            }
-            else
-            {
-                state->activeUsers.store(0, std::memory_order_relaxed);
-                ReleaseGroups(newGroups, newGroupCount);
-                delete state;
-            }
-        }
-
-        void DrainMigration() noexcept
-        {
-            while (true)
-            {
-                MigrationState* migration = AcquireMigration();
-                if (!migration)
-                    break;
-                HelpMigration(migration, migration->oldGroupCount);
-                const bool finalized = FinalizeMigration(migration);
-                ReleaseAndMaybeDestroy(migration, finalized);
-            }
-        }
-
-        void HelpMigration(MigrationState* state, size_type budget = 1) noexcept
-        {
-            if (!state)
-                return;
-            // If migration already finalized we should not continue touching old groups.
-            if (state->finalized.load(std::memory_order_acquire))
-                return;
-            const size_type totalGroups = state->oldGroupCount;
-            size_type       processed   = 0;
-            while (processed < budget)
-            {
-                const size_type groupIndex = state->nextGroup.fetch_add(1, std::memory_order_acq_rel);
-                if (groupIndex >= totalGroups)
-                    break;
-                MigrateGroup(state, groupIndex);
-                state->migratedGroups.fetch_add(1, std::memory_order_acq_rel);
-                ++processed;
-            }
-        }
-
-        bool FinalizeMigration(MigrationState* state) noexcept
-        {
-            if (!state)
-                return false;
-            if (state->migratedGroups.load(std::memory_order_acquire) < state->oldGroupCount)
-                return false;
-
-            MigrationState* expected = state;
-            if (!m_migration.compare_exchange_strong(
-                        expected,
-                        nullptr,
-                        std::memory_order_acq_rel,
-                        std::memory_order_relaxed))
-            {
-                return false;
-            }
-            state->finalized.store(true, std::memory_order_release);
-            // Return epoch to even if currently odd.
-            size_type cur = m_epoch.load(std::memory_order_relaxed);
-            if (cur & 1u)
-                m_epoch.store(cur + 1, std::memory_order_release);
-            return true;
-        }
-
-        void MigrateGroup(MigrationState* state, size_type groupIndex) noexcept
-        {
-            if (!state)
-                return;
-            // Avoid migrating after finalization (oldGroups may be retired/reclaimed soon).
-            if (state->finalized.load(std::memory_order_acquire))
-                return;
-            TableView       oldView {state->oldGroups, state->oldMask};
-            const size_type base = groupIndex << kGroupShift;
-            bool            pendingWork;
-            detail::Backoff slotBackoff;
-            detail::Backoff pendingBackoff;
-            do
-            {
-                pendingWork = false;
-                for (size_type offset = 0; offset < GroupSize; ++offset)
-                {
-                    const size_type index = (base + offset) & state->oldMask;
-                    auto&           slot  = SlotAt(oldView, index);
-
-                    while (true)
-                    {
-                        const auto slotState = slot.State(std::memory_order_acquire);
-                        if (slotState == detail::SlotState::Empty)
-                        {
-                            slotBackoff.Reset();
-                            break;
-                        }
-                        if (slotState == detail::SlotState::Tombstone)
-                        {
-                            if (slot.TryLockFrom(detail::SlotState::Tombstone))
-                            {
-                                slot.hash = 0;
-                                slot.UnlockTo(detail::SlotState::Empty);
-                            }
-                            slotBackoff.Reset();
-                            break;
-                        }
-                        if (slotState == detail::SlotState::PendingInsert)
-                        {
-                            pendingWork = true;
-                            slotBackoff.Pause();
-                            break;
-                        }
-                        if (slotState == detail::SlotState::Occupied)
-                        {
-                            if (!slot.TryLockFrom(detail::SlotState::Occupied))
-                            {
-                                pendingWork = true;
-                                slotBackoff.Pause();
-                                break;
-                            }
-
-                            Key               keyCopy   = std::move(slot.KeyRef());
-                            Value             valueCopy = std::move(slot.ValueRef());
-                            const std::size_t hash      = slot.hash;
-                            slot.DestroyPayload();
-                            slot.UnlockTo(detail::SlotState::Tombstone);
-                            slotBackoff.Reset();
-
-                            InsertMigrated(state, hash, std::move(keyCopy), std::move(valueCopy));
-                            break;
-                        }
-                    }
-                }
-                if (pendingWork)
-                    pendingBackoff.Pause();
-                else
-                    pendingBackoff.Reset();
-            } while (pendingWork);
-        }
-
-        void InsertMigrated(MigrationState* state, std::size_t hash, Key&& key, Value&& value)
-        {
-            Key             migrationKey   = std::move(key);
-            Value           migrationValue = std::move(value);
-            detail::Backoff backoff;
-            while (true)
-            {
-                TableView   newView = TableView {state->newGroups, state->newMask};
-                InsertProbe probe   = LocateForInsert(newView, migrationKey, hash);
-                if (!probe.slot)
-                {
-                    // No slot found under current probe budget; assist remaining migration work then retry.
-                    HelpMigration(state, 1);
-                    backoff.Pause();
-                    continue;// Retry until slot acquired (capacity chosen at migration start should have space)
-                }
-
-                if (!probe.isNew)
-                {
-                    try
-                    {
-                        probe.slot->AssignValue(migrationValue);
-                    } catch (...)
-                    {
-                        probe.slot->UnlockTo(detail::SlotState::Occupied);
-                        throw;
-                    }
-                    probe.slot->UnlockTo(detail::SlotState::Occupied);
-                    return;
-                }
-
-                try
-                {
-                    probe.slot->ConstructPayload(hash, std::move(migrationKey), std::move(migrationValue));
-                    probe.slot->UnlockTo(detail::SlotState::Occupied);
-                    return;
-                } catch (...)
-                {
-                    probe.slot->hash = 0;
-                    probe.slot->UnlockTo(probe.previousState);
-                    throw;
-                }
-            }
-        }
-
-        void RemoveFromOld(MigrationState* migration, const Key& key, std::size_t hash)
-        {
-            if (!migration)
-                return;
-            // Skip removal from old table if finalized (old table retiring).
-            if (migration->finalized.load(std::memory_order_acquire))
-                return;
-            TableView oldView {migration->oldGroups, migration->oldMask};
-            if (auto* secondarySlot = AcquireForMutation(oldView, key, hash))
-            {
-                secondarySlot->DestroyPayload();
-                secondarySlot->UnlockTo(detail::SlotState::Tombstone);
-            }
-        }
 
         template<class K>
-        InsertProbe LocateForInsert(const TableView& view, const K& key, std::size_t hash)
+        [[nodiscard]] auto ComputeHash(const K& key) const -> std::size_t
         {
-            size_type index = hash & view.mask;
-            // Yield budget: defensive upper bound on consecutive yields without progress to avoid pathological livelock.
-            // The theoretical maximum probes is capacity (mask+1). We allow additional yields before abandoning.
-            static constexpr size_type kExtraYieldBudget = 2 * 1024;// tunable
-            const size_type            capacity          = view.mask + 1;
-            size_type                  yields            = 0;
-            size_type                  steps             = 0;// number of examined slots
-            detail::Backoff            backoff;
-            for (size_type probe = 0; probe <= view.mask; ++probe)
-            {
-                auto& slot  = SlotAt(view, index);
-                auto  state = slot.State(std::memory_order_acquire);
-                switch (state)
-                {
-                    case detail::SlotState::Empty:
-                        if (slot.TryLockFrom(detail::SlotState::Empty))
-                        {
-                            // instrumentation removed
-                            return {&slot, detail::SlotState::Empty, true};
-                        }
-                        break;
-                    case detail::SlotState::Tombstone:
-                        if (slot.TryLockFrom(detail::SlotState::Tombstone))
-                        {
-                            // instrumentation removed
-                            return {&slot, detail::SlotState::Tombstone, true};
-                        }
-                        break;
-                    case detail::SlotState::Occupied: {
-                        if (slot.hash == hash)
-                        {
-                            if (slot.TryLockFrom(detail::SlotState::Occupied))
-                            {
-                                const bool match = m_equal(slot.KeyRef(), key);
-                                if (match)
-                                {
-                                    // instrumentation removed
-                                    return {&slot, detail::SlotState::Occupied, false};
-                                }
-                                slot.UnlockTo(detail::SlotState::Occupied);
-                            }
-                            else
-                            {
-                                if (backoff.Pause())
-                                    ++yields;
-                                // instrumentation removed
-                            }
-                        }
-                        break;
-                    }
-                    case detail::SlotState::PendingInsert:
-                        if (backoff.Pause())
-                            ++yields;
-                        // instrumentation removed
-                        break;
-                }
-                if (yields > capacity + kExtraYieldBudget)
-                {
-                    // instrumentation removed
-                    return {};// Abandon to let higher level potentially trigger migration/backoff.
-                }
-                index = (index + 1) & view.mask;
-                ++steps;
-            }
-            // instrumentation removed
-            return {};// Table appears saturated or heavy contention.
+            return static_cast<std::size_t>(std::invoke(m_hash, key));
         }
 
-        template<class K>
-        Slot* AcquireForMutation(const TableView& view, const K& key, std::size_t hash) noexcept
+        [[nodiscard]] auto FindNodeInChain(const Node* head, const Key& key, const std::size_t hash) const -> const Node*
         {
-            if (!ViewValid(view))
-                return nullptr;
-            if (!view.groups)
-                return nullptr;
-            size_type       index = hash & view.mask;
-            detail::Backoff backoff;
-            for (size_type probe = 0; probe <= view.mask; ++probe)
+            const Node* current = head;
+            while (current)
             {
-                auto& slot  = SlotAt(view, index);
-                auto  state = slot.State(std::memory_order_acquire);
-                if (state == detail::SlotState::Empty)
-                    return nullptr;
-                if (state == detail::SlotState::PendingInsert)
+                if (current->hash == hash && m_equal(current->key, key))
                 {
-                    backoff.Pause();
+                    return current;
                 }
-                else if (state == detail::SlotState::Occupied && slot.hash == hash)
-                {
-                    if (slot.TryLockFrom(detail::SlotState::Occupied))
-                    {
-                        if (m_equal(slot.KeyRef(), key))
-                            return &slot;
-                        slot.UnlockTo(detail::SlotState::Occupied);
-                    }
-                    else
-                    {
-                        backoff.Pause();
-                    }
-                }
-                index = (index + 1) & view.mask;
+                current = current->next;
             }
             return nullptr;
         }
 
-        template<class K>
-        bool ContainsInView(const TableView& view, const K& key, std::size_t hash) const noexcept
+        [[nodiscard]] auto FindNodeInTable(const Table* table, const Key& key, const std::size_t hash) const -> const Node*
         {
-            if (!ViewValid(view) || !view.groups)
-                return false;
-            size_type       index = hash & view.mask;
-            detail::Backoff backoff;
-            for (size_type probe = 0; probe <= view.mask;)
+            if (!table || table->bucketCount == 0)
             {
-                auto&      slot  = SlotAt(view, index);
-                const auto state = slot.State(std::memory_order_acquire);
-                if (state == detail::SlotState::Empty)
-                    return false;
-                if (state == detail::SlotState::PendingInsert)
-                {
-                    backoff.Pause();
-                    ++probe;
-                    index = (index + 1) & view.mask;
-                    continue;
-                }
-                else if (state == detail::SlotState::Occupied)
-                {
-                    const std::size_t observedHash = slot.hash;
-                    if (observedHash == hash)
-                    {
-                        const Key& candidateKey = slot.KeyRef();
-                        const auto verifyState  = slot.State(std::memory_order_acquire);
-                        if (verifyState == detail::SlotState::Occupied && slot.hash == observedHash &&
-                            m_equal(candidateKey, key))
-                        {
-                            return true;
-                        }
-                    }
-                }
-                ++probe;
-                index = (index + 1) & view.mask;
+                return nullptr;
             }
-            return false;
+
+            const size_type bucketIndex = BucketIndex(hash, table->bucketCount);
+            return FindNodeInChain(table->buckets[bucketIndex].load(std::memory_order_acquire), key, hash);
         }
 
-        template<class K>
-        bool TryCopyValueInView(const TableView& view, const K& key, std::size_t hash, Value& outValue) const
+        [[nodiscard]] auto ShardIndex(const std::size_t hash) const noexcept -> size_type
         {
-            if (!ViewValid(view) || !view.groups)
-                return false;
-            size_type       index = hash & view.mask;
-            detail::Backoff backoff;
-            for (size_type probe = 0; probe <= view.mask;)
+            if constexpr (detail::IsPowerOfTwo(ShardCount))
             {
-                auto&      slot  = SlotAt(view, index);
-                const auto state = slot.State(std::memory_order_acquire);
-                if (state == detail::SlotState::Empty)
-                    return false;
-                if (state == detail::SlotState::PendingInsert)
-                {
-                    backoff.Pause();
-                    ++probe;
-                    index = (index + 1) & view.mask;
-                    continue;
-                }
-                else if (state == detail::SlotState::Occupied)
-                {
-                    const std::size_t observedHash = slot.hash;
-                    if (observedHash == hash)
-                    {
-                        Value      snapshot     = slot.ValueRef();
-                        const Key& candidateKey = slot.KeyRef();
-                        const auto verifyState  = slot.State(std::memory_order_acquire);
-                        if (verifyState == detail::SlotState::Occupied && slot.hash == observedHash &&
-                            m_equal(candidateKey, key))
-                        {
-                            outValue = std::move(snapshot);
-                            return true;
-                        }
-                    }
-                }
-                ++probe;
-                index = (index + 1) & view.mask;
+                return hash & (ShardCount - 1);
             }
-            return false;
+            return hash % ShardCount;
+        }
+
+        [[nodiscard]] auto ShardForHash(const std::size_t hash) noexcept -> Shard&
+        {
+            return m_shards[ShardIndex(hash)];
+        }
+
+        [[nodiscard]] auto ShardForHash(const std::size_t hash) const noexcept -> const Shard&
+        {
+            return m_shards[ShardIndex(hash)];
+        }
+
+        [[nodiscard]] static auto BucketIndex(const std::size_t hash, const size_type bucketCount) noexcept -> size_type
+        {
+            return hash & (bucketCount - 1);
+        }
+
+        [[nodiscard]] static auto BucketCountForElements(const size_type desiredElements) noexcept -> size_type
+        {
+            const size_type adjusted = std::max<size_type>(
+                    kMinBucketsPerShard,
+                    desiredElements == 0 ? kMinBucketsPerShard
+                                         : detail::CeilDivide(desiredElements * 4 + 2, 3));
+            return std::bit_ceil(adjusted);
+        }
+
+        [[nodiscard]] auto AllocateBytes(const size_type bytes, const size_type alignment) -> void*
+        {
+            void* memory = m_allocator.Allocate(bytes, alignment);
+            if (!memory)
+            {
+                throw std::bad_alloc();
+            }
+            return memory;
+        }
+
+        template<class T, class... Args>
+        [[nodiscard]] auto AllocateObject(Args&&... args) -> T*
+        {
+            void* memory = AllocateBytes(sizeof(T), alignof(T));
+            try
+            {
+                return ::new (memory) T(std::forward<Args>(args)...);
+            } catch (...)
+            {
+                m_allocator.Deallocate(memory, sizeof(T), alignof(T));
+                throw;
+            }
+        }
+
+        template<class T>
+        void DestroyObject(T* object) noexcept
+        {
+            if (!object)
+            {
+                return;
+            }
+            object->~T();
+            m_allocator.Deallocate(object, sizeof(T), alignof(T));
+        }
+
+        [[nodiscard]] auto AllocateBuckets(const size_type bucketCount) -> typename Table::Bucket*
+        {
+            using Bucket = typename Table::Bucket;
+
+            auto* buckets = static_cast<Bucket*>(
+                    AllocateBytes(sizeof(Bucket) * bucketCount, alignof(Bucket)));
+            size_type initialized = 0;
+            try
+            {
+                for (; initialized < bucketCount; ++initialized)
+                {
+                    ::new (static_cast<void*>(buckets + initialized)) Bucket(nullptr);
+                }
+            } catch (...)
+            {
+                for (size_type i = 0; i < initialized; ++i)
+                {
+                    buckets[i].~Bucket();
+                }
+                m_allocator.Deallocate(buckets, sizeof(Bucket) * bucketCount, alignof(Bucket));
+                throw;
+            }
+
+            return buckets;
+        }
+
+        void DestroyBuckets(typename Table::Bucket* buckets, const size_type bucketCount) noexcept
+        {
+            if (!buckets)
+            {
+                return;
+            }
+
+            using Bucket = typename Table::Bucket;
+            for (size_type i = 0; i < bucketCount; ++i)
+            {
+                buckets[i].~Bucket();
+            }
+            m_allocator.Deallocate(buckets, sizeof(Bucket) * bucketCount, alignof(Bucket));
+        }
+
+        [[nodiscard]] auto AllocateEmptyTable(const size_type bucketCount) -> Table*
+        {
+            auto* table        = AllocateObject<Table>();
+            table->bucketCount = bucketCount;
+            try
+            {
+                table->buckets = AllocateBuckets(bucketCount);
+            } catch (...)
+            {
+                DestroyObject(table);
+                throw;
+            }
+            return table;
         }
 
         template<class K, class V>
-        bool EmplaceOrAssignInternal(K&& key, V&& value)
+        [[nodiscard]] auto AllocateNode(const std::size_t hash, Node* next, K&& key, V&& value) -> Node*
         {
-            const std::size_t hash         = ComputeHash(key);
-            size_type         attemptCount = 0;// counts LocateForInsert failures (returned empty probe)
-            // stats removed
-            while (true)
+            return AllocateObject<Node>(hash, next, std::forward<K>(key), std::forward<V>(value));
+        }
+
+        void DestroyChain(Node* head) noexcept
+        {
+            while (head)
             {
-                ViewToken   token     = AcquireGuardedView();
-                TableView   primary   = token.view;
-                bool        finalized = false;
-                InsertProbe probe     = LocateForInsert(primary, key, hash);
-                if (!probe.slot)
-                {
-                    // If in migration, help advance it before backing off.
-                    if (token.mig)
-                    {
-                        HelpMigration(token.mig, 8);
-                        finalized = FinalizeMigration(token.mig);
-                    }
-                    ReleaseGuard(token, finalized);
-                    ++attemptCount;
-                    // Escalate: if we repeatedly fail to find a slot, forcibly start a migration to grow capacity.
-                    if ((attemptCount & (attemptCount - 1)) == 0)// on powers of two attempts: 1,2,4,8,...
-                    {
-                        size_type desired = m_capacity ? m_capacity * 2 : (GroupSize * 2);
-                        StartMigration(desired);
-                    }
-                    else
-                    {
-                        MaybeStartMigration();
-                    }
-                    // Spin + jitter backoff
-                    {
-                        static thread_local uint32_t seed     = 0x9E3779B9u ^ static_cast<uint32_t>(reinterpret_cast<uintptr_t>(this));
-                        auto                         nextRand = [&]() noexcept { uint32_t x = seed; x ^= x << 13; x ^= x >> 17; x ^= x << 5; seed = x; return x; };
-                        const int                    power    = attemptCount < 12 ? static_cast<int>(attemptCount) : 12;
-                        int                          spins    = (32 << power) + static_cast<int>(nextRand() & 31u);
-                        if (attemptCount > 20)
-                            spins = 256;
-                        for (int i = 0; i < spins; ++i)
-                        {
-#if (defined(__x86_64__) || defined(_M_X64) || defined(__i386) || defined(_M_IX86))
-                            _mm_pause();
-#else
-                            asm volatile("");
-#endif
-                        }
-                        if (attemptCount > 8)
-                            std::this_thread::yield();
-                    }
-                    continue;
-                }
-
-                if (!probe.isNew)
-                {
-                    try
-                    {
-                        probe.slot->AssignValue(std::forward<V>(value));
-                    } catch (...)
-                    {
-                        probe.slot->UnlockTo(detail::SlotState::Occupied);
-                        ReleaseGuard(token, finalized);
-                        throw;
-                    }
-                    probe.slot->UnlockTo(detail::SlotState::Occupied);
-                    // stats removed
-                    if (token.mig)
-                    {
-                        HelpMigration(token.mig);
-                        finalized = FinalizeMigration(token.mig);
-                    }
-                    else
-                    {
-                        MaybeStartMigration();
-                    }
-                    ReleaseGuard(token, finalized);
-                    return false;
-                }
-
-                try
-                {
-                    probe.slot->ConstructPayload(hash, std::forward<K>(key), std::forward<V>(value));
-                    probe.slot->UnlockTo(detail::SlotState::Occupied);
-                } catch (...)
-                {
-                    probe.slot->hash = 0;
-                    probe.slot->UnlockTo(probe.previousState);
-                    ReleaseGuard(token, finalized);
-                    throw;
-                }
-
-                IncrementSizeShard();
-                // adaptive logic removed (relied on removed stats)
-
-                if (token.mig)
-                {
-                    HelpMigration(token.mig);
-                    finalized = FinalizeMigration(token.mig);
-                }
-                else
-                {
-                    MaybeStartMigration(1);
-                }
-                ReleaseGuard(token, finalized);
-                return true;
+                Node* next = head->next;
+                DestroyObject(head);
+                head = next;
             }
+        }
+
+        void DestroyTable(Table* table) noexcept
+        {
+            if (!table)
+            {
+                return;
+            }
+
+            for (size_type bucketIndex = 0; bucketIndex < table->bucketCount; ++bucketIndex)
+            {
+                DestroyChain(table->buckets[bucketIndex].load(std::memory_order_relaxed));
+            }
+
+            DestroyBuckets(table->buckets, table->bucketCount);
+            DestroyObject(table);
+        }
+
+        static void DestroyChainThunk(void* context, void* object) noexcept
+        {
+            auto* self = static_cast<ConcurrentHashMap*>(context);
+            self->DestroyChain(static_cast<Node*>(object));
+        }
+
+        static void DestroyTableThunk(void* context, void* object) noexcept
+        {
+            auto* self = static_cast<ConcurrentHashMap*>(context);
+            self->DestroyTable(static_cast<Table*>(object));
+        }
+
+        void RetireChain(Shard& shard, Node* chainHead)
+        {
+            shard.reclaimer.Retire(chainHead, this, &DestroyChainThunk);
+        }
+
+        void RetireTable(Shard& shard, Table* table)
+        {
+            shard.reclaimer.Retire(table, this, &DestroyTableThunk);
+        }
+
+        [[nodiscard]] auto CloneChain(const Node* head) -> Node*
+        {
+            std::vector<const Node*> nodes;
+            for (const Node* current = head; current; current = current->next)
+            {
+                nodes.push_back(current);
+            }
+
+            Node* newHead = nullptr;
+            try
+            {
+                for (auto it = nodes.rbegin(); it != nodes.rend(); ++it)
+                {
+                    const Node* source = *it;
+                    newHead            = AllocateNode(source->hash, newHead, source->key, source->value);
+                }
+            } catch (...)
+            {
+                DestroyChain(newHead);
+                throw;
+            }
+
+            return newHead;
+        }
+
+        template<class NewValueFactory>
+        [[nodiscard]] auto CloneChainReplacingValue(const Node*       head,
+                                                    const Key&        key,
+                                                    const std::size_t hash,
+                                                    NewValueFactory&& factory) -> Node*
+        {
+            std::vector<const Node*> nodes;
+            for (const Node* current = head; current; current = current->next)
+            {
+                nodes.push_back(current);
+            }
+
+            Node* newHead = nullptr;
+            try
+            {
+                for (auto it = nodes.rbegin(); it != nodes.rend(); ++it)
+                {
+                    const Node* source = *it;
+                    if (source->hash == hash && m_equal(source->key, key))
+                    {
+                        auto value = std::invoke(factory, source->value);
+                        newHead    = AllocateNode(source->hash, newHead, source->key, std::move(value));
+                    }
+                    else
+                    {
+                        newHead = AllocateNode(source->hash, newHead, source->key, source->value);
+                    }
+                }
+            } catch (...)
+            {
+                DestroyChain(newHead);
+                throw;
+            }
+
+            return newHead;
+        }
+
+        [[nodiscard]] auto CloneChainWithoutKey(const Node* head, const Key& key, const std::size_t hash) -> Node*
+        {
+            std::vector<const Node*> nodes;
+            for (const Node* current = head; current; current = current->next)
+            {
+                nodes.push_back(current);
+            }
+
+            Node* newHead = nullptr;
+            try
+            {
+                for (auto it = nodes.rbegin(); it != nodes.rend(); ++it)
+                {
+                    const Node* source = *it;
+                    if (source->hash == hash && m_equal(source->key, key))
+                    {
+                        continue;
+                    }
+                    newHead = AllocateNode(source->hash, newHead, source->key, source->value);
+                }
+            } catch (...)
+            {
+                DestroyChain(newHead);
+                throw;
+            }
+
+            return newHead;
+        }
+
+        template<class K, class V>
+        [[nodiscard]] auto CloneChainWithPrepended(const Node* head, const std::size_t hash, K&& key, V&& value) -> Node*
+        {
+            Node* cloned = CloneChain(head);
+            try
+            {
+                return AllocateNode(hash, cloned, std::forward<K>(key), std::forward<V>(value));
+            } catch (...)
+            {
+                DestroyChain(cloned);
+                throw;
+            }
+        }
+
+        [[nodiscard]] auto ResizeTable(const Table* current, const size_type desiredElements) -> Table*
+        {
+            const size_type newBucketCount = BucketCountForElements(desiredElements);
+            if (current && current->bucketCount >= newBucketCount)
+            {
+                return nullptr;
+            }
+
+            Table* replacement = AllocateEmptyTable(newBucketCount);
+            try
+            {
+                if (current)
+                {
+                    for (size_type bucketIndex = 0; bucketIndex < current->bucketCount; ++bucketIndex)
+                    {
+                        for (const Node* node = current->buckets[bucketIndex].load(std::memory_order_relaxed);
+                             node;
+                             node = node->next)
+                        {
+                            const size_type targetIndex =
+                                    BucketIndex(node->hash, replacement->bucketCount);
+                            Node* head = replacement->buckets[targetIndex].load(std::memory_order_relaxed);
+                            Node* copy = AllocateNode(node->hash, head, node->key, node->value);
+                            replacement->buckets[targetIndex].store(copy, std::memory_order_relaxed);
+                        }
+                    }
+                }
+            } catch (...)
+            {
+                DestroyTable(replacement);
+                throw;
+            }
+
+            return replacement;
+        }
+
+        void EnsureShardCapacity(Shard& shard, const size_type desiredElements)
+        {
+            Table* current = shard.table.load(std::memory_order_acquire);
+            Table* resized = ResizeTable(current, desiredElements);
+            if (!resized)
+            {
+                return;
+            }
+
+            shard.table.store(resized, std::memory_order_release);
+            shard.bucketCount.store(resized->bucketCount, std::memory_order_release);
+            RetireTable(shard, current);
+        }
+
+        template<class K, class V>
+        bool InsertOrAssignInternal(K&& key, V&& value)
+        {
+            const std::size_t               hash  = ComputeHash(key);
+            Shard&                          shard = ShardForHash(hash);
+            std::lock_guard<Sync::SpinLock> lock(shard.writeLock);
+
+            EnsureShardCapacity(shard, shard.size + 1);
+
+            Table* const    table       = shard.table.load(std::memory_order_acquire);
+            const size_type bucketIndex = BucketIndex(hash, table->bucketCount);
+            Node* const     oldHead     = table->buckets[bucketIndex].load(std::memory_order_acquire);
+
+            bool  inserted = FindNodeInChain(oldHead, key, hash) == nullptr;
+            Node* newHead  = nullptr;
+            if (inserted)
+            {
+                newHead = CloneChainWithPrepended(oldHead, hash, std::forward<K>(key), std::forward<V>(value));
+            }
+            else
+            {
+                auto replaceFactory = [&value](const Value&) -> Value {
+                    return Value(std::forward<V>(value));
+                };
+                newHead = CloneChainReplacingValue(oldHead, key, hash, replaceFactory);
+            }
+
+            table->buckets[bucketIndex].store(newHead, std::memory_order_release);
+            RetireChain(shard, oldHead);
+
+            if (inserted)
+            {
+                ++shard.size;
+                m_size.fetch_add(1, std::memory_order_acq_rel);
+            }
+
+            shard.reclaimer.Poll();
+            return inserted;
         }
 
         template<class K, class V, class Updater>
         bool UpsertInternal(K&& key, V&& value, Updater&& updater)
         {
-            const std::size_t hash         = ComputeHash(key);
-            size_type         attemptCount = 0;
-            // stats removed
-            while (true)
+            const std::size_t               hash  = ComputeHash(key);
+            Shard&                          shard = ShardForHash(hash);
+            std::lock_guard<Sync::SpinLock> lock(shard.writeLock);
+
+            EnsureShardCapacity(shard, shard.size + 1);
+
+            Table* const    table       = shard.table.load(std::memory_order_acquire);
+            const size_type bucketIndex = BucketIndex(hash, table->bucketCount);
+            Node* const     oldHead     = table->buckets[bucketIndex].load(std::memory_order_acquire);
+
+            const bool inserted = FindNodeInChain(oldHead, key, hash) == nullptr;
+            Node*      newHead  = nullptr;
+            if (inserted)
             {
-                ViewToken   token     = AcquireGuardedView();
-                TableView   primary   = token.view;
-                bool        finalized = false;
-                InsertProbe probe     = LocateForInsert(primary, key, hash);
-                if (!probe.slot)
-                {
-                    if (token.mig)
-                    {
-                        HelpMigration(token.mig, 8);
-                        finalized = FinalizeMigration(token.mig);
-                    }
-                    ReleaseGuard(token, finalized);
-                    ++attemptCount;
-                    if ((attemptCount & (attemptCount - 1)) == 0)
-                    {
-                        size_type desired = m_capacity ? m_capacity * 2 : (GroupSize * 2);
-                        StartMigration(desired);
-                    }
-                    else
-                    {
-                        MaybeStartMigration();
-                    }
-                    // Spin + jitter backoff
-                    {
-                        static thread_local uint32_t seed     = 0x85EBCA77u ^ static_cast<uint32_t>(reinterpret_cast<uintptr_t>(this));
-                        auto                         nextRand = [&]() noexcept { uint32_t x = seed; x ^= x << 13; x ^= x >> 17; x ^= x << 5; seed = x; return x; };
-                        const int                    power    = attemptCount < 12 ? static_cast<int>(attemptCount) : 12;
-                        int                          spins    = (32 << power) + static_cast<int>(nextRand() & 31u);
-                        if (attemptCount > 20)
-                            spins = 256;
-                        for (int i = 0; i < spins; ++i)
-                        {
-                            NGIN_CPU_RELAX();
-                        }
-                        if (attemptCount > 8)
-                            std::this_thread::yield();
-                    }
-                    continue;
-                }
-
-                if (!probe.isNew)
-                {
-                    try
-                    {
-                        std::invoke(std::forward<Updater>(updater), probe.slot->ValueRef(), std::forward<V>(value));
-                    } catch (...)
-                    {
-                        probe.slot->UnlockTo(detail::SlotState::Occupied);
-                        ReleaseGuard(token, finalized);
-                        throw;
-                    }
-                    probe.slot->UnlockTo(detail::SlotState::Occupied);
-                    // stats removed
-                    if (token.mig)
-                    {
-                        HelpMigration(token.mig);
-                        finalized = FinalizeMigration(token.mig);
-                    }
-                    else
-                    {
-                        MaybeStartMigration();
-                    }
-                    ReleaseGuard(token, finalized);
-                    return false;
-                }
-
-                try
-                {
-                    probe.slot->ConstructPayload(hash, std::forward<K>(key), std::forward<V>(value));
-                    probe.slot->UnlockTo(detail::SlotState::Occupied);
-                } catch (...)
-                {
-                    probe.slot->hash = 0;
-                    probe.slot->UnlockTo(probe.previousState);
-                    ReleaseGuard(token, finalized);
-                    throw;
-                }
-
-                IncrementSizeShard();
-                // adaptive logic removed (relied on removed stats)
-
-                if (token.mig)
-                {
-                    HelpMigration(token.mig);
-                    finalized = FinalizeMigration(token.mig);
-                }
-                else
-                {
-                    MaybeStartMigration(1);
-                }
-                ReleaseGuard(token, finalized);
-                return true;
+                newHead = CloneChainWithPrepended(oldHead, hash, std::forward<K>(key), std::forward<V>(value));
+                ++shard.size;
+                m_size.fetch_add(1, std::memory_order_acq_rel);
             }
+            else
+            {
+                auto replaceFactory = [&value, &updater](const Value& current) -> Value {
+                    Value next = current;
+                    std::invoke(updater, next, std::forward<V>(value));
+                    return next;
+                };
+                newHead = CloneChainReplacingValue(oldHead, key, hash, replaceFactory);
+            }
+
+            table->buckets[bucketIndex].store(newHead, std::memory_order_release);
+            RetireChain(shard, oldHead);
+            shard.reclaimer.Poll();
+            return inserted;
         }
 
-        template<class K>
-        [[nodiscard]] std::size_t ComputeHash(const K& key) const
-        {
-            return static_cast<std::size_t>(std::invoke(m_hash, key));
-        }
-
-    public:
-        // Diagnostics API removed.
+        std::atomic<size_type> m_size {0};
+        alignas(64) Shard m_shards[ShardCount] {};
+        [[no_unique_address]] Hash      m_hash {};
+        [[no_unique_address]] Equal     m_equal {};
+        [[no_unique_address]] Allocator m_allocator {};
     };
 }// namespace NGIN::Containers
