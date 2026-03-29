@@ -211,6 +211,35 @@ TEST_CASE("String constructs from small and large C strings", "[Text][String]")
     }
 }
 
+TEST_CASE("String constructs from pointer-length ranges", "[Text][String]")
+{
+    const char* text = "alphabet soup";
+
+    SECTION("empty range accepts null")
+    {
+        String value(nullptr, 0);
+        CHECK(value.Empty());
+    }
+
+    SECTION("small bounded range")
+    {
+        String value(text, 5);
+        CHECK(value.View() == std::string_view("alpha"));
+    }
+
+    SECTION("heap bounded range")
+    {
+        std::string large(80, 'x');
+        String      value(large.data(), large.size());
+        CHECK(value.View() == std::string_view(large));
+    }
+
+    SECTION("null pointer with non-zero count throws")
+    {
+        CHECK_THROWS_AS((String(nullptr, 1)), std::invalid_argument);
+    }
+}
+
 TEST_CASE("String copy constructor preserves content", "[Text][String]")
 {
     SECTION("small buffer")
@@ -382,6 +411,120 @@ TEST_CASE("String append operations", "[Text][String]")
         String value("ab");
         value.Append(3, 'x');
         CHECK(value.View() == std::string_view("abxxx"));
+    }
+}
+
+TEST_CASE("String pointer-length assign and append preserve overlap handling", "[Text][String]")
+{
+    SECTION("Assign overlap")
+    {
+        String value("abcdef");
+        value.Assign(value.Data() + 2, 3);
+        CHECK(value.View() == std::string_view("cde"));
+    }
+
+    SECTION("Append overlap")
+    {
+        String value("abcdef");
+        value.Append(value.Data() + 1, 4);
+        CHECK(value.View() == std::string_view("abcdefbcde"));
+    }
+
+    SECTION("null pointer with non-zero count throws")
+    {
+        String value("abcdef");
+        CHECK_THROWS_AS(value.Assign(nullptr, 1), std::invalid_argument);
+        CHECK_THROWS_AS(value.Append(nullptr, 1), std::invalid_argument);
+    }
+}
+
+TEST_CASE("String overwrite APIs support direct builders", "[Text][String]")
+{
+    SECTION("ResizeAndOverwrite exact and shorter writes")
+    {
+        String value("alpha");
+
+        value.ResizeAndOverwrite(5, [](char* buffer, String::size_type writableCount) {
+            REQUIRE(writableCount == 5U);
+            std::memcpy(buffer, "omega", 5);
+            return 5U;
+        });
+        CHECK(value.View() == std::string_view("omega"));
+
+        value.ResizeAndOverwrite(8, [](char* buffer, String::size_type writableCount) {
+            REQUIRE(writableCount == 8U);
+            std::memcpy(buffer, "hi", 2);
+            return 2U;
+        });
+        CHECK(value.View() == std::string_view("hi"));
+    }
+
+    SECTION("ResizeAndOverwrite restores size on throw and on oversized result")
+    {
+        String value("alpha");
+
+        CHECK_THROWS_AS(
+                value.ResizeAndOverwrite(10, [](char* buffer, String::size_type) -> String::size_type {
+                    buffer[0] = 'z';
+                    throw std::runtime_error("boom");
+                }),
+                std::runtime_error);
+        CHECK(value.Size() == 5U);
+        CHECK(value.Data()[value.Size()] == '\0');
+
+        CHECK_THROWS_AS(
+                value.ResizeAndOverwrite(3, [](char*, String::size_type) { return 4U; }),
+                std::length_error);
+        CHECK(value.Size() == 5U);
+        CHECK(value.Data()[value.Size()] == '\0');
+    }
+
+    SECTION("AppendAndOverwrite exact shorter and throwing writes")
+    {
+        String value("pre");
+
+        value.AppendAndOverwrite(5, [](char* buffer, String::size_type writableCount) {
+            REQUIRE(writableCount == 5U);
+            std::memcpy(buffer, "hello", 5);
+            return 5U;
+        });
+        CHECK(value.View() == std::string_view("prehello"));
+
+        value.AppendAndOverwrite(4, [](char* buffer, String::size_type writableCount) {
+            REQUIRE(writableCount == 4U);
+            std::memcpy(buffer, "xy", 2);
+            return 2U;
+        });
+        CHECK(value.View() == std::string_view("prehelloxy"));
+
+        CHECK_THROWS_AS(
+                value.AppendAndOverwrite(6, [](char* buffer, String::size_type) -> String::size_type {
+                    buffer[0] = '!';
+                    throw std::runtime_error("boom");
+                }),
+                std::runtime_error);
+        CHECK(value.View() == std::string_view("prehelloxy"));
+
+        CHECK_THROWS_AS(
+                value.AppendAndOverwrite(3, [](char*, String::size_type) { return 5U; }),
+                std::length_error);
+        CHECK(value.View() == std::string_view("prehelloxy"));
+    }
+
+    SECTION("Overwrite APIs can force heap growth and explicit view conversion remains available")
+    {
+        String value("tiny");
+
+        value.ResizeAndOverwrite(80, [](char* buffer, String::size_type writableCount) {
+            for (String::size_type i = 0; i < writableCount; ++i)
+                buffer[i] = 'a';
+            return writableCount;
+        });
+        CHECK(value.Size() == 80U);
+        CHECK(value.Capacity() >= 80U);
+
+        const String::view_type view = static_cast<String::view_type>(value);
+        CHECK(view.size() == value.Size());
     }
 }
 
@@ -766,6 +909,21 @@ TEST_CASE("String supports traits-aware comparisons", "[Text][String]")
     CHECK(value.FindFirstOf("xyzl") == 2U);
     CHECK(value.FindFirstNotOf("he") == 2U);
     CHECK(value.FindLastNotOf("lo") == 1U);
+}
+
+TEST_CASE("String relational operators are routed through Compare", "[Text][String]")
+{
+    String alpha("alpha");
+    String beta("beta");
+
+    CHECK(alpha < beta);
+    CHECK(alpha <= beta);
+    CHECK(beta > alpha);
+    CHECK(beta >= alpha);
+    CHECK(alpha <= String::view_type {"alpha", 5});
+    CHECK(alpha >= String::view_type {"alpha", 5});
+    CHECK(String::view_type {"aardvark", 8} < beta);
+    CHECK(String::view_type {"gamma", 5} > beta);
 }
 
 TEST_CASE("String supports wide character SBO storage", "[Text][String]")

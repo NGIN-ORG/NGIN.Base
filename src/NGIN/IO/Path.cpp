@@ -30,7 +30,7 @@ namespace NGIN::IO
         [[nodiscard]] NGIN::Containers::Vector<std::string_view> SplitNormalizedComponents(std::string_view value)
         {
             NGIN::Containers::Vector<std::string_view> out;
-            std::size_t pos = 0;
+            std::size_t                                pos = 0;
             if (IsDrivePrefix(value))
             {
                 pos = 2;
@@ -74,7 +74,7 @@ namespace NGIN::IO
 
     bool Path::IsAbsolute() const noexcept
     {
-        const std::string_view view = m_path;
+        const std::string_view view = m_path.View();
         if (view.empty())
             return false;
         if (IsDrivePrefix(view))
@@ -101,7 +101,7 @@ namespace NGIN::IO
 
     std::string_view Path::Filename() const noexcept
     {
-        const std::string_view view = m_path;
+        const std::string_view view = m_path.View();
         if (view.empty())
             return {};
         std::size_t end = view.size();
@@ -149,7 +149,7 @@ namespace NGIN::IO
 
     Path Path::Parent() const
     {
-        const std::string_view view = m_path;
+        const std::string_view view = m_path.View();
         if (view.empty())
             return Path {};
 
@@ -199,7 +199,7 @@ namespace NGIN::IO
 
     void Path::Normalize()
     {
-        const std::string_view view = m_path;
+        const std::string_view view = m_path.View();
         if (view.empty())
             return;
 
@@ -291,8 +291,8 @@ namespace NGIN::IO
 
     Path Path::LexicallyRelativeTo(const Path& base) const
     {
-        Path lhs = LexicallyNormal();
-        Path rhs = base.LexicallyNormal();
+        Path                   lhs     = LexicallyNormal();
+        Path                   rhs     = base.LexicallyNormal();
         const std::string_view lhsView = lhs.View();
         const std::string_view rhsView = rhs.View();
 
@@ -319,7 +319,7 @@ namespace NGIN::IO
             ++common;
 
         NGIN::Text::String out;
-        bool wrote = false;
+        bool               wrote = false;
         for (std::size_t i = common; i < rhsParts.Size(); ++i)
         {
             if (wrote)
@@ -392,9 +392,9 @@ namespace NGIN::IO
         if (name.empty())
             return *this;
 
-        const std::size_t suffixLen = name.size();
-        const std::size_t start = view.size() - suffixLen;
-        const std::size_t dot = name.find_last_of('.');
+        const std::size_t  suffixLen = name.size();
+        const std::size_t  start     = view.size() - suffixLen;
+        const std::size_t  dot       = name.find_last_of('.');
         NGIN::Text::String out;
         if (dot == std::string_view::npos || dot == 0)
         {

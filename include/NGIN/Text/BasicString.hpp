@@ -129,6 +129,13 @@ namespace NGIN::Text
                 InitFromView(view_type {cstr, static_cast<size_type>(traits_type::length(cstr))});
         }
 
+        BasicString(const CharT* data, size_type count, const Alloc& alloc = Alloc())
+            : m_allocator(alloc)
+        {
+            ResetToEmptySmall();
+            InitFromView(MakeBoundedView(data, count, "BasicString constructor"));
+        }
+
         BasicString(view_type sv, const Alloc& alloc = Alloc())
             : m_allocator(alloc)
         {
@@ -241,7 +248,7 @@ namespace NGIN::Text
         const CharT& Back() const { return At(Size() - 1); }
         CharT&       Back() { return At(Size() - 1); }
 
-        operator view_type() const noexcept { return View(); }
+        explicit operator view_type() const noexcept { return View(); }
 
         void Clear() noexcept
         {
@@ -348,12 +355,21 @@ namespace NGIN::Text
             CommitHeap(newData, newCapacity, count);
         }
 
+        void Assign(const CharT* data, size_type count)
+        {
+            Assign(MakeBoundedView(data, count, "BasicString::Assign"));
+        }
+
         void Append(const ThisType& other) { AppendView(other.View()); }
         void Append(view_type sv) { AppendView(sv); }
         void Append(const CharT* cstr)
         {
             AppendView(cstr != nullptr ? view_type {cstr, static_cast<size_type>(traits_type::length(cstr))}
                                        : view_type {});
+        }
+        void Append(const CharT* data, size_type count)
+        {
+            AppendView(MakeBoundedView(data, count, "BasicString::Append"));
         }
         void Append(size_type count, CharT ch)
         {
@@ -369,6 +385,63 @@ namespace NGIN::Text
             SetSize(newSize);
         }
         void Append(CharT ch) { PushBack(ch); }
+
+        template<class TOp>
+            requires requires(TOp&& op, CharT* buffer, size_type writableCount) {
+                { std::invoke(std::forward<TOp>(op), buffer, writableCount) } -> std::convertible_to<size_type>;
+            }
+        void ResizeAndOverwrite(size_type count, TOp&& op)
+        {
+            const size_type oldSize = Size();
+            if (count > Capacity())
+                ReallocateTo(CheckedGrow(Capacity(), count));
+
+            CharT* const destination = Data();
+            try
+            {
+                const size_type written = static_cast<size_type>(std::invoke(std::forward<TOp>(op), destination, count));
+                if (written > count)
+                {
+                    SetSize(oldSize);
+                    throw std::length_error("BasicString::ResizeAndOverwrite wrote past requested size");
+                }
+
+                SetSize(written);
+            } catch (...)
+            {
+                SetSize(oldSize);
+                throw;
+            }
+        }
+
+        template<class TOp>
+            requires requires(TOp&& op, CharT* buffer, size_type writableCount) {
+                { std::invoke(std::forward<TOp>(op), buffer, writableCount) } -> std::convertible_to<size_type>;
+            }
+        void AppendAndOverwrite(size_type count, TOp&& op)
+        {
+            const size_type oldSize = Size();
+            const size_type newSize = CheckedAppendSize(oldSize, count);
+            if (newSize > Capacity())
+                ReallocateTo(CheckedGrow(Capacity(), newSize));
+
+            CharT* const destination = Data() + oldSize;
+            try
+            {
+                const size_type written = static_cast<size_type>(std::invoke(std::forward<TOp>(op), destination, count));
+                if (written > count)
+                {
+                    SetSize(oldSize);
+                    throw std::length_error("BasicString::AppendAndOverwrite wrote past requested size");
+                }
+
+                SetSize(oldSize + written);
+            } catch (...)
+            {
+                SetSize(oldSize);
+                throw;
+            }
+        }
 
         [[nodiscard]] ThisType Substr(size_type pos = 0, size_type count = npos) const
         {
@@ -880,6 +953,66 @@ namespace NGIN::Text
             return !(left == right);
         }
 
+        friend bool operator<(const ThisType& left, view_type right) noexcept
+        {
+            return left.Compare(right) < 0;
+        }
+
+        friend bool operator<(view_type left, const ThisType& right) noexcept
+        {
+            return right.Compare(left) > 0;
+        }
+
+        friend bool operator<(const ThisType& left, const ThisType& right) noexcept
+        {
+            return left < right.View();
+        }
+
+        friend bool operator<=(const ThisType& left, view_type right) noexcept
+        {
+            return left.Compare(right) <= 0;
+        }
+
+        friend bool operator<=(view_type left, const ThisType& right) noexcept
+        {
+            return right.Compare(left) >= 0;
+        }
+
+        friend bool operator<=(const ThisType& left, const ThisType& right) noexcept
+        {
+            return left <= right.View();
+        }
+
+        friend bool operator>(const ThisType& left, view_type right) noexcept
+        {
+            return left.Compare(right) > 0;
+        }
+
+        friend bool operator>(view_type left, const ThisType& right) noexcept
+        {
+            return right.Compare(left) < 0;
+        }
+
+        friend bool operator>(const ThisType& left, const ThisType& right) noexcept
+        {
+            return left > right.View();
+        }
+
+        friend bool operator>=(const ThisType& left, view_type right) noexcept
+        {
+            return left.Compare(right) >= 0;
+        }
+
+        friend bool operator>=(view_type left, const ThisType& right) noexcept
+        {
+            return right.Compare(left) <= 0;
+        }
+
+        friend bool operator>=(const ThisType& left, const ThisType& right) noexcept
+        {
+            return left >= right.View();
+        }
+
     private:
         static constexpr size_type SmallCharSetLinearThreshold = 4;
 
@@ -891,6 +1024,17 @@ namespace NGIN::Text
         [[nodiscard]] static constexpr bool CanUseRawCharSearch() noexcept
         {
             return std::same_as<CharT, char> && std::same_as<Traits, std::char_traits<char>>;
+        }
+
+        [[nodiscard]] static view_type MakeBoundedView(const CharT* data, size_type count, const char* operation)
+        {
+            if (count == 0)
+                return view_type {};
+
+            if (data == nullptr)
+                throw std::invalid_argument(operation);
+
+            return view_type {data, count};
         }
 
         static void ValidateCapacity(size_type capacity)
