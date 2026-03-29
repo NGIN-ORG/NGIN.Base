@@ -194,6 +194,7 @@ list(APPEND NGIN_BASE_CORE_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/PollerIocp.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/File.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/FileView.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/FileSystemDriver.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/FileSystemUtilities.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/LocalFileSystem.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/Path.cpp
@@ -206,10 +207,12 @@ list(APPEND NGIN_BASE_CORE_SOURCES
 
 if(WIN32)
   list(APPEND NGIN_BASE_CORE_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/FileSystemDriver.win32.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/LocalFileSystem.win32.cpp
   )
 elseif(UNIX)
   list(APPEND NGIN_BASE_CORE_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/FileSystemDriver.linux.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/LocalFileSystem.posix.cpp
   )
 endif()

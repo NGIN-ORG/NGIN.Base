@@ -44,7 +44,7 @@ You probably do not need it when:
 - Usable and maturing:
   - async filesystem surface
   - advanced `VirtualFileSystem` semantics
-  - deeper Windows validation and edge-case coverage
+  - deeper Windows runtime validation and edge-case coverage
 
 ## Which API Should I Use?
 
@@ -71,10 +71,15 @@ Use async filesystem APIs only when:
 - your surrounding code already uses `TaskContext` and an executor
 - avoiding blocking is materially important to the design
 
-If you want a straightforward worker-backed setup, start with `FileSystemDriver`.
+If you want a straightforward setup, start with `FileSystemDriver`.
 
-Current async local-file execution is driver-backed: filesystem work is dispatched onto the `FileSystemDriver`
-backend and resumes your task on the `TaskContext` executor when the operation completes.
+Current async local-file execution is driver-backed and platform-sensitive:
+
+- on Linux, `FileSystemDriver` uses `io_uring` for async file read, write, flush, and close when the native backend is available
+- on Windows, `FileSystemDriver` uses an IOCP-backed native file backend for async file read, write, flush, and close when the native backend is available
+- path lookup, directory operations, and other unsupported operations can still route through the driver fallback path
+
+In all cases, the operation resumes your task on the `TaskContext` executor when the work completes.
 
 For straightforward tools and ordinary application startup code, the sync APIs are usually the better first choice.
 
@@ -248,7 +253,7 @@ Recommended async types:
 - `IAsyncFileSystem` for async filesystem entry points
 - `AsyncFileHandle` for lower-level async file reads and writes
 - `AsyncDirectoryHandle` for directory-relative async filesystem work
-- `FileSystemDriver` when you want a ready-made worker-backed executor for filesystem tasks
+- `FileSystemDriver` when you want a ready-made async filesystem driver and executor
 
 ## `Path` Versus `std::filesystem::path`
 

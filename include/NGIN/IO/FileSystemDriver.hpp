@@ -9,6 +9,15 @@
 
 namespace NGIN::IO
 {
+    class FileSystemDriver;
+
+    namespace detail
+    {
+        class NativeFileBackend;
+        NativeFileBackend* GetNativeFileBackend(FileSystemDriver& driver) noexcept;
+        const NativeFileBackend* GetNativeFileBackend(const FileSystemDriver& driver) noexcept;
+    }
+
     class NGIN_BASE_API FileSystemDriver
     {
     public:
@@ -22,6 +31,8 @@ namespace NGIN::IO
         enum class ActiveBackend : UInt8
         {
             None,
+            NativeIoUring,
+            NativeIocp,
             WorkerFallback,
         };
 
@@ -32,24 +43,14 @@ namespace NGIN::IO
             BackendPreference backendPreference {BackendPreference::Auto};
         };
 
-        FileSystemDriver()
-            : FileSystemDriver(Options {})
-        {
-        }
+        FileSystemDriver();
+        explicit FileSystemDriver(Options options);
+        ~FileSystemDriver();
 
-        explicit FileSystemDriver(Options options)
-            : m_options(std::move(options))
-        {
-            if (m_options.backendPreference == BackendPreference::Native)
-            {
-                m_backend = ActiveBackend::None;
-                return;
-            }
-
-            m_scheduler = std::make_shared<NGIN::Execution::ThreadPoolScheduler>(
-                    static_cast<std::size_t>(m_options.workerThreads == 0 ? 1 : m_options.workerThreads));
-            m_backend = ActiveBackend::WorkerFallback;
-        }
+        FileSystemDriver(const FileSystemDriver&)            = delete;
+        FileSystemDriver& operator=(const FileSystemDriver&) = delete;
+        FileSystemDriver(FileSystemDriver&&)                 = delete;
+        FileSystemDriver& operator=(FileSystemDriver&&)      = delete;
 
         [[nodiscard]] const Options& GetOptions() const noexcept
         {
@@ -61,9 +62,14 @@ namespace NGIN::IO
             return m_backend;
         }
 
+        [[nodiscard]] bool HasNativeBackend() const noexcept
+        {
+            return m_nativeBackend != nullptr;
+        }
+
         [[nodiscard]] bool HasBackend() const noexcept
         {
-            return m_backend != ActiveBackend::None && static_cast<bool>(m_scheduler);
+            return static_cast<bool>(m_scheduler);
         }
 
         [[nodiscard]] NGIN::Execution::ExecutorRef GetExecutor() noexcept
@@ -102,8 +108,12 @@ namespace NGIN::IO
         }
 
     private:
-        Options                                          m_options {};
-        ActiveBackend                                    m_backend {ActiveBackend::None};
+        friend detail::NativeFileBackend* detail::GetNativeFileBackend(FileSystemDriver&) noexcept;
+        friend const detail::NativeFileBackend* detail::GetNativeFileBackend(const FileSystemDriver&) noexcept;
+
+        Options                                                m_options {};
+        ActiveBackend                                          m_backend {ActiveBackend::None};
         std::shared_ptr<NGIN::Execution::ThreadPoolScheduler> m_scheduler {};
+        std::unique_ptr<detail::NativeFileBackend>            m_nativeBackend {};
     };
 }// namespace NGIN::IO

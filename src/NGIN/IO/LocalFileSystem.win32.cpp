@@ -1,6 +1,7 @@
 #include <NGIN/IO/LocalFileSystem.hpp>
 
 #include "AsyncDispatch.hpp"
+#include "NativeFileSystemBackend.hpp"
 
 #define NOMINMAX
 #include <windows.h>
@@ -1226,10 +1227,26 @@ namespace NGIN::IO
 
     namespace
     {
+        struct OpenedAsyncWindowsFile final
+        {
+            HANDLE handle {INVALID_HANDLE_VALUE};
+            Path   path {};
+            bool   canRead {false};
+            bool   canWrite {false};
+            bool   appendMode {false};
+            UInt64 cursor {0};
+        };
+
         struct LocalAsyncFileState final
         {
             std::shared_ptr<FileSystemDriver> driver {};
-            std::unique_ptr<LocalFileHandle>  handle {};
+            HANDLE                            handle {INVALID_HANDLE_VALUE};
+            Path                              path {};
+            bool                              canRead {false};
+            bool                              canWrite {false};
+            bool                              appendMode {false};
+            UInt64                            cursor {0};
+            mutable std::mutex                mutex {};
         };
 
         struct LocalAsyncDirectoryState final
@@ -1241,12 +1258,333 @@ namespace NGIN::IO
 
         extern const AsyncDirectoryHandle::Operations LocalAsyncDirectoryOperations;
 
+        [[nodiscard]] Result<OpenedAsyncWindowsFile> OpenAsyncWindowsFile(const Path& path, const FileOpenOptions& options) noexcept
+        {
+            OpenedAsyncWindowsFile opened;
+            opened.path       = path;
+            opened.canRead    = options.access == FileAccess::Read || options.access == FileAccess::ReadWrite;
+            opened.canWrite   = options.access == FileAccess::Write || options.access == FileAccess::ReadWrite || options.access == FileAccess::Append;
+            opened.appendMode = options.access == FileAccess::Append;
+
+            DWORD desiredAccess = 0;
+            switch (options.access)
+            {
+                case FileAccess::Read:
+                    desiredAccess = GENERIC_READ;
+                    break;
+                case FileAccess::Write:
+                    desiredAccess = GENERIC_WRITE;
+                    break;
+                case FileAccess::ReadWrite:
+                    desiredAccess = GENERIC_READ | GENERIC_WRITE;
+                    break;
+                case FileAccess::Append:
+                    desiredAccess = FILE_APPEND_DATA;
+                    break;
+            }
+
+            DWORD shareMode = 0;
+            if ((options.share & FileShare::Read) == FileShare::Read)
+                shareMode |= FILE_SHARE_READ;
+            if ((options.share & FileShare::Write) == FileShare::Write)
+                shareMode |= FILE_SHARE_WRITE;
+            if ((options.share & FileShare::Delete) == FileShare::Delete)
+                shareMode |= FILE_SHARE_DELETE;
+
+            DWORD creationDisposition = OPEN_EXISTING;
+            switch (options.disposition)
+            {
+                case FileCreateDisposition::OpenExisting:
+                    creationDisposition = OPEN_EXISTING;
+                    break;
+                case FileCreateDisposition::CreateAlways:
+                    creationDisposition = CREATE_ALWAYS;
+                    break;
+                case FileCreateDisposition::CreateNew:
+                    creationDisposition = CREATE_NEW;
+                    break;
+                case FileCreateDisposition::OpenAlways:
+                    creationDisposition = OPEN_ALWAYS;
+                    break;
+                case FileCreateDisposition::TruncateExisting:
+                    creationDisposition = TRUNCATE_EXISTING;
+                    break;
+            }
+
+            DWORD flags = FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED;
+            if ((options.flags & FileOpenFlags::WriteThrough) == FileOpenFlags::WriteThrough)
+                flags |= FILE_FLAG_WRITE_THROUGH;
+            if ((options.flags & FileOpenFlags::DeleteOnClose) == FileOpenFlags::DeleteOnClose)
+                flags |= FILE_FLAG_DELETE_ON_CLOSE;
+            if ((options.flags & FileOpenFlags::Sequential) == FileOpenFlags::Sequential)
+                flags |= FILE_FLAG_SEQUENTIAL_SCAN;
+            if ((options.flags & FileOpenFlags::RandomAccess) == FileOpenFlags::RandomAccess)
+                flags |= FILE_FLAG_RANDOM_ACCESS;
+
+            opened.handle = CreateFileW(ToNativePath(path).c_str(), desiredAccess, shareMode, nullptr, creationDisposition, flags, nullptr);
+            if (opened.handle == INVALID_HANDLE_VALUE)
+            {
+                return Result<OpenedAsyncWindowsFile>(
+                        NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "CreateFileW failed", path)));
+            }
+
+            if (opened.appendMode)
+            {
+                LARGE_INTEGER size {};
+                if (GetFileSizeEx(opened.handle, &size))
+                {
+                    opened.cursor = static_cast<UInt64>(size.QuadPart);
+                }
+            }
+            return Result<OpenedAsyncWindowsFile>(std::move(opened));
+        }
+
+        [[nodiscard]] UInt64 ReserveSequentialOffset(LocalAsyncFileState& state, const UInt64 requestedSize) noexcept
+        {
+            std::lock_guard<std::mutex> guard(state.mutex);
+            UInt64 offset = state.cursor;
+            if (state.appendMode)
+            {
+                LARGE_INTEGER size {};
+                if (GetFileSizeEx(state.handle, &size))
+                {
+                    offset      = static_cast<UInt64>(size.QuadPart);
+                    state.cursor = offset;
+                }
+            }
+            state.cursor += requestedSize;
+            return offset;
+        }
+
+        [[nodiscard]] Result<UIntSize> LocalAsyncFileReadAtSync(
+                LocalAsyncFileState& state, const UInt64 offset, std::span<NGIN::Byte> destination) noexcept
+        {
+            std::lock_guard<std::mutex> guard(state.mutex);
+            if (state.handle == INVALID_HANDLE_VALUE)
+                return Result<UIntSize>(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::InvalidArgument, "file not open", state.path)));
+            if (!state.canRead)
+                return Result<UIntSize>(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::NotSupported, "file not opened for read", state.path)));
+            if (destination.empty())
+                return Result<UIntSize>(UIntSize {0});
+
+            OVERLAPPED overlapped {};
+            overlapped.Offset     = static_cast<DWORD>(offset & 0xffffffffULL);
+            overlapped.OffsetHigh = static_cast<DWORD>((offset >> 32u) & 0xffffffffULL);
+
+            DWORD bytesRead = 0;
+            if (!ReadFile(state.handle, destination.data(), static_cast<DWORD>(destination.size()), &bytesRead, &overlapped))
+            {
+                return Result<UIntSize>(
+                        NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "ReadFile overlapped failed", state.path)));
+            }
+            return Result<UIntSize>(static_cast<UIntSize>(bytesRead));
+        }
+
+        [[nodiscard]] Result<UIntSize> LocalAsyncFileWriteAtSync(
+                LocalAsyncFileState& state, const UInt64 offset, std::span<const NGIN::Byte> source) noexcept
+        {
+            std::lock_guard<std::mutex> guard(state.mutex);
+            if (state.handle == INVALID_HANDLE_VALUE)
+                return Result<UIntSize>(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::InvalidArgument, "file not open", state.path)));
+            if (!state.canWrite)
+                return Result<UIntSize>(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::NotSupported, "file not opened for write", state.path)));
+            if (source.empty())
+                return Result<UIntSize>(UIntSize {0});
+
+            OVERLAPPED overlapped {};
+            overlapped.Offset     = static_cast<DWORD>(offset & 0xffffffffULL);
+            overlapped.OffsetHigh = static_cast<DWORD>((offset >> 32u) & 0xffffffffULL);
+
+            DWORD bytesWritten = 0;
+            if (!WriteFile(state.handle, source.data(), static_cast<DWORD>(source.size()), &bytesWritten, &overlapped))
+            {
+                return Result<UIntSize>(
+                        NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "WriteFile overlapped failed", state.path)));
+            }
+            return Result<UIntSize>(static_cast<UIntSize>(bytesWritten));
+        }
+
+        [[nodiscard]] Result<UIntSize> LocalAsyncFileReadSync(LocalAsyncFileState& state, std::span<NGIN::Byte> destination) noexcept
+        {
+            return LocalAsyncFileReadAtSync(state, ReserveSequentialOffset(state, destination.size()), destination);
+        }
+
+        [[nodiscard]] Result<UIntSize> LocalAsyncFileWriteSync(LocalAsyncFileState& state, std::span<const NGIN::Byte> source) noexcept
+        {
+            return LocalAsyncFileWriteAtSync(state, ReserveSequentialOffset(state, source.size()), source);
+        }
+
+        [[nodiscard]] ResultVoid LocalAsyncFileFlushSync(LocalAsyncFileState& state) noexcept
+        {
+            std::lock_guard<std::mutex> guard(state.mutex);
+            if (state.handle == INVALID_HANDLE_VALUE)
+                return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::InvalidArgument, "file not open", state.path)));
+            if (!FlushFileBuffers(state.handle))
+                return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "FlushFileBuffers failed", state.path)));
+            return {};
+        }
+
+        [[nodiscard]] ResultVoid LocalAsyncFileCloseSync(LocalAsyncFileState& state) noexcept
+        {
+            std::lock_guard<std::mutex> guard(state.mutex);
+            if (state.handle != INVALID_HANDLE_VALUE)
+            {
+                ::CloseHandle(state.handle);
+                state.handle = INVALID_HANDLE_VALUE;
+            }
+            return {};
+        }
+
+        struct NativeWindowsFileCompletion
+        {
+            enum class Status : UInt8
+            {
+                Completed,
+                Canceled,
+                Fault,
+            };
+
+            Status                  status {Status::Fault};
+            Int64                   value {0};
+            int                     systemCode {0};
+            NGIN::Async::AsyncFault fault {};
+        };
+
+        class NativeWindowsFileAwaiter
+        {
+        public:
+            NativeWindowsFileAwaiter(detail::NativeFileBackend& backend,
+                                     NGIN::Async::TaskContext& ctx,
+                                     detail::NativeFileRequest request) noexcept
+                : m_backend(backend)
+                , m_resumeExecutor(ctx.GetExecutor())
+                , m_cancellation(ctx.GetCancellationToken())
+                , m_request(std::move(request))
+                , m_state(std::make_shared<State>())
+            {
+            }
+
+            [[nodiscard]] bool await_ready() const noexcept { return false; }
+
+            void await_suspend(std::coroutine_handle<> awaiting) noexcept
+            {
+                m_state->m_resumeExecutor = m_resumeExecutor;
+                m_state->m_awaiting       = awaiting;
+
+                if (m_cancellation.IsCancellationRequested())
+                {
+                    m_state->completion.status = NativeWindowsFileCompletion::Status::Canceled;
+                    m_state->Resume();
+                    return;
+                }
+
+                m_request.userData = m_state.get();
+                m_request.completion = +[](void* rawState, detail::NativeFileCompletion completion) noexcept {
+                    auto* state = static_cast<State*>(rawState);
+                    if (state == nullptr)
+                    {
+                        return;
+                    }
+                    if (completion.status == detail::NativeFileCompletion::Status::Fault)
+                    {
+                        state->completion.status = NativeWindowsFileCompletion::Status::Fault;
+                        state->completion.fault  = completion.fault;
+                    }
+                    else
+                    {
+                        state->completion.status     = NativeWindowsFileCompletion::Status::Completed;
+                        state->completion.value      = completion.value;
+                        state->completion.systemCode = completion.systemCode;
+                    }
+                    state->Resume();
+                };
+
+                if (!m_backend.Submit(m_request))
+                {
+                    m_state->completion.status = NativeWindowsFileCompletion::Status::Fault;
+                    m_state->completion.fault  = NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::SchedulerFailure);
+                    m_state->Resume();
+                }
+            }
+
+            [[nodiscard]] NativeWindowsFileCompletion await_resume() noexcept
+            {
+                return std::move(m_state->completion);
+            }
+
+        private:
+            struct State
+            {
+                NGIN::Execution::ExecutorRef m_resumeExecutor {};
+                std::coroutine_handle<>      m_awaiting {};
+                NativeWindowsFileCompletion  completion {};
+
+                void Resume() noexcept
+                {
+                    if (m_awaiting)
+                    {
+                        if (m_resumeExecutor.IsValid())
+                        {
+                            m_resumeExecutor.Execute(m_awaiting);
+                        }
+                        else
+                        {
+                            m_awaiting.resume();
+                        }
+                    }
+                }
+            };
+
+            detail::NativeFileBackend&     m_backend;
+            NGIN::Execution::ExecutorRef   m_resumeExecutor {};
+            NGIN::Async::CancellationToken m_cancellation {};
+            detail::NativeFileRequest      m_request {};
+            std::shared_ptr<State>         m_state {};
+        };
+
+        [[nodiscard]] auto SubmitNativeWindowsFile(detail::NativeFileBackend& backend,
+                                                   NGIN::Async::TaskContext& ctx,
+                                                   detail::NativeFileRequest request) noexcept
+        {
+            return NativeWindowsFileAwaiter(backend, ctx, std::move(request));
+        }
+
         AsyncTask<UIntSize> LocalAsyncFileRead(
                 const std::shared_ptr<void>& rawState, NGIN::Async::TaskContext& ctx, std::span<NGIN::Byte> destination)
         {
             auto state = std::static_pointer_cast<LocalAsyncFileState>(rawState);
+            if (auto* backend = detail::GetNativeFileBackend(*state->driver); backend != nullptr)
+            {
+                const auto offset = ReserveSequentialOffset(*state, destination.size());
+                auto completion = co_await SubmitNativeWindowsFile(
+                        *backend,
+                        ctx,
+                        detail::NativeFileRequest {
+                                .kind = detail::NativeFileOperationKind::Read,
+                                .handleValue = reinterpret_cast<std::uintptr_t>(state->handle),
+                                .offset = offset,
+                                .buffer = destination.data(),
+                                .size = static_cast<UInt32>(destination.size()),
+                        });
+                if (completion.status == NativeWindowsFileCompletion::Status::Canceled)
+                {
+                    co_await AsyncTask<UIntSize>::ReturnCanceled();
+                    co_return 0;
+                }
+                if (completion.status == NativeWindowsFileCompletion::Status::Fault)
+                {
+                    co_await AsyncTask<UIntSize>::ReturnFault(completion.fault);
+                    co_return 0;
+                }
+                if (completion.systemCode != 0)
+                {
+                    co_return NGIN::Utilities::Unexpected<IOError>(
+                            MakeWindowsError(static_cast<DWORD>(completion.systemCode), "ReadFile overlapped failed", state->path));
+                }
+                co_return static_cast<UIntSize>(completion.value);
+            }
             auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [state, destination]() mutable noexcept {
-                return state->handle->Read(destination);
+                return LocalAsyncFileReadSync(*state, destination);
             });
             if (completion.IsCanceled())
             {
@@ -1268,8 +1606,38 @@ namespace NGIN::IO
                 const std::shared_ptr<void>& rawState, NGIN::Async::TaskContext& ctx, std::span<const NGIN::Byte> source)
         {
             auto state = std::static_pointer_cast<LocalAsyncFileState>(rawState);
+            if (auto* backend = detail::GetNativeFileBackend(*state->driver); backend != nullptr)
+            {
+                const auto offset = ReserveSequentialOffset(*state, source.size());
+                auto completion = co_await SubmitNativeWindowsFile(
+                        *backend,
+                        ctx,
+                        detail::NativeFileRequest {
+                                .kind = detail::NativeFileOperationKind::Write,
+                                .handleValue = reinterpret_cast<std::uintptr_t>(state->handle),
+                                .offset = offset,
+                                .buffer = const_cast<NGIN::Byte*>(source.data()),
+                                .size = static_cast<UInt32>(source.size()),
+                        });
+                if (completion.status == NativeWindowsFileCompletion::Status::Canceled)
+                {
+                    co_await AsyncTask<UIntSize>::ReturnCanceled();
+                    co_return 0;
+                }
+                if (completion.status == NativeWindowsFileCompletion::Status::Fault)
+                {
+                    co_await AsyncTask<UIntSize>::ReturnFault(completion.fault);
+                    co_return 0;
+                }
+                if (completion.systemCode != 0)
+                {
+                    co_return NGIN::Utilities::Unexpected<IOError>(
+                            MakeWindowsError(static_cast<DWORD>(completion.systemCode), "WriteFile overlapped failed", state->path));
+                }
+                co_return static_cast<UIntSize>(completion.value);
+            }
             auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [state, source]() mutable noexcept {
-                return state->handle->Write(source);
+                return LocalAsyncFileWriteSync(*state, source);
             });
             if (completion.IsCanceled())
             {
@@ -1293,8 +1661,37 @@ namespace NGIN::IO
                                                  std::span<NGIN::Byte>      destination)
         {
             auto state = std::static_pointer_cast<LocalAsyncFileState>(rawState);
+            if (auto* backend = detail::GetNativeFileBackend(*state->driver); backend != nullptr)
+            {
+                auto completion = co_await SubmitNativeWindowsFile(
+                        *backend,
+                        ctx,
+                        detail::NativeFileRequest {
+                                .kind = detail::NativeFileOperationKind::Read,
+                                .handleValue = reinterpret_cast<std::uintptr_t>(state->handle),
+                                .offset = offset,
+                                .buffer = destination.data(),
+                                .size = static_cast<UInt32>(destination.size()),
+                        });
+                if (completion.status == NativeWindowsFileCompletion::Status::Canceled)
+                {
+                    co_await AsyncTask<UIntSize>::ReturnCanceled();
+                    co_return 0;
+                }
+                if (completion.status == NativeWindowsFileCompletion::Status::Fault)
+                {
+                    co_await AsyncTask<UIntSize>::ReturnFault(completion.fault);
+                    co_return 0;
+                }
+                if (completion.systemCode != 0)
+                {
+                    co_return NGIN::Utilities::Unexpected<IOError>(
+                            MakeWindowsError(static_cast<DWORD>(completion.systemCode), "ReadFile overlapped failed", state->path));
+                }
+                co_return static_cast<UIntSize>(completion.value);
+            }
             auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [state, offset, destination]() mutable noexcept {
-                return state->handle->ReadAt(offset, destination);
+                return LocalAsyncFileReadAtSync(*state, offset, destination);
             });
             if (completion.IsCanceled())
             {
@@ -1318,8 +1715,37 @@ namespace NGIN::IO
                                                   std::span<const NGIN::Byte> source)
         {
             auto state = std::static_pointer_cast<LocalAsyncFileState>(rawState);
+            if (auto* backend = detail::GetNativeFileBackend(*state->driver); backend != nullptr)
+            {
+                auto completion = co_await SubmitNativeWindowsFile(
+                        *backend,
+                        ctx,
+                        detail::NativeFileRequest {
+                                .kind = detail::NativeFileOperationKind::Write,
+                                .handleValue = reinterpret_cast<std::uintptr_t>(state->handle),
+                                .offset = offset,
+                                .buffer = const_cast<NGIN::Byte*>(source.data()),
+                                .size = static_cast<UInt32>(source.size()),
+                        });
+                if (completion.status == NativeWindowsFileCompletion::Status::Canceled)
+                {
+                    co_await AsyncTask<UIntSize>::ReturnCanceled();
+                    co_return 0;
+                }
+                if (completion.status == NativeWindowsFileCompletion::Status::Fault)
+                {
+                    co_await AsyncTask<UIntSize>::ReturnFault(completion.fault);
+                    co_return 0;
+                }
+                if (completion.systemCode != 0)
+                {
+                    co_return NGIN::Utilities::Unexpected<IOError>(
+                            MakeWindowsError(static_cast<DWORD>(completion.systemCode), "WriteFile overlapped failed", state->path));
+                }
+                co_return static_cast<UIntSize>(completion.value);
+            }
             auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [state, offset, source]() mutable noexcept {
-                return state->handle->WriteAt(offset, source);
+                return LocalAsyncFileWriteAtSync(*state, offset, source);
             });
             if (completion.IsCanceled())
             {
@@ -1340,8 +1766,35 @@ namespace NGIN::IO
         AsyncTaskVoid LocalAsyncFileFlush(const std::shared_ptr<void>& rawState, NGIN::Async::TaskContext& ctx)
         {
             auto state = std::static_pointer_cast<LocalAsyncFileState>(rawState);
+            if (auto* backend = detail::GetNativeFileBackend(*state->driver); backend != nullptr)
+            {
+                auto completion = co_await SubmitNativeWindowsFile(
+                        *backend,
+                        ctx,
+                        detail::NativeFileRequest {
+                                .kind = detail::NativeFileOperationKind::Flush,
+                                .handleValue = reinterpret_cast<std::uintptr_t>(state->handle),
+                        });
+                if (completion.status == NativeWindowsFileCompletion::Status::Canceled)
+                {
+                    co_await AsyncTaskVoid::ReturnCanceled();
+                    co_return;
+                }
+                if (completion.status == NativeWindowsFileCompletion::Status::Fault)
+                {
+                    co_await AsyncTaskVoid::ReturnFault(completion.fault);
+                    co_return;
+                }
+                if (completion.systemCode != 0)
+                {
+                    co_await AsyncTaskVoid::ReturnError(
+                            MakeWindowsError(static_cast<DWORD>(completion.systemCode), "FlushFileBuffers failed", state->path));
+                    co_return;
+                }
+                co_return;
+            }
             auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [state]() mutable noexcept {
-                return state->handle->Flush();
+                return LocalAsyncFileFlushSync(*state);
             });
             if (completion.IsCanceled())
             {
@@ -1365,9 +1818,45 @@ namespace NGIN::IO
         AsyncTaskVoid LocalAsyncFileClose(const std::shared_ptr<void>& rawState, NGIN::Async::TaskContext& ctx)
         {
             auto state = std::static_pointer_cast<LocalAsyncFileState>(rawState);
+            if (auto* backend = detail::GetNativeFileBackend(*state->driver); backend != nullptr)
+            {
+                HANDLE handleToClose = INVALID_HANDLE_VALUE;
+                {
+                    std::lock_guard<std::mutex> guard(state->mutex);
+                    handleToClose = state->handle;
+                    state->handle = INVALID_HANDLE_VALUE;
+                }
+                if (handleToClose == INVALID_HANDLE_VALUE)
+                {
+                    co_return;
+                }
+                auto completion = co_await SubmitNativeWindowsFile(
+                        *backend,
+                        ctx,
+                        detail::NativeFileRequest {
+                                .kind = detail::NativeFileOperationKind::Close,
+                                .handleValue = reinterpret_cast<std::uintptr_t>(handleToClose),
+                        });
+                if (completion.status == NativeWindowsFileCompletion::Status::Canceled)
+                {
+                    co_await AsyncTaskVoid::ReturnCanceled();
+                    co_return;
+                }
+                if (completion.status == NativeWindowsFileCompletion::Status::Fault)
+                {
+                    co_await AsyncTaskVoid::ReturnFault(completion.fault);
+                    co_return;
+                }
+                if (completion.systemCode != 0)
+                {
+                    co_await AsyncTaskVoid::ReturnError(
+                            MakeWindowsError(static_cast<DWORD>(completion.systemCode), "CloseHandle failed", state->path));
+                    co_return;
+                }
+                co_return;
+            }
             auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [state]() mutable noexcept {
-                state->handle->Close();
-                return ResultVoid {};
+                return LocalAsyncFileCloseSync(*state);
             });
             if (completion.IsCanceled())
             {
@@ -1385,7 +1874,10 @@ namespace NGIN::IO
         [[nodiscard]] bool LocalAsyncFileIsOpen(const std::shared_ptr<void>& rawState) noexcept
         {
             auto state = std::static_pointer_cast<LocalAsyncFileState>(rawState);
-            return state && state->handle && state->handle->IsOpen();
+            if (!state)
+                return false;
+            std::lock_guard<std::mutex> guard(state->mutex);
+            return state->handle != INVALID_HANDLE_VALUE;
         }
 
         const AsyncFileHandle::Operations LocalAsyncFileOperations {
@@ -1399,11 +1891,16 @@ namespace NGIN::IO
         };
 
         [[nodiscard]] AsyncFileHandle MakeAsyncFileHandle(
-                std::shared_ptr<FileSystemDriver> driver, std::unique_ptr<LocalFileHandle> handle)
+                std::shared_ptr<FileSystemDriver> driver, OpenedAsyncWindowsFile opened)
         {
             auto state = std::make_shared<LocalAsyncFileState>();
-            state->driver = std::move(driver);
-            state->handle = std::move(handle);
+            state->driver     = std::move(driver);
+            state->handle     = opened.handle;
+            state->path       = std::move(opened.path);
+            state->canRead    = opened.canRead;
+            state->canWrite   = opened.canWrite;
+            state->appendMode = opened.appendMode;
+            state->cursor     = opened.cursor;
             return AsyncFileHandle(std::move(state), &LocalAsyncFileOperations);
         }
 
@@ -1472,7 +1969,7 @@ namespace NGIN::IO
 
             const Path resolvedPath = ResolveAsyncDirectoryPath(*state, normalized.Value());
             auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [resolvedPath, options]() mutable noexcept {
-                return LocalFileHandle::Open(resolvedPath, options);
+                return OpenAsyncWindowsFile(resolvedPath, options);
             });
             if (completion.IsCanceled())
             {
@@ -1559,7 +2056,7 @@ namespace NGIN::IO
             NGIN::Async::TaskContext& ctx, const Path& path, const FileOpenOptions& options)
     {
         auto completion = co_await detail::DispatchToDriver(*m_asyncDriver, ctx, [path, options]() mutable noexcept {
-            return LocalFileHandle::Open(path, options);
+            return OpenAsyncWindowsFile(path, options);
         });
         if (completion.IsCanceled())
         {
