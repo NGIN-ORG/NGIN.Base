@@ -1807,7 +1807,19 @@ namespace NGIN::Net
             awaiter.data   = data;
             awaiter.exec   = ctx.GetExecutor();
             awaiter.token  = token;
-            co_return co_await awaiter;
+            auto result    = co_await awaiter;
+            if (!result)
+            {
+                if (result.Error().code == NGIN::Async::AsyncErrorCode::Canceled)
+                {
+                    co_await NGIN::Async::Task<NGIN::UInt32, NetError>::ReturnCanceled();
+                    co_return 0;
+                }
+                co_await NGIN::Async::Task<NGIN::UInt32, NetError>::ReturnFault(
+                        NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidState, result.Error().native));
+                co_return 0;
+            }
+            co_return std::move(result).Value();
         }
 
         static NGIN::Async::Task<NGIN::UInt32, NetError> SubmitReceive(NGIN::Async::TaskContext&      ctx,
@@ -1822,7 +1834,19 @@ namespace NGIN::Net
             awaiter.destination = destination;
             awaiter.exec        = ctx.GetExecutor();
             awaiter.token       = token;
-            co_return co_await awaiter;
+            auto result         = co_await awaiter;
+            if (!result)
+            {
+                if (result.Error().code == NGIN::Async::AsyncErrorCode::Canceled)
+                {
+                    co_await NGIN::Async::Task<NGIN::UInt32, NetError>::ReturnCanceled();
+                    co_return 0;
+                }
+                co_await NGIN::Async::Task<NGIN::UInt32, NetError>::ReturnFault(
+                        NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidState, result.Error().native));
+                co_return 0;
+            }
+            co_return std::move(result).Value();
         }
 
         static NGIN::Async::Task<NGIN::UInt32, NetError> SubmitSendTo(NGIN::Async::TaskContext&      ctx,
@@ -1839,7 +1863,19 @@ namespace NGIN::Net
             awaiter.data           = data;
             awaiter.exec           = ctx.GetExecutor();
             awaiter.token          = token;
-            co_return co_await awaiter;
+            auto result            = co_await awaiter;
+            if (!result)
+            {
+                if (result.Error().code == NGIN::Async::AsyncErrorCode::Canceled)
+                {
+                    co_await NGIN::Async::Task<NGIN::UInt32, NetError>::ReturnCanceled();
+                    co_return 0;
+                }
+                co_await NGIN::Async::Task<NGIN::UInt32, NetError>::ReturnFault(
+                        NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidState, result.Error().native));
+                co_return 0;
+            }
+            co_return std::move(result).Value();
         }
 
         static NGIN::Async::Task<DatagramReceiveResult, NetError> SubmitReceiveFrom(NGIN::Async::TaskContext&      ctx,
@@ -1854,7 +1890,19 @@ namespace NGIN::Net
             awaiter.destination = destination;
             awaiter.exec        = ctx.GetExecutor();
             awaiter.token       = token;
-            co_return co_await awaiter;
+            auto result         = co_await awaiter;
+            if (!result)
+            {
+                if (result.Error().code == NGIN::Async::AsyncErrorCode::Canceled)
+                {
+                    co_await NGIN::Async::Task<DatagramReceiveResult, NetError>::ReturnCanceled();
+                    co_return DatagramReceiveResult {};
+                }
+                co_await NGIN::Async::Task<DatagramReceiveResult, NetError>::ReturnFault(
+                        NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidState, result.Error().native));
+                co_return DatagramReceiveResult {};
+            }
+            co_return std::move(result).Value();
         }
 
         static NGIN::Async::Task<void, NetError> SubmitConnect(NGIN::Async::TaskContext&      ctx,
@@ -1889,7 +1937,19 @@ namespace NGIN::Net
             awaiter.listenHandle = &handle;
             awaiter.exec         = ctx.GetExecutor();
             awaiter.token        = token;
-            co_return co_await awaiter;
+            auto result          = co_await awaiter;
+            if (!result)
+            {
+                if (result.Error().code == NGIN::Async::AsyncErrorCode::Canceled)
+                {
+                    co_await NGIN::Async::Task<SocketHandle, NetError>::ReturnCanceled();
+                    co_return SocketHandle {};
+                }
+                co_await NGIN::Async::Task<SocketHandle, NetError>::ReturnFault(
+                        NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidState, result.Error().native));
+                co_return SocketHandle {};
+            }
+            co_return std::move(result).Value();
         }
 #endif
     };

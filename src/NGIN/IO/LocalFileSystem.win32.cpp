@@ -3,7 +3,9 @@
 #include "AsyncDispatch.hpp"
 #include "NativeFileSystemBackend.hpp"
 
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <windows.h>
 
 #include <NGIN/Utilities/Expected.hpp>

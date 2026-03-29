@@ -135,7 +135,7 @@ namespace NGIN
                 try
                 {
                     Unload();
-                } catch (const std::exception& ex)
+                } catch (const std::exception&)
                 {
                     // Log the error or handle it as appropriate.
                     // Avoid throwing exceptions from destructors.

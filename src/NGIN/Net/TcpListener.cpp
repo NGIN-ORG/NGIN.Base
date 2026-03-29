@@ -75,8 +75,8 @@ namespace NGIN::Net
                                                                     NGIN::Async::CancellationToken token)
     {
 #if defined(NGIN_PLATFORM_WINDOWS)
-        auto handleResult = co_await driver.SubmitAccept(ctx, m_handle, token);
-        co_return TcpSocket(std::move(*handleResult), true);
+        auto handle = co_await driver.SubmitAccept(ctx, m_handle, token);
+        co_return TcpSocket(std::move(handle), true);
 #else
         for (;;)
         {

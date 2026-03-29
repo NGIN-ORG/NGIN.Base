@@ -2,7 +2,9 @@
 
 #if defined(NGIN_PLATFORM_WINDOWS)
 
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <windows.h>
 
 #include <NGIN/Async/AsyncError.hpp>
