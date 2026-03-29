@@ -13,6 +13,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <unordered_set>
 
 namespace NGIN::IO::detail
 {
@@ -96,7 +97,34 @@ namespace NGIN::IO::detail
             {
                 return false;
             }
-            return ::CreateIoCompletionPort(handle, m_completionPort, 0, 0) == m_completionPort;
+
+            {
+                std::lock_guard<std::mutex> guard(m_associatedHandlesMutex);
+                if (m_associatedHandles.contains(handle))
+                {
+                    return true;
+                }
+            }
+
+            if (::CreateIoCompletionPort(handle, m_completionPort, 0, 0) != m_completionPort)
+            {
+                return false;
+            }
+
+            std::lock_guard<std::mutex> guard(m_associatedHandlesMutex);
+            m_associatedHandles.insert(handle);
+            return true;
+        }
+
+        void ForgetHandle(HANDLE handle) noexcept
+        {
+            if (handle == INVALID_HANDLE_VALUE || handle == nullptr)
+            {
+                return;
+            }
+
+            std::lock_guard<std::mutex> guard(m_associatedHandlesMutex);
+            m_associatedHandles.erase(handle);
         }
 
         bool SubmitOverlapped(NativeFileRequest request) noexcept
@@ -203,12 +231,16 @@ namespace NGIN::IO::detail
                             }
                             break;
                         case NativeFileOperationKind::Close:
-                            if (!::CloseHandle(reinterpret_cast<HANDLE>(control->request.handleValue)))
+                        {
+                            const auto handle = reinterpret_cast<HANDLE>(control->request.handleValue);
+                            ForgetHandle(handle);
+                            if (!::CloseHandle(handle))
                             {
                                 completion.value      = -1;
                                 completion.systemCode = static_cast<int>(::GetLastError());
                             }
                             break;
+                        }
                         default:
                             break;
                     }
@@ -248,6 +280,8 @@ namespace NGIN::IO::detail
         bool        m_initialized {false};
         bool        m_stopping {false};
         std::thread m_worker {};
+        std::mutex  m_associatedHandlesMutex {};
+        std::unordered_set<HANDLE> m_associatedHandles {};
     };
 
     std::unique_ptr<NativeFileBackend> CreateNativeFileBackend(const FileSystemDriver::Options& options)

@@ -256,14 +256,32 @@ namespace NGIN::IO
     Result<Path> LocalMount::Virtualize(const Path& realPath) noexcept
     {
         Path normalized = realPath.LexicallyNormal();
-        if (!normalized.StartsWith(m_realRoot))
+        Path root       = m_realRoot;
+        if (!normalized.StartsWith(root))
         {
-            return Result<Path>(NGIN::Utilities::Unexpected<IOError>(
-                    MakeError(IOErrorCode::InvalidPath, "real path is outside mount root", realPath)));
+            auto canonicalPath = m_localFileSystem.WeaklyCanonical(normalized);
+            if (!canonicalPath.HasValue())
+            {
+                return Result<Path>(NGIN::Utilities::Unexpected<IOError>(std::move(canonicalPath.Error())));
+            }
+
+            auto canonicalRoot = m_localFileSystem.WeaklyCanonical(root);
+            if (!canonicalRoot.HasValue())
+            {
+                return Result<Path>(NGIN::Utilities::Unexpected<IOError>(std::move(canonicalRoot.Error())));
+            }
+
+            normalized = std::move(canonicalPath.Value());
+            root       = std::move(canonicalRoot.Value());
+            if (!normalized.StartsWith(root))
+            {
+                return Result<Path>(NGIN::Utilities::Unexpected<IOError>(
+                        MakeError(IOErrorCode::InvalidPath, "real path is outside mount root", realPath)));
+            }
         }
 
         const auto full   = normalized.View();
-        const auto prefix = m_realRoot.View();
+        const auto prefix = root.View();
 
         std::string_view suffix {};
         if (full.size() > prefix.size())

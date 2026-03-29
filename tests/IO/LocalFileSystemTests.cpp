@@ -235,12 +235,17 @@ TEST_CASE("IO.LocalFileSystem async directory handles scope relative operations"
     auto fileTask = directory.OpenFileAsync(ctx, NGIN::IO::Path {"seed.txt"}, options);
     auto fileOpen = RunAsyncTask(fileTask, ctx);
     REQUIRE(fileOpen.Succeeded());
-    REQUIRE(fileOpen.Value().IsOpen());
+    auto file = std::move(fileOpen.Value());
+    REQUIRE(file.IsOpen());
 
     auto childTask = directory.OpenDirectoryAsync(ctx, NGIN::IO::Path {"child"});
     auto childOpen = RunAsyncTask(childTask, ctx);
     REQUIRE(childOpen.Succeeded());
     REQUIRE(childOpen.Value().IsValid());
+
+    auto closeTask   = file.CloseAsync(ctx);
+    auto closeResult = RunAsyncTask(closeTask, ctx);
+    REQUIRE(closeResult.Succeeded());
 
     RemoveTempDir(fs, root);
 }

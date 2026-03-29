@@ -175,8 +175,14 @@ namespace NGIN::IO
             return Path {};
         }
 
+        std::size_t minimumParentEnd = 0;
+        if (IsDrivePrefix(view) && view.size() >= 3 && IsSeparator(view[2]))
+            minimumParentEnd = 3;
+        else if (!view.empty() && IsSeparator(view.front()))
+            minimumParentEnd = 1;
+
         std::size_t parentEnd = start;
-        while (parentEnd > 0 && IsSeparator(view[parentEnd - 1]))
+        while (parentEnd > minimumParentEnd && IsSeparator(view[parentEnd - 1]))
             --parentEnd;
         return Path {view.substr(0, parentEnd)};
     }

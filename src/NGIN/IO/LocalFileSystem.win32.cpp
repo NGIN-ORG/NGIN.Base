@@ -887,6 +887,9 @@ namespace NGIN::IO
             if (!entries.HasValue())
                 return Result<UInt64>(NGIN::Utilities::Unexpected<IOError>(std::move(entries.Error())));
 
+            RemoveOptions removeLeafOptions = options;
+            removeLeafOptions.recursive     = false;
+
             UInt64 removed = 0;
             auto&  values  = entries.Value();
             for (auto it = values.rbegin(); it != values.rend(); ++it)
@@ -897,7 +900,7 @@ namespace NGIN::IO
 
                 ResultVoid result;
                 if (entryInfo.Value().type == EntryType::Directory)
-                    result = RemoveDirectoryNative(it->path, options);
+                    result = RemoveDirectoryNative(it->path, removeLeafOptions);
                 else
                     result = RemoveFileNative(it->path, options);
                 if (!result.HasValue())
@@ -917,7 +920,7 @@ namespace NGIN::IO
 
             ResultVoid removeRoot;
             if (rootInfo.Value().type == EntryType::Directory)
-                removeRoot = RemoveDirectoryNative(path, options);
+                removeRoot = RemoveDirectoryNative(path, removeLeafOptions);
             else
                 removeRoot = RemoveFileNative(path, options);
             if (!removeRoot.HasValue())
@@ -1376,8 +1379,11 @@ namespace NGIN::IO
             DWORD bytesRead = 0;
             if (!ReadFile(state.handle, destination.data(), static_cast<DWORD>(destination.size()), &bytesRead, &overlapped))
             {
+                const DWORD error = GetLastError();
+                if (error == ERROR_HANDLE_EOF)
+                    return Result<UIntSize>(UIntSize {0});
                 return Result<UIntSize>(
-                        NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "ReadFile overlapped failed", state.path)));
+                        NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(error, "ReadFile overlapped failed", state.path)));
             }
             return Result<UIntSize>(static_cast<UIntSize>(bytesRead));
         }
@@ -1578,6 +1584,10 @@ namespace NGIN::IO
                     co_await AsyncTask<UIntSize>::ReturnFault(completion.fault);
                     co_return 0;
                 }
+                if (completion.systemCode == ERROR_HANDLE_EOF)
+                {
+                    co_return UIntSize {0};
+                }
                 if (completion.systemCode != 0)
                 {
                     co_return NGIN::Utilities::Unexpected<IOError>(
@@ -1684,6 +1694,10 @@ namespace NGIN::IO
                 {
                     co_await AsyncTask<UIntSize>::ReturnFault(completion.fault);
                     co_return 0;
+                }
+                if (completion.systemCode == ERROR_HANDLE_EOF)
+                {
+                    co_return UIntSize {0};
                 }
                 if (completion.systemCode != 0)
                 {
