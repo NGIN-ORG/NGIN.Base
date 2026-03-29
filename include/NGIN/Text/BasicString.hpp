@@ -584,6 +584,17 @@ namespace NGIN::Text
             return Find(value) != npos;
         }
 
+        [[nodiscard]] size_type Find(CharT ch, size_type pos = 0) const noexcept
+        {
+            return Find(view_type {std::addressof(ch), 1}, pos);
+        }
+
+        [[nodiscard]] size_type Find(const CharT* cstr, size_type pos = 0) const noexcept
+        {
+            return cstr != nullptr ? Find(view_type {cstr, static_cast<size_type>(traits_type::length(cstr))}, pos)
+                                   : npos;
+        }
+
         [[nodiscard]] size_type Find(view_type value, size_type pos = 0) const noexcept
         {
             const view_type haystack = View();
@@ -596,10 +607,262 @@ namespace NGIN::Text
             if (pos > haystack.size() - value.size())
                 return npos;
 
+            if constexpr (CanUseRawCharSearch())
+            {
+                if (value.size() == 1)
+                    return FindSingleRawChar(haystack, value[0], pos);
+
+                // Two-byte needles are common enough in token parsing to justify a memchr-led fast path.
+                if (value.size() == 2)
+                    return FindTwoRawChars(haystack, value[0], value[1], pos);
+            }
+
             for (size_type index = pos; index <= haystack.size() - value.size(); ++index)
             {
                 if (traits_type::compare(haystack.data() + index, value.data(), value.size()) == 0)
                     return index;
+            }
+
+            return npos;
+        }
+
+        [[nodiscard]] size_type RFind(CharT ch, size_type pos = npos) const noexcept
+        {
+            return RFind(view_type {std::addressof(ch), 1}, pos);
+        }
+
+        [[nodiscard]] size_type RFind(const CharT* cstr, size_type pos = npos) const noexcept
+        {
+            return cstr != nullptr ? RFind(view_type {cstr, static_cast<size_type>(traits_type::length(cstr))}, pos)
+                                   : npos;
+        }
+
+        [[nodiscard]] size_type RFind(view_type value, size_type pos = npos) const noexcept
+        {
+            const view_type haystack = View();
+            if (value.empty())
+                return std::min(pos, haystack.size());
+
+            if (value.size() > haystack.size())
+                return npos;
+
+            size_type index = LastNeedleStart(haystack.size(), value.size(), pos);
+            if constexpr (CanUseRawCharSearch())
+            {
+                if (value.size() == 1)
+                    return RFindSingleRawChar(haystack, value[0], index);
+
+                // Mirror the short-needle fast path for reverse scans before falling back to Traits::compare.
+                if (value.size() == 2)
+                    return RFindTwoRawChars(haystack, value[0], value[1], index);
+            }
+
+            while (true)
+            {
+                if (traits_type::compare(haystack.data() + index, value.data(), value.size()) == 0)
+                    return index;
+
+                if (index == 0)
+                    break;
+                --index;
+            }
+
+            return npos;
+        }
+
+        [[nodiscard]] size_type FindFirstOf(CharT ch, size_type pos = 0) const noexcept
+        {
+            return Find(ch, pos);
+        }
+
+        [[nodiscard]] size_type FindFirstOf(const CharT* cstr, size_type pos = 0) const noexcept
+        {
+            return cstr != nullptr
+                           ? FindFirstOf(view_type {cstr, static_cast<size_type>(traits_type::length(cstr))}, pos)
+                           : npos;
+        }
+
+        [[nodiscard]] size_type FindFirstOf(view_type values, size_type pos = 0) const noexcept
+        {
+            const view_type haystack = View();
+            if (pos >= haystack.size() || values.empty())
+                return npos;
+
+            if constexpr (CanUseRawCharSearch())
+            {
+                if (values.size() == 1)
+                    return FindSingleRawChar(haystack, values[0], pos);
+
+                // Small sets are cheaper to scan linearly; larger sets amortize the 256-byte lookup table.
+                if (values.size() > SmallCharSetLinearThreshold)
+                {
+                    const auto lookup = BuildRawCharLookup(values);
+                    for (size_type index = pos; index < haystack.size(); ++index)
+                    {
+                        if (lookup[ToRawByte(haystack[index])])
+                            return index;
+                    }
+                    return npos;
+                }
+            }
+
+            for (size_type index = pos; index < haystack.size(); ++index)
+            {
+                if (ContainsChar(values, haystack[index]))
+                    return index;
+            }
+
+            return npos;
+        }
+
+        [[nodiscard]] size_type FindLastOf(CharT ch, size_type pos = npos) const noexcept
+        {
+            return RFind(ch, pos);
+        }
+
+        [[nodiscard]] size_type FindLastOf(const CharT* cstr, size_type pos = npos) const noexcept
+        {
+            return cstr != nullptr
+                           ? FindLastOf(view_type {cstr, static_cast<size_type>(traits_type::length(cstr))}, pos)
+                           : npos;
+        }
+
+        [[nodiscard]] size_type FindLastOf(view_type values, size_type pos = npos) const noexcept
+        {
+            const view_type haystack = View();
+            if (haystack.empty() || values.empty())
+                return npos;
+
+            size_type index = std::min(pos, haystack.size() - 1);
+            if constexpr (CanUseRawCharSearch())
+            {
+                if (values.size() == 1)
+                    return RFindSingleRawChar(haystack, values[0], index);
+
+                // Small sets are cheaper to scan linearly; larger sets amortize the 256-byte lookup table.
+                if (values.size() > SmallCharSetLinearThreshold)
+                {
+                    const auto lookup = BuildRawCharLookup(values);
+                    while (true)
+                    {
+                        if (lookup[ToRawByte(haystack[index])])
+                            return index;
+
+                        if (index == 0)
+                            break;
+                        --index;
+                    }
+                    return npos;
+                }
+            }
+
+            while (true)
+            {
+                if (ContainsChar(values, haystack[index]))
+                    return index;
+
+                if (index == 0)
+                    break;
+                --index;
+            }
+
+            return npos;
+        }
+
+        [[nodiscard]] size_type FindFirstNotOf(CharT ch, size_type pos = 0) const noexcept
+        {
+            return FindFirstNotOf(view_type {std::addressof(ch), 1}, pos);
+        }
+
+        [[nodiscard]] size_type FindFirstNotOf(const CharT* cstr, size_type pos = 0) const noexcept
+        {
+            return cstr != nullptr
+                           ? FindFirstNotOf(view_type {cstr, static_cast<size_type>(traits_type::length(cstr))}, pos)
+                           : npos;
+        }
+
+        [[nodiscard]] size_type FindFirstNotOf(view_type values, size_type pos = 0) const noexcept
+        {
+            const view_type haystack = View();
+            if (pos >= haystack.size())
+                return npos;
+
+            if (values.empty())
+                return pos;
+
+            if constexpr (CanUseRawCharSearch())
+            {
+                // Small sets are cheaper to scan linearly; larger sets amortize the 256-byte lookup table.
+                if (values.size() > SmallCharSetLinearThreshold)
+                {
+                    const auto lookup = BuildRawCharLookup(values);
+                    for (size_type index = pos; index < haystack.size(); ++index)
+                    {
+                        if (!lookup[ToRawByte(haystack[index])])
+                            return index;
+                    }
+                    return npos;
+                }
+            }
+
+            for (size_type index = pos; index < haystack.size(); ++index)
+            {
+                if (!ContainsChar(values, haystack[index]))
+                    return index;
+            }
+
+            return npos;
+        }
+
+        [[nodiscard]] size_type FindLastNotOf(CharT ch, size_type pos = npos) const noexcept
+        {
+            return FindLastNotOf(view_type {std::addressof(ch), 1}, pos);
+        }
+
+        [[nodiscard]] size_type FindLastNotOf(const CharT* cstr, size_type pos = npos) const noexcept
+        {
+            return cstr != nullptr
+                           ? FindLastNotOf(view_type {cstr, static_cast<size_type>(traits_type::length(cstr))}, pos)
+                           : npos;
+        }
+
+        [[nodiscard]] size_type FindLastNotOf(view_type values, size_type pos = npos) const noexcept
+        {
+            const view_type haystack = View();
+            if (haystack.empty())
+                return npos;
+
+            size_type index = std::min(pos, haystack.size() - 1);
+            if (values.empty())
+                return index;
+
+            if constexpr (CanUseRawCharSearch())
+            {
+                // Small sets are cheaper to scan linearly; larger sets amortize the 256-byte lookup table.
+                if (values.size() > SmallCharSetLinearThreshold)
+                {
+                    const auto lookup = BuildRawCharLookup(values);
+                    while (true)
+                    {
+                        if (!lookup[ToRawByte(haystack[index])])
+                            return index;
+
+                        if (index == 0)
+                            break;
+                        --index;
+                    }
+                    return npos;
+                }
+            }
+
+            while (true)
+            {
+                if (!ContainsChar(values, haystack[index]))
+                    return index;
+
+                if (index == 0)
+                    break;
+                --index;
             }
 
             return npos;
@@ -627,9 +890,16 @@ namespace NGIN::Text
         }
 
     private:
+        static constexpr size_type SmallCharSetLinearThreshold = 4;
+
         [[nodiscard]] static constexpr size_type MaxCapacity() noexcept
         {
             return (std::numeric_limits<size_type>::max() / sizeof(CharT)) - 1;
+        }
+
+        [[nodiscard]] static constexpr bool CanUseRawCharSearch() noexcept
+        {
+            return std::same_as<CharT, char> && std::same_as<Traits, std::char_traits<char>>;
         }
 
         static void ValidateCapacity(size_type capacity)
@@ -674,6 +944,99 @@ namespace NGIN::Text
         {
             for (size_type index = 0; index < count; ++index)
                 traits_type::assign(destination[index], value);
+        }
+
+        [[nodiscard]] static size_type LastNeedleStart(size_type haystackSize, size_type needleSize, size_type pos) noexcept
+        {
+            const size_type lastStart = haystackSize - needleSize;
+            return std::min(pos, lastStart);
+        }
+
+        [[nodiscard]] static bool ContainsChar(view_type values, CharT ch) noexcept
+        {
+            for (size_type index = 0; index < values.size(); ++index)
+            {
+                if (traits_type::compare(values.data() + index, std::addressof(ch), 1) == 0)
+                    return true;
+            }
+            return false;
+        }
+
+        [[nodiscard]] static unsigned char ToRawByte(char ch) noexcept
+        {
+            return static_cast<unsigned char>(ch);
+        }
+
+        [[nodiscard]] static std::array<bool, 256> BuildRawCharLookup(view_type values) noexcept
+        {
+            std::array<bool, 256> lookup {};
+            for (size_type index = 0; index < values.size(); ++index)
+                lookup[ToRawByte(values[index])] = true;
+            return lookup;
+        }
+
+        [[nodiscard]] static size_type FindSingleRawChar(view_type haystack, CharT ch, size_type pos) noexcept
+        {
+            const void* const hit =
+                    std::memchr(haystack.data() + pos, ToRawByte(ch), static_cast<std::size_t>(haystack.size() - pos));
+            if (hit == nullptr)
+                return npos;
+
+            return static_cast<size_type>(static_cast<const char*>(hit) - haystack.data());
+        }
+
+        [[nodiscard]] static size_type FindTwoRawChars(view_type haystack, CharT first, CharT second, size_type pos) noexcept
+        {
+            const CharT* search    = haystack.data() + pos;
+            size_type    remaining = haystack.size() - pos;
+            while (remaining >= 2)
+            {
+                const void* const hit =
+                        std::memchr(search, ToRawByte(first), static_cast<std::size_t>(remaining - 1));
+                if (hit == nullptr)
+                    return npos;
+
+                const CharT* const candidate = static_cast<const CharT*>(hit);
+                if (candidate[1] == second)
+                    return static_cast<size_type>(candidate - haystack.data());
+
+                remaining = haystack.size() - static_cast<size_type>((candidate - haystack.data()) + 1);
+                search    = candidate + 1;
+            }
+
+            return npos;
+        }
+
+        [[nodiscard]] static size_type RFindSingleRawChar(view_type haystack, CharT ch, size_type pos) noexcept
+        {
+            size_type index = pos;
+            while (true)
+            {
+                if (haystack[index] == ch)
+                    return index;
+
+                if (index == 0)
+                    break;
+                --index;
+            }
+
+            return npos;
+        }
+
+        [[nodiscard]] static size_type RFindTwoRawChars(view_type haystack, CharT first, CharT second, size_type pos) noexcept
+        {
+            size_type index = pos;
+            while (true)
+            {
+                if (haystack[index] == first && haystack[index + 1] == second)
+                    return index;
+
+                if (index == 0)
+                    break;
+                --index;
+            }
+
+            return npos;
         }
 
         [[nodiscard]] static CharT* AllocateWith(Alloc& allocator, size_type capacity)

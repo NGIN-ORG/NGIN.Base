@@ -385,6 +385,69 @@ TEST_CASE("String append operations", "[Text][String]")
     }
 }
 
+TEST_CASE("String search APIs cover forward and reverse semantics", "[Text][String]")
+{
+    String value("bananaban");
+
+    SECTION("Find and RFind")
+    {
+        CHECK(value.Find('b') == 0U);
+        CHECK(value.Find("ana") == 1U);
+        CHECK(value.Find("ana", 2) == 3U);
+        CHECK(value.Find("xyz") == String::npos);
+        CHECK(value.Find(String::view_type {}) == 0U);
+        CHECK(value.Find(String::view_type {}, value.Size() + 4) == value.Size());
+
+        CHECK(value.RFind('b') == 6U);
+        CHECK(value.RFind("ana") == 3U);
+        CHECK(value.RFind("ban", 4) == 0U);
+        CHECK(value.RFind("xyz") == String::npos);
+        CHECK(value.RFind(String::view_type {}) == value.Size());
+        CHECK(value.RFind(String::view_type {}, 4) == 4U);
+    }
+
+    SECTION("FindFirstOf and FindLastOf")
+    {
+        CHECK(value.FindFirstOf('n') == 2U);
+        CHECK(value.FindFirstOf("xybn") == 0U);
+        CHECK(value.FindFirstOf("xyz", 1) == String::npos);
+
+        CHECK(value.FindLastOf('n') == 8U);
+        CHECK(value.FindLastOf("xybn") == 8U);
+        CHECK(value.FindLastOf("xyz") == String::npos);
+        CHECK(value.FindFirstOf(String::view_type {}) == String::npos);
+        CHECK(value.FindLastOf(String::view_type {}) == String::npos);
+    }
+
+    SECTION("FindFirstNotOf and FindLastNotOf")
+    {
+        String padded("   alpha  ");
+
+        CHECK(padded.FindFirstNotOf(' ') == 3U);
+        CHECK(padded.FindFirstNotOf(" alh") == 5U);
+        CHECK(padded.FindFirstNotOf(String::view_type {}, 4) == 4U);
+        CHECK(padded.FindFirstNotOf(" alpha") == String::npos);
+
+        CHECK(padded.FindLastNotOf(' ') == 7U);
+        CHECK(padded.FindLastNotOf(" alh") == 5U);
+        CHECK(padded.FindLastNotOf(String::view_type {}) == padded.Size() - 1);
+        CHECK(padded.FindLastNotOf(" alpha") == String::npos);
+    }
+}
+
+TEST_CASE("String search supports heap-backed strings", "[Text][String]")
+{
+    std::string large = std::string(60, 'a') + "bc" + std::string(20, 'a') + "bc";
+    String      value(large.c_str());
+
+    CHECK(value.Find("bc") == 60U);
+    CHECK(value.RFind("bc") == 82U);
+    CHECK(value.FindFirstOf("cb", 61) == 61U);
+    CHECK(value.FindLastOf("cb") == 83U);
+    CHECK(value.FindFirstNotOf("a", 60) == 60U);
+    CHECK(value.FindLastNotOf("abc") == String::npos);
+}
+
 TEST_CASE("String Substr returns bounded slices", "[Text][String]")
 {
     String value("alphabet");
@@ -665,6 +728,12 @@ TEST_CASE("String supports traits-aware comparisons", "[Text][String]")
     CHECK(value.StartsWith("he"));
     CHECK(value.EndsWith('O'));
     CHECK(value.EndsWith("LO"));
+    CHECK(value.Find('h') == 0U);
+    CHECK(value.Find(FoldString::view_type {"LL", 2}) == 2U);
+    CHECK(value.RFind("LO") == 3U);
+    CHECK(value.FindFirstOf("xyzl") == 2U);
+    CHECK(value.FindFirstNotOf("he") == 2U);
+    CHECK(value.FindLastNotOf("lo") == 1U);
 }
 
 TEST_CASE("String supports wide character SBO storage", "[Text][String]")
@@ -674,6 +743,10 @@ TEST_CASE("String supports wide character SBO storage", "[Text][String]")
     CHECK(value.Size() == 2U);
     CHECK(value.Data()[0] == u'h');
     CHECK(value.Data()[1] == u'i');
+    CHECK(value.Find(u'i') == 1U);
+    CHECK(value.RFind(u"hi") == 0U);
+    CHECK(value.FindFirstOf(u"xyzih") == 0U);
+    CHECK(value.FindLastNotOf(u"i") == 0U);
 }
 
 TEST_CASE("String operator plus supports c-string and char overloads", "[Text][String]")

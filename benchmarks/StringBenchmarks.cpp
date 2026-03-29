@@ -3,6 +3,7 @@
 #include <iostream>
 #include <random>
 #include <string>
+#include <vector>
 
 using NGIN::Benchmark;
 using NGIN::BenchmarkContext;
@@ -27,11 +28,27 @@ void fill_random_strings(std::vector<StrType>& vec, size_t count, size_t len)
     }
 }
 
+template<typename StrType>
+std::vector<StrType> make_string_vector(std::initializer_list<std::string> values)
+{
+    std::vector<StrType> result;
+    result.reserve(values.size());
+    for (const auto& value: values)
+        result.emplace_back(value.c_str());
+    return result;
+}
+
 int main()
 {
     constexpr size_t N        = 10000;
     constexpr size_t shortLen = 8;
     constexpr size_t longLen  = 128;
+
+    std::cout << "Object sizes: std::string=" << sizeof(std::string)
+              << ", NGIN::Text::String=" << sizeof(String)
+              << ", NGIN::Text::AnsiString=" << sizeof(NGIN::Text::AnsiString)
+              << ", NGIN::Text::WString=" << sizeof(NGIN::Text::WString)
+              << ", NGIN::Text::UTF16String=" << sizeof(NGIN::Text::UTF16String) << '\n';
 
     // --- Construction Benchmarks ---
     Benchmark::Register([](BenchmarkContext& ctx) {
@@ -422,6 +439,302 @@ int main()
         ctx.stop();
     },
                         "NGIN::String prefix/suffix trim");
+
+    // --- Search Benchmarks ---
+    Benchmark::Register([](BenchmarkContext& ctx) {
+        const std::vector<std::string> haystacks {"bananaban", "nanabanax", "abananabn", "xxnxxnxxx"};
+        size_t                         sum = 0;
+        ctx.start();
+        for (size_t i = 0; i < N; ++i)
+        {
+            sum += haystacks[i % haystacks.size()].find('n');
+        }
+        ctx.doNotOptimize(sum);
+        ctx.stop();
+    },
+                        "std::string find char SBO");
+
+    Benchmark::Register([](BenchmarkContext& ctx) {
+        const auto haystacks =
+                make_string_vector<String>({"bananaban", "nanabanax", "abananabn", "xxnxxnxxx"});
+        size_t sum = 0;
+        ctx.start();
+        for (size_t i = 0; i < N; ++i)
+        {
+            sum += haystacks[i % haystacks.size()].Find('n');
+        }
+        ctx.doNotOptimize(sum);
+        ctx.stop();
+    },
+                        "NGIN::String Find char SBO");
+
+    Benchmark::Register([](BenchmarkContext& ctx) {
+        const std::vector<std::string> haystacks {"bananaban", "ananxxxx", "xxanxxan", "zzanazzz"};
+        size_t                         sum = 0;
+        ctx.start();
+        for (size_t i = 0; i < N; ++i)
+        {
+            sum += haystacks[i % haystacks.size()].find("an");
+        }
+        ctx.doNotOptimize(sum);
+        ctx.stop();
+    },
+                        "std::string find short needle SBO");
+
+    Benchmark::Register([](BenchmarkContext& ctx) {
+        const auto haystacks =
+                make_string_vector<String>({"bananaban", "ananxxxx", "xxanxxan", "zzanazzz"});
+        size_t sum = 0;
+        ctx.start();
+        for (size_t i = 0; i < N; ++i)
+        {
+            sum += haystacks[i % haystacks.size()].Find("an");
+        }
+        ctx.doNotOptimize(sum);
+        ctx.stop();
+    },
+                        "NGIN::String Find short needle SBO");
+
+    Benchmark::Register([](BenchmarkContext& ctx) {
+        const std::vector<std::string> haystacks {
+                std::string(80, 'a') + "needle" + std::string(80, 'a'),
+                std::string(20, 'a') + "needle" + std::string(80, 'a') + "needle",
+                std::string(90, 'a') + "needle" + std::string(10, 'a'),
+                std::string(30, 'a') + "needlz" + std::string(50, 'a') + "needle",
+        };
+        size_t sum = 0;
+        ctx.start();
+        for (size_t i = 0; i < N; ++i)
+        {
+            sum += haystacks[i % haystacks.size()].find("needle");
+        }
+        ctx.doNotOptimize(sum);
+        ctx.stop();
+    },
+                        "std::string find needle heap");
+
+    Benchmark::Register([](BenchmarkContext& ctx) {
+        const auto haystacks = make_string_vector<String>(
+                {std::string(80, 'a') + "needle" + std::string(80, 'a'),
+                 std::string(20, 'a') + "needle" + std::string(80, 'a') + "needle",
+                 std::string(90, 'a') + "needle" + std::string(10, 'a'),
+                 std::string(30, 'a') + "needlz" + std::string(50, 'a') + "needle"});
+        size_t sum = 0;
+        ctx.start();
+        for (size_t i = 0; i < N; ++i)
+        {
+            sum += haystacks[i % haystacks.size()].Find("needle");
+        }
+        ctx.doNotOptimize(sum);
+        ctx.stop();
+    },
+                        "NGIN::String Find needle heap");
+
+    Benchmark::Register([](BenchmarkContext& ctx) {
+        const std::vector<std::string> haystacks {
+                std::string(80, 'a') + "needle" + std::string(80, 'a'),
+                std::string(20, 'a') + "needle" + std::string(80, 'a') + "needle",
+                std::string(90, 'a') + "needle" + std::string(10, 'a'),
+                std::string(30, 'a') + "needlz" + std::string(50, 'a') + "needle",
+        };
+        size_t sum = 0;
+        ctx.start();
+        for (size_t i = 0; i < N; ++i)
+        {
+            sum += haystacks[i % haystacks.size()].rfind("needle");
+        }
+        ctx.doNotOptimize(sum);
+        ctx.stop();
+    },
+                        "std::string rfind needle heap");
+
+    Benchmark::Register([](BenchmarkContext& ctx) {
+        const auto haystacks = make_string_vector<String>(
+                {std::string(80, 'a') + "needle" + std::string(80, 'a'),
+                 std::string(20, 'a') + "needle" + std::string(80, 'a') + "needle",
+                 std::string(90, 'a') + "needle" + std::string(10, 'a'),
+                 std::string(30, 'a') + "needlz" + std::string(50, 'a') + "needle"});
+        size_t sum = 0;
+        ctx.start();
+        for (size_t i = 0; i < N; ++i)
+        {
+            sum += haystacks[i % haystacks.size()].RFind("needle");
+        }
+        ctx.doNotOptimize(sum);
+        ctx.stop();
+    },
+                        "NGIN::String RFind needle heap");
+
+    Benchmark::Register([](BenchmarkContext& ctx) {
+        const std::vector<std::string> haystacks {
+                std::string(80, 'a') + "needle" + std::string(80, 'a'),
+                std::string(20, 'a') + "needle" + std::string(80, 'a') + "needle",
+                std::string(90, 'a') + "needle" + std::string(10, 'a'),
+                std::string(30, 'a') + "needlz" + std::string(50, 'a') + "needle",
+        };
+        size_t sum = 0;
+        ctx.start();
+        for (size_t i = 0; i < N; ++i)
+        {
+            sum += haystacks[i % haystacks.size()].find("missing");
+        }
+        ctx.doNotOptimize(sum);
+        ctx.stop();
+    },
+                        "std::string find missing heap");
+
+    Benchmark::Register([](BenchmarkContext& ctx) {
+        const auto haystacks = make_string_vector<String>(
+                {std::string(80, 'a') + "needle" + std::string(80, 'a'),
+                 std::string(20, 'a') + "needle" + std::string(80, 'a') + "needle",
+                 std::string(90, 'a') + "needle" + std::string(10, 'a'),
+                 std::string(30, 'a') + "needlz" + std::string(50, 'a') + "needle"});
+        size_t sum = 0;
+        ctx.start();
+        for (size_t i = 0; i < N; ++i)
+        {
+            sum += haystacks[i % haystacks.size()].Find("missing");
+        }
+        ctx.doNotOptimize(sum);
+        ctx.stop();
+    },
+                        "NGIN::String Find missing heap");
+
+    Benchmark::Register([](BenchmarkContext& ctx) {
+        const std::vector<std::string> haystacks {
+                std::string(80, 'a') + "needle" + std::string(80, 'a'),
+                std::string(20, 'a') + "needle" + std::string(80, 'a') + "needle",
+                std::string(90, 'a') + "needle" + std::string(10, 'a'),
+                std::string(30, 'a') + "needlz" + std::string(50, 'a') + "needle",
+        };
+        size_t sum = 0;
+        ctx.start();
+        for (size_t i = 0; i < N; ++i)
+        {
+            sum += haystacks[i % haystacks.size()].find_first_of("xyzl");
+        }
+        ctx.doNotOptimize(sum);
+        ctx.stop();
+    },
+                        "std::string find_first_of heap");
+
+    Benchmark::Register([](BenchmarkContext& ctx) {
+        const auto haystacks = make_string_vector<String>(
+                {std::string(80, 'a') + "needle" + std::string(80, 'a'),
+                 std::string(20, 'a') + "needle" + std::string(80, 'a') + "needle",
+                 std::string(90, 'a') + "needle" + std::string(10, 'a'),
+                 std::string(30, 'a') + "needlz" + std::string(50, 'a') + "needle"});
+        size_t sum = 0;
+        ctx.start();
+        for (size_t i = 0; i < N; ++i)
+        {
+            sum += haystacks[i % haystacks.size()].FindFirstOf("xyzl");
+        }
+        ctx.doNotOptimize(sum);
+        ctx.stop();
+    },
+                        "NGIN::String FindFirstOf heap");
+
+    Benchmark::Register([](BenchmarkContext& ctx) {
+        const std::vector<std::string> haystacks {
+                std::string(80, 'a') + "needle" + std::string(80, 'a'),
+                std::string(20, 'a') + "needle" + std::string(80, 'a') + "needle",
+                std::string(90, 'a') + "needle" + std::string(10, 'a'),
+                std::string(30, 'a') + "needlz" + std::string(50, 'a') + "needle",
+        };
+        size_t sum = 0;
+        ctx.start();
+        for (size_t i = 0; i < N; ++i)
+        {
+            sum += haystacks[i % haystacks.size()].find_last_of("xyzl");
+        }
+        ctx.doNotOptimize(sum);
+        ctx.stop();
+    },
+                        "std::string find_last_of heap");
+
+    Benchmark::Register([](BenchmarkContext& ctx) {
+        const auto haystacks = make_string_vector<String>(
+                {std::string(80, 'a') + "needle" + std::string(80, 'a'),
+                 std::string(20, 'a') + "needle" + std::string(80, 'a') + "needle",
+                 std::string(90, 'a') + "needle" + std::string(10, 'a'),
+                 std::string(30, 'a') + "needlz" + std::string(50, 'a') + "needle"});
+        size_t sum = 0;
+        ctx.start();
+        for (size_t i = 0; i < N; ++i)
+        {
+            sum += haystacks[i % haystacks.size()].FindLastOf("xyzl");
+        }
+        ctx.doNotOptimize(sum);
+        ctx.stop();
+    },
+                        "NGIN::String FindLastOf heap");
+
+    Benchmark::Register([](BenchmarkContext& ctx) {
+        const std::vector<std::string> haystacks {std::string(32, ' ') + "payload" + std::string(32, ' '),
+                                                  std::string(8, ' ') + "payload" + std::string(24, ' '),
+                                                  std::string(16, ' ') + "payload" + std::string(8, ' '),
+                                                  std::string(4, ' ') + "payload" + std::string(40, ' ')};
+        size_t                         sum = 0;
+        ctx.start();
+        for (size_t i = 0; i < N; ++i)
+        {
+            sum += haystacks[i % haystacks.size()].find_first_not_of(' ');
+        }
+        ctx.doNotOptimize(sum);
+        ctx.stop();
+    },
+                        "std::string find_first_not_of");
+
+    Benchmark::Register([](BenchmarkContext& ctx) {
+        const auto haystacks =
+                make_string_vector<String>({std::string(32, ' ') + "payload" + std::string(32, ' '),
+                                            std::string(8, ' ') + "payload" + std::string(24, ' '),
+                                            std::string(16, ' ') + "payload" + std::string(8, ' '),
+                                            std::string(4, ' ') + "payload" + std::string(40, ' ')});
+        size_t sum = 0;
+        ctx.start();
+        for (size_t i = 0; i < N; ++i)
+        {
+            sum += haystacks[i % haystacks.size()].FindFirstNotOf(' ');
+        }
+        ctx.doNotOptimize(sum);
+        ctx.stop();
+    },
+                        "NGIN::String FindFirstNotOf");
+
+    Benchmark::Register([](BenchmarkContext& ctx) {
+        const std::vector<std::string> haystacks {std::string(32, ' ') + "payload" + std::string(32, ' '),
+                                                  std::string(8, ' ') + "payload" + std::string(24, ' '),
+                                                  std::string(16, ' ') + "payload" + std::string(8, ' '),
+                                                  std::string(4, ' ') + "payload" + std::string(40, ' ')};
+        size_t                         sum = 0;
+        ctx.start();
+        for (size_t i = 0; i < N; ++i)
+        {
+            sum += haystacks[i % haystacks.size()].find_last_not_of(' ');
+        }
+        ctx.doNotOptimize(sum);
+        ctx.stop();
+    },
+                        "std::string find_last_not_of");
+
+    Benchmark::Register([](BenchmarkContext& ctx) {
+        const auto haystacks =
+                make_string_vector<String>({std::string(32, ' ') + "payload" + std::string(32, ' '),
+                                            std::string(8, ' ') + "payload" + std::string(24, ' '),
+                                            std::string(16, ' ') + "payload" + std::string(8, ' '),
+                                            std::string(4, ' ') + "payload" + std::string(40, ' ')});
+        size_t sum = 0;
+        ctx.start();
+        for (size_t i = 0; i < N; ++i)
+        {
+            sum += haystacks[i % haystacks.size()].FindLastNotOf(' ');
+        }
+        ctx.doNotOptimize(sum);
+        ctx.stop();
+    },
+                        "NGIN::String FindLastNotOf");
 
     // --- End: Run all and print ---
     Benchmark::defaultConfig.iterations       = 100;
