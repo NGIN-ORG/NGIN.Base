@@ -9,6 +9,7 @@
 
 using namespace NGIN;
 using namespace NGIN::Hashing;
+namespace Check = NGIN::Hashing::Checksum;
 
 namespace
 {
@@ -51,6 +52,21 @@ namespace
     static_assert(CRC32::MPEG_2Engine::Compute(kDigitsSpan) == CRC32MPEG2Bitwise::Compute(kDigitsSpan));
     static_assert(CRC64::ISO_3309Engine::Compute(kDigitsSpan) == CRC64ISO3309Bitwise::Compute(kDigitsSpan));
     static_assert(CRC64::ECMA_182Engine::Compute(kDigitsSpan) == CRC64ECMA182Bitwise::Compute(kDigitsSpan));
+
+    static_assert(Check::Additive::BSDChecksum(kDigitsSpan) == static_cast<UInt16>(0xD16F));
+    static_assert(Check::Additive::SYSVChecksum(kDigitsText) == static_cast<UInt16>(0x01DD));
+    static_assert(Check::Additive::Sum8(kDigitsSpan) == static_cast<UInt8>(0xDD));
+    static_assert(Check::Additive::Sum24(kDigitsSpan) == static_cast<UInt32>(0x0001DD));
+    static_assert(Check::Additive::Sum32(kDigitsText) == static_cast<UInt32>(0x000001DD));
+    static_assert(Check::Additive::Xor8(kDigitsText) == static_cast<UInt8>(0x31));
+    static_assert(Check::Internet::Checksum16(kDigitsSpan) == static_cast<UInt16>(0xF62A));
+    static_assert(Check::Adler::Adler32(kDigitsText) == static_cast<UInt32>(0x091E01DE));
+    static_assert(Check::Fletcher::Fletcher16(kDigitsSpan) == static_cast<UInt16>(0x1EDE));
+    static_assert(Check::Fletcher::Fletcher32(kDigitsSpan) == static_cast<UInt32>(0x09DF09D5));
+
+    static_assert(Check::Decimal::Luhn("7992739871") == static_cast<UInt8>(3));
+    static_assert(Check::Decimal::Verhoeff("236") == static_cast<UInt8>(3));
+    static_assert(Check::Decimal::Damm("572") == static_cast<UInt8>(4));
 }// namespace
 
 TEST_CASE("FNV1a32 overloads produce consistent results", "[Hashing][Checksum]")
@@ -235,29 +251,151 @@ TEST_CASE("CRC stateful updates match one-shot results", "[Hashing][CRC]")
     CHECK(crc64.Finalize() == CRC64::ISO_3309(kDigitsSpan));
 }
 
+TEST_CASE("Checksum implementations handle empty input", "[Hashing][Checksum]")
+{
+    CHECK(Check::Additive::BSDChecksum(nullptr, 0) == static_cast<UInt16>(0x0000));
+    CHECK(Check::Additive::SYSVChecksum(nullptr, 0) == static_cast<UInt16>(0x0000));
+    CHECK(Check::Additive::Sum8(nullptr, 0) == static_cast<UInt8>(0x00));
+    CHECK(Check::Additive::Sum24(nullptr, 0) == static_cast<UInt32>(0x000000));
+    CHECK(Check::Additive::Sum32(nullptr, 0) == static_cast<UInt32>(0x00000000));
+    CHECK(Check::Additive::Xor8(nullptr, 0) == static_cast<UInt8>(0x00));
+    CHECK(Check::Internet::Checksum16(nullptr, 0) == static_cast<UInt16>(0xFFFF));
+    CHECK(Check::Adler::Adler32(nullptr, 0) == static_cast<UInt32>(0x00000001));
+    CHECK(Check::Fletcher::Fletcher16(nullptr, 0) == static_cast<UInt16>(0x0000));
+    CHECK(Check::Fletcher::Fletcher32(nullptr, 0) == static_cast<UInt32>(0x00000000));
+}
+
+TEST_CASE("Checksum implementations match known vectors", "[Hashing][Checksum]")
+{
+    CHECK(Check::Additive::BSDChecksum(kDigitsSpan) == static_cast<UInt16>(0xD16F));
+    CHECK(Check::Additive::SYSVChecksum(kDigitsSpan) == static_cast<UInt16>(0x01DD));
+    CHECK(Check::Additive::Sum8(kDigitsSpan) == static_cast<UInt8>(0xDD));
+    CHECK(Check::Additive::Sum24(kDigitsSpan) == static_cast<UInt32>(0x0001DD));
+    CHECK(Check::Additive::Sum32(kDigitsSpan) == static_cast<UInt32>(0x000001DD));
+    CHECK(Check::Additive::Xor8(kDigitsSpan) == static_cast<UInt8>(0x31));
+    CHECK(Check::Internet::Checksum16(kDigitsSpan) == static_cast<UInt16>(0xF62A));
+    CHECK(Check::Adler::Adler32(kDigitsSpan) == static_cast<UInt32>(0x091E01DE));
+    CHECK(Check::Fletcher::Fletcher16(kDigitsSpan) == static_cast<UInt16>(0x1EDE));
+    CHECK(Check::Fletcher::Fletcher32(kDigitsSpan) == static_cast<UInt32>(0x09DF09D5));
+}
+
 TEST_CASE("Checksum overloads remain consistent", "[Hashing][Checksum]")
 {
-    constexpr std::string_view value = "checksum";
-    const auto*                data  = reinterpret_cast<const UInt8*>(value.data());
-    const auto                 size  = value.size();
+    CHECK(Check::Additive::BSDChecksum(kDigitsSpan) == Check::Additive::BSDChecksum(kDigitsBytes.data(), kDigitsBytes.size()));
+    CHECK(Check::Additive::BSDChecksum(kDigitsSpan) == Check::Additive::BSDChecksum(kDigitsText));
 
-    CHECK(BSDChecksum(data, size) == BSDChecksum(value));
-    CHECK(BSDChecksum(data, size) == BSDChecksum(value.data(), size));
+    CHECK(Check::Additive::SYSVChecksum(kDigitsSpan) == Check::Additive::SYSVChecksum(kDigitsBytes.data(), kDigitsBytes.size()));
+    CHECK(Check::Additive::SYSVChecksum(kDigitsSpan) == Check::Additive::SYSVChecksum(kDigitsText));
 
-    CHECK(SYSVChecksum(data, size) == SYSVChecksum(value));
-    CHECK(SYSVChecksum(data, size) == SYSVChecksum(value.data(), size));
+    CHECK(Check::Additive::Sum8(kDigitsSpan) == Check::Additive::Sum8(kDigitsBytes.data(), kDigitsBytes.size()));
+    CHECK(Check::Additive::Sum8(kDigitsSpan) == Check::Additive::Sum8(kDigitsText));
 
-    CHECK(Sum8(value) == Sum8(data, size));
-    CHECK(Sum24(value) == Sum24(value.data(), size));
-    CHECK(Sum32(value) == Sum32(data, size));
+    CHECK(Check::Additive::Sum24(kDigitsSpan) == Check::Additive::Sum24(kDigitsBytes.data(), kDigitsBytes.size()));
+    CHECK(Check::Additive::Sum24(kDigitsSpan) == Check::Additive::Sum24(kDigitsText));
 
-    CHECK(InternetChecksum(value) == InternetChecksum(value.data(), size));
+    CHECK(Check::Additive::Sum32(kDigitsSpan) == Check::Additive::Sum32(kDigitsBytes.data(), kDigitsBytes.size()));
+    CHECK(Check::Additive::Sum32(kDigitsSpan) == Check::Additive::Sum32(kDigitsText));
 
-    CHECK(Fletcher4(value) == Fletcher4(data, size));
-    CHECK(Fletcher8(value) == Fletcher8(value.data(), size));
-    CHECK(Fletcher16(value) == Fletcher16(data, size));
-    CHECK(Fletcher32(value) == Fletcher32(data, size));
+    CHECK(Check::Additive::Xor8(kDigitsSpan) == Check::Additive::Xor8(kDigitsBytes.data(), kDigitsBytes.size()));
+    CHECK(Check::Additive::Xor8(kDigitsSpan) == Check::Additive::Xor8(kDigitsText));
 
-    CHECK(Adler32(value) == Adler32(data, size));
-    CHECK(Xor8(value) == Xor8(data, size));
+    CHECK(Check::Internet::Checksum16(kDigitsSpan) == Check::Internet::Checksum16(kDigitsBytes.data(), kDigitsBytes.size()));
+    CHECK(Check::Internet::Checksum16(kDigitsSpan) == Check::Internet::Checksum16(kDigitsText));
+
+    CHECK(Check::Adler::Adler32(kDigitsSpan) == Check::Adler::Adler32(kDigitsBytes.data(), kDigitsBytes.size()));
+    CHECK(Check::Adler::Adler32(kDigitsSpan) == Check::Adler::Adler32(kDigitsText));
+
+    CHECK(Check::Fletcher::Fletcher16(kDigitsSpan) == Check::Fletcher::Fletcher16(kDigitsBytes.data(), kDigitsBytes.size()));
+    CHECK(Check::Fletcher::Fletcher16(kDigitsSpan) == Check::Fletcher::Fletcher16(kDigitsText));
+
+    CHECK(Check::Fletcher::Fletcher32(kDigitsSpan) == Check::Fletcher::Fletcher32(kDigitsBytes.data(), kDigitsBytes.size()));
+    CHECK(Check::Fletcher::Fletcher32(kDigitsSpan) == Check::Fletcher::Fletcher32(kDigitsText));
+}
+
+TEST_CASE("Checksum stateful updates match one-shot results", "[Hashing][Checksum]")
+{
+    Check::Additive::BSDState bsd;
+    bsd.Update(kDigitsSpan.first<4>());
+    bsd.Update(kDigitsText.substr(4));
+    CHECK(bsd.Finalize() == Check::Additive::BSDChecksum(kDigitsSpan));
+    bsd.Reset();
+    CHECK(bsd.Finalize() == static_cast<UInt16>(0x0000));
+
+    Check::Additive::SYSVState sysv;
+    sysv.Update(kDigitsSpan.subspan(0, 3));
+    sysv.Update(kDigitsBytes.data() + 3, kDigitsBytes.size() - 3);
+    CHECK(sysv.Finalize() == Check::Additive::SYSVChecksum(kDigitsSpan));
+    sysv.Reset();
+    CHECK(sysv.Finalize() == static_cast<UInt16>(0x0000));
+
+    Check::Additive::Sum8State sum8;
+    sum8.Update(kDigitsText.substr(0, 5));
+    sum8.Update(kDigitsSpan.subspan(5));
+    CHECK(sum8.Finalize() == Check::Additive::Sum8(kDigitsSpan));
+    sum8.Reset();
+    CHECK(sum8.Finalize() == static_cast<UInt8>(0x00));
+
+    Check::Additive::Sum24State sum24;
+    sum24.Update(kDigitsSpan.subspan(0, 2));
+    sum24.Update(kDigitsText.substr(2));
+    CHECK(sum24.Finalize() == Check::Additive::Sum24(kDigitsSpan));
+    sum24.Reset();
+    CHECK(sum24.Finalize() == static_cast<UInt32>(0x000000));
+
+    Check::Additive::Sum32State sum32;
+    sum32.Update(kDigitsSpan.subspan(0, 6));
+    sum32.Update(kDigitsBytes.data() + 6, kDigitsBytes.size() - 6);
+    CHECK(sum32.Finalize() == Check::Additive::Sum32(kDigitsSpan));
+    sum32.Reset();
+    CHECK(sum32.Finalize() == static_cast<UInt32>(0x00000000));
+
+    Check::Additive::Xor8State xor8;
+    xor8.Update(kDigitsText.substr(0, 1));
+    xor8.Update(kDigitsSpan.subspan(1));
+    CHECK(xor8.Finalize() == Check::Additive::Xor8(kDigitsSpan));
+    xor8.Reset();
+    CHECK(xor8.Finalize() == static_cast<UInt8>(0x00));
+
+    Check::Internet::Checksum16State internet;
+    internet.Update(kDigitsSpan.subspan(0, 3));
+    internet.Update(kDigitsSpan.subspan(3, 2));
+    internet.Update(kDigitsText.substr(5));
+    CHECK(internet.Finalize() == Check::Internet::Checksum16(kDigitsSpan));
+    internet.Reset();
+    CHECK(internet.Finalize() == static_cast<UInt16>(0xFFFF));
+
+    Check::Adler::Adler32State adler;
+    adler.Update(kDigitsSpan.subspan(0, 4));
+    adler.Update(kDigitsText.substr(4));
+    CHECK(adler.Finalize() == Check::Adler::Adler32(kDigitsSpan));
+    adler.Reset();
+    CHECK(adler.Finalize() == static_cast<UInt32>(0x00000001));
+
+    Check::Fletcher::Fletcher16State fletcher16;
+    fletcher16.Update(kDigitsSpan.subspan(0, 5));
+    fletcher16.Update(kDigitsText.substr(5));
+    CHECK(fletcher16.Finalize() == Check::Fletcher::Fletcher16(kDigitsSpan));
+    fletcher16.Reset();
+    CHECK(fletcher16.Finalize() == static_cast<UInt16>(0x0000));
+
+    Check::Fletcher::Fletcher32State fletcher32;
+    fletcher32.Update(kDigitsSpan.subspan(0, 1));
+    fletcher32.Update(kDigitsSpan.subspan(1, 4));
+    fletcher32.Update(kDigitsText.substr(5));
+    CHECK(fletcher32.Finalize() == Check::Fletcher::Fletcher32(kDigitsSpan));
+    fletcher32.Reset();
+    CHECK(fletcher32.Finalize() == static_cast<UInt32>(0x00000000));
+}
+
+TEST_CASE("Decimal checksum algorithms validate digits", "[Hashing][Checksum]")
+{
+    CHECK(Check::Decimal::Luhn("7992739871") == static_cast<UInt8>(3));
+    CHECK(Check::Decimal::Luhn("799273987A") == Check::Decimal::InvalidDigitChecksum);
+
+    CHECK(Check::Decimal::Verhoeff("236") == static_cast<UInt8>(3));
+    CHECK(Check::Decimal::Verhoeff("23A") == Check::Decimal::InvalidDigitChecksum);
+
+    CHECK(Check::Decimal::Damm("572") == static_cast<UInt8>(4));
+    CHECK(Check::Decimal::Damm("5724") == static_cast<UInt8>(0));
+    CHECK(Check::Decimal::Damm("57A") == Check::Decimal::InvalidDigitChecksum);
 }
