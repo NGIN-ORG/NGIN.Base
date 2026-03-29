@@ -210,9 +210,15 @@ if(WIN32)
     ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/FileSystemDriver.win32.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/LocalFileSystem.win32.cpp
   )
-elseif(UNIX)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   list(APPEND NGIN_BASE_CORE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/FileSystemDriver.linux.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/LocalFileSystem.posix.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/LocalFileSystem.linux.cpp
+  )
+elseif(UNIX)
+  list(APPEND NGIN_BASE_CORE_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/FileSystemDriver.posix.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/LocalFileSystem.posix.cpp
   )
 endif()
