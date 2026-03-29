@@ -652,19 +652,51 @@ TEST_CASE("String shrink-to-fit can release heap storage back to SBO", "[Text][S
     CHECK(value.View() == std::string_view("xxxxxxxx"));
 }
 
+TEST_CASE("String Reserve and ReserveExact expose distinct capacity semantics", "[Text][String]")
+{
+    using SmallStr = NGIN::Text::BasicString<char, 16>;
+
+    SmallStr grown("abc");
+    grown.Reserve(20);
+    CHECK(grown.Capacity() >= 20U);
+    CHECK(grown.Capacity() > 20U);
+
+    SmallStr exact("abc");
+    exact.ReserveExact(20);
+    CHECK(exact.Capacity() == 20U);
+}
+
 TEST_CASE("String swap respects allocator propagation traits", "[Text][String]")
 {
     using SwapStr = NGIN::Text::BasicString<char, 32, SwapAllocator>;
 
-    SwapStr left("Left", SwapAllocator {1});
-    SwapStr right("Right", SwapAllocator {2});
+    SECTION("small strings")
+    {
+        SwapStr left("Left", SwapAllocator {1});
+        SwapStr right("Right", SwapAllocator {2});
 
-    left.Swap(right);
+        left.Swap(right);
 
-    CHECK(CStrEqual(left.CStr(), "Right"));
-    CHECK(CStrEqual(right.CStr(), "Left"));
-    CHECK(left.GetAllocator().Id() == 1);
-    CHECK(right.GetAllocator().Id() == 2);
+        CHECK(CStrEqual(left.CStr(), "Right"));
+        CHECK(CStrEqual(right.CStr(), "Left"));
+        CHECK(left.GetAllocator().Id() == 1);
+        CHECK(right.GetAllocator().Id() == 2);
+    }
+
+    SECTION("heap strings")
+    {
+        std::string leftValue(80, 'L');
+        std::string rightValue(72, 'R');
+        SwapStr     left(leftValue.c_str(), SwapAllocator {1});
+        SwapStr     right(rightValue.c_str(), SwapAllocator {2});
+
+        left.Swap(right);
+
+        CHECK(left.View() == std::string_view(rightValue));
+        CHECK(right.View() == std::string_view(leftValue));
+        CHECK(left.GetAllocator().Id() == 1);
+        CHECK(right.GetAllocator().Id() == 2);
+    }
 }
 
 TEST_CASE("String View and At provide bounded access", "[Text][String]")

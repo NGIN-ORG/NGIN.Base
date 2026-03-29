@@ -159,7 +159,7 @@ namespace NGIN::Text
 
         ~BasicString()
         {
-            ReleaseStorage();
+            DestroyHeapIfAny();
         }
 
         ThisType& operator=(const ThisType& other)
@@ -253,7 +253,7 @@ namespace NGIN::Text
         {
             if (newCap <= Capacity())
                 return;
-            ReallocateTo(newCap);
+            ReallocateTo(CheckedGrow(Capacity(), newCap));
         }
 
         void ReserveExact(size_type newCap)
@@ -270,16 +270,10 @@ namespace NGIN::Text
 
             if (m_size <= sbo_chars)
             {
-                CharT* const oldData     = m_heapData;
-                size_type    oldCapacity = m_heapCapacity;
-
-                CopyChars(m_smallData.data(), oldData, m_size);
-                m_smallData[m_size] = CharT(0);
-                m_isSmall           = true;
-                m_heapData          = nullptr;
-                m_heapCapacity      = 0;
-
-                DeallocateWith(m_allocator, oldData, oldCapacity);
+                SmallStorage buffer {};
+                CopyChars(buffer.data(), m_heapData, m_size);
+                buffer[m_size] = CharT(0);
+                CommitSmall(buffer.data(), m_size);
                 return;
             }
 
@@ -335,11 +329,7 @@ namespace NGIN::Text
                 SmallStorage temp {};
                 CopyChars(temp.data(), source, count);
                 temp[count] = CharT(0);
-
-                ReleaseStorage();
-                m_isSmall = true;
-                CopyChars(m_smallData.data(), temp.data(), count + 1);
-                m_size = count;
+                CommitSmall(temp.data(), count);
                 return;
             }
 
@@ -355,12 +345,7 @@ namespace NGIN::Text
             CharT* const    newData     = AllocateWith(m_allocator, newCapacity);
             CopyChars(newData, source, count);
             newData[count] = CharT(0);
-
-            ReleaseStorage();
-            m_isSmall      = false;
-            m_heapData     = newData;
-            m_heapCapacity = newCapacity;
-            m_size         = count;
+            CommitHeap(newData, newCapacity, count);
         }
 
         void Append(const ThisType& other) { AppendView(other.View()); }
@@ -519,9 +504,15 @@ namespace NGIN::Text
             }
             else
             {
-                ThisType temp(View(), m_allocator);
-                Assign(other.View());
-                other.Assign(temp.View());
+                ThisType thisValue(View(), m_allocator);
+                ThisType otherValue(other.View(), other.m_allocator);
+
+                DestroyHeapIfAny();
+                other.DestroyHeapIfAny();
+                ResetToEmptySmall();
+                other.ResetToEmptySmall();
+                SwapValueState(otherValue);
+                other.SwapValueState(thisValue);
             }
         }
 
@@ -1058,6 +1049,15 @@ namespace NGIN::Text
             allocator.Deallocate(static_cast<void*>(data), bytes, alignof(CharT));
         }
 
+        void DestroyHeapIfAny() noexcept
+        {
+            if (!m_isSmall)
+                DeallocateWith(m_allocator, m_heapData, m_heapCapacity);
+
+            m_heapData     = nullptr;
+            m_heapCapacity = 0;
+        }
+
         void ResetToEmptySmall() noexcept
         {
             m_isSmall      = true;
@@ -1067,16 +1067,33 @@ namespace NGIN::Text
             m_smallData[0] = CharT(0);
         }
 
-        void ReleaseStorage() noexcept
+        void SwapValueState(ThisType& other) noexcept
         {
-            if (!m_isSmall)
-                DeallocateWith(m_allocator, m_heapData, m_heapCapacity);
+            using std::swap;
+            swap(m_isSmall, other.m_isSmall);
+            swap(m_size, other.m_size);
+            swap(m_heapData, other.m_heapData);
+            swap(m_heapCapacity, other.m_heapCapacity);
+            swap(m_smallData, other.m_smallData);
+        }
 
-            m_heapData     = nullptr;
-            m_heapCapacity = 0;
-            m_isSmall      = true;
-            m_size         = 0;
-            m_smallData[0] = CharT(0);
+        void CommitSmall(const CharT* source, size_type count)
+        {
+            DestroyHeapIfAny();
+            ResetToEmptySmall();
+            CopyChars(m_smallData.data(), source, count);
+            m_smallData[count] = CharT(0);
+            m_size             = count;
+        }
+
+        void CommitHeap(CharT* data, size_type capacity, size_type size) noexcept
+        {
+            DestroyHeapIfAny();
+            m_isSmall        = false;
+            m_heapData       = data;
+            m_heapCapacity   = capacity;
+            m_size           = size;
+            m_heapData[size] = CharT(0);
         }
 
         void SetSize(size_type size) noexcept
@@ -1143,9 +1160,21 @@ namespace NGIN::Text
         {
             if constexpr (NGIN::Memory::AllocatorPropagationTraits<Alloc>::PropagateOnCopyAssignment)
             {
-                ReleaseStorage();
-                m_allocator = other.m_allocator;
-                CopyConstructFrom(other);
+                if constexpr (std::is_nothrow_copy_assignable_v<Alloc>)
+                {
+                    ThisType temp(other);
+                    DestroyHeapIfAny();
+                    m_allocator = other.m_allocator;
+                    ResetToEmptySmall();
+                    SwapValueState(temp);
+                }
+                else
+                {
+                    DestroyHeapIfAny();
+                    ResetToEmptySmall();
+                    m_allocator = other.m_allocator;
+                    CopyConstructFrom(other);
+                }
             }
             else
             {
@@ -1162,14 +1191,27 @@ namespace NGIN::Text
 
             if constexpr (propagation::PropagateOnMoveAssignment)
             {
-                ReleaseStorage();
-                m_allocator = std::move(other.m_allocator);
-                MoveConstructFrom(std::move(other));
+                if constexpr (std::is_nothrow_move_assignable_v<Alloc>)
+                {
+                    ThisType temp(std::move(other));
+                    DestroyHeapIfAny();
+                    m_allocator = std::move(temp.m_allocator);
+                    ResetToEmptySmall();
+                    SwapValueState(temp);
+                }
+                else
+                {
+                    DestroyHeapIfAny();
+                    ResetToEmptySmall();
+                    m_allocator = std::move(other.m_allocator);
+                    MoveConstructFrom(std::move(other));
+                }
             }
             else if constexpr (propagation::IsAlwaysEqual)
             {
-                ReleaseStorage();
-                MoveConstructFrom(std::move(other));
+                DestroyHeapIfAny();
+                ResetToEmptySmall();
+                SwapValueState(other);
             }
             else
             {
@@ -1186,27 +1228,17 @@ namespace NGIN::Text
             {
                 if (!m_isSmall)
                 {
-                    CharT* const oldData     = m_heapData;
-                    size_type    oldCapacity = m_heapCapacity;
-
-                    CopyChars(m_smallData.data(), oldData, m_size + 1);
-                    m_isSmall      = true;
-                    m_heapData     = nullptr;
-                    m_heapCapacity = 0;
-                    DeallocateWith(m_allocator, oldData, oldCapacity);
+                    SmallStorage buffer {};
+                    CopyChars(buffer.data(), m_heapData, m_size);
+                    buffer[m_size] = CharT(0);
+                    CommitSmall(buffer.data(), m_size);
                 }
                 return;
             }
 
             CharT* const newData = AllocateWith(m_allocator, newCapacity);
             CopyChars(newData, Data(), m_size + 1);
-
-            if (!m_isSmall)
-                DeallocateWith(m_allocator, m_heapData, m_heapCapacity);
-
-            m_isSmall      = false;
-            m_heapData     = newData;
-            m_heapCapacity = newCapacity;
+            CommitHeap(newData, newCapacity, m_size);
         }
 
         void AppendView(view_type sv)
@@ -1282,11 +1314,7 @@ namespace NGIN::Text
                           Data() + pos + eraseCount,
                           suffixCount);
                 buffer[newSize] = CharT(0);
-
-                ReleaseStorage();
-                m_isSmall = true;
-                CopyChars(m_smallData.data(), buffer.data(), newSize + 1);
-                m_size = newSize;
+                CommitSmall(buffer.data(), newSize);
                 return;
             }
 
@@ -1312,14 +1340,7 @@ namespace NGIN::Text
             CopyChars(newData + pos, replacement.data(), replacement.size());
             CopyChars(newData + pos + replacement.size(), Data() + pos + eraseCount, suffixCount);
             newData[newSize] = CharT(0);
-
-            if (!m_isSmall)
-                DeallocateWith(m_allocator, m_heapData, m_heapCapacity);
-
-            m_isSmall      = false;
-            m_heapData     = newData;
-            m_heapCapacity = newCapacity;
-            m_size         = newSize;
+            CommitHeap(newData, newCapacity, newSize);
         }
 
         bool                        m_isSmall {true};
