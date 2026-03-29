@@ -300,12 +300,13 @@ v.PushBack(1);
 
 Allocator propagation follows `AllocatorPropagationTraits<Alloc>` (move-propagation enabled by default).
 
-### `BasicString<CharT, SBOBytes, Alloc, Growth>`
+### `BasicString<CharT, SBOBytes, Alloc, Growth, Traits>`
 
-`NGIN::Containers::BasicString` is a small-string-optimized string:
+`NGIN::Text::BasicString` is a small-string-optimized string:
 
 - SBO sized in **bytes** (works for any `CharT`)
 - allocator-backed heap growth beyond SBO
+- traits-aware comparisons and views
 
 ```cpp
 using String = NGIN::Text::String; // alias in String.hpp

@@ -1,8 +1,8 @@
 #include <NGIN/Benchmark.hpp>
 #include <NGIN/Text/String.hpp>
-#include <string>
 #include <iostream>
 #include <random>
+#include <string>
 
 using NGIN::Benchmark;
 using NGIN::BenchmarkContext;
@@ -182,6 +182,19 @@ int main()
     },
                         "NGIN::String append long");
 
+    Benchmark::Register([](BenchmarkContext& ctx) {
+        String s("ab");
+        ctx.start();
+        for (size_t i = 0; i < N; ++i)
+        {
+            s.Append(3, 'x');
+            s.Resize(2);
+        }
+        ctx.doNotOptimize(s);
+        ctx.stop();
+    },
+                        "NGIN::String append repeated char");
+
     // --- Random String Construction ---
     Benchmark::Register([](BenchmarkContext& ctx) {
         std::vector<std::string> vec;
@@ -326,6 +339,89 @@ int main()
         ctx.stop();
     },
                         "NGIN::String move assignment");
+
+    // --- Mutation Benchmarks ---
+    Benchmark::Register([](BenchmarkContext& ctx) {
+        std::string s("alphagamma");
+        ctx.start();
+        for (size_t i = 0; i < N; ++i)
+        {
+            s.insert(5, "-beta");
+            s.erase(5, 5);
+        }
+        ctx.doNotOptimize(s);
+        ctx.stop();
+    },
+                        "std::string insert/erase middle");
+
+    Benchmark::Register([](BenchmarkContext& ctx) {
+        String s("alphagamma");
+        ctx.start();
+        for (size_t i = 0; i < N; ++i)
+        {
+            s.Insert(5, "-beta");
+            s.Erase(5, 5);
+        }
+        ctx.doNotOptimize(s);
+        ctx.stop();
+    },
+                        "NGIN::String insert/erase middle");
+
+    Benchmark::Register([](BenchmarkContext& ctx) {
+        std::string s("alpha-x");
+        ctx.start();
+        for (size_t i = 0; i < N; ++i)
+        {
+            s.replace(5, 2, "-beta-gamma");
+            s.replace(5, 11, "-x");
+        }
+        ctx.doNotOptimize(s);
+        ctx.stop();
+    },
+                        "std::string replace grow/shrink");
+
+    Benchmark::Register([](BenchmarkContext& ctx) {
+        String s("alpha-x");
+        ctx.start();
+        for (size_t i = 0; i < N; ++i)
+        {
+            s.Replace(5, 2, "-beta-gamma");
+            s.Replace(5, 11, "-x");
+        }
+        ctx.doNotOptimize(s);
+        ctx.stop();
+    },
+                        "NGIN::String replace grow/shrink");
+
+    Benchmark::Register([](BenchmarkContext& ctx) {
+        std::string s("prefix-payload-suffix");
+        ctx.start();
+        for (size_t i = 0; i < N; ++i)
+        {
+            s.erase(0, 7);
+            s.erase(s.size() - 7, 7);
+            s.insert(0, "prefix-");
+            s += "-suffix";
+        }
+        ctx.doNotOptimize(s);
+        ctx.stop();
+    },
+                        "std::string prefix/suffix trim");
+
+    Benchmark::Register([](BenchmarkContext& ctx) {
+        String s("prefix-payload-suffix");
+        ctx.start();
+        for (size_t i = 0; i < N; ++i)
+        {
+            s.RemovePrefix(7);
+            s.RemoveSuffix(7);
+            s.Insert(0, "prefix-");
+            s.Append("-suffix");
+        }
+        ctx.doNotOptimize(s);
+        ctx.stop();
+    },
+                        "NGIN::String prefix/suffix trim");
 
     // --- End: Run all and print ---
     Benchmark::defaultConfig.iterations       = 100;
