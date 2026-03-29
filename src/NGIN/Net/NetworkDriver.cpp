@@ -1509,7 +1509,8 @@ namespace NGIN::Net
                 const int  result = ::setsockopt(sock, SOL_SOCKET, SO_UPDATE_CONNECT_CONTEXT, nullptr, 0);
                 if (result != 0)
                 {
-                    return NGIN::Utilities::Unexpected(ToAsyncError(detail::LastError()));
+                    op.error = detail::LastError();
+                    return NGIN::Utilities::Unexpected(ToAsyncError(op.error));
                 }
                 return {};
             }
@@ -1920,6 +1921,16 @@ namespace NGIN::Net
             auto result            = co_await awaiter;
             if (!result)
             {
+                if (result.Error().code == NGIN::Async::AsyncErrorCode::Canceled)
+                {
+                    co_await NGIN::Async::Task<void, NetError>::ReturnCanceled();
+                    co_return;
+                }
+                if (awaiter.op.error.code != NetErrorCode::Ok)
+                {
+                    co_await NGIN::Async::Task<void, NetError>::ReturnError(awaiter.op.error);
+                    co_return;
+                }
                 co_await NGIN::Async::Task<void, NetError>::ReturnFault(
                         NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidState, result.Error().native));
                 co_return;

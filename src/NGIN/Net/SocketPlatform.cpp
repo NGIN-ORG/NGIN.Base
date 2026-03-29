@@ -85,6 +85,13 @@ namespace NGIN::Net::detail
             case WSAEMSGSIZE: code = NetErrorCode::MessageTooLarge; break;
             case WSAEACCES: code = NetErrorCode::PermissionDenied; break;
             case WSAECONNREFUSED: code = NetErrorCode::Disconnected; break;
+            case ERROR_SEM_TIMEOUT: code = NetErrorCode::TimedOut; break;
+            case ERROR_NETNAME_DELETED: code = NetErrorCode::ConnectionReset; break;
+            case ERROR_CONNECTION_ABORTED: code = NetErrorCode::Disconnected; break;
+            case ERROR_CONNECTION_REFUSED: code = NetErrorCode::Disconnected; break;
+            case ERROR_NETWORK_UNREACHABLE: code = NetErrorCode::HostUnreachable; break;
+            case ERROR_HOST_UNREACHABLE: code = NetErrorCode::HostUnreachable; break;
+            case ERROR_ACCESS_DENIED: code = NetErrorCode::PermissionDenied; break;
             default: break;
         }
 #else
