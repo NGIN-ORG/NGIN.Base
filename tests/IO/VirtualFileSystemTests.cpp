@@ -75,8 +75,13 @@ TEST_CASE("IO.VirtualFileSystem forwards path-returning operations", "[IO][Virtu
     REQUIRE(weaklyCanonical.Value().View() == virtualRoot.Join("missing/child.txt").LexicallyNormal().View());
 
     auto symlinkTarget = vfs.ReadSymlink(virtualLink);
+#if defined(_WIN32)
+    REQUIRE_FALSE(symlinkTarget.HasValue());
+    REQUIRE(symlinkTarget.Error().code == NGIN::IO::IOErrorCode::Unsupported);
+#else
     REQUIRE(symlinkTarget.HasValue());
     REQUIRE(symlinkTarget.Value().View() == virtualFile.View());
+#endif
 
     auto sameFile = vfs.SameFile(virtualFile, virtualHard);
     REQUIRE(sameFile.HasValue());
@@ -192,6 +197,10 @@ TEST_CASE("IO.VirtualFileSystem async file operations use value handles", "[IO][
     REQUIRE(readResult.Value() == payload.size());
     REQUIRE(std::string(reinterpret_cast<const char*>(buffer.data()), readResult.Value()) == payload);
 
+    auto closeTask   = file.CloseAsync(ctx);
+    auto closeResult = RunAsyncTask(closeTask, ctx);
+    REQUIRE(closeResult.Succeeded());
+
     auto infoTask   = vfs.GetInfoAsync(ctx, virtualFile);
     auto infoResult = RunAsyncTask(infoTask, ctx);
     REQUIRE(infoResult.Succeeded());
@@ -246,7 +255,12 @@ TEST_CASE("IO.VirtualFileSystem async directory handles stay mount scoped", "[IO
     auto fileTask = directory.OpenFileAsync(ctx, NGIN::IO::Path {"inside.txt"}, options);
     auto fileOpen = RunAsyncTask(fileTask, ctx);
     REQUIRE(fileOpen.Succeeded());
-    REQUIRE(fileOpen.Value().IsOpen());
+    auto file = std::move(fileOpen.Value());
+    REQUIRE(file.IsOpen());
+
+    auto closeTask   = file.CloseAsync(ctx);
+    auto closeResult = RunAsyncTask(closeTask, ctx);
+    REQUIRE(closeResult.Succeeded());
 
     RemoveTempDir(backingFs, realRoot);
 }

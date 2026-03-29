@@ -122,6 +122,7 @@ namespace NGIN::IO
     {
         FileOpenOptions options;
         options.access      = FileAccess::Read;
+        options.share       = FileShare::All;
         options.disposition = FileCreateDisposition::OpenExisting;
 
         auto file = co_await fs.OpenFileAsync(ctx, path, options);
@@ -144,6 +145,7 @@ namespace NGIN::IO
     {
         FileOpenOptions options;
         options.access      = FileAccess::Write;
+        options.share       = FileShare::All;
         options.disposition = FileCreateDisposition::CreateAlways;
 
         auto file = co_await fs.OpenFileAsync(ctx, path, options);

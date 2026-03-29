@@ -33,6 +33,13 @@ TEST_CASE("IO.Path empty and root classification", "[IO][Path]")
     const NGIN::IO::Path driveRoot {"C:/"};
     REQUIRE(driveRoot.IsAbsolute());
     REQUIRE(driveRoot.IsRoot());
+    REQUIRE(driveRoot.Parent().View() == "C:/");
+
+    const NGIN::IO::Path absoluteSingleSegment {"/alpha"};
+    REQUIRE(absoluteSingleSegment.Parent().View() == "/");
+
+    const NGIN::IO::Path driveSingleSegment {"C:/alpha"};
+    REQUIRE(driveSingleSegment.Parent().View() == "C:/");
 }
 
 TEST_CASE("IO.Path normalization handles separators and dot segments", "[IO][Path]")

@@ -52,35 +52,35 @@ namespace NGIN::IO
         [[nodiscard]] bool IsValid() const noexcept { return static_cast<bool>(m_state) && m_operations != nullptr; }
         explicit           operator bool() const noexcept { return IsValid(); }
 
-        AsyncTask<bool> ExistsAsync(NGIN::Async::TaskContext& ctx, const Path& path)
+        AsyncTask<bool> ExistsAsync(NGIN::Async::TaskContext& ctx, Path path)
         {
             if (!IsValid() || m_operations->exists == nullptr)
                 co_return NGIN::Utilities::Unexpected<IOError>(MakeInvalidHandleError("async directory handle is empty"));
             co_return co_await m_operations->exists(m_state, ctx, path);
         }
 
-        AsyncTask<FileInfo> GetInfoAsync(NGIN::Async::TaskContext& ctx, const Path& path, const MetadataOptions& options = {})
+        AsyncTask<FileInfo> GetInfoAsync(NGIN::Async::TaskContext& ctx, Path path, MetadataOptions options = {})
         {
             if (!IsValid() || m_operations->getInfo == nullptr)
                 co_return NGIN::Utilities::Unexpected<IOError>(MakeInvalidHandleError("async directory handle is empty"));
             co_return co_await m_operations->getInfo(m_state, ctx, path, options);
         }
 
-        AsyncTask<AsyncFileHandle> OpenFileAsync(NGIN::Async::TaskContext& ctx, const Path& path, const FileOpenOptions& options)
+        AsyncTask<AsyncFileHandle> OpenFileAsync(NGIN::Async::TaskContext& ctx, Path path, FileOpenOptions options)
         {
             if (!IsValid() || m_operations->openFile == nullptr)
                 co_return NGIN::Utilities::Unexpected<IOError>(MakeInvalidHandleError("async directory handle is empty"));
             co_return co_await m_operations->openFile(m_state, ctx, path, options);
         }
 
-        AsyncTask<AsyncDirectoryHandle> OpenDirectoryAsync(NGIN::Async::TaskContext& ctx, const Path& path)
+        AsyncTask<AsyncDirectoryHandle> OpenDirectoryAsync(NGIN::Async::TaskContext& ctx, Path path)
         {
             if (!IsValid() || m_operations->openDirectory == nullptr)
                 co_return NGIN::Utilities::Unexpected<IOError>(MakeInvalidHandleError("async directory handle is empty"));
             co_return co_await m_operations->openDirectory(m_state, ctx, path);
         }
 
-        AsyncTask<Path> ReadSymlinkAsync(NGIN::Async::TaskContext& ctx, const Path& path)
+        AsyncTask<Path> ReadSymlinkAsync(NGIN::Async::TaskContext& ctx, Path path)
         {
             if (!IsValid() || m_operations->readSymlink == nullptr)
                 co_return NGIN::Utilities::Unexpected<IOError>(MakeInvalidHandleError("async directory handle is empty"));
