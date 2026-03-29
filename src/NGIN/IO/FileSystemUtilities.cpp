@@ -130,7 +130,7 @@ namespace NGIN::IO
         NGIN::Byte                           temp[64 * 1024];
         for (;;)
         {
-            const UIntSize n = co_await file->ReadAsync(ctx, std::span<NGIN::Byte>(temp, sizeof(temp)));
+            const UIntSize n = co_await file.ReadAsync(ctx, std::span<NGIN::Byte>(temp, sizeof(temp)));
             if (n == 0)
                 break;
             for (UIntSize i = 0; i < n; ++i)
@@ -151,7 +151,7 @@ namespace NGIN::IO
         UIntSize total = 0;
         while (total < bytes.size())
         {
-            const UIntSize n = co_await file->WriteAsync(ctx, bytes.subspan(total));
+            const UIntSize n = co_await file.WriteAsync(ctx, bytes.subspan(total));
             if (n == 0)
             {
                 co_await AsyncTaskVoid::ReturnError(MakeError(IOErrorCode::SystemError, "short write", path));
@@ -160,7 +160,7 @@ namespace NGIN::IO
             total += n;
         }
 
-        co_await file->FlushAsync(ctx);
+        co_await file.FlushAsync(ctx);
         co_return;
     }
 

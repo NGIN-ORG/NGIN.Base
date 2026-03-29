@@ -91,8 +91,10 @@ namespace NGIN::IO
         Result<Path>      CreateTempFile(const Path& directory = {}, std::string_view prefix = "ngin") noexcept override;
         Result<SpaceInfo> GetSpaceInfo(const Path& path) noexcept override;
 
-        AsyncTask<std::unique_ptr<IAsyncFileHandle>> OpenFileAsync(
+        AsyncTask<AsyncFileHandle> OpenFileAsync(
                 NGIN::Async::TaskContext& ctx, const Path& path, const FileOpenOptions& options) override;
+        AsyncTask<AsyncDirectoryHandle> OpenDirectoryAsync(
+                NGIN::Async::TaskContext& ctx, const Path& path) override;
         AsyncTask<FileInfo> GetInfoAsync(
                 NGIN::Async::TaskContext& ctx, const Path& path, const MetadataOptions& options = {}) override;
         AsyncTaskVoid CopyFileAsync(NGIN::Async::TaskContext& ctx, const Path& from, const Path& to, const CopyOptions& options = {}) override;

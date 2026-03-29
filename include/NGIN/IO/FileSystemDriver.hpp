@@ -4,6 +4,9 @@
 #include <NGIN/Execution/ThreadPoolScheduler.hpp>
 #include <NGIN/IO/IOResult.hpp>
 
+#include <memory>
+#include <utility>
+
 namespace NGIN::IO
 {
     class NGIN_BASE_API FileSystemDriver
@@ -16,6 +19,12 @@ namespace NGIN::IO
             Fallback,
         };
 
+        enum class ActiveBackend : UInt8
+        {
+            None,
+            WorkerFallback,
+        };
+
         struct Options
         {
             UInt32            workerThreads {1};
@@ -23,10 +32,23 @@ namespace NGIN::IO
             BackendPreference backendPreference {BackendPreference::Auto};
         };
 
-        explicit FileSystemDriver(const Options& options = {})
-            : m_options(options)
-            , m_scheduler(static_cast<std::size_t>(options.workerThreads == 0 ? 1 : options.workerThreads))
+        FileSystemDriver()
+            : FileSystemDriver(Options {})
         {
+        }
+
+        explicit FileSystemDriver(Options options)
+            : m_options(std::move(options))
+        {
+            if (m_options.backendPreference == BackendPreference::Native)
+            {
+                m_backend = ActiveBackend::None;
+                return;
+            }
+
+            m_scheduler = std::make_shared<NGIN::Execution::ThreadPoolScheduler>(
+                    static_cast<std::size_t>(m_options.workerThreads == 0 ? 1 : m_options.workerThreads));
+            m_backend = ActiveBackend::WorkerFallback;
         }
 
         [[nodiscard]] const Options& GetOptions() const noexcept
@@ -34,9 +56,23 @@ namespace NGIN::IO
             return m_options;
         }
 
+        [[nodiscard]] ActiveBackend GetActiveBackend() const noexcept
+        {
+            return m_backend;
+        }
+
+        [[nodiscard]] bool HasBackend() const noexcept
+        {
+            return m_backend != ActiveBackend::None && static_cast<bool>(m_scheduler);
+        }
+
         [[nodiscard]] NGIN::Execution::ExecutorRef GetExecutor() noexcept
         {
-            return NGIN::Execution::ExecutorRef::From(m_scheduler);
+            if (!m_scheduler)
+            {
+                return {};
+            }
+            return NGIN::Execution::ExecutorRef::From(*m_scheduler);
         }
 
         [[nodiscard]] NGIN::Async::TaskContext MakeTaskContext(NGIN::Async::CancellationToken cancellation = {}) noexcept
@@ -46,22 +82,28 @@ namespace NGIN::IO
 
         [[nodiscard]] bool RunOne() noexcept
         {
-            return m_scheduler.RunOne();
+            return m_scheduler ? m_scheduler->RunOne() : false;
         }
 
         void RunUntilIdle() noexcept
         {
-            m_scheduler.RunUntilIdle();
+            if (m_scheduler)
+            {
+                m_scheduler->RunUntilIdle();
+            }
         }
 
         void CancelAll() noexcept
         {
-            m_scheduler.CancelAll();
+            if (m_scheduler)
+            {
+                m_scheduler->CancelAll();
+            }
         }
 
     private:
-        Options                            m_options {};
-        NGIN::Execution::ThreadPoolScheduler m_scheduler;
+        Options                                          m_options {};
+        ActiveBackend                                    m_backend {ActiveBackend::None};
+        std::shared_ptr<NGIN::Execution::ThreadPoolScheduler> m_scheduler {};
     };
 }// namespace NGIN::IO
-

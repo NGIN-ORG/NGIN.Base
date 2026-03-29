@@ -1,13 +1,22 @@
 #pragma once
 
+#include <NGIN/IO/FileSystemDriver.hpp>
 #include <NGIN/IO/IAsyncFileSystem.hpp>
 #include <NGIN/IO/IFileSystem.hpp>
+
+#include <memory>
 
 namespace NGIN::IO
 {
     class NGIN_BASE_API LocalFileSystem final : public IFileSystem, public IAsyncFileSystem
     {
     public:
+        LocalFileSystem();
+        explicit LocalFileSystem(std::shared_ptr<FileSystemDriver> asyncDriver);
+
+        void BindAsyncDriver(std::shared_ptr<FileSystemDriver> asyncDriver) noexcept;
+        [[nodiscard]] const std::shared_ptr<FileSystemDriver>& GetAsyncDriver() const noexcept { return m_asyncDriver; }
+
         [[nodiscard]] FileSystemCapabilities GetCapabilities() const noexcept override;
         Result<bool>                         Exists(const Path& path) noexcept override;
         Result<FileInfo>                     GetInfo(const Path& path, const MetadataOptions& options = {}) noexcept override;
@@ -43,10 +52,15 @@ namespace NGIN::IO
         Result<Path>      CreateTempFile(const Path& directory = {}, std::string_view prefix = "ngin") noexcept override;
         Result<SpaceInfo> GetSpaceInfo(const Path& path) noexcept override;
 
-        AsyncTask<std::unique_ptr<IAsyncFileHandle>> OpenFileAsync(
+        AsyncTask<AsyncFileHandle> OpenFileAsync(
                 NGIN::Async::TaskContext& ctx, const Path& path, const FileOpenOptions& options) override;
+        AsyncTask<AsyncDirectoryHandle> OpenDirectoryAsync(
+                NGIN::Async::TaskContext& ctx, const Path& path) override;
         AsyncTask<FileInfo> GetInfoAsync(
                 NGIN::Async::TaskContext& ctx, const Path& path, const MetadataOptions& options = {}) override;
         AsyncTaskVoid CopyFileAsync(NGIN::Async::TaskContext& ctx, const Path& from, const Path& to, const CopyOptions& options = {}) override;
+
+    private:
+        std::shared_ptr<FileSystemDriver> m_asyncDriver;
     };
 }// namespace NGIN::IO

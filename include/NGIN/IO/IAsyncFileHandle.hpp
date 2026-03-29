@@ -18,6 +18,6 @@ namespace NGIN::IO
         virtual AsyncTask<UIntSize> WriteAtAsync(NGIN::Async::TaskContext& ctx, UInt64 offset, std::span<const NGIN::Byte> source) = 0;
         virtual AsyncTaskVoid       FlushAsync(NGIN::Async::TaskContext& ctx) = 0;
         virtual AsyncTaskVoid       CloseAsync(NGIN::Async::TaskContext& ctx) = 0;
+        [[nodiscard]] virtual bool  IsOpen() const noexcept = 0;
     };
 }// namespace NGIN::IO
-

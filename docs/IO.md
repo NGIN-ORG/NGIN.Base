@@ -59,7 +59,8 @@ You probably do not need it when:
 - Need fine-grained file IO:
   - use `FileHandle`
 - Need async filesystem operations:
-  - use `IAsyncFileSystem`, but only if your code already uses the async runtime
+  - use `IAsyncFileSystem` together with `FileSystemDriver` or another suitable executor-backed `TaskContext`
+  - use `AsyncDirectoryHandle` when async code needs directory-relative operations
 
 ## Sync-First Recommendation
 
@@ -69,6 +70,11 @@ Use async filesystem APIs only when:
 
 - your surrounding code already uses `TaskContext` and an executor
 - avoiding blocking is materially important to the design
+
+If you want a straightforward worker-backed setup, start with `FileSystemDriver`.
+
+Current async local-file execution is driver-backed: filesystem work is dispatched onto the `FileSystemDriver`
+backend and resumes your task on the `TaskContext` executor when the operation completes.
 
 For straightforward tools and ordinary application startup code, the sync APIs are usually the better first choice.
 
@@ -234,6 +240,16 @@ NGIN::Async::Task<void, NGIN::IO::IOError> LoadConfig(
 
 For lower-level control, use `OpenFileAsync` and the async file handle surface directly.
 
+If you need scoped async operations relative to an opened directory, use `OpenDirectoryAsync` and
+`AsyncDirectoryHandle`.
+
+Recommended async types:
+
+- `IAsyncFileSystem` for async filesystem entry points
+- `AsyncFileHandle` for lower-level async file reads and writes
+- `AsyncDirectoryHandle` for directory-relative async filesystem work
+- `FileSystemDriver` when you want a ready-made worker-backed executor for filesystem tasks
+
 ## `Path` Versus `std::filesystem::path`
 
 `Path` is not a drop-in replacement for `std::filesystem::path`.
@@ -295,6 +311,8 @@ Core types:
 - `LocalFileSystem`
 - `VirtualFileSystem`
 - `FileHandle`
+- `AsyncFileHandle`
+- `AsyncDirectoryHandle`
 - `DirectoryHandle`
 - `DirectoryEnumerator`
 

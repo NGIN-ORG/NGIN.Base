@@ -728,7 +728,7 @@ namespace NGIN::IO
         return resolved.Value().mount->GetFileSystem().GetSpaceInfo(resolved.Value().translatedPath);
     }
 
-    AsyncTask<std::unique_ptr<IAsyncFileHandle>> VirtualFileSystem::OpenFileAsync(
+    AsyncTask<AsyncFileHandle> VirtualFileSystem::OpenFileAsync(
             NGIN::Async::TaskContext& ctx, const Path& path, const FileOpenOptions& options)
     {
         auto resolved = ResolvePath(path);
@@ -743,6 +743,23 @@ namespace NGIN::IO
                     MakeError(IOErrorCode::Unsupported, "mount has no async filesystem", path));
         }
         co_return co_await asyncFs->OpenFileAsync(ctx, resolved.Value().translatedPath, options);
+    }
+
+    AsyncTask<AsyncDirectoryHandle> VirtualFileSystem::OpenDirectoryAsync(
+            NGIN::Async::TaskContext& ctx, const Path& path)
+    {
+        auto resolved = ResolvePath(path);
+        if (!resolved.HasValue())
+        {
+            co_return NGIN::Utilities::Unexpected<IOError>(std::move(resolved.Error()));
+        }
+        auto* asyncFs = resolved.Value().mount->GetAsyncFileSystem();
+        if (!asyncFs)
+        {
+            co_return NGIN::Utilities::Unexpected<IOError>(
+                    MakeError(IOErrorCode::Unsupported, "mount has no async filesystem", path));
+        }
+        co_return co_await asyncFs->OpenDirectoryAsync(ctx, resolved.Value().translatedPath);
     }
 
     AsyncTask<FileInfo> VirtualFileSystem::GetInfoAsync(

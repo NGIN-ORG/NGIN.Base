@@ -1,5 +1,7 @@
 #include <NGIN/IO/LocalFileSystem.hpp>
 
+#include "AsyncDispatch.hpp"
+
 #include <NGIN/Utilities/Expected.hpp>
 
 #include <algorithm>
@@ -548,7 +550,7 @@ namespace NGIN::IO
             std::size_t                 m_current {static_cast<std::size_t>(-1)};
         };
 
-        class LocalFileHandle final : public IFileHandle, public IAsyncFileHandle
+        class LocalFileHandle final : public IFileHandle
         {
         public:
             static Result<std::unique_ptr<LocalFileHandle>> Open(const Path& path, const FileOpenOptions& options) noexcept
@@ -762,49 +764,6 @@ namespace NGIN::IO
             {
                 std::lock_guard<std::mutex> guard(m_mutex);
                 return IsOpenUnlocked();
-            }
-
-            AsyncTask<UIntSize> ReadAsync(NGIN::Async::TaskContext& ctx, std::span<NGIN::Byte> destination) override
-            {
-                co_await ctx.YieldNow();
-                co_return ToAsyncResult(Read(destination));
-            }
-
-            AsyncTask<UIntSize> WriteAsync(NGIN::Async::TaskContext& ctx, std::span<const NGIN::Byte> source) override
-            {
-                co_await ctx.YieldNow();
-                co_return ToAsyncResult(Write(source));
-            }
-
-            AsyncTask<UIntSize> ReadAtAsync(NGIN::Async::TaskContext& ctx, UInt64 offset, std::span<NGIN::Byte> destination) override
-            {
-                co_await ctx.YieldNow();
-                co_return ToAsyncResult(ReadAt(offset, destination));
-            }
-
-            AsyncTask<UIntSize> WriteAtAsync(NGIN::Async::TaskContext& ctx, UInt64 offset, std::span<const NGIN::Byte> source) override
-            {
-                co_await ctx.YieldNow();
-                co_return ToAsyncResult(WriteAt(offset, source));
-            }
-
-            AsyncTaskVoid FlushAsync(NGIN::Async::TaskContext& ctx) override
-            {
-                co_await ctx.YieldNow();
-                auto flushed = Flush();
-                if (!flushed)
-                {
-                    co_await AsyncTaskVoid::ReturnError(std::move(flushed).TakeError());
-                    co_return;
-                }
-                co_return;
-            }
-
-            AsyncTaskVoid CloseAsync(NGIN::Async::TaskContext& ctx) override
-            {
-                co_await ctx.YieldNow();
-                Close();
-                co_return;
             }
 
         private:
@@ -1675,18 +1634,413 @@ namespace NGIN::IO
         return Result<SpaceInfo>(info);
     }
 
-    AsyncTask<std::unique_ptr<IAsyncFileHandle>> LocalFileSystem::OpenFileAsync(
-            NGIN::Async::TaskContext& ctx, const Path& path, const FileOpenOptions& options)
+    namespace
     {
-        co_await ctx.YieldNow();
-
-        auto opened = LocalFileHandle::Open(path, options);
-        if (!opened.HasValue())
+        struct LocalAsyncFileState final
         {
-            co_return NGIN::Utilities::Unexpected<IOError>(std::move(opened.Error()));
+            std::shared_ptr<FileSystemDriver>   driver {};
+            std::unique_ptr<LocalFileHandle>    handle {};
+        };
+
+        struct LocalAsyncDirectoryState final
+        {
+            std::shared_ptr<FileSystemDriver> driver {};
+            std::unique_ptr<LocalDirectoryHandle> handle {};
+            Path                              path {};
+        };
+
+        extern const AsyncDirectoryHandle::Operations LocalAsyncDirectoryOperations;
+
+        AsyncTask<UIntSize> LocalAsyncFileRead(
+                const std::shared_ptr<void>& rawState, NGIN::Async::TaskContext& ctx, std::span<NGIN::Byte> destination)
+        {
+            auto state = std::static_pointer_cast<LocalAsyncFileState>(rawState);
+            auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [state, destination]() mutable noexcept {
+                return state->handle->Read(destination);
+            });
+
+            if (completion.IsCanceled())
+            {
+                co_await AsyncTask<UIntSize>::ReturnCanceled();
+                co_return 0;
+            }
+            if (completion.IsFault())
+            {
+                co_await AsyncTask<UIntSize>::ReturnFault(std::move(*completion.fault));
+                co_return 0;
+            }
+
+            auto result = std::move(*completion.result);
+            if (!result)
+                co_return NGIN::Utilities::Unexpected<IOError>(std::move(result).TakeError());
+            co_return std::move(result).TakeValue();
         }
 
-        std::unique_ptr<IAsyncFileHandle> result(opened.Value().release());
-        co_return std::move(result);
+        AsyncTask<UIntSize> LocalAsyncFileWrite(
+                const std::shared_ptr<void>& rawState, NGIN::Async::TaskContext& ctx, std::span<const NGIN::Byte> source)
+        {
+            auto state = std::static_pointer_cast<LocalAsyncFileState>(rawState);
+            auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [state, source]() mutable noexcept {
+                return state->handle->Write(source);
+            });
+
+            if (completion.IsCanceled())
+            {
+                co_await AsyncTask<UIntSize>::ReturnCanceled();
+                co_return 0;
+            }
+            if (completion.IsFault())
+            {
+                co_await AsyncTask<UIntSize>::ReturnFault(std::move(*completion.fault));
+                co_return 0;
+            }
+
+            auto result = std::move(*completion.result);
+            if (!result)
+                co_return NGIN::Utilities::Unexpected<IOError>(std::move(result).TakeError());
+            co_return std::move(result).TakeValue();
+        }
+
+        AsyncTask<UIntSize> LocalAsyncFileReadAt(const std::shared_ptr<void>& rawState,
+                                                 NGIN::Async::TaskContext&  ctx,
+                                                 UInt64                     offset,
+                                                 std::span<NGIN::Byte>      destination)
+        {
+            auto state = std::static_pointer_cast<LocalAsyncFileState>(rawState);
+            auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [state, offset, destination]() mutable noexcept {
+                return state->handle->ReadAt(offset, destination);
+            });
+
+            if (completion.IsCanceled())
+            {
+                co_await AsyncTask<UIntSize>::ReturnCanceled();
+                co_return 0;
+            }
+            if (completion.IsFault())
+            {
+                co_await AsyncTask<UIntSize>::ReturnFault(std::move(*completion.fault));
+                co_return 0;
+            }
+
+            auto result = std::move(*completion.result);
+            if (!result)
+                co_return NGIN::Utilities::Unexpected<IOError>(std::move(result).TakeError());
+            co_return std::move(result).TakeValue();
+        }
+
+        AsyncTask<UIntSize> LocalAsyncFileWriteAt(const std::shared_ptr<void>& rawState,
+                                                  NGIN::Async::TaskContext&  ctx,
+                                                  UInt64                     offset,
+                                                  std::span<const NGIN::Byte> source)
+        {
+            auto state = std::static_pointer_cast<LocalAsyncFileState>(rawState);
+            auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [state, offset, source]() mutable noexcept {
+                return state->handle->WriteAt(offset, source);
+            });
+
+            if (completion.IsCanceled())
+            {
+                co_await AsyncTask<UIntSize>::ReturnCanceled();
+                co_return 0;
+            }
+            if (completion.IsFault())
+            {
+                co_await AsyncTask<UIntSize>::ReturnFault(std::move(*completion.fault));
+                co_return 0;
+            }
+
+            auto result = std::move(*completion.result);
+            if (!result)
+                co_return NGIN::Utilities::Unexpected<IOError>(std::move(result).TakeError());
+            co_return std::move(result).TakeValue();
+        }
+
+        AsyncTaskVoid LocalAsyncFileFlush(const std::shared_ptr<void>& rawState, NGIN::Async::TaskContext& ctx)
+        {
+            auto state = std::static_pointer_cast<LocalAsyncFileState>(rawState);
+            auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [state]() mutable noexcept {
+                return state->handle->Flush();
+            });
+
+            if (completion.IsCanceled())
+            {
+                co_await AsyncTaskVoid::ReturnCanceled();
+                co_return;
+            }
+            if (completion.IsFault())
+            {
+                co_await AsyncTaskVoid::ReturnFault(std::move(*completion.fault));
+                co_return;
+            }
+
+            auto result = std::move(*completion.result);
+            if (!result)
+            {
+                co_await AsyncTaskVoid::ReturnError(std::move(result).TakeError());
+                co_return;
+            }
+            co_return;
+        }
+
+        AsyncTaskVoid LocalAsyncFileClose(const std::shared_ptr<void>& rawState, NGIN::Async::TaskContext& ctx)
+        {
+            auto state = std::static_pointer_cast<LocalAsyncFileState>(rawState);
+            auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [state]() mutable noexcept {
+                state->handle->Close();
+                return ResultVoid {};
+            });
+
+            if (completion.IsCanceled())
+            {
+                co_await AsyncTaskVoid::ReturnCanceled();
+                co_return;
+            }
+            if (completion.IsFault())
+            {
+                co_await AsyncTaskVoid::ReturnFault(std::move(*completion.fault));
+                co_return;
+            }
+            co_return;
+        }
+
+        [[nodiscard]] bool LocalAsyncFileIsOpen(const std::shared_ptr<void>& rawState) noexcept
+        {
+            auto state = std::static_pointer_cast<LocalAsyncFileState>(rawState);
+            return state && state->handle && state->handle->IsOpen();
+        }
+
+        const AsyncFileHandle::Operations LocalAsyncFileOperations {
+                .read = &LocalAsyncFileRead,
+                .write = &LocalAsyncFileWrite,
+                .readAt = &LocalAsyncFileReadAt,
+                .writeAt = &LocalAsyncFileWriteAt,
+                .flush = &LocalAsyncFileFlush,
+                .close = &LocalAsyncFileClose,
+                .isOpen = &LocalAsyncFileIsOpen,
+        };
+
+        [[nodiscard]] AsyncFileHandle MakeAsyncFileHandle(
+                std::shared_ptr<FileSystemDriver> driver, std::unique_ptr<LocalFileHandle> handle)
+        {
+            auto state = std::make_shared<LocalAsyncFileState>();
+            state->driver = std::move(driver);
+            state->handle = std::move(handle);
+            return AsyncFileHandle(std::move(state), &LocalAsyncFileOperations);
+        }
+
+        [[nodiscard]] Path ResolveAsyncDirectoryPath(const LocalAsyncDirectoryState& state, const Path& relativePath)
+        {
+            return JoinHandlePath(state.path, relativePath);
+        }
+
+        AsyncTask<bool> LocalAsyncDirectoryExists(
+                const std::shared_ptr<void>& rawState, NGIN::Async::TaskContext& ctx, const Path& path)
+        {
+            auto state      = std::static_pointer_cast<LocalAsyncDirectoryState>(rawState);
+            auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [state, path]() mutable noexcept {
+                return state->handle->Exists(path);
+            });
+
+            if (completion.IsCanceled())
+            {
+                co_await AsyncTask<bool>::ReturnCanceled();
+                co_return false;
+            }
+            if (completion.IsFault())
+            {
+                co_await AsyncTask<bool>::ReturnFault(std::move(*completion.fault));
+                co_return false;
+            }
+
+            auto result = std::move(*completion.result);
+            if (!result)
+                co_return NGIN::Utilities::Unexpected<IOError>(std::move(result).TakeError());
+            co_return std::move(result).TakeValue();
+        }
+
+        AsyncTask<FileInfo> LocalAsyncDirectoryGetInfo(const std::shared_ptr<void>& rawState,
+                                                       NGIN::Async::TaskContext&  ctx,
+                                                       const Path&                path,
+                                                       const MetadataOptions&     options)
+        {
+            auto state      = std::static_pointer_cast<LocalAsyncDirectoryState>(rawState);
+            auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [state, path, options]() mutable noexcept {
+                return state->handle->GetInfo(path, options);
+            });
+
+            if (completion.IsCanceled())
+            {
+                co_await AsyncTask<FileInfo>::ReturnCanceled();
+                co_return FileInfo {};
+            }
+            if (completion.IsFault())
+            {
+                co_await AsyncTask<FileInfo>::ReturnFault(std::move(*completion.fault));
+                co_return FileInfo {};
+            }
+
+            auto result = std::move(*completion.result);
+            if (!result)
+                co_return NGIN::Utilities::Unexpected<IOError>(std::move(result).TakeError());
+            co_return std::move(result).TakeValue();
+        }
+
+        AsyncTask<AsyncFileHandle> LocalAsyncDirectoryOpenFile(const std::shared_ptr<void>& rawState,
+                                                               NGIN::Async::TaskContext&  ctx,
+                                                               const Path&                path,
+                                                               const FileOpenOptions&     options)
+        {
+            auto state      = std::static_pointer_cast<LocalAsyncDirectoryState>(rawState);
+            auto normalized = NormalizeRelativeHandlePath(path);
+            if (!normalized.HasValue())
+                co_return NGIN::Utilities::Unexpected<IOError>(std::move(normalized).TakeError());
+
+            const Path resolvedPath = ResolveAsyncDirectoryPath(*state, normalized.Value());
+            auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [resolvedPath, options]() mutable noexcept {
+                return LocalFileHandle::Open(resolvedPath, options);
+            });
+
+            if (completion.IsCanceled())
+            {
+                co_await AsyncTask<AsyncFileHandle>::ReturnCanceled();
+                co_return AsyncFileHandle {};
+            }
+            if (completion.IsFault())
+            {
+                co_await AsyncTask<AsyncFileHandle>::ReturnFault(std::move(*completion.fault));
+                co_return AsyncFileHandle {};
+            }
+
+            auto result = std::move(*completion.result);
+            if (!result)
+                co_return NGIN::Utilities::Unexpected<IOError>(std::move(result).TakeError());
+            co_return MakeAsyncFileHandle(state->driver, std::move(result).TakeValue());
+        }
+
+        AsyncTask<AsyncDirectoryHandle> LocalAsyncDirectoryOpenDirectory(
+                const std::shared_ptr<void>& rawState, NGIN::Async::TaskContext& ctx, const Path& path)
+        {
+            auto state      = std::static_pointer_cast<LocalAsyncDirectoryState>(rawState);
+            auto normalized = NormalizeRelativeHandlePath(path);
+            if (!normalized.HasValue())
+                co_return NGIN::Utilities::Unexpected<IOError>(std::move(normalized).TakeError());
+
+            const Path resolvedPath = ResolveAsyncDirectoryPath(*state, normalized.Value());
+            auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [resolvedPath]() mutable noexcept {
+                return LocalDirectoryHandle::Open(resolvedPath);
+            });
+
+            if (completion.IsCanceled())
+            {
+                co_await AsyncTask<AsyncDirectoryHandle>::ReturnCanceled();
+                co_return AsyncDirectoryHandle {};
+            }
+            if (completion.IsFault())
+            {
+                co_await AsyncTask<AsyncDirectoryHandle>::ReturnFault(std::move(*completion.fault));
+                co_return AsyncDirectoryHandle {};
+            }
+
+            auto result = std::move(*completion.result);
+            if (!result)
+                co_return NGIN::Utilities::Unexpected<IOError>(std::move(result).TakeError());
+
+            auto nextState    = std::make_shared<LocalAsyncDirectoryState>();
+            nextState->driver = state->driver;
+            nextState->handle = std::move(result).TakeValue();
+            nextState->path   = resolvedPath;
+            co_return AsyncDirectoryHandle(std::move(nextState), &LocalAsyncDirectoryOperations);
+        }
+
+        AsyncTask<Path> LocalAsyncDirectoryReadSymlink(
+                const std::shared_ptr<void>& rawState, NGIN::Async::TaskContext& ctx, const Path& path)
+        {
+            auto state      = std::static_pointer_cast<LocalAsyncDirectoryState>(rawState);
+            auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [state, path]() mutable noexcept {
+                return state->handle->ReadSymlink(path);
+            });
+
+            if (completion.IsCanceled())
+            {
+                co_await AsyncTask<Path>::ReturnCanceled();
+                co_return Path {};
+            }
+            if (completion.IsFault())
+            {
+                co_await AsyncTask<Path>::ReturnFault(std::move(*completion.fault));
+                co_return Path {};
+            }
+
+            auto result = std::move(*completion.result);
+            if (!result)
+                co_return NGIN::Utilities::Unexpected<IOError>(std::move(result).TakeError());
+            co_return std::move(result).TakeValue();
+        }
+
+        const AsyncDirectoryHandle::Operations LocalAsyncDirectoryOperations {
+                .exists = &LocalAsyncDirectoryExists,
+                .getInfo = &LocalAsyncDirectoryGetInfo,
+                .openFile = &LocalAsyncDirectoryOpenFile,
+                .openDirectory = &LocalAsyncDirectoryOpenDirectory,
+                .readSymlink = &LocalAsyncDirectoryReadSymlink,
+        };
+    }// namespace
+
+    AsyncTask<AsyncFileHandle> LocalFileSystem::OpenFileAsync(
+            NGIN::Async::TaskContext& ctx, const Path& path, const FileOpenOptions& options)
+    {
+        auto completion = co_await detail::DispatchToDriver(*m_asyncDriver, ctx, [path, options]() mutable noexcept {
+            return LocalFileHandle::Open(path, options);
+        });
+
+        if (completion.IsCanceled())
+        {
+            co_await AsyncTask<AsyncFileHandle>::ReturnCanceled();
+            co_return AsyncFileHandle {};
+        }
+        if (completion.IsFault())
+        {
+            co_await AsyncTask<AsyncFileHandle>::ReturnFault(std::move(*completion.fault));
+            co_return AsyncFileHandle {};
+        }
+
+        auto opened = std::move(*completion.result);
+        if (!opened)
+        {
+            co_return NGIN::Utilities::Unexpected<IOError>(std::move(opened).TakeError());
+        }
+
+        co_return MakeAsyncFileHandle(m_asyncDriver, std::move(opened).TakeValue());
+    }
+
+    AsyncTask<AsyncDirectoryHandle> LocalFileSystem::OpenDirectoryAsync(
+            NGIN::Async::TaskContext& ctx, const Path& path)
+    {
+        auto completion = co_await detail::DispatchToDriver(*m_asyncDriver, ctx, [path]() mutable noexcept {
+            return LocalDirectoryHandle::Open(path);
+        });
+
+        if (completion.IsCanceled())
+        {
+            co_await AsyncTask<AsyncDirectoryHandle>::ReturnCanceled();
+            co_return AsyncDirectoryHandle {};
+        }
+        if (completion.IsFault())
+        {
+            co_await AsyncTask<AsyncDirectoryHandle>::ReturnFault(std::move(*completion.fault));
+            co_return AsyncDirectoryHandle {};
+        }
+
+        auto opened = std::move(*completion.result);
+        if (!opened)
+        {
+            co_return NGIN::Utilities::Unexpected<IOError>(std::move(opened).TakeError());
+        }
+
+        auto state    = std::make_shared<LocalAsyncDirectoryState>();
+        state->driver = m_asyncDriver;
+        state->handle = std::move(opened).TakeValue();
+        state->path   = path.LexicallyNormal();
+        co_return AsyncDirectoryHandle(std::move(state), &LocalAsyncDirectoryOperations);
     }
 }// namespace NGIN::IO

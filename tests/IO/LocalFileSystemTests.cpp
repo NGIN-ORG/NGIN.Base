@@ -1,8 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <NGIN/Async/Cancellation.hpp>
+#include <NGIN/IO/FileSystemDriver.hpp>
 #include <NGIN/IO/FileSystemUtilities.hpp>
 #include <NGIN/IO/LocalFileSystem.hpp>
 
+#include <array>
 #include <chrono>
 #include <cstdlib>
 #include <string>
@@ -41,6 +44,19 @@ namespace
         options.recursive     = true;
         options.ignoreMissing = true;
         REQUIRE(fs.RemoveDirectory(path, options).HasValue());
+    }
+
+    template<typename T>
+    auto RunAsyncTask(NGIN::IO::AsyncTask<T>& task, NGIN::Async::TaskContext& ctx) -> NGIN::Async::TaskOutcome<T, NGIN::IO::IOError>
+    {
+        task.Schedule(ctx);
+        return task.Get();
+    }
+
+    auto RunAsyncTask(NGIN::IO::AsyncTaskVoid& task, NGIN::Async::TaskContext& ctx) -> NGIN::Async::TaskOutcome<void, NGIN::IO::IOError>
+    {
+        task.Schedule(ctx);
+        return task.Get();
     }
 
 #if !defined(_WIN32)
@@ -91,6 +107,164 @@ TEST_CASE("IO.LocalFileSystem basic read write enumerate", "[IO][LocalFileSystem
     const auto capabilities = fs.GetCapabilities();
     REQUIRE(capabilities.memoryMappedFiles);
     REQUIRE(capabilities.metadataNoFollow);
+
+    RemoveTempDir(fs, root);
+}
+
+TEST_CASE("IO.LocalFileSystem async file operations use value handles", "[IO][LocalFileSystem][Async]")
+{
+    NGIN::IO::LocalFileSystem fs;
+    const auto                root     = MakeTempDir(fs);
+    const auto                filePath = root.Join("async.bin");
+
+    const std::string payload = "async local filesystem payload";
+    REQUIRE(NGIN::IO::WriteAllText(fs, filePath, payload).HasValue());
+
+    NGIN::IO::FileSystemDriver driver;
+    auto                       ctx = driver.MakeTaskContext();
+
+    NGIN::IO::FileOpenOptions readOptions;
+    readOptions.access      = NGIN::IO::FileAccess::Read;
+    readOptions.disposition = NGIN::IO::FileCreateDisposition::OpenExisting;
+
+    auto openTask = fs.OpenFileAsync(ctx, filePath, readOptions);
+    auto opened   = RunAsyncTask(openTask, ctx);
+    REQUIRE(opened.Succeeded());
+    auto file = std::move(opened.Value());
+    REQUIRE(file.IsValid());
+    REQUIRE(file.IsOpen());
+
+    std::array<NGIN::Byte, 64> buffer {};
+    auto                       readTask   = file.ReadAsync(ctx, std::span<NGIN::Byte>(buffer.data(), buffer.size()));
+    auto                       readResult = RunAsyncTask(readTask, ctx);
+    REQUIRE(readResult.Succeeded());
+    const auto readCount = readResult.Value();
+    REQUIRE(readCount == payload.size());
+    REQUIRE(std::string(reinterpret_cast<const char*>(buffer.data()), readCount) == payload);
+
+    auto closeTask   = file.CloseAsync(ctx);
+    auto closeResult = RunAsyncTask(closeTask, ctx);
+    REQUIRE(closeResult.Succeeded());
+    REQUIRE_FALSE(file.IsOpen());
+
+    auto emptyHandle = NGIN::IO::AsyncFileHandle {};
+    auto emptyRead   = emptyHandle.ReadAsync(ctx, std::span<NGIN::Byte>(buffer.data(), 1));
+    auto emptyResult = RunAsyncTask(emptyRead, ctx);
+    REQUIRE(emptyResult.IsDomainError());
+    REQUIRE(emptyResult.DomainError().code == NGIN::IO::IOErrorCode::InvalidArgument);
+
+    RemoveTempDir(fs, root);
+}
+
+TEST_CASE("IO.LocalFileSystem async utility helpers work through FileSystemDriver", "[IO][LocalFileSystem][Async]")
+{
+    NGIN::IO::LocalFileSystem fs;
+    const auto                root    = MakeTempDir(fs);
+    const auto                source  = root.Join("source.bin");
+    const auto                copied  = root.Join("copied.bin");
+    const std::string         payload = "worker-backed async helper payload";
+
+    NGIN::IO::FileSystemDriver driver;
+    auto                       ctx = driver.MakeTaskContext();
+
+    auto writeTask = NGIN::IO::WriteAllBytesAsync(
+            fs,
+            ctx,
+            source,
+            std::span<const NGIN::Byte>(reinterpret_cast<const NGIN::Byte*>(payload.data()), payload.size()));
+    auto writeResult = RunAsyncTask(writeTask, ctx);
+    REQUIRE(writeResult.Succeeded());
+
+    auto readTask   = NGIN::IO::ReadAllBytesAsync(fs, ctx, source);
+    auto readResult = RunAsyncTask(readTask, ctx);
+    REQUIRE(readResult.Succeeded());
+    REQUIRE(readResult.Value().Size() == payload.size());
+    REQUIRE(std::string(reinterpret_cast<const char*>(readResult.Value().data()), readResult.Value().Size()) == payload);
+
+    auto infoTask   = fs.GetInfoAsync(ctx, source);
+    auto infoResult = RunAsyncTask(infoTask, ctx);
+    REQUIRE(infoResult.Succeeded());
+    REQUIRE(infoResult.Value().type == NGIN::IO::EntryType::File);
+    REQUIRE(infoResult.Value().size == payload.size());
+
+    auto copyTask   = fs.CopyFileAsync(ctx, source, copied);
+    auto copyResult = RunAsyncTask(copyTask, ctx);
+    REQUIRE(copyResult.Succeeded());
+
+    auto copiedText = NGIN::IO::ReadAllText(fs, copied);
+    REQUIRE(copiedText.HasValue());
+    REQUIRE(std::string(copiedText.Value().Data(), copiedText.Value().Size()) == payload);
+
+    RemoveTempDir(fs, root);
+}
+
+TEST_CASE("IO.LocalFileSystem async directory handles scope relative operations", "[IO][LocalFileSystem][Async]")
+{
+    NGIN::IO::LocalFileSystem fs;
+    const auto                root      = MakeTempDir(fs);
+    const auto                nestedDir = root.Join("nested");
+    const auto                childDir  = nestedDir.Join("child");
+
+    REQUIRE(fs.CreateDirectories(childDir).HasValue());
+    REQUIRE(NGIN::IO::WriteAllText(fs, nestedDir.Join("seed.txt"), "seed").HasValue());
+
+    NGIN::IO::FileSystemDriver driver;
+    auto                       ctx = driver.MakeTaskContext();
+
+    auto directoryTask = fs.OpenDirectoryAsync(ctx, nestedDir);
+    auto directoryOpen = RunAsyncTask(directoryTask, ctx);
+    REQUIRE(directoryOpen.Succeeded());
+
+    auto directory = std::move(directoryOpen.Value());
+    REQUIRE(directory.IsValid());
+
+    auto existsTask = directory.ExistsAsync(ctx, NGIN::IO::Path {"seed.txt"});
+    auto exists     = RunAsyncTask(existsTask, ctx);
+    REQUIRE(exists.Succeeded());
+    REQUIRE(exists.Value());
+
+    auto infoTask = directory.GetInfoAsync(ctx, NGIN::IO::Path {"seed.txt"});
+    auto info     = RunAsyncTask(infoTask, ctx);
+    REQUIRE(info.Succeeded());
+    REQUIRE(info.Value().exists);
+
+    NGIN::IO::FileOpenOptions options;
+    options.access      = NGIN::IO::FileAccess::Read;
+    options.disposition = NGIN::IO::FileCreateDisposition::OpenExisting;
+
+    auto fileTask = directory.OpenFileAsync(ctx, NGIN::IO::Path {"seed.txt"}, options);
+    auto fileOpen = RunAsyncTask(fileTask, ctx);
+    REQUIRE(fileOpen.Succeeded());
+    REQUIRE(fileOpen.Value().IsOpen());
+
+    auto childTask = directory.OpenDirectoryAsync(ctx, NGIN::IO::Path {"child"});
+    auto childOpen = RunAsyncTask(childTask, ctx);
+    REQUIRE(childOpen.Succeeded());
+    REQUIRE(childOpen.Value().IsValid());
+
+    RemoveTempDir(fs, root);
+}
+
+TEST_CASE("IO.LocalFileSystem async operations observe cancellation before dispatch", "[IO][LocalFileSystem][Async]")
+{
+    NGIN::IO::LocalFileSystem fs;
+    const auto                root     = MakeTempDir(fs);
+    const auto                filePath = root.Join("cancel.txt");
+
+    REQUIRE(NGIN::IO::WriteAllText(fs, filePath, "cancel me").HasValue());
+
+    NGIN::IO::FileSystemDriver      driver;
+    NGIN::Async::CancellationSource cancellation;
+    cancellation.Cancel();
+    auto ctx = driver.MakeTaskContext(cancellation.GetToken());
+
+    NGIN::IO::FileOpenOptions options;
+    options.access      = NGIN::IO::FileAccess::Read;
+    options.disposition = NGIN::IO::FileCreateDisposition::OpenExisting;
+
+    auto openTask = fs.OpenFileAsync(ctx, filePath, options);
+    auto opened   = RunAsyncTask(openTask, ctx);
+    REQUIRE(opened.IsCanceled());
 
     RemoveTempDir(fs, root);
 }
