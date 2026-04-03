@@ -159,6 +159,26 @@ For user-facing work, start with the non-`Plan` docs first.
 
 The convenience alias `NGIN::Base` resolves to the shared target when available, otherwise the static target.
 
+## Platform Source Naming
+
+Platform-specific implementation files follow one default pattern:
+
+- `<BaseName>.<platform>.cpp`
+
+Use these platform tokens:
+
+- `win32`
+- `linux`
+- `macos`
+- `posix`
+
+Additional rules:
+
+- Use `posix` only when one implementation is intentionally shared across multiple Unix-like targets.
+- Use `<BaseName>.<arch>.cpp` for architecture-specific helpers such as `x86_64` and `aarch64`.
+- Add another suffix only when that extra axis is a first-class build or source-layout concept. Format: `<BaseName>.<platform>.<variant>.cpp`.
+- Do not encode hidden implementation details in the filename. For example, prefer `NetworkDriver.win32.cpp` over `NetworkDriver.win32.iocp.cpp`.
+
 ## Build Options
 
 Main CMake options:

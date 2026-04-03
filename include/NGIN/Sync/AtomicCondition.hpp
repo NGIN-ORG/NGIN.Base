@@ -1,10 +1,9 @@
 
 #pragma once
 
+#include <NGIN/Defines.hpp>
 #include <atomic>
-#include <thread>
 #include <cstdint>
-#include <climits>
 #include <NGIN/Primitives.hpp>// Assumes UInt32 is defined here
 #include <NGIN/Units.hpp>
 
@@ -12,19 +11,17 @@
 #include <cassert>
 #endif
 
-#if defined(_WIN32)
-#include <Windows.h>
-#include <synchapi.h>
-#elif defined(__linux__)
-#include <errno.h>
-#include <linux/futex.h>
-#include <sys/syscall.h>
-#include <time.h>
-#include <unistd.h>
-#endif
-
 namespace NGIN::Sync
 {
+    namespace detail
+    {
+#if defined(NGIN_PLATFORM_WINDOWS) || defined(NGIN_PLATFORM_LINUX)
+        NGIN_BASE_API void AtomicConditionWait(UInt32& generation, UInt32 observedGeneration) noexcept;
+        NGIN_BASE_API bool AtomicConditionWaitFor(UInt32& generation, UInt32 observedGeneration, UInt64 nanoseconds) noexcept;
+        NGIN_BASE_API void AtomicConditionNotifyOne(UInt32& generation) noexcept;
+        NGIN_BASE_API void AtomicConditionNotifyAll(UInt32& generation) noexcept;
+#endif
+    }// namespace detail
 
     /// @brief A minimal condition-like object using C++20 atomic wait/notify.
     ///
@@ -69,27 +66,8 @@ namespace NGIN::Sync
         /// This is the safe building block for predicate loops (prevents missed notifications).
         void Wait(UInt32 observedGeneration) noexcept
         {
-#if defined(_WIN32)
-            (void)::WaitOnAddress(static_cast<volatile void*>(&m_generation), &observedGeneration, sizeof(UInt32), INFINITE);
-#elif defined(__linux__)
-            for (;;)
-            {
-                const int rc = static_cast<int>(::syscall(SYS_futex, static_cast<std::uint32_t*>(&m_generation),
-                                                          FUTEX_WAIT_PRIVATE, observedGeneration, nullptr, nullptr, 0));
-                if (rc == 0)
-                {
-                    break;
-                }
-                if (errno == EAGAIN)
-                {
-                    break;
-                }
-                if (errno == EINTR)
-                {
-                    continue;
-                }
-                break;
-            }
+#if defined(NGIN_PLATFORM_WINDOWS) || defined(NGIN_PLATFORM_LINUX)
+            detail::AtomicConditionWait(m_generation, observedGeneration);
 #else
             auto generation = Generation();
             generation.wait(observedGeneration, std::memory_order_acquire);
@@ -123,40 +101,12 @@ namespace NGIN::Sync
             const auto nsTruncated = static_cast<UInt64>(nsDouble);
             const auto ns          = (static_cast<double>(nsTruncated) < nsDouble) ? (nsTruncated + 1ull) : nsTruncated;
 
-#if defined(_WIN32)
-            const DWORD ms = static_cast<DWORD>((ns + 999'999ull) / 1'000'000ull);
-            const BOOL  ok = ::WaitOnAddress(static_cast<volatile void*>(&m_generation), &gen, sizeof(UInt32), ms);
+#if defined(NGIN_PLATFORM_WINDOWS) || defined(NGIN_PLATFORM_LINUX)
+            const bool ok = detail::AtomicConditionWaitFor(m_generation, gen, ns);
 #ifdef _DEBUG
             m_waitingThreads.fetch_sub(1, std::memory_order_relaxed);
 #endif
-            return ok != 0;
-#elif defined(__linux__)
-            timespec ts {};
-            ts.tv_sec  = static_cast<time_t>(ns / 1'000'000'000ull);
-            ts.tv_nsec = static_cast<long>(ns % 1'000'000'000ull);
-
-            int rc = -1;
-            for (;;)
-            {
-                rc = static_cast<int>(::syscall(SYS_futex, static_cast<std::uint32_t*>(&m_generation),
-                                                FUTEX_WAIT_PRIVATE, gen, &ts, nullptr, 0));
-                if (rc == 0 || errno != EINTR)
-                {
-                    break;
-                }
-            }
-#ifdef _DEBUG
-            m_waitingThreads.fetch_sub(1, std::memory_order_relaxed);
-#endif
-            if (rc == 0)
-            {
-                return true;
-            }
-            if (errno == ETIMEDOUT)
-            {
-                return false;
-            }
-            return Load() != gen;
+            return ok;
 #else
             Wait(gen);
 #ifdef _DEBUG
@@ -179,34 +129,8 @@ namespace NGIN::Sync
             const auto nsTruncated = static_cast<UInt64>(nsDouble);
             const auto ns          = (static_cast<double>(nsTruncated) < nsDouble) ? (nsTruncated + 1ull) : nsTruncated;
 
-#if defined(_WIN32)
-            const DWORD ms = static_cast<DWORD>((ns + 999'999ull) / 1'000'000ull);
-            const BOOL  ok = ::WaitOnAddress(static_cast<volatile void*>(&m_generation), &observedGeneration, sizeof(UInt32), ms);
-            return ok != 0;
-#elif defined(__linux__)
-            timespec ts {};
-            ts.tv_sec  = static_cast<time_t>(ns / 1'000'000'000ull);
-            ts.tv_nsec = static_cast<long>(ns % 1'000'000'000ull);
-
-            int rc = -1;
-            for (;;)
-            {
-                rc = static_cast<int>(::syscall(SYS_futex, static_cast<std::uint32_t*>(&m_generation),
-                                                FUTEX_WAIT_PRIVATE, observedGeneration, &ts, nullptr, 0));
-                if (rc == 0 || errno != EINTR)
-                {
-                    break;
-                }
-            }
-            if (rc == 0)
-            {
-                return true;
-            }
-            if (errno == ETIMEDOUT)
-            {
-                return false;
-            }
-            return Load() != observedGeneration;
+#if defined(NGIN_PLATFORM_WINDOWS) || defined(NGIN_PLATFORM_LINUX)
+            return detail::AtomicConditionWaitFor(m_generation, observedGeneration, ns);
 #else
             (void)duration;
             Wait(observedGeneration);
@@ -221,10 +145,8 @@ namespace NGIN::Sync
         {
             auto generation = Generation();
             generation.fetch_add(1u, std::memory_order_release);
-#if defined(_WIN32)
-            ::WakeByAddressSingle(static_cast<void*>(&m_generation));
-#elif defined(__linux__)
-            (void)::syscall(SYS_futex, static_cast<std::uint32_t*>(&m_generation), FUTEX_WAKE_PRIVATE, 1, nullptr, nullptr, 0);
+#if defined(NGIN_PLATFORM_WINDOWS) || defined(NGIN_PLATFORM_LINUX)
+            detail::AtomicConditionNotifyOne(m_generation);
 #else
             generation.notify_one();
 #endif
@@ -237,11 +159,8 @@ namespace NGIN::Sync
         {
             auto generation = Generation();
             generation.fetch_add(1u, std::memory_order_release);
-#if defined(_WIN32)
-            ::WakeByAddressAll(static_cast<void*>(&m_generation));
-#elif defined(__linux__)
-            (void)::syscall(SYS_futex, static_cast<std::uint32_t*>(&m_generation), FUTEX_WAKE_PRIVATE, INT_MAX, nullptr,
-                            nullptr, 0);
+#if defined(NGIN_PLATFORM_WINDOWS) || defined(NGIN_PLATFORM_LINUX)
+            detail::AtomicConditionNotifyAll(m_generation);
 #else
             generation.notify_all();
 #endif

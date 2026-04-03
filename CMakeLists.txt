@@ -153,6 +153,15 @@ set(ngin_base_primary_target "")
 set(NGIN_BASE_CORE_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/CoreInit.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/Async/Fiber/FiberCommon.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/Path.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/VirtualFileSystem.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/FileSystemDriver.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/FileSystemUtilities.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/LocalFileSystem.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Serialization/JSON/JsonParser.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Serialization/JSON/JsonArchive.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Serialization/XML/XmlParser.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Serialization/XML/XmlArchive.cpp
 )
 
 if(WIN32)
@@ -186,40 +195,59 @@ elseif(UNIX)
 endif()
 
 list(APPEND NGIN_BASE_CORE_SOURCES
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/NetworkDriver.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/SocketPlatform.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/TcpSocket.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/TcpListener.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/UdpSocket.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/PollerIocp.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/File.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/FileView.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/FileSystemDriver.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/FileSystemUtilities.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/LocalFileSystem.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/Path.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/VirtualFileSystem.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Serialization/JSON/JsonParser.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Serialization/JSON/JsonArchive.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Serialization/XML/XmlParser.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Serialization/XML/XmlArchive.cpp
 )
 
 if(WIN32)
   list(APPEND NGIN_BASE_CORE_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/DynamicLibrary.win32.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Time/MonotonicClock.win32.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Time/Sleep.win32.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Execution/ThisThread.win32.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Execution/Thread.win32.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Execution/AtomicCondition.win32.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/File.win32.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/FileView.win32.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/FileSystemDriver.win32.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/LocalFileSystem.win32.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/SocketPlatform.win32.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/NetworkDriver.win32.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/TcpSocket.win32.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/UdpSocket.win32.cpp
   )
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   list(APPEND NGIN_BASE_CORE_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/DynamicLibrary.posix.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Time/MonotonicClock.posix.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Time/Sleep.posix.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Execution/ThisThread.linux.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Execution/Thread.posix.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Execution/AtomicCondition.linux.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/File.posix.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/FileView.posix.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/FileSystemDriver.linux.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/LocalFileSystem.posix.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/LocalFileSystem.linux.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/SocketPlatform.linux.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/NetworkDriver.linux.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/TcpSocket.posix.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/UdpSocket.posix.cpp
   )
 elseif(UNIX)
   list(APPEND NGIN_BASE_CORE_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/DynamicLibrary.posix.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Time/MonotonicClock.posix.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Time/Sleep.posix.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Execution/ThisThread.posix.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Execution/Thread.posix.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/File.posix.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/FileView.posix.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/FileSystemDriver.posix.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/LocalFileSystem.posix.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/SocketPlatform.posix.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/NetworkDriver.posix.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/TcpSocket.posix.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/UdpSocket.posix.cpp
   )
 endif()
 

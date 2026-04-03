@@ -58,6 +58,18 @@ if(TARGET NGIN.Base.BuildOptions)
 endif()
 target_compile_features(ngin_base_test_config INTERFACE cxx_std_23)
 
+set(NGIN_BASE_DYNAMIC_LIBRARY_TEST_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/IO")
+
+add_library(NGINBaseDynamicLibraryFixture SHARED
+  ${CMAKE_CURRENT_SOURCE_DIR}/IO/fixtures/DynamicLibraryFixture.cpp
+)
+target_compile_features(NGINBaseDynamicLibraryFixture PRIVATE cxx_std_23)
+set_target_properties(NGINBaseDynamicLibraryFixture PROPERTIES
+  FOLDER "Tests"
+  LIBRARY_OUTPUT_DIRECTORY "${NGIN_BASE_DYNAMIC_LIBRARY_TEST_OUTPUT_DIR}"
+  RUNTIME_OUTPUT_DIRECTORY "${NGIN_BASE_DYNAMIC_LIBRARY_TEST_OUTPUT_DIR}"
+)
+
 option(NGIN_BASE_TESTS_ONE_EXE_PER_FILE "Split each test source into its own executable" ON)
 option(NGIN_BASE_ENABLE_ASAN "Enable Address/Undefined sanitizers for tests" ON)
 
@@ -143,4 +155,14 @@ if(NGIN_BASE_ENABLE_ASAN AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(${test_tgt} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
     target_link_options(${test_tgt} PRIVATE -fsanitize=address,undefined)
   endforeach()
+endif()
+
+if(TARGET IO_DynamicLibraryTests)
+  add_dependencies(IO_DynamicLibraryTests NGINBaseDynamicLibraryFixture)
+  set_target_properties(IO_DynamicLibraryTests PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${NGIN_BASE_DYNAMIC_LIBRARY_TEST_OUTPUT_DIR}"
+  )
+  target_compile_definitions(IO_DynamicLibraryTests PRIVATE
+    NGIN_BASE_TEST_DYNAMIC_LIBRARY_FILENAME="$<TARGET_FILE_NAME:NGINBaseDynamicLibraryFixture>"
+  )
 endif()
