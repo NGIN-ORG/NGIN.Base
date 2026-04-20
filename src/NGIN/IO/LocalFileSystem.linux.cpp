@@ -448,6 +448,12 @@ namespace NGIN::IO
                 co_await AsyncTaskVoid::ReturnFault(std::move(*completion.fault));
                 co_return;
             }
+            auto result = std::move(*completion.result);
+            if (!result)
+            {
+                co_await AsyncTaskVoid::ReturnError(std::move(result).TakeError());
+                co_return;
+            }
             co_return;
         }
 
@@ -494,19 +500,17 @@ namespace NGIN::IO
 
         if (completion.IsCanceled())
         {
-            co_await AsyncTask<AsyncFileHandle>::ReturnCanceled();
-            co_return AsyncFileHandle {};
+            co_return NGIN::Async::Sentinels::Canceled;
         }
         if (completion.IsFault())
         {
-            co_await AsyncTask<AsyncFileHandle>::ReturnFault(std::move(*completion.fault));
-            co_return AsyncFileHandle {};
+            co_return NGIN::Async::Fault(std::move(*completion.fault));
         }
 
         auto opened = std::move(*completion.result);
         if (!opened)
         {
-            co_return NGIN::Utilities::Unexpected<IOError>(std::move(opened).TakeError());
+            co_return std::move(opened).TakeError();
         }
 
         co_return detail::MakeAsyncPosixFileHandle(m_asyncDriver, std::move(opened).TakeValue());

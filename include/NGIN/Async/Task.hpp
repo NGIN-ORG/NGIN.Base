@@ -10,6 +10,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <type_traits>
 #include <utility>
 
@@ -34,6 +35,71 @@ namespace NGIN::Async
     class BaseTask
     {
     };
+
+#if NGIN_ASYNC_HAS_EXCEPTIONS
+    class AsyncCanceledException : public std::exception
+    {
+    public:
+        [[nodiscard]] const char* what() const noexcept override
+        {
+            return "async task canceled";
+        }
+    };
+
+    class AsyncFaultException : public std::exception
+    {
+    public:
+        explicit AsyncFaultException(AsyncFault fault) noexcept
+            : m_fault(std::move(fault))
+        {
+        }
+
+        [[nodiscard]] const AsyncFault& Fault() const noexcept
+        {
+            return m_fault;
+        }
+
+        [[nodiscard]] const char* what() const noexcept override
+        {
+            return "async task fault";
+        }
+
+    private:
+        AsyncFault m_fault;
+    };
+
+    template<typename E>
+    class AsyncDomainErrorException : public std::exception
+    {
+    public:
+        explicit AsyncDomainErrorException(E error) noexcept(std::is_nothrow_move_constructible_v<E>)
+            : m_error(std::move(error))
+        {
+        }
+
+        [[nodiscard]] const E& Error() const noexcept
+        {
+            return m_error;
+        }
+
+        [[nodiscard]] const char* what() const noexcept override
+        {
+            return "async task domain error";
+        }
+
+    private:
+        E m_error;
+    };
+
+    template<typename E>
+    struct AsyncExceptionAdapter
+    {
+        [[noreturn]] static void Throw(const E& error)
+        {
+            throw AsyncDomainErrorException<E>(error);
+        }
+    };
+#endif
 
     template<typename T, typename E>
     class Task;
@@ -285,10 +351,12 @@ namespace NGIN::Async
             void unhandled_exception() noexcept
             {
 #if NGIN_ASYNC_HAS_EXCEPTIONS
-                SetFault(MakeAsyncFault(AsyncFaultCode::UnhandledException));
+                AsyncFault fault = MakeAsyncFault(AsyncFaultCode::UnhandledException);
 #if NGIN_ASYNC_CAPTURE_EXCEPTIONS
                 m_exception = std::current_exception();
+                fault.capturedException = m_exception;
 #endif
+                SetFault(std::move(fault));
 #else
                 std::terminate();
 #endif
@@ -426,6 +494,12 @@ namespace NGIN::Async
             void return_value(NGIN::Utilities::Unexpected<E> error) noexcept
             {
                 SetDomainError(error.Error());
+            }
+
+            void return_value(E error) noexcept
+                requires(!std::is_same_v<T, E>)
+            {
+                SetDomainError(std::move(error));
             }
 
             void return_value(CanceledTag) noexcept
@@ -969,6 +1043,140 @@ namespace NGIN::Async
             return OutcomeAwaiter {*this};
         }
 
+#if NGIN_ASYNC_HAS_EXCEPTIONS
+        class ThrowingAwaiter final
+        {
+        public:
+            explicit ThrowingAwaiter(Task& task) noexcept
+                : m_outcome(task.AsOutcome())
+            {
+            }
+
+            [[nodiscard]] bool await_ready() const noexcept
+            {
+                return m_outcome.await_ready();
+            }
+
+            template<typename ParentPromise>
+            auto await_suspend(std::coroutine_handle<ParentPromise> awaiting) noexcept
+            {
+                return m_outcome.await_suspend(awaiting);
+            }
+
+            [[nodiscard]] T await_resume()
+            {
+                return Task::TakeOrThrow(m_outcome.await_resume());
+            }
+
+        private:
+            OutcomeAwaiter m_outcome;
+        };
+
+        class ThrowingView final
+        {
+        public:
+            explicit ThrowingView(Task& task) noexcept
+                : m_task(task)
+            {
+            }
+
+            [[nodiscard]] ThrowingAwaiter operator co_await() noexcept
+            {
+                return ThrowingAwaiter {m_task};
+            }
+
+        private:
+            Task& m_task;
+        };
+
+        class OwnedThrowingAwaiter final
+        {
+        public:
+            explicit OwnedThrowingAwaiter(Task&& task) noexcept
+                : m_task(std::move(task))
+            {
+            }
+
+            [[nodiscard]] bool await_ready() const noexcept
+            {
+                return !m_task.m_handle || m_task.m_handle.promise().m_finished.load(std::memory_order_acquire);
+            }
+
+            template<typename ParentPromise>
+            std::coroutine_handle<> await_suspend(std::coroutine_handle<ParentPromise> awaiting) noexcept
+            {
+                if (!m_task.m_handle)
+                {
+                    return awaiting;
+                }
+
+                auto& child = m_task.m_handle.promise();
+                if (child.m_finished.load(std::memory_order_acquire))
+                {
+                    return awaiting;
+                }
+
+                child.m_continuation = awaiting;
+                child.m_completionHandler = nullptr;
+
+                bool expected = false;
+                if (m_task.m_started.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
+                {
+                    if (!detail::InheritChildExecutionContext(m_task.m_executor, child, awaiting.promise()))
+                    {
+                        child.SetFault(MakeAsyncFault(AsyncFaultCode::InvalidState));
+                        child.MarkFinishedAndResume(m_task.m_handle);
+                        return std::noop_coroutine();
+                    }
+
+                    m_task.m_executor.Execute(m_task.m_handle);
+                }
+
+                return std::noop_coroutine();
+            }
+
+            [[nodiscard]] T await_resume()
+            {
+                return Task::TakeOrThrow(m_task.Get());
+            }
+
+        private:
+            Task m_task;
+        };
+
+        class OwnedThrowingView final
+        {
+        public:
+            explicit OwnedThrowingView(Task&& task) noexcept
+                : m_task(std::move(task))
+            {
+            }
+
+            [[nodiscard]] OwnedThrowingAwaiter operator co_await() noexcept
+            {
+                return OwnedThrowingAwaiter {std::move(m_task)};
+            }
+
+        private:
+            Task m_task;
+        };
+
+        [[nodiscard]] ThrowingView Throwing() & noexcept
+        {
+            return ThrowingView {*this};
+        }
+
+        [[nodiscard]] OwnedThrowingView Throwing() && noexcept
+        {
+            return OwnedThrowingView {std::move(*this)};
+        }
+
+        [[nodiscard]] T GetOrThrow()
+        {
+            return TakeOrThrow(Get());
+        }
+#endif
+
         struct ReturnErrorAwaiter final
         {
             E error {};
@@ -1025,6 +1233,40 @@ namespace NGIN::Async
         auto ContinueWith(TaskContext& ctx, F&& func);
 
     private:
+#if NGIN_ASYNC_HAS_EXCEPTIONS
+        [[noreturn]] static void ThrowFromOutcome(TaskOutcome<T, E> outcome)
+        {
+            if (outcome.IsDomainError())
+            {
+                AsyncExceptionAdapter<E>::Throw(outcome.DomainError());
+            }
+
+            if (outcome.IsCanceled())
+            {
+                throw AsyncCanceledException();
+            }
+
+            assert(outcome.IsFault());
+#if NGIN_ASYNC_CAPTURE_EXCEPTIONS
+            if (outcome.Fault().capturedException)
+            {
+                std::rethrow_exception(outcome.Fault().capturedException);
+            }
+#endif
+            throw AsyncFaultException(outcome.Fault());
+        }
+
+        [[nodiscard]] static T TakeOrThrow(TaskOutcome<T, E> outcome)
+        {
+            if (outcome.Succeeded())
+            {
+                return std::move(outcome.Value());
+            }
+
+            ThrowFromOutcome(outcome);
+        }
+#endif
+
         template<typename ParentPromise>
         static void PropagateChildCompletion(std::coroutine_handle<> self, std::coroutine_handle<> continuation) noexcept
         {
@@ -1668,6 +1910,140 @@ namespace NGIN::Async
             return OutcomeAwaiter {*this};
         }
 
+#if NGIN_ASYNC_HAS_EXCEPTIONS
+        class ThrowingAwaiter final
+        {
+        public:
+            explicit ThrowingAwaiter(Task& task) noexcept
+                : m_outcome(task.AsOutcome())
+            {
+            }
+
+            [[nodiscard]] bool await_ready() const noexcept
+            {
+                return m_outcome.await_ready();
+            }
+
+            template<typename ParentPromise>
+            auto await_suspend(std::coroutine_handle<ParentPromise> awaiting) noexcept
+            {
+                return m_outcome.await_suspend(awaiting);
+            }
+
+            void await_resume()
+            {
+                Task::HandleThrowingOutcome(m_outcome.await_resume());
+            }
+
+        private:
+            OutcomeAwaiter m_outcome;
+        };
+
+        class ThrowingView final
+        {
+        public:
+            explicit ThrowingView(Task& task) noexcept
+                : m_task(task)
+            {
+            }
+
+            [[nodiscard]] ThrowingAwaiter operator co_await() noexcept
+            {
+                return ThrowingAwaiter {m_task};
+            }
+
+        private:
+            Task& m_task;
+        };
+
+        class OwnedThrowingAwaiter final
+        {
+        public:
+            explicit OwnedThrowingAwaiter(Task&& task) noexcept
+                : m_task(std::move(task))
+            {
+            }
+
+            [[nodiscard]] bool await_ready() const noexcept
+            {
+                return !m_task.m_handle || m_task.m_handle.promise().m_finished.load(std::memory_order_acquire);
+            }
+
+            template<typename ParentPromise>
+            std::coroutine_handle<> await_suspend(std::coroutine_handle<ParentPromise> awaiting) noexcept
+            {
+                if (!m_task.m_handle)
+                {
+                    return awaiting;
+                }
+
+                auto& child = m_task.m_handle.promise();
+                if (child.m_finished.load(std::memory_order_acquire))
+                {
+                    return awaiting;
+                }
+
+                child.m_continuation = awaiting;
+                child.m_completionHandler = nullptr;
+
+                bool expected = false;
+                if (m_task.m_started.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
+                {
+                    if (!detail::InheritChildExecutionContext(m_task.m_executor, child, awaiting.promise()))
+                    {
+                        child.SetFault(MakeAsyncFault(AsyncFaultCode::InvalidState));
+                        child.MarkFinishedAndResume(m_task.m_handle);
+                        return std::noop_coroutine();
+                    }
+
+                    m_task.m_executor.Execute(m_task.m_handle);
+                }
+
+                return std::noop_coroutine();
+            }
+
+            void await_resume()
+            {
+                Task::HandleThrowingOutcome(m_task.Get());
+            }
+
+        private:
+            Task m_task;
+        };
+
+        class OwnedThrowingView final
+        {
+        public:
+            explicit OwnedThrowingView(Task&& task) noexcept
+                : m_task(std::move(task))
+            {
+            }
+
+            [[nodiscard]] OwnedThrowingAwaiter operator co_await() noexcept
+            {
+                return OwnedThrowingAwaiter {std::move(m_task)};
+            }
+
+        private:
+            Task m_task;
+        };
+
+        [[nodiscard]] ThrowingView Throwing() & noexcept
+        {
+            return ThrowingView {*this};
+        }
+
+        [[nodiscard]] OwnedThrowingView Throwing() && noexcept
+        {
+            return OwnedThrowingView {std::move(*this)};
+        }
+
+        void WaitOrThrow()
+        {
+            HandleThrowingOutcome(Get());
+        }
+#endif
+
         struct ReturnErrorAwaiter final
         {
             E error {};
@@ -1732,6 +2108,35 @@ namespace NGIN::Async
         }
 
     private:
+#if NGIN_ASYNC_HAS_EXCEPTIONS
+        static void HandleThrowingOutcome(TaskOutcome<void, E> outcome)
+        {
+            if (outcome.Succeeded())
+            {
+                return;
+            }
+
+            if (outcome.IsDomainError())
+            {
+                AsyncExceptionAdapter<E>::Throw(outcome.DomainError());
+            }
+
+            if (outcome.IsCanceled())
+            {
+                throw AsyncCanceledException();
+            }
+
+            assert(outcome.IsFault());
+#if NGIN_ASYNC_CAPTURE_EXCEPTIONS
+            if (outcome.Fault().capturedException)
+            {
+                std::rethrow_exception(outcome.Fault().capturedException);
+            }
+#endif
+            throw AsyncFaultException(outcome.Fault());
+        }
+#endif
+
         template<typename ParentPromise>
         static void PropagateChildCompletion(std::coroutine_handle<> self, std::coroutine_handle<> continuation) noexcept
         {

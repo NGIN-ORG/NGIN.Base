@@ -3,7 +3,10 @@
 #pragma once
 
 #include <NGIN/Primitives.hpp>
-#include <NGIN/Utilities/Expected.hpp>
+#include <NGIN/Utilities/Error.hpp>
+
+#include <exception>
+#include <string_view>
 
 #ifndef NGIN_ASYNC_CAPTURE_EXCEPTIONS
 #define NGIN_ASYNC_CAPTURE_EXCEPTIONS 1
@@ -39,49 +42,37 @@ namespace NGIN::Async
 
     struct AsyncFault final
     {
-        AsyncFaultCode code {AsyncFaultCode::None};
-        int            native {0};
+        AsyncFaultCode          code {AsyncFaultCode::None};
+        int                     native {0};
+        std::string_view        message {};
+#if NGIN_ASYNC_CAPTURE_EXCEPTIONS
+        std::exception_ptr      capturedException {};
+#endif
+
+        constexpr AsyncFault() noexcept = default;
+
+        constexpr explicit AsyncFault(AsyncFaultCode faultCode, int nativeCode = 0, std::string_view faultMessage = {}) noexcept
+            : code(faultCode)
+            , native(nativeCode)
+            , message(faultMessage)
+        {
+        }
 
         [[nodiscard]] constexpr bool IsOk() const noexcept
         {
             return code == AsyncFaultCode::None;
         }
-    };
 
-    [[nodiscard]] constexpr AsyncFault MakeAsyncFault(AsyncFaultCode code, int native = 0) noexcept
-    {
-        return AsyncFault {code, native};
-    }
-
-    // Legacy compatibility surface used by unmigrated internal helpers while the async stack is being retargeted.
-    enum class AsyncErrorCode : NGIN::UInt8
-    {
-        Ok,
-        Canceled,
-        Fault,
-        TimedOut,
-        InvalidState,
-        InvalidArgument,
-        Unknown,
-    };
-
-    struct AsyncError final
-    {
-        AsyncErrorCode code {AsyncErrorCode::Ok};
-        int            native {0};
-
-        [[nodiscard]] constexpr bool IsOk() const noexcept
+        [[nodiscard]] constexpr NGIN::Utilities::ErrorInfo ToErrorInfo() const noexcept
         {
-            return code == AsyncErrorCode::Ok;
+            return {NGIN::Utilities::ErrorDomain::Async, code, native};
         }
     };
 
-    template<typename T>
-    using AsyncExpected = NGIN::Utilities::Expected<T, AsyncError>;
-
-    [[nodiscard]] constexpr AsyncError MakeAsyncError(AsyncErrorCode code, int native = 0) noexcept
+    [[nodiscard]] constexpr AsyncFault MakeAsyncFault(
+            AsyncFaultCode code, int native = 0, std::string_view message = {}) noexcept
     {
-        return AsyncError {code, native};
+        return AsyncFault {code, native, message};
     }
 
     struct CanceledTag final

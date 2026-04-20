@@ -4,6 +4,7 @@
 #include <NGIN/Text/String.hpp>
 #include <NGIN/Defines.hpp>
 #include <NGIN/Primitives.hpp>
+#include <NGIN/Utilities/Error.hpp>
 
 namespace NGIN::IO
 {
@@ -41,5 +42,18 @@ namespace NGIN::IO
         Path        path {};
         Path        secondaryPath {};
         String      message {};
+
+        constexpr IOError() noexcept = default;
+
+        constexpr explicit IOError(IOErrorCode errorCode, Int32 errorSystemCode = 0) noexcept
+            : code(errorCode)
+            , systemCode(errorSystemCode)
+        {
+        }
+
+        [[nodiscard]] constexpr NGIN::Utilities::ErrorInfo ToErrorInfo() const noexcept
+        {
+            return {NGIN::Utilities::ErrorDomain::IO, code, systemCode};
+        }
     };
 }// namespace NGIN::IO

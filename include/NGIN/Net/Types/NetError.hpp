@@ -5,6 +5,7 @@
 #include <system_error>
 
 #include <NGIN/Primitives.hpp>
+#include <NGIN/Utilities/Error.hpp>
 #include <NGIN/Utilities/Expected.hpp>
 
 namespace NGIN::Net
@@ -27,9 +28,22 @@ namespace NGIN::Net
     struct NetError final
     {
         NetErrorCode code {NetErrorCode::Ok};
-        int     native {0};
+        int          native {0};
+
+        constexpr NetError() noexcept = default;
+
+        constexpr explicit NetError(NetErrorCode errorCode, int nativeCode = 0) noexcept
+            : code(errorCode)
+            , native(nativeCode)
+        {
+        }
 
         [[nodiscard]] constexpr bool IsOk() const noexcept { return code == NetErrorCode::Ok; }
+
+        [[nodiscard]] constexpr NGIN::Utilities::ErrorInfo ToErrorInfo() const noexcept
+        {
+            return {NGIN::Utilities::ErrorDomain::Net, code, native};
+        }
     };
 
     [[nodiscard]] inline std::error_code ToErrorCode(NetError error) noexcept

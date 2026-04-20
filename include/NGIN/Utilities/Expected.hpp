@@ -160,6 +160,22 @@ namespace NGIN::Utilities
             detail::WithExceptionsAbortOnThrow([&]() { m_storage.template Construct<E>(std::move(unexpected).Error()); });
         }
 
+        /// @brief Constructs an `Expected` holding an error by copying `error`.
+        constexpr Expected(const E& error) noexcept(NGIN::Meta::TypeTraits<E>::IsNothrowCopyConstructible())
+            requires(!NGIN::Meta::TypeTraits<T>::template IsSame<E>() && NGIN::Meta::TypeTraits<E>::IsCopyConstructible())
+            : m_storage {}, m_hasValue {0}
+        {
+            detail::WithExceptionsAbortOnThrow([&]() { m_storage.template Construct<E>(error); });
+        }
+
+        /// @brief Constructs an `Expected` holding an error by moving `error`.
+        constexpr Expected(E&& error) noexcept(NGIN::Meta::TypeTraits<E>::IsNothrowMoveConstructible())
+            requires(!NGIN::Meta::TypeTraits<T>::template IsSame<E>() && NGIN::Meta::TypeTraits<E>::IsMoveConstructible())
+            : m_storage {}, m_hasValue {0}
+        {
+            detail::WithExceptionsAbortOnThrow([&]() { m_storage.template Construct<E>(std::move(error)); });
+        }
+
         /// @brief Constructs an `Expected` holding an error in-place.
         ///
         /// @param args Forwarded constructor arguments for `E`.
@@ -862,6 +878,22 @@ namespace NGIN::Utilities
             : m_error {}, m_hasValue {0}
         {
             detail::WithExceptionsAbortOnThrow([&]() { m_error.Construct(std::move(unexpected).Error()); });
+        }
+
+        /// @brief Constructs an error state by copying `error`.
+        constexpr Expected(const E& error) noexcept(NGIN::Meta::TypeTraits<E>::IsNothrowCopyConstructible())
+            requires(NGIN::Meta::TypeTraits<E>::IsCopyConstructible())
+            : m_error {}, m_hasValue {0}
+        {
+            detail::WithExceptionsAbortOnThrow([&]() { m_error.Construct(error); });
+        }
+
+        /// @brief Constructs an error state by moving `error`.
+        constexpr Expected(E&& error) noexcept(NGIN::Meta::TypeTraits<E>::IsNothrowMoveConstructible())
+            requires(NGIN::Meta::TypeTraits<E>::IsMoveConstructible())
+            : m_error {}, m_hasValue {0}
+        {
+            detail::WithExceptionsAbortOnThrow([&]() { m_error.Construct(std::move(error)); });
         }
 
         /// @brief Constructs an error state in-place.

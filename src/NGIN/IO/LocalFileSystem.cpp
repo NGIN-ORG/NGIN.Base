@@ -72,20 +72,18 @@ namespace NGIN::IO
 
         if (completion.IsCanceled())
         {
-            co_await AsyncTask<FileInfo>::ReturnCanceled();
-            co_return FileInfo {};
+            co_return NGIN::Async::Sentinels::Canceled;
         }
 
         if (completion.IsFault())
         {
-            co_await AsyncTask<FileInfo>::ReturnFault(std::move(*completion.fault));
-            co_return FileInfo {};
+            co_return NGIN::Async::Fault(std::move(*completion.fault));
         }
 
         auto result = std::move(*completion.result);
         if (!result)
         {
-            co_return NGIN::Utilities::Unexpected<IOError>(std::move(result).TakeError());
+            co_return std::move(result).TakeError();
         }
         co_return std::move(result).TakeValue();
     }

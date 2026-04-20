@@ -752,13 +752,12 @@ namespace NGIN::IO
         auto resolved = ResolvePath(path);
         if (!resolved.HasValue())
         {
-            co_return NGIN::Utilities::Unexpected<IOError>(std::move(resolved.Error()));
+            co_return std::move(resolved).TakeError();
         }
         auto* asyncFs = resolved.Value().mount->GetAsyncFileSystem();
         if (!asyncFs)
         {
-            co_return NGIN::Utilities::Unexpected<IOError>(
-                    MakeError(IOErrorCode::Unsupported, "mount has no async filesystem", path));
+            co_return MakeError(IOErrorCode::Unsupported, "mount has no async filesystem", path);
         }
         co_return co_await asyncFs->OpenFileAsync(ctx, resolved.Value().translatedPath, options);
     }
@@ -769,13 +768,12 @@ namespace NGIN::IO
         auto resolved = ResolvePath(path);
         if (!resolved.HasValue())
         {
-            co_return NGIN::Utilities::Unexpected<IOError>(std::move(resolved.Error()));
+            co_return std::move(resolved).TakeError();
         }
         auto* asyncFs = resolved.Value().mount->GetAsyncFileSystem();
         if (!asyncFs)
         {
-            co_return NGIN::Utilities::Unexpected<IOError>(
-                    MakeError(IOErrorCode::Unsupported, "mount has no async filesystem", path));
+            co_return MakeError(IOErrorCode::Unsupported, "mount has no async filesystem", path);
         }
         co_return co_await asyncFs->OpenDirectoryAsync(ctx, resolved.Value().translatedPath);
     }
@@ -786,13 +784,12 @@ namespace NGIN::IO
         auto resolved = ResolvePath(path);
         if (!resolved.HasValue())
         {
-            co_return NGIN::Utilities::Unexpected<IOError>(std::move(resolved.Error()));
+            co_return std::move(resolved).TakeError();
         }
         auto* asyncFs = resolved.Value().mount->GetAsyncFileSystem();
         if (!asyncFs)
         {
-            co_return NGIN::Utilities::Unexpected<IOError>(
-                    MakeError(IOErrorCode::Unsupported, "mount has no async filesystem", path));
+            co_return MakeError(IOErrorCode::Unsupported, "mount has no async filesystem", path);
         }
         auto info = co_await asyncFs->GetInfoAsync(ctx, resolved.Value().translatedPath, options);
         info.path = path;
@@ -816,15 +813,13 @@ namespace NGIN::IO
         }
         if (fromResolved.Value().mount != toResolved.Value().mount)
         {
-            co_await AsyncTaskVoid::ReturnError(
-                    MakeError(IOErrorCode::CrossDevice, "cross-mount async copy not implemented", from, to));
+            co_await AsyncTaskVoid::ReturnError(MakeError(IOErrorCode::CrossDevice, "cross-mount async copy not implemented", from, to));
             co_return;
         }
         auto* asyncFs = fromResolved.Value().mount->GetAsyncFileSystem();
         if (!asyncFs)
         {
-            co_await AsyncTaskVoid::ReturnError(
-                    MakeError(IOErrorCode::Unsupported, "mount has no async filesystem", from, to));
+            co_await AsyncTaskVoid::ReturnError(MakeError(IOErrorCode::Unsupported, "mount has no async filesystem", from, to));
             co_return;
         }
         co_await asyncFs->CopyFileAsync(ctx, fromResolved.Value().translatedPath, toResolved.Value().translatedPath, options);

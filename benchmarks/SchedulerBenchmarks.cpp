@@ -461,12 +461,7 @@ int main()
             std::atomic<int>                     completed {0};
 
             auto delayCanceled = [](NGIN::Async::TaskContext& ctx, std::atomic<int>& completed) -> NGIN::Async::Task<void> {
-                auto delayResult = co_await ctx.Delay(NGIN::Units::Milliseconds(100.0));
-                if (!delayResult && delayResult.Error().code != NGIN::Async::AsyncErrorCode::Canceled)
-                {
-                    co_await NGIN::Async::Task<void>::ReturnError(delayResult.Error());
-                    co_return;
-                }
+                co_await ctx.Delay(NGIN::Units::Milliseconds(100.0));
                 completed.fetch_add(1, std::memory_order_release);
                 completed.notify_one();
                 co_return;
@@ -645,12 +640,7 @@ int main()
             std::atomic<int>                      completed {0};
 
             auto delayCanceled = [](NGIN::Async::TaskContext& ctx, std::atomic<int>& completed) -> NGIN::Async::Task<void> {
-                auto delayResult = co_await ctx.Delay(NGIN::Units::Milliseconds(100.0));
-                if (!delayResult && delayResult.Error().code != NGIN::Async::AsyncErrorCode::Canceled)
-                {
-                    co_await NGIN::Async::Task<void>::ReturnError(delayResult.Error());
-                    co_return;
-                }
+                co_await ctx.Delay(NGIN::Units::Milliseconds(100.0));
                 completed.fetch_add(1, std::memory_order_relaxed);
                 co_return;
             };

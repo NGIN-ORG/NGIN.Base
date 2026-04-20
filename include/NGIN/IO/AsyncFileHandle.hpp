@@ -60,28 +60,28 @@ namespace NGIN::IO
         AsyncTask<UIntSize> ReadAsync(NGIN::Async::TaskContext& ctx, std::span<NGIN::Byte> destination)
         {
             if (!IsValid() || m_operations->read == nullptr)
-                co_return NGIN::Utilities::Unexpected<IOError>(MakeInvalidHandleError("async file handle is empty"));
+                co_return MakeInvalidHandleError("async file handle is empty");
             co_return co_await m_operations->read(m_state, ctx, destination);
         }
 
         AsyncTask<UIntSize> WriteAsync(NGIN::Async::TaskContext& ctx, std::span<const NGIN::Byte> source)
         {
             if (!IsValid() || m_operations->write == nullptr)
-                co_return NGIN::Utilities::Unexpected<IOError>(MakeInvalidHandleError("async file handle is empty"));
+                co_return MakeInvalidHandleError("async file handle is empty");
             co_return co_await m_operations->write(m_state, ctx, source);
         }
 
         AsyncTask<UIntSize> ReadAtAsync(NGIN::Async::TaskContext& ctx, UInt64 offset, std::span<NGIN::Byte> destination)
         {
             if (!IsValid() || m_operations->readAt == nullptr)
-                co_return NGIN::Utilities::Unexpected<IOError>(MakeInvalidHandleError("async file handle is empty"));
+                co_return MakeInvalidHandleError("async file handle is empty");
             co_return co_await m_operations->readAt(m_state, ctx, offset, destination);
         }
 
         AsyncTask<UIntSize> WriteAtAsync(NGIN::Async::TaskContext& ctx, UInt64 offset, std::span<const NGIN::Byte> source)
         {
             if (!IsValid() || m_operations->writeAt == nullptr)
-                co_return NGIN::Utilities::Unexpected<IOError>(MakeInvalidHandleError("async file handle is empty"));
+                co_return MakeInvalidHandleError("async file handle is empty");
             co_return co_await m_operations->writeAt(m_state, ctx, offset, source);
         }
 
