@@ -69,7 +69,7 @@ namespace NGIN::Net
 #if defined(NGIN_PLATFORM_WINDOWS)
         if (!detail::EnsureBoundForConnectEx(m_handle, remoteEndpoint))
         {
-            co_await NGIN::Async::Task<void, NetError>::ReturnError(detail::LastError());
+            co_await NGIN::Async::DomainFailure(detail::LastError());
             co_return;
         }
 
@@ -86,7 +86,7 @@ namespace NGIN::Net
 
             if (result.Error().code != NetErrorCode::WouldBlock)
             {
-                co_await NGIN::Async::Task<void, NetError>::ReturnError(result.Error());
+                co_await NGIN::Async::DomainFailure(result.Error());
                 co_return;
             }
 
@@ -99,7 +99,7 @@ namespace NGIN::Net
 
             if (connectResult.Error().code != NetErrorCode::WouldBlock)
             {
-                co_await NGIN::Async::Task<void, NetError>::ReturnError(connectResult.Error());
+                co_await NGIN::Async::DomainFailure(connectResult.Error());
                 co_return;
             }
         }

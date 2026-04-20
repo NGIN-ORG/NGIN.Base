@@ -29,32 +29,38 @@ namespace NGIN::Async
     {
     };
 
-    enum class AsyncFaultCode : NGIN::UInt8
+    enum class AsyncFaultCode : NGIN::UInt16
     {
-        None,
-        InvalidState,
-        InvalidArgument,
-        SchedulerFailure,
-        ContinuationDispatchFailure,
+        None = 0,
+        InvalidTaskUsage,
+        InvalidContinuationState,
+        SchedulerDispatchFailed,
+        ContinuationDispatchFailed,
+        RuntimeInvariantViolation,
         UnhandledException,
-        Unknown,
+        UnknownRuntimeFailure,
+
+        // Compatibility aliases for existing call sites while v2 lands across the tree.
+        InvalidState                = InvalidTaskUsage,
+        InvalidArgument             = RuntimeInvariantViolation,
+        SchedulerFailure            = SchedulerDispatchFailed,
+        ContinuationDispatchFailure = ContinuationDispatchFailed,
+        Unknown                     = UnknownRuntimeFailure,
     };
 
     struct AsyncFault final
     {
-        AsyncFaultCode          code {AsyncFaultCode::None};
-        int                     native {0};
-        std::string_view        message {};
+        AsyncFaultCode   code {AsyncFaultCode::None};
+        int              native {0};
+        std::string_view message {};
 #if NGIN_ASYNC_CAPTURE_EXCEPTIONS
-        std::exception_ptr      capturedException {};
+        std::exception_ptr capturedException {};
 #endif
 
         constexpr AsyncFault() noexcept = default;
 
         constexpr explicit AsyncFault(AsyncFaultCode faultCode, int nativeCode = 0, std::string_view faultMessage = {}) noexcept
-            : code(faultCode)
-            , native(nativeCode)
-            , message(faultMessage)
+            : code(faultCode), native(nativeCode), message(faultMessage)
         {
         }
 
@@ -75,27 +81,4 @@ namespace NGIN::Async
         return AsyncFault {code, native, message};
     }
 
-    struct CanceledTag final
-    {
-    };
-
-    namespace Sentinels
-    {
-        inline constexpr CanceledTag Canceled {};
-    }
-
-    struct FaultResult final
-    {
-        AsyncFault fault {};
-    };
-
-    [[nodiscard]] constexpr FaultResult Fault(AsyncFault fault) noexcept
-    {
-        return FaultResult {fault};
-    }
-
-    [[nodiscard]] constexpr FaultResult Fault(AsyncFaultCode code, int native = 0) noexcept
-    {
-        return FaultResult {MakeAsyncFault(code, native)};
-    }
 }// namespace NGIN::Async

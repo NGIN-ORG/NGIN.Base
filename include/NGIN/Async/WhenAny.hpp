@@ -85,7 +85,7 @@ namespace NGIN::Async
         template<typename TTask>
         [[nodiscard]] inline Detached WatchTask(std::shared_ptr<SharedState> state, TTask& task, NGIN::UIntSize index)
         {
-            (void) co_await task.AsOutcome();
+            (void) co_await task.AsCompletion();
 
             bool expected = false;
             if (state->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
@@ -103,9 +103,9 @@ namespace NGIN::Async
         template<typename... TTasks>
         struct Awaiter final
         {
-            TaskContext&                  ctx;
-            std::shared_ptr<SharedState>  state;
-            std::tuple<TTasks&...>        tasks;
+            TaskContext&                 ctx;
+            std::shared_ptr<SharedState> state;
+            std::tuple<TTasks&...>       tasks;
 
             bool await_ready() const noexcept
             {
@@ -120,7 +120,7 @@ namespace NGIN::Async
                     return false;
                 }
 
-                state->exec = ctx.GetExecutor();
+                state->exec     = ctx.GetExecutor();
                 state->awaiting = awaiting;
                 ctx.GetCancellationToken().Register(state->cancellationRegistration,
                                                     state->exec,
@@ -177,13 +177,16 @@ namespace NGIN::Async
     template<typename TFirstTask, typename... TOtherTasks>
         requires(detail::IsTaskTypeV<TFirstTask>) && (detail::IsTaskTypeV<TOtherTasks> && ...) &&
                 (std::is_same_v<typename std::remove_reference_t<TFirstTask>::ErrorType,
-                                typename std::remove_reference_t<TOtherTasks>::ErrorType> && ...)
-    [[nodiscard]] inline Task<NGIN::UIntSize, typename std::remove_reference_t<TFirstTask>::ErrorType>
-    WhenAny(TaskContext& ctx, TFirstTask& firstTask, TOtherTasks&... otherTasks)
+                                typename std::remove_reference_t<TOtherTasks>::ErrorType> &&
+                 ...)
+    [[nodiscard]] inline Task<NGIN::UIntSize, typename std::remove_reference_t<TFirstTask>::ErrorType> WhenAny(TaskContext& ctx, TFirstTask& firstTask, TOtherTasks&... otherTasks)
     {
+        using E             = typename std::remove_reference_t<TFirstTask>::ErrorType;
+        using OutCompletion = Completion<NGIN::UIntSize, E>;
+
         if (ctx.IsCancellationRequested())
         {
-            co_return Sentinels::Canceled;
+            co_return OutCompletion::Canceled();
         }
 
         auto state = std::make_shared<detail::when_any::SharedState>();
@@ -193,7 +196,7 @@ namespace NGIN::Async
                 std::tuple<TFirstTask&, TOtherTasks&...>(firstTask, otherTasks...)};
         if (ctx.IsCancellationRequested() || index == static_cast<NGIN::UIntSize>(-1))
         {
-            co_return Sentinels::Canceled;
+            co_return OutCompletion::Canceled();
         }
 
         co_return index;

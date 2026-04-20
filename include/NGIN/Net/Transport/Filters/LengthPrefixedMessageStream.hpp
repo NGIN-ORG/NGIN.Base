@@ -34,14 +34,14 @@ namespace NGIN::Net::Transport::Filters
         {
             if (!m_inner)
             {
-                co_await NGIN::Async::Task<void, NGIN::Net::NetError>::ReturnFault(
+                co_await NGIN::Async::Faulted(
                         NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidState));
                 co_return;
             }
 
             if (message.size() > std::numeric_limits<NGIN::UInt32>::max())
             {
-                co_await NGIN::Async::Task<void, NGIN::Net::NetError>::ReturnError(
+                co_await NGIN::Async::DomainFailure(
                         NGIN::Net::NetError {NGIN::Net::NetErrorCode::MessageTooLarge, 0});
                 co_return;
             }
@@ -60,7 +60,8 @@ namespace NGIN::Net::Transport::Filters
         {
             if (!m_inner)
             {
-                co_return NGIN::Async::Fault(NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidState));
+                co_return NGIN::Async::Completion<NGIN::Net::ConstByteSpan, NGIN::Net::NetError>::Faulted(
+                        NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidState));
             }
 
             std::array<NGIN::Byte, LengthBytes> header {};
@@ -75,7 +76,8 @@ namespace NGIN::Net::Transport::Filters
 
             if (!messageBuffer.data || messageBuffer.capacity < messageSize)
             {
-                co_return NGIN::Async::Fault(NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidState));
+                co_return NGIN::Async::Completion<NGIN::Net::ConstByteSpan, NGIN::Net::NetError>::Faulted(
+                        NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidState));
             }
 
             co_await ReadExact(ctx, *m_inner, NGIN::Net::ByteSpan {messageBuffer.data, messageSize}, token);
@@ -121,7 +123,7 @@ namespace NGIN::Net::Transport::Filters
                 const auto bytes = co_await stream.WriteAsync(ctx, data.subspan(offset), token);
                 if (bytes == 0)
                 {
-                    co_await NGIN::Async::Task<void, NGIN::Net::NetError>::ReturnError(
+                    co_await NGIN::Async::DomainFailure(
                             NGIN::Net::NetError {NGIN::Net::NetErrorCode::Disconnected, 0});
                     co_return;
                 }
@@ -141,7 +143,7 @@ namespace NGIN::Net::Transport::Filters
                 const auto bytes = co_await stream.ReadAsync(ctx, destination.subspan(offset), token);
                 if (bytes == 0)
                 {
-                    co_await NGIN::Async::Task<void, NGIN::Net::NetError>::ReturnError(
+                    co_await NGIN::Async::DomainFailure(
                             NGIN::Net::NetError {NGIN::Net::NetErrorCode::Disconnected, 0});
                     co_return;
                 }

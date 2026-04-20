@@ -48,7 +48,7 @@ namespace NGIN::Net::Transport
         {
             if (!driver)
             {
-                co_await NGIN::Async::Task<void, NGIN::Net::NetError>::ReturnFault(
+                co_await NGIN::Async::Faulted(
                         NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidState));
                 co_return;
             }
@@ -64,11 +64,13 @@ namespace NGIN::Net::Transport
         {
             if (!driver)
             {
-                co_return NGIN::Async::Fault(NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidState));
+                co_return NGIN::Async::Completion<ReceivedDatagram, NGIN::Net::NetError>::Faulted(
+                        NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidState));
             }
             if (!receiveBuffer.data || receiveBuffer.capacity == 0)
             {
-                co_return NGIN::Async::Fault(NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidState));
+                co_return NGIN::Async::Completion<ReceivedDatagram, NGIN::Net::NetError>::Faulted(
+                        NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidState));
             }
 
             auto result = co_await socket.ReceiveFromAsync(ctx,

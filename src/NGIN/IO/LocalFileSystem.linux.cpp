@@ -144,12 +144,12 @@ namespace NGIN::IO
                         });
                 if (completion.status == NativePosixFileCompletion::Status::Canceled)
                 {
-                    co_await AsyncTask<UIntSize>::ReturnCanceled();
+                    co_await NGIN::Async::Canceled();
                     co_return 0;
                 }
                 if (completion.status == NativePosixFileCompletion::Status::Fault)
                 {
-                    co_await AsyncTask<UIntSize>::ReturnFault(completion.fault);
+                    co_await NGIN::Async::Faulted(completion.fault);
                     co_return 0;
                 }
                 if (completion.systemCode != 0)
@@ -165,12 +165,12 @@ namespace NGIN::IO
             });
             if (completion.IsCanceled())
             {
-                co_await AsyncTask<UIntSize>::ReturnCanceled();
+                co_await NGIN::Async::Canceled();
                 co_return 0;
             }
             if (completion.IsFault())
             {
-                co_await AsyncTask<UIntSize>::ReturnFault(std::move(*completion.fault));
+                co_await NGIN::Async::Faulted(std::move(*completion.fault));
                 co_return 0;
             }
             auto result = std::move(*completion.result);
@@ -197,12 +197,12 @@ namespace NGIN::IO
                         });
                 if (completion.status == NativePosixFileCompletion::Status::Canceled)
                 {
-                    co_await AsyncTask<UIntSize>::ReturnCanceled();
+                    co_await NGIN::Async::Canceled();
                     co_return 0;
                 }
                 if (completion.status == NativePosixFileCompletion::Status::Fault)
                 {
-                    co_await AsyncTask<UIntSize>::ReturnFault(completion.fault);
+                    co_await NGIN::Async::Faulted(completion.fault);
                     co_return 0;
                 }
                 if (completion.systemCode != 0)
@@ -218,12 +218,12 @@ namespace NGIN::IO
             });
             if (completion.IsCanceled())
             {
-                co_await AsyncTask<UIntSize>::ReturnCanceled();
+                co_await NGIN::Async::Canceled();
                 co_return 0;
             }
             if (completion.IsFault())
             {
-                co_await AsyncTask<UIntSize>::ReturnFault(std::move(*completion.fault));
+                co_await NGIN::Async::Faulted(std::move(*completion.fault));
                 co_return 0;
             }
             auto result = std::move(*completion.result);
@@ -252,12 +252,12 @@ namespace NGIN::IO
                         });
                 if (completion.status == NativePosixFileCompletion::Status::Canceled)
                 {
-                    co_await AsyncTask<UIntSize>::ReturnCanceled();
+                    co_await NGIN::Async::Canceled();
                     co_return 0;
                 }
                 if (completion.status == NativePosixFileCompletion::Status::Fault)
                 {
-                    co_await AsyncTask<UIntSize>::ReturnFault(completion.fault);
+                    co_await NGIN::Async::Faulted(completion.fault);
                     co_return 0;
                 }
                 if (completion.systemCode != 0)
@@ -273,12 +273,12 @@ namespace NGIN::IO
             });
             if (completion.IsCanceled())
             {
-                co_await AsyncTask<UIntSize>::ReturnCanceled();
+                co_await NGIN::Async::Canceled();
                 co_return 0;
             }
             if (completion.IsFault())
             {
-                co_await AsyncTask<UIntSize>::ReturnFault(std::move(*completion.fault));
+                co_await NGIN::Async::Faulted(std::move(*completion.fault));
                 co_return 0;
             }
             auto result = std::move(*completion.result);
@@ -307,12 +307,12 @@ namespace NGIN::IO
                         });
                 if (completion.status == NativePosixFileCompletion::Status::Canceled)
                 {
-                    co_await AsyncTask<UIntSize>::ReturnCanceled();
+                    co_await NGIN::Async::Canceled();
                     co_return 0;
                 }
                 if (completion.status == NativePosixFileCompletion::Status::Fault)
                 {
-                    co_await AsyncTask<UIntSize>::ReturnFault(completion.fault);
+                    co_await NGIN::Async::Faulted(completion.fault);
                     co_return 0;
                 }
                 if (completion.systemCode != 0)
@@ -328,12 +328,12 @@ namespace NGIN::IO
             });
             if (completion.IsCanceled())
             {
-                co_await AsyncTask<UIntSize>::ReturnCanceled();
+                co_await NGIN::Async::Canceled();
                 co_return 0;
             }
             if (completion.IsFault())
             {
-                co_await AsyncTask<UIntSize>::ReturnFault(std::move(*completion.fault));
+                co_await NGIN::Async::Faulted(std::move(*completion.fault));
                 co_return 0;
             }
             auto result = std::move(*completion.result);
@@ -356,17 +356,17 @@ namespace NGIN::IO
                         });
                 if (completion.status == NativePosixFileCompletion::Status::Canceled)
                 {
-                    co_await AsyncTaskVoid::ReturnCanceled();
+                    co_await NGIN::Async::Canceled();
                     co_return;
                 }
                 if (completion.status == NativePosixFileCompletion::Status::Fault)
                 {
-                    co_await AsyncTaskVoid::ReturnFault(completion.fault);
+                    co_await NGIN::Async::Faulted(completion.fault);
                     co_return;
                 }
                 if (completion.systemCode != 0)
                 {
-                    co_await AsyncTaskVoid::ReturnError(detail::MakeErrnoError(completion.systemCode, "io_uring fsync failed", state->path));
+                    co_await NGIN::Async::DomainFailure(detail::MakeErrnoError(completion.systemCode, "io_uring fsync failed", state->path));
                     co_return;
                 }
                 co_return;
@@ -377,18 +377,18 @@ namespace NGIN::IO
             });
             if (completion.IsCanceled())
             {
-                co_await AsyncTaskVoid::ReturnCanceled();
+                co_await NGIN::Async::Canceled();
                 co_return;
             }
             if (completion.IsFault())
             {
-                co_await AsyncTaskVoid::ReturnFault(std::move(*completion.fault));
+                co_await NGIN::Async::Faulted(std::move(*completion.fault));
                 co_return;
             }
             auto result = std::move(*completion.result);
             if (!result)
             {
-                co_await AsyncTaskVoid::ReturnError(std::move(result).TakeError());
+                co_await NGIN::Async::DomainFailure(std::move(result).TakeError());
                 co_return;
             }
             co_return;
@@ -419,17 +419,17 @@ namespace NGIN::IO
                         });
                 if (completion.status == NativePosixFileCompletion::Status::Canceled)
                 {
-                    co_await AsyncTaskVoid::ReturnCanceled();
+                    co_await NGIN::Async::Canceled();
                     co_return;
                 }
                 if (completion.status == NativePosixFileCompletion::Status::Fault)
                 {
-                    co_await AsyncTaskVoid::ReturnFault(completion.fault);
+                    co_await NGIN::Async::Faulted(completion.fault);
                     co_return;
                 }
                 if (completion.systemCode != 0)
                 {
-                    co_await AsyncTaskVoid::ReturnError(detail::MakeErrnoError(completion.systemCode, "io_uring close failed", state->path));
+                    co_await NGIN::Async::DomainFailure(detail::MakeErrnoError(completion.systemCode, "io_uring close failed", state->path));
                     co_return;
                 }
                 co_return;
@@ -440,18 +440,18 @@ namespace NGIN::IO
             });
             if (completion.IsCanceled())
             {
-                co_await AsyncTaskVoid::ReturnCanceled();
+                co_await NGIN::Async::Canceled();
                 co_return;
             }
             if (completion.IsFault())
             {
-                co_await AsyncTaskVoid::ReturnFault(std::move(*completion.fault));
+                co_await NGIN::Async::Faulted(std::move(*completion.fault));
                 co_return;
             }
             auto result = std::move(*completion.result);
             if (!result)
             {
-                co_await AsyncTaskVoid::ReturnError(std::move(result).TakeError());
+                co_await NGIN::Async::DomainFailure(std::move(result).TakeError());
                 co_return;
             }
             co_return;
@@ -500,11 +500,11 @@ namespace NGIN::IO
 
         if (completion.IsCanceled())
         {
-            co_return NGIN::Async::Sentinels::Canceled;
+            co_return NGIN::Async::Completion<AsyncFileHandle, IOError>::Canceled();
         }
         if (completion.IsFault())
         {
-            co_return NGIN::Async::Fault(std::move(*completion.fault));
+            co_return NGIN::Async::Completion<AsyncFileHandle, IOError>::Faulted(std::move(*completion.fault));
         }
 
         auto opened = std::move(*completion.result);

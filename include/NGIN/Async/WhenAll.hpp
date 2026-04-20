@@ -26,8 +26,8 @@ namespace NGIN::Async
             std::coroutine_handle<>      awaiting {};
             CancellationRegistration     cancellationRegistration {};
 
-            TaskStatus               status {TaskStatus::Pending};
-            std::optional<E>         domainError {};
+            TaskStatus                status {TaskStatus::Pending};
+            std::optional<E>          domainError {};
             std::optional<AsyncFault> fault {};
         };
 
@@ -92,7 +92,7 @@ namespace NGIN::Async
         template<typename E, typename TTask>
         [[nodiscard]] inline Detached WatchTask(std::weak_ptr<SharedState<E>> weakState, TTask& task, NGIN::UIntSize)
         {
-            auto outcome = co_await task.AsOutcome();
+            auto outcome = co_await task.AsCompletion();
 
             if (auto state = weakState.lock())
             {
@@ -103,7 +103,7 @@ namespace NGIN::Async
                     {
                         if (outcome.IsDomainError())
                         {
-                            state->status = TaskStatus::DomainError;
+                            state->status      = TaskStatus::DomainError;
                             state->domainError = outcome.DomainError();
                         }
                         else if (outcome.IsCanceled())
@@ -113,7 +113,7 @@ namespace NGIN::Async
                         else if (outcome.IsFault())
                         {
                             state->status = TaskStatus::Fault;
-                            state->fault = outcome.Fault();
+                            state->fault  = outcome.Fault();
                         }
 
                         if (state->awaiting)
@@ -169,7 +169,7 @@ namespace NGIN::Async
                     return false;
                 }
 
-                state->exec = ctx.GetExecutor();
+                state->exec     = ctx.GetExecutor();
                 state->awaiting = awaiting;
                 state->remaining.store(static_cast<NGIN::UIntSize>(sizeof...(TTasks)), std::memory_order_release);
 
@@ -177,7 +177,7 @@ namespace NGIN::Async
                         state->cancellationRegistration, state->exec, awaiting, &CancelWhenAll<E>, state.get());
 
                 std::weak_ptr<SharedState<E>> weakState = state;
-                auto& exec = state->exec;
+                auto&                         exec      = state->exec;
                 [&]<std::size_t... Indices>(std::index_sequence<Indices...>) {
                     (([&] {
                          auto watch = WatchTask<E>(weakState, std::get<Indices>(tasks), static_cast<NGIN::UIntSize>(Indices));
@@ -197,17 +197,18 @@ namespace NGIN::Async
         requires(std::is_same_v<std::remove_reference_t<TFirstTask>,
                                 Task<void, typename std::remove_reference_t<TFirstTask>::ErrorType>>) &&
                 (std::is_same_v<typename std::remove_reference_t<TFirstTask>::ErrorType,
-                                typename std::remove_reference_t<TOtherTasks>::ErrorType> && ...) &&
+                                typename std::remove_reference_t<TOtherTasks>::ErrorType> &&
+                 ...) &&
                 (std::is_same_v<std::remove_reference_t<TOtherTasks>,
-                                Task<void, typename std::remove_reference_t<TFirstTask>::ErrorType>> && ...)
-    [[nodiscard]] inline Task<void, typename std::remove_reference_t<TFirstTask>::ErrorType>
-    WhenAll(TaskContext& ctx, TFirstTask& firstTask, TOtherTasks&... otherTasks)
+                                Task<void, typename std::remove_reference_t<TFirstTask>::ErrorType>> &&
+                 ...)
+    [[nodiscard]] inline Task<void, typename std::remove_reference_t<TFirstTask>::ErrorType> WhenAll(TaskContext& ctx, TFirstTask& firstTask, TOtherTasks&... otherTasks)
     {
         using E = typename std::remove_reference_t<TFirstTask>::ErrorType;
 
         if (ctx.IsCancellationRequested())
         {
-            co_await Task<void, E>::ReturnCanceled();
+            co_await NGIN::Async::Canceled();
             co_return;
         }
 
@@ -219,17 +220,17 @@ namespace NGIN::Async
 
         if (state->status == TaskStatus::DomainError)
         {
-            co_await Task<void, E>::ReturnError(std::move(*state->domainError));
+            co_await NGIN::Async::DomainFailure(std::move(*state->domainError));
             co_return;
         }
         if (state->status == TaskStatus::Canceled || ctx.IsCancellationRequested())
         {
-            co_await Task<void, E>::ReturnCanceled();
+            co_await NGIN::Async::Canceled();
             co_return;
         }
         if (state->status == TaskStatus::Fault)
         {
-            co_await Task<void, E>::ReturnFault(*state->fault);
+            co_await NGIN::Async::Faulted(*state->fault);
             co_return;
         }
 
@@ -238,17 +239,17 @@ namespace NGIN::Async
             auto outcome = task->Get();
             if (outcome.IsDomainError())
             {
-                co_await Task<void, E>::ReturnError(outcome.DomainError());
+                co_await NGIN::Async::DomainFailure(outcome.DomainError());
                 co_return;
             }
             if (outcome.IsCanceled())
             {
-                co_await Task<void, E>::ReturnCanceled();
+                co_await NGIN::Async::Canceled();
                 co_return;
             }
             if (outcome.IsFault())
             {
-                co_await Task<void, E>::ReturnFault(outcome.Fault());
+                co_await NGIN::Async::Faulted(outcome.Fault());
                 co_return;
             }
         }
@@ -260,9 +261,11 @@ namespace NGIN::Async
         requires(sizeof...(T) > 0) && (!std::is_void_v<T> && ...)
     [[nodiscard]] inline Task<std::tuple<T...>, E> WhenAll(TaskContext& ctx, Task<T, E>&... tasks)
     {
+        using OutCompletion = Completion<std::tuple<T...>, E>;
+
         if (ctx.IsCancellationRequested())
         {
-            co_return Sentinels::Canceled;
+            co_return OutCompletion::Canceled();
         }
 
         auto state = std::make_shared<detail::when_all::SharedState<E>>();
@@ -270,15 +273,15 @@ namespace NGIN::Async
 
         if (state->status == TaskStatus::DomainError)
         {
-            co_return NGIN::Utilities::Unexpected<E>(std::move(*state->domainError));
+            co_return OutCompletion::DomainFailure(std::move(*state->domainError));
         }
         if (state->status == TaskStatus::Canceled || ctx.IsCancellationRequested())
         {
-            co_return Sentinels::Canceled;
+            co_return OutCompletion::Canceled();
         }
         if (state->status == TaskStatus::Fault)
         {
-            co_return Fault(*state->fault);
+            co_return OutCompletion::Faulted(*state->fault);
         }
 
         auto output = std::tuple<T...> {std::move(*tasks.Get())...};

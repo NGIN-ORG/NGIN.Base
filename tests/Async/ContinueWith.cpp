@@ -60,7 +60,8 @@ namespace
         throw std::runtime_error("parent");
         co_return 0;
 #else
-        co_return NGIN::Async::Fault(NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::Unknown));
+        co_return NGIN::Async::Completion<int, NGIN::Async::NoError>::Faulted(
+                NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::Unknown));
 #endif
     }
 
@@ -75,7 +76,7 @@ namespace
         throw std::runtime_error("continuation");
         co_return;
 #else
-        co_await NGIN::Async::Task<void>::ReturnFault(
+        co_await NGIN::Async::Faulted(
                 NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::Unknown));
         co_return;
 #endif

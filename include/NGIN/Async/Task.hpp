@@ -1,5 +1,5 @@
 /// <summary>
-/// Core coroutine types: Task<T, E>/Task<void, E>, TaskOutcome, and TaskContext integration.
+/// Core coroutine types: Task<T, E>/Task<void, E>, completion/result views, and TaskContext integration.
 /// </summary>
 #pragma once
 
@@ -14,8 +14,8 @@
 #include <type_traits>
 #include <utility>
 
-#include <NGIN/Async/AsyncError.hpp>
 #include <NGIN/Async/Cancellation.hpp>
+#include <NGIN/Async/Completion.hpp>
 #include <NGIN/Async/TaskContext.hpp>
 #include <NGIN/Sync/AtomicCondition.hpp>
 #include <NGIN/Units.hpp>
@@ -23,15 +23,6 @@
 
 namespace NGIN::Async
 {
-    enum class TaskStatus : NGIN::UInt8
-    {
-        Pending,
-        Succeeded,
-        DomainError,
-        Canceled,
-        Fault,
-    };
-
     class BaseTask
     {
     };
@@ -92,122 +83,23 @@ namespace NGIN::Async
     };
 
     template<typename E>
-    struct AsyncExceptionAdapter
+    struct AsyncExceptionTraits
     {
         [[noreturn]] static void Throw(const E& error)
         {
             throw AsyncDomainErrorException<E>(error);
         }
     };
+
+    template<typename E>
+    using AsyncExceptionAdapter = AsyncExceptionTraits<E>;
 #endif
 
-    template<typename T, typename E>
+    template<typename T, typename E = NoError>
     class Task;
 
     template<typename E>
     class Task<void, E>;
-
-    template<typename T, typename E>
-    class TaskOutcome
-    {
-    public:
-        [[nodiscard]] TaskStatus Status() const noexcept { return m_status; }
-        [[nodiscard]] bool       Succeeded() const noexcept { return m_status == TaskStatus::Succeeded; }
-        [[nodiscard]] bool       HasValue() const noexcept { return Succeeded() && m_value != nullptr; }
-        [[nodiscard]] bool       IsDomainError() const noexcept { return m_status == TaskStatus::DomainError; }
-        [[nodiscard]] bool       IsCanceled() const noexcept { return m_status == TaskStatus::Canceled; }
-        [[nodiscard]] bool       IsFault() const noexcept { return m_status == TaskStatus::Fault; }
-
-        [[nodiscard]] T& Value() const
-        {
-            assert(HasValue());
-            return *m_value;
-        }
-
-        [[nodiscard]] T& operator*() const
-        {
-            return Value();
-        }
-
-        [[nodiscard]] T* operator->() const
-        {
-            assert(HasValue());
-            return m_value;
-        }
-
-        [[nodiscard]] explicit operator bool() const noexcept
-        {
-            return Succeeded();
-        }
-
-        [[nodiscard]] E& DomainError() const
-        {
-            assert(IsDomainError() && m_domainError != nullptr);
-            return *m_domainError;
-        }
-
-        [[nodiscard]] AsyncFault& Fault() const
-        {
-            assert(IsFault() && m_fault != nullptr);
-            return *m_fault;
-        }
-
-    private:
-        template<typename, typename>
-        friend class Task;
-
-        constexpr TaskOutcome(TaskStatus status, T* value, E* domainError, AsyncFault* fault) noexcept
-            : m_status(status)
-            , m_value(value)
-            , m_domainError(domainError)
-            , m_fault(fault)
-        {
-        }
-
-        TaskStatus         m_status {TaskStatus::Pending};
-        T*                 m_value {nullptr};
-        E*                 m_domainError {nullptr};
-        AsyncFault*        m_fault {nullptr};
-    };
-
-    template<typename E>
-    class TaskOutcome<void, E>
-    {
-    public:
-        [[nodiscard]] TaskStatus Status() const noexcept { return m_status; }
-        [[nodiscard]] bool       Succeeded() const noexcept { return m_status == TaskStatus::Succeeded; }
-        [[nodiscard]] bool       IsDomainError() const noexcept { return m_status == TaskStatus::DomainError; }
-        [[nodiscard]] bool       IsCanceled() const noexcept { return m_status == TaskStatus::Canceled; }
-        [[nodiscard]] bool       IsFault() const noexcept { return m_status == TaskStatus::Fault; }
-        [[nodiscard]] explicit operator bool() const noexcept { return Succeeded(); }
-
-        [[nodiscard]] E& DomainError() const
-        {
-            assert(IsDomainError() && m_domainError != nullptr);
-            return *m_domainError;
-        }
-
-        [[nodiscard]] AsyncFault& Fault() const
-        {
-            assert(IsFault() && m_fault != nullptr);
-            return *m_fault;
-        }
-
-    private:
-        template<typename, typename>
-        friend class Task;
-
-        constexpr TaskOutcome(TaskStatus status, E* domainError, AsyncFault* fault) noexcept
-            : m_status(status)
-            , m_domainError(domainError)
-            , m_fault(fault)
-        {
-        }
-
-        TaskStatus        m_status {TaskStatus::Pending};
-        E*                m_domainError {nullptr};
-        AsyncFault*       m_fault {nullptr};
-    };
 
     namespace detail
     {
@@ -228,19 +120,21 @@ namespace NGIN::Async
             }
         }
 
-        template<typename E>
-        struct PromiseCommon
+        struct PromiseRuntimeCommon
         {
-            using DomainErrorType = E;
             using CompletionHandler = void (*)(std::coroutine_handle<>, std::coroutine_handle<>) noexcept;
 
-            TaskStatus                    m_status {TaskStatus::Pending};
-            std::optional<E>              m_domainError {};
-            std::optional<AsyncFault>     m_fault {};
+            std::atomic<bool>            m_finished {false};
+            NGIN::Sync::AtomicCondition  m_finishedCondition {};
+            std::coroutine_handle<>      m_continuation {};
+            CompletionHandler            m_completionHandler {};
+            TaskContext*                 m_ctx {nullptr};
+            NGIN::Execution::ExecutorRef m_executor {};
+
 #if NGIN_ASYNC_CAPTURE_EXCEPTIONS
-            std::exception_ptr            m_exception {};
+            std::exception_ptr m_exception {};
             using ExceptionPropagator = void (*)(std::exception_ptr, std::coroutine_handle<>) noexcept;
-            ExceptionPropagator           m_setChildException {};
+            ExceptionPropagator m_setChildException {};
 
             void SetChildException(std::exception_ptr ex) noexcept
             {
@@ -250,47 +144,19 @@ namespace NGIN::Async
                 }
             }
 #endif
-            std::atomic<bool>             m_finished {false};
-            NGIN::Sync::AtomicCondition   m_finishedCondition {};
-            std::coroutine_handle<>       m_continuation {};
-            CompletionHandler             m_completionHandler {};
-            TaskContext*                  m_ctx {nullptr};
-            NGIN::Execution::ExecutorRef  m_executor {};
 
-            PromiseCommon() = default;
+            PromiseRuntimeCommon() = default;
 
-            explicit PromiseCommon(TaskContext& ctx) noexcept
-                : m_ctx(&ctx)
-                , m_executor(ctx.GetExecutor())
+            explicit PromiseRuntimeCommon(TaskContext& ctx) noexcept
+                : m_ctx(&ctx), m_executor(ctx.GetExecutor())
             {
             }
 
             template<typename... Args>
                 requires(sizeof...(Args) > 0)
-            explicit PromiseCommon(TaskContext& ctx, Args&&...) noexcept
-                : PromiseCommon(ctx)
+            explicit PromiseRuntimeCommon(TaskContext& ctx, Args&&...) noexcept
+                : PromiseRuntimeCommon(ctx)
             {
-            }
-
-            void SetDomainError(E error) noexcept
-            {
-                m_status = TaskStatus::DomainError;
-                m_fault.reset();
-                m_domainError.emplace(std::move(error));
-            }
-
-            void SetCanceled() noexcept
-            {
-                m_status = TaskStatus::Canceled;
-                m_domainError.reset();
-                m_fault.reset();
-            }
-
-            void SetFault(AsyncFault fault) noexcept
-            {
-                m_status = TaskStatus::Fault;
-                m_domainError.reset();
-                m_fault.emplace(std::move(fault));
             }
 
             template<typename Handle>
@@ -323,29 +189,72 @@ namespace NGIN::Async
                     }
                 }
             }
+        };
+
+        template<typename T, typename E>
+        struct PromiseStorage : PromiseRuntimeCommon
+        {
+            using DomainErrorType = E;
+
+            std::optional<Completion<T, E>> m_completion {};
+
+            using Base = PromiseRuntimeCommon;
+            using Base::Base;
+
+            [[nodiscard]] bool HasCompletion() const noexcept
+            {
+                return m_completion.has_value();
+            }
+
+            [[nodiscard]] bool IsSucceeded() const noexcept
+            {
+                return m_completion.has_value() && m_completion->Succeeded();
+            }
+
+            void SetCompletion(Completion<T, E> completion) noexcept
+            {
+                if (!m_completion.has_value())
+                {
+                    m_completion.emplace(std::move(completion));
+                }
+            }
+
+            void SetDomainError(E error) noexcept
+            {
+                SetCompletion(Completion<T, E>::DomainFailure(std::move(error)));
+            }
+
+            void SetCanceled() noexcept
+            {
+                SetCompletion(Completion<T, E>::Canceled());
+            }
+
+            void SetFault(AsyncFault fault) noexcept
+            {
+                SetCompletion(Completion<T, E>::Faulted(std::move(fault)));
+            }
 
             template<typename ChildPromise>
-            void PropagateFromChild(const ChildPromise& child) noexcept
+            void PropagateFromChild(ChildPromise& child) noexcept
             {
-                switch (child.m_status)
+                if (!child.m_completion.has_value() || child.m_completion->Succeeded())
                 {
-                    case TaskStatus::DomainError:
-                        m_status = TaskStatus::DomainError;
-                        m_fault.reset();
-                        m_domainError = *child.m_domainError;
-                        break;
-                    case TaskStatus::Canceled:
-                        SetCanceled();
-                        break;
-                    case TaskStatus::Fault:
-                        m_status = TaskStatus::Fault;
-                        m_domainError.reset();
-                        m_fault = *child.m_fault;
-                        break;
-                    case TaskStatus::Pending:
-                    case TaskStatus::Succeeded:
-                        break;
+                    return;
                 }
+
+                if (child.m_completion->IsDomainError())
+                {
+                    SetDomainError(std::move(*child.m_completion).DomainError());
+                    return;
+                }
+
+                if (child.m_completion->IsCanceled())
+                {
+                    SetCanceled();
+                    return;
+                }
+
+                SetFault(std::move(*child.m_completion).Fault());
             }
 
             void unhandled_exception() noexcept
@@ -353,8 +262,89 @@ namespace NGIN::Async
 #if NGIN_ASYNC_HAS_EXCEPTIONS
                 AsyncFault fault = MakeAsyncFault(AsyncFaultCode::UnhandledException);
 #if NGIN_ASYNC_CAPTURE_EXCEPTIONS
-                m_exception = std::current_exception();
-                fault.capturedException = m_exception;
+                this->m_exception       = std::current_exception();
+                fault.capturedException = this->m_exception;
+#endif
+                SetFault(std::move(fault));
+#else
+                std::terminate();
+#endif
+            }
+        };
+
+        template<typename E>
+        struct PromiseStorage<void, E> : PromiseRuntimeCommon
+        {
+            using DomainErrorType = E;
+
+            std::optional<Completion<void, E>> m_completion {};
+
+            using Base = PromiseRuntimeCommon;
+            using Base::Base;
+
+            [[nodiscard]] bool HasCompletion() const noexcept
+            {
+                return m_completion.has_value();
+            }
+
+            [[nodiscard]] bool IsSucceeded() const noexcept
+            {
+                return m_completion.has_value() && m_completion->Succeeded();
+            }
+
+            void SetCompletion(Completion<void, E> completion) noexcept
+            {
+                if (!m_completion.has_value())
+                {
+                    m_completion.emplace(std::move(completion));
+                }
+            }
+
+            void SetDomainError(E error) noexcept
+            {
+                SetCompletion(Completion<void, E>::DomainFailure(std::move(error)));
+            }
+
+            void SetCanceled() noexcept
+            {
+                SetCompletion(Completion<void, E>::Canceled());
+            }
+
+            void SetFault(AsyncFault fault) noexcept
+            {
+                SetCompletion(Completion<void, E>::Faulted(std::move(fault)));
+            }
+
+            template<typename ChildPromise>
+            void PropagateFromChild(ChildPromise& child) noexcept
+            {
+                if (!child.m_completion.has_value() || child.m_completion->Succeeded())
+                {
+                    return;
+                }
+
+                if (child.m_completion->IsDomainError())
+                {
+                    SetDomainError(std::move(*child.m_completion).DomainError());
+                    return;
+                }
+
+                if (child.m_completion->IsCanceled())
+                {
+                    SetCanceled();
+                    return;
+                }
+
+                SetFault(std::move(*child.m_completion).Fault());
+            }
+
+            void unhandled_exception() noexcept
+            {
+#if NGIN_ASYNC_HAS_EXCEPTIONS
+                AsyncFault fault = MakeAsyncFault(AsyncFaultCode::UnhandledException);
+#if NGIN_ASYNC_CAPTURE_EXCEPTIONS
+                this->m_exception       = std::current_exception();
+                fault.capturedException = this->m_exception;
 #endif
                 SetFault(std::move(fault));
 #else
@@ -423,20 +413,19 @@ namespace NGIN::Async
         }
     }// namespace detail
 
-    template<typename T, typename E = NoError>
+    template<typename T, typename E>
     class Task final : public BaseTask
     {
     public:
         using ValueType = T;
         using ErrorType = E;
 
-        struct promise_type final : detail::PromiseCommon<E>
+        struct promise_type final : detail::PromiseStorage<T, E>
         {
-            std::optional<T> m_value {};
-
-            using Base = detail::PromiseCommon<E>;
+            using Base = detail::PromiseStorage<T, E>;
             using Base::Base;
             using Base::SetCanceled;
+            using Base::SetCompletion;
             using Base::SetDomainError;
             using Base::SetFault;
 
@@ -469,15 +458,12 @@ namespace NGIN::Async
 
             void return_value(T value) noexcept
             {
-                if (this->m_status != TaskStatus::Pending)
-                {
-                    return;
-                }
+                SetCompletion(Completion<T, E>::Success(std::move(value)));
+            }
 
-                this->m_status = TaskStatus::Succeeded;
-                this->m_domainError.reset();
-                this->m_fault.reset();
-                m_value.emplace(std::move(value));
+            void return_value(Completion<T, E> completion) noexcept
+            {
+                SetCompletion(std::move(completion));
             }
 
             void return_value(NGIN::Utilities::Expected<T, E> result) noexcept
@@ -488,7 +474,7 @@ namespace NGIN::Async
                     return;
                 }
 
-                return_value(std::move(result).TakeValue());
+                SetCompletion(Completion<T, E>::Success(std::move(result).TakeValue()));
             }
 
             void return_value(NGIN::Utilities::Unexpected<E> error) noexcept
@@ -502,26 +488,9 @@ namespace NGIN::Async
                 SetDomainError(std::move(error));
             }
 
-            void return_value(CanceledTag) noexcept
+            [[nodiscard]] TaskResult<T, E> MakeResult() const noexcept
             {
-                SetCanceled();
-            }
-
-            void return_value(FaultResult result) noexcept
-            {
-                SetFault(result.fault);
-            }
-
-            [[nodiscard]] TaskOutcome<T, E> MakeOutcome() const noexcept
-            {
-                T*          value       = (this->m_status == TaskStatus::Succeeded && m_value.has_value()) ? const_cast<T*>(&*m_value) : nullptr;
-                E*          domainError = (this->m_status == TaskStatus::DomainError && this->m_domainError.has_value())
-                                                ? const_cast<E*>(&*this->m_domainError)
-                                                : nullptr;
-                AsyncFault* fault       = (this->m_status == TaskStatus::Fault && this->m_fault.has_value())
-                                                ? const_cast<AsyncFault*>(&*this->m_fault)
-                                                : nullptr;
-                return TaskOutcome<T, E> {this->m_status, value, domainError, fault};
+                return TaskResult<T, E> {this->m_completion ? &*this->m_completion : nullptr};
             }
         };
 
@@ -530,21 +499,17 @@ namespace NGIN::Async
         Task() noexcept = default;
 
         explicit Task(handle_type h) noexcept
-            : m_handle(h)
-            , m_executor(h ? h.promise().m_executor : NGIN::Execution::ExecutorRef {})
+            : m_handle(h), m_executor(h ? h.promise().m_executor : NGIN::Execution::ExecutorRef {})
         {
         }
 
         Task(Task&& other) noexcept
-            : m_handle(other.m_handle)
-            , m_executor(other.m_executor)
-            , m_started(other.m_started.load(std::memory_order_acquire))
-            , m_invalidFault(std::move(other.m_invalidFault))
+            : m_handle(other.m_handle), m_executor(other.m_executor), m_started(other.m_started.load(std::memory_order_acquire)), m_invalidCompletion(std::move(other.m_invalidCompletion))
         {
             other.m_handle   = nullptr;
             other.m_executor = {};
             other.m_started.store(false, std::memory_order_release);
-            other.m_invalidFault.reset();
+            other.m_invalidCompletion.reset();
         }
 
         Task& operator=(Task&& other) noexcept
@@ -559,12 +524,12 @@ namespace NGIN::Async
                 m_handle   = other.m_handle;
                 m_executor = other.m_executor;
                 m_started.store(other.m_started.load(std::memory_order_acquire), std::memory_order_release);
-                m_invalidFault = std::move(other.m_invalidFault);
+                m_invalidCompletion = std::move(other.m_invalidCompletion);
 
                 other.m_handle   = nullptr;
                 other.m_executor = {};
                 other.m_started.store(false, std::memory_order_release);
-                other.m_invalidFault.reset();
+                other.m_invalidCompletion.reset();
             }
             return *this;
         }
@@ -589,7 +554,7 @@ namespace NGIN::Async
         {
             if (!m_handle)
             {
-                m_invalidFault = MakeAsyncFault(AsyncFaultCode::InvalidState);
+                SetInvalidCompletion(AsyncFaultCode::InvalidTaskUsage);
                 return false;
             }
 
@@ -599,14 +564,14 @@ namespace NGIN::Async
                 return false;
             }
 
-            m_executor = ctx.GetExecutor();
-            auto& promise = m_handle.promise();
-            promise.m_ctx = &ctx;
+            m_executor         = ctx.GetExecutor();
+            auto& promise      = m_handle.promise();
+            promise.m_ctx      = &ctx;
             promise.m_executor = m_executor;
 
             if (!m_executor.IsValid())
             {
-                promise.SetFault(MakeAsyncFault(AsyncFaultCode::InvalidState));
+                promise.SetFault(MakeAsyncFault(AsyncFaultCode::InvalidTaskUsage));
                 promise.MarkFinishedAndResume(m_handle);
                 return false;
             }
@@ -629,7 +594,7 @@ namespace NGIN::Async
 
             if (!m_started.load(std::memory_order_acquire) && !m_handle.promise().m_finished.load(std::memory_order_acquire))
             {
-                m_invalidFault = MakeAsyncFault(AsyncFaultCode::InvalidState);
+                SetInvalidCompletion(AsyncFaultCode::InvalidTaskUsage);
                 return;
             }
 
@@ -645,22 +610,27 @@ namespace NGIN::Async
             }
         }
 
-        [[nodiscard]] TaskOutcome<T, E> Get()
+        [[nodiscard]] TaskResult<T, E> Get()
         {
             if (!m_handle)
             {
-                m_invalidFault = MakeAsyncFault(AsyncFaultCode::InvalidState);
-                return TaskOutcome<T, E> {TaskStatus::Fault, nullptr, nullptr, &*m_invalidFault};
+                SetInvalidCompletion(AsyncFaultCode::InvalidTaskUsage);
+                return TaskResult<T, E> {&*m_invalidCompletion};
             }
 
             Wait();
 
-            if (m_invalidFault.has_value())
+            if (m_invalidCompletion.has_value())
             {
-                return TaskOutcome<T, E> {TaskStatus::Fault, nullptr, nullptr, &*m_invalidFault};
+                return TaskResult<T, E> {&*m_invalidCompletion};
             }
 
-            return m_handle.promise().MakeOutcome();
+            return m_handle.promise().MakeResult();
+        }
+
+        [[nodiscard]] const Completion<T, E>& GetCompletion()
+        {
+            return Get().CompletionRef();
         }
 
         [[nodiscard]] bool IsCompleted() const noexcept
@@ -675,12 +645,12 @@ namespace NGIN::Async
 
         [[nodiscard]] bool IsFaulted() const noexcept
         {
-            return m_handle && m_handle.promise().m_status == TaskStatus::Fault;
+            return m_handle && m_handle.promise().m_completion.has_value() && m_handle.promise().m_completion->IsFault();
         }
 
         [[nodiscard]] bool IsCanceled() const noexcept
         {
-            return m_handle && m_handle.promise().m_status == TaskStatus::Canceled;
+            return m_handle && m_handle.promise().m_completion.has_value() && m_handle.promise().m_completion->IsCanceled();
         }
 
 #if NGIN_ASYNC_CAPTURE_EXCEPTIONS
@@ -711,18 +681,18 @@ namespace NGIN::Async
             {
                 return m_task.m_handle &&
                        m_task.m_handle.promise().m_finished.load(std::memory_order_acquire) &&
-                       m_task.m_handle.promise().m_status == TaskStatus::Succeeded;
+                       m_task.m_handle.promise().IsSucceeded();
             }
 
             template<typename ParentPromise>
             std::coroutine_handle<> await_suspend(std::coroutine_handle<ParentPromise> awaiting) noexcept
             {
                 static_assert(std::is_same_v<typename ParentPromise::DomainErrorType, E>,
-                              "Await propagation requires identical Task error types in v1.");
+                              "Await propagation requires identical Task error types in v2.");
 
                 if (!m_task.m_handle)
                 {
-                    awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidState));
+                    awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidTaskUsage));
                     awaiting.promise().MarkFinishedAndResume(awaiting);
                     return std::noop_coroutine();
                 }
@@ -730,7 +700,7 @@ namespace NGIN::Async
                 auto& child = m_task.m_handle.promise();
                 if (child.m_finished.load(std::memory_order_acquire))
                 {
-                    if (child.m_status == TaskStatus::Succeeded)
+                    if (child.IsSucceeded())
                     {
                         return awaiting;
                     }
@@ -742,12 +712,12 @@ namespace NGIN::Async
 
                 if (child.m_continuation)
                 {
-                    awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidState));
+                    awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidContinuationState));
                     awaiting.promise().MarkFinishedAndResume(awaiting);
                     return std::noop_coroutine();
                 }
 
-                child.m_continuation    = awaiting;
+                child.m_continuation      = awaiting;
                 child.m_completionHandler = &Task::template PropagateChildCompletion<ParentPromise>;
 #if NGIN_ASYNC_CAPTURE_EXCEPTIONS
                 child.m_setChildException = &Task::template PropagateChildException<ParentPromise>;
@@ -758,7 +728,7 @@ namespace NGIN::Async
                 {
                     if (!detail::InheritChildExecutionContext(m_task.m_executor, child, awaiting.promise()))
                     {
-                        child.SetFault(MakeAsyncFault(AsyncFaultCode::InvalidState));
+                        child.SetFault(MakeAsyncFault(AsyncFaultCode::InvalidTaskUsage));
                         child.MarkFinishedAndResume(m_task.m_handle);
                         return std::noop_coroutine();
                     }
@@ -773,8 +743,8 @@ namespace NGIN::Async
             {
                 assert(m_task.m_handle);
                 auto& promise = m_task.m_handle.promise();
-                assert(promise.m_status == TaskStatus::Succeeded);
-                return std::move(*promise.m_value);
+                assert(promise.IsSucceeded());
+                return std::move(promise.m_completion->Value());
             }
 
         private:
@@ -793,18 +763,18 @@ namespace NGIN::Async
             {
                 return m_task.m_handle &&
                        m_task.m_handle.promise().m_finished.load(std::memory_order_acquire) &&
-                       m_task.m_handle.promise().m_status == TaskStatus::Succeeded;
+                       m_task.m_handle.promise().IsSucceeded();
             }
 
             template<typename ParentPromise>
             std::coroutine_handle<> await_suspend(std::coroutine_handle<ParentPromise> awaiting) noexcept
             {
                 static_assert(std::is_same_v<typename ParentPromise::DomainErrorType, E>,
-                              "Await propagation requires identical Task error types in v1.");
+                              "Await propagation requires identical Task error types in v2.");
 
                 if (!m_task.m_handle)
                 {
-                    awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidState));
+                    awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidTaskUsage));
                     awaiting.promise().MarkFinishedAndResume(awaiting);
                     return std::noop_coroutine();
                 }
@@ -812,7 +782,7 @@ namespace NGIN::Async
                 auto& child = m_task.m_handle.promise();
                 if (child.m_finished.load(std::memory_order_acquire))
                 {
-                    if (child.m_status == TaskStatus::Succeeded)
+                    if (child.IsSucceeded())
                     {
                         return awaiting;
                     }
@@ -824,12 +794,12 @@ namespace NGIN::Async
 
                 if (child.m_continuation)
                 {
-                    awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidState));
+                    awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidContinuationState));
                     awaiting.promise().MarkFinishedAndResume(awaiting);
                     return std::noop_coroutine();
                 }
 
-                child.m_continuation = awaiting;
+                child.m_continuation      = awaiting;
                 child.m_completionHandler = &Task::template PropagateChildCompletion<ParentPromise>;
 #if NGIN_ASYNC_CAPTURE_EXCEPTIONS
                 child.m_setChildException = &Task::template PropagateChildException<ParentPromise>;
@@ -840,7 +810,7 @@ namespace NGIN::Async
                 {
                     if (!detail::InheritChildExecutionContext(m_task.m_executor, child, awaiting.promise()))
                     {
-                        child.SetFault(MakeAsyncFault(AsyncFaultCode::InvalidState));
+                        child.SetFault(MakeAsyncFault(AsyncFaultCode::InvalidTaskUsage));
                         child.MarkFinishedAndResume(m_task.m_handle);
                         return std::noop_coroutine();
                     }
@@ -855,8 +825,8 @@ namespace NGIN::Async
             {
                 assert(m_task.m_handle);
                 auto& promise = m_task.m_handle.promise();
-                assert(promise.m_status == TaskStatus::Succeeded);
-                return std::move(*promise.m_value);
+                assert(promise.IsSucceeded());
+                return std::move(promise.m_completion->Value());
             }
 
         private:
@@ -867,8 +837,7 @@ namespace NGIN::Async
         {
         public:
             CancellablePropagationAwaiter(Task& task, TaskContext& ctx) noexcept
-                : m_task(task)
-                , m_ctx(&ctx)
+                : m_task(task), m_ctx(&ctx)
             {
             }
 
@@ -876,18 +845,18 @@ namespace NGIN::Async
             {
                 return m_task.m_handle &&
                        m_task.m_handle.promise().m_finished.load(std::memory_order_acquire) &&
-                       m_task.m_handle.promise().m_status == TaskStatus::Succeeded;
+                       m_task.m_handle.promise().IsSucceeded();
             }
 
             template<typename ParentPromise>
             std::coroutine_handle<> await_suspend(std::coroutine_handle<ParentPromise> awaiting) noexcept
             {
                 static_assert(std::is_same_v<typename ParentPromise::DomainErrorType, E>,
-                              "Await propagation requires identical Task error types in v1.");
+                              "Await propagation requires identical Task error types in v2.");
 
                 if (!m_task.m_handle)
                 {
-                    awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidState));
+                    awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidTaskUsage));
                     awaiting.promise().MarkFinishedAndResume(awaiting);
                     return std::noop_coroutine();
                 }
@@ -904,7 +873,7 @@ namespace NGIN::Async
                 auto& child = m_task.m_handle.promise();
                 if (child.m_finished.load(std::memory_order_acquire))
                 {
-                    if (child.m_status == TaskStatus::Succeeded)
+                    if (child.IsSucceeded())
                     {
                         return awaiting;
                     }
@@ -916,12 +885,12 @@ namespace NGIN::Async
 
                 if (child.m_continuation)
                 {
-                    awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidState));
+                    awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidContinuationState));
                     awaiting.promise().MarkFinishedAndResume(awaiting);
                     return std::noop_coroutine();
                 }
 
-                child.m_continuation = awaiting;
+                child.m_continuation      = awaiting;
                 child.m_completionHandler = &Task::template PropagateChildCompletion<ParentPromise>;
 #if NGIN_ASYNC_CAPTURE_EXCEPTIONS
                 child.m_setChildException = &Task::template PropagateChildException<ParentPromise>;
@@ -939,7 +908,7 @@ namespace NGIN::Async
                 {
                     if (!detail::InheritChildExecutionContext(m_task.m_executor, child, awaiting.promise()))
                     {
-                        child.SetFault(MakeAsyncFault(AsyncFaultCode::InvalidState));
+                        child.SetFault(MakeAsyncFault(AsyncFaultCode::InvalidTaskUsage));
                         child.MarkFinishedAndResume(m_task.m_handle);
                         return std::noop_coroutine();
                     }
@@ -954,18 +923,18 @@ namespace NGIN::Async
             {
                 assert(m_task.m_handle);
                 auto& promise = m_task.m_handle.promise();
-                assert(promise.m_status == TaskStatus::Succeeded);
-                return std::move(*promise.m_value);
+                assert(promise.IsSucceeded());
+                return std::move(promise.m_completion->Value());
             }
 
         private:
             template<typename, typename>
             friend class Task;
 
-            Task&                               m_task;
-            TaskContext*                        m_ctx;
-            CancellationRegistration            m_cancellationRegistration {};
-            std::coroutine_handle<>             m_awaiting {};
+            Task&                    m_task;
+            TaskContext*             m_ctx;
+            CancellationRegistration m_cancellationRegistration {};
+            std::coroutine_handle<>  m_awaiting {};
         };
 
         [[nodiscard]] PropagationAwaiter operator co_await() & noexcept
@@ -983,10 +952,10 @@ namespace NGIN::Async
             return CancellablePropagationAwaiter {*this, ctx};
         }
 
-        class OutcomeAwaiter final
+        class CompletionAwaiter final
         {
         public:
-            explicit OutcomeAwaiter(Task& task) noexcept
+            explicit CompletionAwaiter(Task& task) noexcept
                 : m_task(task)
             {
             }
@@ -1010,7 +979,7 @@ namespace NGIN::Async
                     return awaiting;
                 }
 
-                child.m_continuation = awaiting;
+                child.m_continuation      = awaiting;
                 child.m_completionHandler = nullptr;
 
                 bool expected = false;
@@ -1018,7 +987,7 @@ namespace NGIN::Async
                 {
                     if (!detail::InheritChildExecutionContext(m_task.m_executor, child, awaiting.promise()))
                     {
-                        child.SetFault(MakeAsyncFault(AsyncFaultCode::InvalidState));
+                        child.SetFault(MakeAsyncFault(AsyncFaultCode::InvalidTaskUsage));
                         child.MarkFinishedAndResume(m_task.m_handle);
                         return std::noop_coroutine();
                     }
@@ -1029,7 +998,7 @@ namespace NGIN::Async
                 return std::noop_coroutine();
             }
 
-            [[nodiscard]] TaskOutcome<T, E> await_resume() noexcept
+            [[nodiscard]] TaskResult<T, E> await_resume() noexcept
             {
                 return m_task.Get();
             }
@@ -1038,9 +1007,9 @@ namespace NGIN::Async
             Task& m_task;
         };
 
-        [[nodiscard]] OutcomeAwaiter AsOutcome() noexcept
+        [[nodiscard]] CompletionAwaiter AsCompletion() noexcept
         {
-            return OutcomeAwaiter {*this};
+            return CompletionAwaiter {*this};
         }
 
 #if NGIN_ASYNC_HAS_EXCEPTIONS
@@ -1048,34 +1017,34 @@ namespace NGIN::Async
         {
         public:
             explicit ThrowingAwaiter(Task& task) noexcept
-                : m_outcome(task.AsOutcome())
+                : m_completion(task.AsCompletion())
             {
             }
 
             [[nodiscard]] bool await_ready() const noexcept
             {
-                return m_outcome.await_ready();
+                return m_completion.await_ready();
             }
 
             template<typename ParentPromise>
             auto await_suspend(std::coroutine_handle<ParentPromise> awaiting) noexcept
             {
-                return m_outcome.await_suspend(awaiting);
+                return m_completion.await_suspend(awaiting);
             }
 
             [[nodiscard]] T await_resume()
             {
-                return Task::TakeOrThrow(m_outcome.await_resume());
+                return Task::TakeOrThrow(m_completion.await_resume());
             }
 
         private:
-            OutcomeAwaiter m_outcome;
+            CompletionAwaiter m_completion;
         };
 
-        class ThrowingView final
+        class ThrowingTaskView final
         {
         public:
-            explicit ThrowingView(Task& task) noexcept
+            explicit ThrowingTaskView(Task& task) noexcept
                 : m_task(task)
             {
             }
@@ -1083,6 +1052,11 @@ namespace NGIN::Async
             [[nodiscard]] ThrowingAwaiter operator co_await() noexcept
             {
                 return ThrowingAwaiter {m_task};
+            }
+
+            [[nodiscard]] T Get()
+            {
+                return Task::TakeOrThrow(m_task.Get());
             }
 
         private:
@@ -1116,7 +1090,7 @@ namespace NGIN::Async
                     return awaiting;
                 }
 
-                child.m_continuation = awaiting;
+                child.m_continuation      = awaiting;
                 child.m_completionHandler = nullptr;
 
                 bool expected = false;
@@ -1124,7 +1098,7 @@ namespace NGIN::Async
                 {
                     if (!detail::InheritChildExecutionContext(m_task.m_executor, child, awaiting.promise()))
                     {
-                        child.SetFault(MakeAsyncFault(AsyncFaultCode::InvalidState));
+                        child.SetFault(MakeAsyncFault(AsyncFaultCode::InvalidTaskUsage));
                         child.MarkFinishedAndResume(m_task.m_handle);
                         return std::noop_coroutine();
                     }
@@ -1144,10 +1118,10 @@ namespace NGIN::Async
             Task m_task;
         };
 
-        class OwnedThrowingView final
+        class OwnedThrowingTaskView final
         {
         public:
-            explicit OwnedThrowingView(Task&& task) noexcept
+            explicit OwnedThrowingTaskView(Task&& task) noexcept
                 : m_task(std::move(task))
             {
             }
@@ -1157,129 +1131,94 @@ namespace NGIN::Async
                 return OwnedThrowingAwaiter {std::move(m_task)};
             }
 
+            [[nodiscard]] T Get()
+            {
+                return Task::TakeOrThrow(m_task.Get());
+            }
+
         private:
             Task m_task;
         };
 
-        [[nodiscard]] ThrowingView Throwing() & noexcept
+        [[nodiscard]] ThrowingTaskView AsThrowing() & noexcept
         {
-            return ThrowingView {*this};
+            return ThrowingTaskView {*this};
         }
 
-        [[nodiscard]] OwnedThrowingView Throwing() && noexcept
+        [[nodiscard]] OwnedThrowingTaskView AsThrowing() && noexcept
         {
-            return OwnedThrowingView {std::move(*this)};
-        }
-
-        [[nodiscard]] T GetOrThrow()
-        {
-            return TakeOrThrow(Get());
+            return OwnedThrowingTaskView {std::move(*this)};
         }
 #endif
 
-        struct ReturnErrorAwaiter final
-        {
-            E error {};
+        template<typename F>
+        auto MapError(F&& func) &;
 
-            bool await_ready() const noexcept { return false; }
-            bool await_suspend(std::coroutine_handle<promise_type> h) const noexcept
-            {
-                h.promise().SetDomainError(error);
-                return false;
-            }
-            void await_resume() const noexcept {}
-        };
+        template<typename F>
+        auto MapValue(F&& func) &;
 
-        struct ReturnCanceledAwaiter final
-        {
-            bool await_ready() const noexcept { return false; }
-            bool await_suspend(std::coroutine_handle<promise_type> h) const noexcept
-            {
-                h.promise().SetCanceled();
-                return false;
-            }
-            void await_resume() const noexcept {}
-        };
+        template<typename F>
+        auto MapCompletion(F&& func) &;
 
-        struct ReturnFaultAwaiter final
-        {
-            AsyncFault fault {};
-
-            bool await_ready() const noexcept { return false; }
-            bool await_suspend(std::coroutine_handle<promise_type> h) const noexcept
-            {
-                h.promise().SetFault(fault);
-                return false;
-            }
-            void await_resume() const noexcept {}
-        };
-
-        [[nodiscard]] static ReturnErrorAwaiter ReturnError(E error) noexcept
-        {
-            return ReturnErrorAwaiter {std::move(error)};
-        }
-
-        [[nodiscard]] static ReturnCanceledAwaiter ReturnCanceled() noexcept
-        {
-            return {};
-        }
-
-        [[nodiscard]] static ReturnFaultAwaiter ReturnFault(AsyncFault fault) noexcept
-        {
-            return ReturnFaultAwaiter {fault};
-        }
+        template<typename E2, typename F>
+        auto As(F&& func) &;
 
         template<typename F>
         auto ContinueWith(TaskContext& ctx, F&& func);
 
     private:
 #if NGIN_ASYNC_HAS_EXCEPTIONS
-        [[noreturn]] static void ThrowFromOutcome(TaskOutcome<T, E> outcome)
+        [[noreturn]] static void ThrowFromResult(TaskResult<T, E> result)
         {
-            if (outcome.IsDomainError())
+            if (result.IsDomainError())
             {
-                AsyncExceptionAdapter<E>::Throw(outcome.DomainError());
+                AsyncExceptionTraits<E>::Throw(result.DomainError());
             }
 
-            if (outcome.IsCanceled())
+            if (result.IsCanceled())
             {
                 throw AsyncCanceledException();
             }
 
-            assert(outcome.IsFault());
+            assert(result.IsFault());
 #if NGIN_ASYNC_CAPTURE_EXCEPTIONS
-            if (outcome.Fault().capturedException)
+            if (result.Fault().capturedException)
             {
-                std::rethrow_exception(outcome.Fault().capturedException);
+                std::rethrow_exception(result.Fault().capturedException);
             }
 #endif
-            throw AsyncFaultException(outcome.Fault());
+            throw AsyncFaultException(result.Fault());
         }
 
-        [[nodiscard]] static T TakeOrThrow(TaskOutcome<T, E> outcome)
+        [[nodiscard]] static T TakeOrThrow(TaskResult<T, E> result)
         {
-            if (outcome.Succeeded())
+            if (result.Succeeded())
             {
-                return std::move(outcome.Value());
+                return std::move(result.Value());
             }
 
-            ThrowFromOutcome(outcome);
+            ThrowFromResult(result);
         }
 #endif
+
+        void SetInvalidCompletion(AsyncFaultCode code) noexcept
+        {
+            m_invalidCompletion = Completion<T, E>::Faulted(MakeAsyncFault(code));
+        }
 
         template<typename ParentPromise>
         static void PropagateChildCompletion(std::coroutine_handle<> self, std::coroutine_handle<> continuation) noexcept
         {
-            auto childHandle  = handle_type::from_address(self.address());
-            auto parentHandle = std::coroutine_handle<ParentPromise>::from_address(continuation.address());
-            auto& child       = childHandle.promise();
+            auto  childHandle  = handle_type::from_address(self.address());
+            auto  parentHandle = std::coroutine_handle<ParentPromise>::from_address(continuation.address());
+            auto& child        = childHandle.promise();
 
             if (parentHandle.promise().m_finished.load(std::memory_order_acquire))
             {
                 return;
             }
 
-            if (child.m_status == TaskStatus::Succeeded)
+            if (child.IsSucceeded())
             {
                 detail::ResumeOnExecutor(child.m_executor, continuation);
                 return;
@@ -1326,10 +1265,10 @@ namespace NGIN::Async
             return false;
         }
 
-        handle_type                  m_handle {};
-        NGIN::Execution::ExecutorRef m_executor {};
-        std::atomic_bool             m_started {false};
-        std::optional<AsyncFault>    m_invalidFault {};
+        handle_type                     m_handle {};
+        NGIN::Execution::ExecutorRef    m_executor {};
+        std::atomic_bool                m_started {false};
+        std::optional<Completion<T, E>> m_invalidCompletion {};
     };
 
     template<typename E>
@@ -1339,11 +1278,12 @@ namespace NGIN::Async
         using ValueType = void;
         using ErrorType = E;
 
-        struct promise_type final : detail::PromiseCommon<E>
+        struct promise_type final : detail::PromiseStorage<void, E>
         {
-            using Base = detail::PromiseCommon<E>;
+            using Base = detail::PromiseStorage<void, E>;
             using Base::Base;
             using Base::SetCanceled;
+            using Base::SetCompletion;
             using Base::SetDomainError;
             using Base::SetFault;
 
@@ -1376,25 +1316,12 @@ namespace NGIN::Async
 
             void return_void() noexcept
             {
-                if (this->m_status != TaskStatus::Pending)
-                {
-                    return;
-                }
-
-                this->m_status = TaskStatus::Succeeded;
-                this->m_domainError.reset();
-                this->m_fault.reset();
+                SetCompletion(Completion<void, E>::Success());
             }
 
-            [[nodiscard]] TaskOutcome<void, E> MakeOutcome() const noexcept
+            [[nodiscard]] TaskResult<void, E> MakeResult() const noexcept
             {
-                E*          domainError = (this->m_status == TaskStatus::DomainError && this->m_domainError.has_value())
-                                                ? const_cast<E*>(&*this->m_domainError)
-                                                : nullptr;
-                AsyncFault* fault       = (this->m_status == TaskStatus::Fault && this->m_fault.has_value())
-                                                ? const_cast<AsyncFault*>(&*this->m_fault)
-                                                : nullptr;
-                return TaskOutcome<void, E> {this->m_status, domainError, fault};
+                return TaskResult<void, E> {this->m_completion ? &*this->m_completion : nullptr};
             }
         };
 
@@ -1403,21 +1330,17 @@ namespace NGIN::Async
         Task() noexcept = default;
 
         explicit Task(handle_type h) noexcept
-            : m_handle(h)
-            , m_executor(h ? h.promise().m_executor : NGIN::Execution::ExecutorRef {})
+            : m_handle(h), m_executor(h ? h.promise().m_executor : NGIN::Execution::ExecutorRef {})
         {
         }
 
         Task(Task&& other) noexcept
-            : m_handle(other.m_handle)
-            , m_executor(other.m_executor)
-            , m_started(other.m_started.load(std::memory_order_acquire))
-            , m_invalidFault(std::move(other.m_invalidFault))
+            : m_handle(other.m_handle), m_executor(other.m_executor), m_started(other.m_started.load(std::memory_order_acquire)), m_invalidCompletion(std::move(other.m_invalidCompletion))
         {
             other.m_handle   = nullptr;
             other.m_executor = {};
             other.m_started.store(false, std::memory_order_release);
-            other.m_invalidFault.reset();
+            other.m_invalidCompletion.reset();
         }
 
         Task& operator=(Task&& other) noexcept
@@ -1432,12 +1355,12 @@ namespace NGIN::Async
                 m_handle   = other.m_handle;
                 m_executor = other.m_executor;
                 m_started.store(other.m_started.load(std::memory_order_acquire), std::memory_order_release);
-                m_invalidFault = std::move(other.m_invalidFault);
+                m_invalidCompletion = std::move(other.m_invalidCompletion);
 
                 other.m_handle   = nullptr;
                 other.m_executor = {};
                 other.m_started.store(false, std::memory_order_release);
-                other.m_invalidFault.reset();
+                other.m_invalidCompletion.reset();
             }
             return *this;
         }
@@ -1462,7 +1385,7 @@ namespace NGIN::Async
         {
             if (!m_handle)
             {
-                m_invalidFault = MakeAsyncFault(AsyncFaultCode::InvalidState);
+                SetInvalidCompletion(AsyncFaultCode::InvalidTaskUsage);
                 return false;
             }
 
@@ -1472,14 +1395,14 @@ namespace NGIN::Async
                 return false;
             }
 
-            m_executor = ctx.GetExecutor();
-            auto& promise = m_handle.promise();
-            promise.m_ctx = &ctx;
+            m_executor         = ctx.GetExecutor();
+            auto& promise      = m_handle.promise();
+            promise.m_ctx      = &ctx;
             promise.m_executor = m_executor;
 
             if (!m_executor.IsValid())
             {
-                promise.SetFault(MakeAsyncFault(AsyncFaultCode::InvalidState));
+                promise.SetFault(MakeAsyncFault(AsyncFaultCode::InvalidTaskUsage));
                 promise.MarkFinishedAndResume(m_handle);
                 return false;
             }
@@ -1502,7 +1425,7 @@ namespace NGIN::Async
 
             if (!m_started.load(std::memory_order_acquire) && !m_handle.promise().m_finished.load(std::memory_order_acquire))
             {
-                m_invalidFault = MakeAsyncFault(AsyncFaultCode::InvalidState);
+                SetInvalidCompletion(AsyncFaultCode::InvalidTaskUsage);
                 return;
             }
 
@@ -1518,22 +1441,27 @@ namespace NGIN::Async
             }
         }
 
-        [[nodiscard]] TaskOutcome<void, E> Get()
+        [[nodiscard]] TaskResult<void, E> Get()
         {
             if (!m_handle)
             {
-                m_invalidFault = MakeAsyncFault(AsyncFaultCode::InvalidState);
-                return TaskOutcome<void, E> {TaskStatus::Fault, nullptr, &*m_invalidFault};
+                SetInvalidCompletion(AsyncFaultCode::InvalidTaskUsage);
+                return TaskResult<void, E> {&*m_invalidCompletion};
             }
 
             Wait();
 
-            if (m_invalidFault.has_value())
+            if (m_invalidCompletion.has_value())
             {
-                return TaskOutcome<void, E> {TaskStatus::Fault, nullptr, &*m_invalidFault};
+                return TaskResult<void, E> {&*m_invalidCompletion};
             }
 
-            return m_handle.promise().MakeOutcome();
+            return m_handle.promise().MakeResult();
+        }
+
+        [[nodiscard]] const Completion<void, E>& GetCompletion()
+        {
+            return Get().CompletionRef();
         }
 
         [[nodiscard]] bool IsCompleted() const noexcept
@@ -1548,12 +1476,12 @@ namespace NGIN::Async
 
         [[nodiscard]] bool IsFaulted() const noexcept
         {
-            return m_handle && m_handle.promise().m_status == TaskStatus::Fault;
+            return m_handle && m_handle.promise().m_completion.has_value() && m_handle.promise().m_completion->IsFault();
         }
 
         [[nodiscard]] bool IsCanceled() const noexcept
         {
-            return m_handle && m_handle.promise().m_status == TaskStatus::Canceled;
+            return m_handle && m_handle.promise().m_completion.has_value() && m_handle.promise().m_completion->IsCanceled();
         }
 
 #if NGIN_ASYNC_CAPTURE_EXCEPTIONS
@@ -1584,18 +1512,18 @@ namespace NGIN::Async
             {
                 return m_task.m_handle &&
                        m_task.m_handle.promise().m_finished.load(std::memory_order_acquire) &&
-                       m_task.m_handle.promise().m_status == TaskStatus::Succeeded;
+                       m_task.m_handle.promise().IsSucceeded();
             }
 
             template<typename ParentPromise>
             std::coroutine_handle<> await_suspend(std::coroutine_handle<ParentPromise> awaiting) noexcept
             {
                 static_assert(std::is_same_v<typename ParentPromise::DomainErrorType, E>,
-                              "Await propagation requires identical Task error types in v1.");
+                              "Await propagation requires identical Task error types in v2.");
 
                 if (!m_task.m_handle)
                 {
-                    awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidState));
+                    awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidTaskUsage));
                     awaiting.promise().MarkFinishedAndResume(awaiting);
                     return std::noop_coroutine();
                 }
@@ -1603,7 +1531,7 @@ namespace NGIN::Async
                 auto& child = m_task.m_handle.promise();
                 if (child.m_finished.load(std::memory_order_acquire))
                 {
-                    if (child.m_status == TaskStatus::Succeeded)
+                    if (child.IsSucceeded())
                     {
                         return awaiting;
                     }
@@ -1615,12 +1543,12 @@ namespace NGIN::Async
 
                 if (child.m_continuation)
                 {
-                    awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidState));
+                    awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidContinuationState));
                     awaiting.promise().MarkFinishedAndResume(awaiting);
                     return std::noop_coroutine();
                 }
 
-                child.m_continuation = awaiting;
+                child.m_continuation      = awaiting;
                 child.m_completionHandler = &Task::template PropagateChildCompletion<ParentPromise>;
 #if NGIN_ASYNC_CAPTURE_EXCEPTIONS
                 child.m_setChildException = &Task::template PropagateChildException<ParentPromise>;
@@ -1631,7 +1559,7 @@ namespace NGIN::Async
                 {
                     if (!detail::InheritChildExecutionContext(m_task.m_executor, child, awaiting.promise()))
                     {
-                        child.SetFault(MakeAsyncFault(AsyncFaultCode::InvalidState));
+                        child.SetFault(MakeAsyncFault(AsyncFaultCode::InvalidTaskUsage));
                         child.MarkFinishedAndResume(m_task.m_handle);
                         return std::noop_coroutine();
                     }
@@ -1645,7 +1573,7 @@ namespace NGIN::Async
             void await_resume() noexcept
             {
                 assert(m_task.m_handle);
-                assert(m_task.m_handle.promise().m_status == TaskStatus::Succeeded);
+                assert(m_task.m_handle.promise().IsSucceeded());
             }
 
         private:
@@ -1664,18 +1592,18 @@ namespace NGIN::Async
             {
                 return m_task.m_handle &&
                        m_task.m_handle.promise().m_finished.load(std::memory_order_acquire) &&
-                       m_task.m_handle.promise().m_status == TaskStatus::Succeeded;
+                       m_task.m_handle.promise().IsSucceeded();
             }
 
             template<typename ParentPromise>
             std::coroutine_handle<> await_suspend(std::coroutine_handle<ParentPromise> awaiting) noexcept
             {
                 static_assert(std::is_same_v<typename ParentPromise::DomainErrorType, E>,
-                              "Await propagation requires identical Task error types in v1.");
+                              "Await propagation requires identical Task error types in v2.");
 
                 if (!m_task.m_handle)
                 {
-                    awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidState));
+                    awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidTaskUsage));
                     awaiting.promise().MarkFinishedAndResume(awaiting);
                     return std::noop_coroutine();
                 }
@@ -1683,7 +1611,7 @@ namespace NGIN::Async
                 auto& child = m_task.m_handle.promise();
                 if (child.m_finished.load(std::memory_order_acquire))
                 {
-                    if (child.m_status == TaskStatus::Succeeded)
+                    if (child.IsSucceeded())
                     {
                         return awaiting;
                     }
@@ -1695,12 +1623,12 @@ namespace NGIN::Async
 
                 if (child.m_continuation)
                 {
-                    awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidState));
+                    awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidContinuationState));
                     awaiting.promise().MarkFinishedAndResume(awaiting);
                     return std::noop_coroutine();
                 }
 
-                child.m_continuation = awaiting;
+                child.m_continuation      = awaiting;
                 child.m_completionHandler = &Task::template PropagateChildCompletion<ParentPromise>;
 #if NGIN_ASYNC_CAPTURE_EXCEPTIONS
                 child.m_setChildException = &Task::template PropagateChildException<ParentPromise>;
@@ -1711,7 +1639,7 @@ namespace NGIN::Async
                 {
                     if (!detail::InheritChildExecutionContext(m_task.m_executor, child, awaiting.promise()))
                     {
-                        child.SetFault(MakeAsyncFault(AsyncFaultCode::InvalidState));
+                        child.SetFault(MakeAsyncFault(AsyncFaultCode::InvalidTaskUsage));
                         child.MarkFinishedAndResume(m_task.m_handle);
                         return std::noop_coroutine();
                     }
@@ -1725,7 +1653,7 @@ namespace NGIN::Async
             void await_resume() noexcept
             {
                 assert(m_task.m_handle);
-                assert(m_task.m_handle.promise().m_status == TaskStatus::Succeeded);
+                assert(m_task.m_handle.promise().IsSucceeded());
             }
 
         private:
@@ -1736,8 +1664,7 @@ namespace NGIN::Async
         {
         public:
             CancellablePropagationAwaiter(Task& task, TaskContext& ctx) noexcept
-                : m_task(task)
-                , m_ctx(&ctx)
+                : m_task(task), m_ctx(&ctx)
             {
             }
 
@@ -1745,18 +1672,18 @@ namespace NGIN::Async
             {
                 return m_task.m_handle &&
                        m_task.m_handle.promise().m_finished.load(std::memory_order_acquire) &&
-                       m_task.m_handle.promise().m_status == TaskStatus::Succeeded;
+                       m_task.m_handle.promise().IsSucceeded();
             }
 
             template<typename ParentPromise>
             std::coroutine_handle<> await_suspend(std::coroutine_handle<ParentPromise> awaiting) noexcept
             {
                 static_assert(std::is_same_v<typename ParentPromise::DomainErrorType, E>,
-                              "Await propagation requires identical Task error types in v1.");
+                              "Await propagation requires identical Task error types in v2.");
 
                 if (!m_task.m_handle)
                 {
-                    awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidState));
+                    awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidTaskUsage));
                     awaiting.promise().MarkFinishedAndResume(awaiting);
                     return std::noop_coroutine();
                 }
@@ -1773,7 +1700,7 @@ namespace NGIN::Async
                 auto& child = m_task.m_handle.promise();
                 if (child.m_finished.load(std::memory_order_acquire))
                 {
-                    if (child.m_status == TaskStatus::Succeeded)
+                    if (child.IsSucceeded())
                     {
                         return awaiting;
                     }
@@ -1785,12 +1712,12 @@ namespace NGIN::Async
 
                 if (child.m_continuation)
                 {
-                    awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidState));
+                    awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidContinuationState));
                     awaiting.promise().MarkFinishedAndResume(awaiting);
                     return std::noop_coroutine();
                 }
 
-                child.m_continuation = awaiting;
+                child.m_continuation      = awaiting;
                 child.m_completionHandler = &Task::template PropagateChildCompletion<ParentPromise>;
 #if NGIN_ASYNC_CAPTURE_EXCEPTIONS
                 child.m_setChildException = &Task::template PropagateChildException<ParentPromise>;
@@ -1808,7 +1735,7 @@ namespace NGIN::Async
                 {
                     if (!detail::InheritChildExecutionContext(m_task.m_executor, child, awaiting.promise()))
                     {
-                        child.SetFault(MakeAsyncFault(AsyncFaultCode::InvalidState));
+                        child.SetFault(MakeAsyncFault(AsyncFaultCode::InvalidTaskUsage));
                         child.MarkFinishedAndResume(m_task.m_handle);
                         return std::noop_coroutine();
                     }
@@ -1822,17 +1749,17 @@ namespace NGIN::Async
             void await_resume() noexcept
             {
                 assert(m_task.m_handle);
-                assert(m_task.m_handle.promise().m_status == TaskStatus::Succeeded);
+                assert(m_task.m_handle.promise().IsSucceeded());
             }
 
         private:
             template<typename, typename>
             friend class Task;
 
-            Task&                               m_task;
-            TaskContext*                        m_ctx;
-            CancellationRegistration            m_cancellationRegistration {};
-            std::coroutine_handle<>             m_awaiting {};
+            Task&                    m_task;
+            TaskContext*             m_ctx;
+            CancellationRegistration m_cancellationRegistration {};
+            std::coroutine_handle<>  m_awaiting {};
         };
 
         [[nodiscard]] PropagationAwaiter operator co_await() & noexcept
@@ -1850,10 +1777,10 @@ namespace NGIN::Async
             return CancellablePropagationAwaiter {*this, ctx};
         }
 
-        class OutcomeAwaiter final
+        class CompletionAwaiter final
         {
         public:
-            explicit OutcomeAwaiter(Task& task) noexcept
+            explicit CompletionAwaiter(Task& task) noexcept
                 : m_task(task)
             {
             }
@@ -1877,7 +1804,7 @@ namespace NGIN::Async
                     return awaiting;
                 }
 
-                child.m_continuation = awaiting;
+                child.m_continuation      = awaiting;
                 child.m_completionHandler = nullptr;
 
                 bool expected = false;
@@ -1885,7 +1812,7 @@ namespace NGIN::Async
                 {
                     if (!detail::InheritChildExecutionContext(m_task.m_executor, child, awaiting.promise()))
                     {
-                        child.SetFault(MakeAsyncFault(AsyncFaultCode::InvalidState));
+                        child.SetFault(MakeAsyncFault(AsyncFaultCode::InvalidTaskUsage));
                         child.MarkFinishedAndResume(m_task.m_handle);
                         return std::noop_coroutine();
                     }
@@ -1896,7 +1823,7 @@ namespace NGIN::Async
                 return std::noop_coroutine();
             }
 
-            [[nodiscard]] TaskOutcome<void, E> await_resume() noexcept
+            [[nodiscard]] TaskResult<void, E> await_resume() noexcept
             {
                 return m_task.Get();
             }
@@ -1905,9 +1832,9 @@ namespace NGIN::Async
             Task& m_task;
         };
 
-        [[nodiscard]] OutcomeAwaiter AsOutcome() noexcept
+        [[nodiscard]] CompletionAwaiter AsCompletion() noexcept
         {
-            return OutcomeAwaiter {*this};
+            return CompletionAwaiter {*this};
         }
 
 #if NGIN_ASYNC_HAS_EXCEPTIONS
@@ -1915,34 +1842,34 @@ namespace NGIN::Async
         {
         public:
             explicit ThrowingAwaiter(Task& task) noexcept
-                : m_outcome(task.AsOutcome())
+                : m_completion(task.AsCompletion())
             {
             }
 
             [[nodiscard]] bool await_ready() const noexcept
             {
-                return m_outcome.await_ready();
+                return m_completion.await_ready();
             }
 
             template<typename ParentPromise>
             auto await_suspend(std::coroutine_handle<ParentPromise> awaiting) noexcept
             {
-                return m_outcome.await_suspend(awaiting);
+                return m_completion.await_suspend(awaiting);
             }
 
             void await_resume()
             {
-                Task::HandleThrowingOutcome(m_outcome.await_resume());
+                Task::HandleThrowingResult(m_completion.await_resume());
             }
 
         private:
-            OutcomeAwaiter m_outcome;
+            CompletionAwaiter m_completion;
         };
 
-        class ThrowingView final
+        class ThrowingTaskView final
         {
         public:
-            explicit ThrowingView(Task& task) noexcept
+            explicit ThrowingTaskView(Task& task) noexcept
                 : m_task(task)
             {
             }
@@ -1950,6 +1877,11 @@ namespace NGIN::Async
             [[nodiscard]] ThrowingAwaiter operator co_await() noexcept
             {
                 return ThrowingAwaiter {m_task};
+            }
+
+            void Get()
+            {
+                Task::HandleThrowingResult(m_task.Get());
             }
 
         private:
@@ -1983,7 +1915,14 @@ namespace NGIN::Async
                     return awaiting;
                 }
 
-                child.m_continuation = awaiting;
+                if (child.m_continuation)
+                {
+                    awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidContinuationState));
+                    awaiting.promise().MarkFinishedAndResume(awaiting);
+                    return std::noop_coroutine();
+                }
+
+                child.m_continuation      = awaiting;
                 child.m_completionHandler = nullptr;
 
                 bool expected = false;
@@ -1991,7 +1930,7 @@ namespace NGIN::Async
                 {
                     if (!detail::InheritChildExecutionContext(m_task.m_executor, child, awaiting.promise()))
                     {
-                        child.SetFault(MakeAsyncFault(AsyncFaultCode::InvalidState));
+                        child.SetFault(MakeAsyncFault(AsyncFaultCode::InvalidTaskUsage));
                         child.MarkFinishedAndResume(m_task.m_handle);
                         return std::noop_coroutine();
                     }
@@ -2004,17 +1943,17 @@ namespace NGIN::Async
 
             void await_resume()
             {
-                Task::HandleThrowingOutcome(m_task.Get());
+                Task::HandleThrowingResult(m_task.Get());
             }
 
         private:
             Task m_task;
         };
 
-        class OwnedThrowingView final
+        class OwnedThrowingTaskView final
         {
         public:
-            explicit OwnedThrowingView(Task&& task) noexcept
+            explicit OwnedThrowingTaskView(Task&& task) noexcept
                 : m_task(std::move(task))
             {
             }
@@ -2024,77 +1963,37 @@ namespace NGIN::Async
                 return OwnedThrowingAwaiter {std::move(m_task)};
             }
 
+            void Get()
+            {
+                Task::HandleThrowingResult(m_task.Get());
+            }
+
         private:
             Task m_task;
         };
 
-        [[nodiscard]] ThrowingView Throwing() & noexcept
+        [[nodiscard]] ThrowingTaskView AsThrowing() & noexcept
         {
-            return ThrowingView {*this};
+            return ThrowingTaskView {*this};
         }
 
-        [[nodiscard]] OwnedThrowingView Throwing() && noexcept
+        [[nodiscard]] OwnedThrowingTaskView AsThrowing() && noexcept
         {
-            return OwnedThrowingView {std::move(*this)};
-        }
-
-        void WaitOrThrow()
-        {
-            HandleThrowingOutcome(Get());
+            return OwnedThrowingTaskView {std::move(*this)};
         }
 #endif
 
-        struct ReturnErrorAwaiter final
-        {
-            E error {};
+        template<typename F>
+        auto MapError(F&& func) &;
 
-            bool await_ready() const noexcept { return false; }
-            bool await_suspend(std::coroutine_handle<promise_type> h) const noexcept
-            {
-                h.promise().SetDomainError(error);
-                return false;
-            }
-            void await_resume() const noexcept {}
-        };
+        template<typename F>
+        auto MapValue(F&& func) &;
 
-        struct ReturnCanceledAwaiter final
-        {
-            bool await_ready() const noexcept { return false; }
-            bool await_suspend(std::coroutine_handle<promise_type> h) const noexcept
-            {
-                h.promise().SetCanceled();
-                return false;
-            }
-            void await_resume() const noexcept {}
-        };
+        template<typename F>
+        auto MapCompletion(F&& func) &;
 
-        struct ReturnFaultAwaiter final
-        {
-            AsyncFault fault {};
-
-            bool await_ready() const noexcept { return false; }
-            bool await_suspend(std::coroutine_handle<promise_type> h) const noexcept
-            {
-                h.promise().SetFault(fault);
-                return false;
-            }
-            void await_resume() const noexcept {}
-        };
-
-        [[nodiscard]] static ReturnErrorAwaiter ReturnError(E error) noexcept
-        {
-            return ReturnErrorAwaiter {std::move(error)};
-        }
-
-        [[nodiscard]] static ReturnCanceledAwaiter ReturnCanceled() noexcept
-        {
-            return {};
-        }
-
-        [[nodiscard]] static ReturnFaultAwaiter ReturnFault(AsyncFault fault) noexcept
-        {
-            return ReturnFaultAwaiter {fault};
-        }
+        template<typename E2, typename F>
+        auto As(F&& func) &;
 
         template<typename F>
         auto ContinueWith(TaskContext& ctx, F&& func);
@@ -2109,47 +2008,52 @@ namespace NGIN::Async
 
     private:
 #if NGIN_ASYNC_HAS_EXCEPTIONS
-        static void HandleThrowingOutcome(TaskOutcome<void, E> outcome)
+        static void HandleThrowingResult(TaskResult<void, E> result)
         {
-            if (outcome.Succeeded())
+            if (result.Succeeded())
             {
                 return;
             }
 
-            if (outcome.IsDomainError())
+            if (result.IsDomainError())
             {
-                AsyncExceptionAdapter<E>::Throw(outcome.DomainError());
+                AsyncExceptionTraits<E>::Throw(result.DomainError());
             }
 
-            if (outcome.IsCanceled())
+            if (result.IsCanceled())
             {
                 throw AsyncCanceledException();
             }
 
-            assert(outcome.IsFault());
+            assert(result.IsFault());
 #if NGIN_ASYNC_CAPTURE_EXCEPTIONS
-            if (outcome.Fault().capturedException)
+            if (result.Fault().capturedException)
             {
-                std::rethrow_exception(outcome.Fault().capturedException);
+                std::rethrow_exception(result.Fault().capturedException);
             }
 #endif
-            throw AsyncFaultException(outcome.Fault());
+            throw AsyncFaultException(result.Fault());
         }
 #endif
+
+        void SetInvalidCompletion(AsyncFaultCode code) noexcept
+        {
+            m_invalidCompletion = Completion<void, E>::Faulted(MakeAsyncFault(code));
+        }
 
         template<typename ParentPromise>
         static void PropagateChildCompletion(std::coroutine_handle<> self, std::coroutine_handle<> continuation) noexcept
         {
-            auto childHandle  = handle_type::from_address(self.address());
-            auto parentHandle = std::coroutine_handle<ParentPromise>::from_address(continuation.address());
-            auto& child       = childHandle.promise();
+            auto  childHandle  = handle_type::from_address(self.address());
+            auto  parentHandle = std::coroutine_handle<ParentPromise>::from_address(continuation.address());
+            auto& child        = childHandle.promise();
 
             if (parentHandle.promise().m_finished.load(std::memory_order_acquire))
             {
                 return;
             }
 
-            if (child.m_status == TaskStatus::Succeeded)
+            if (child.IsSucceeded())
             {
                 detail::ResumeOnExecutor(child.m_executor, continuation);
                 return;
@@ -2196,10 +2100,10 @@ namespace NGIN::Async
             return false;
         }
 
-        handle_type                  m_handle {};
-        NGIN::Execution::ExecutorRef m_executor {};
-        std::atomic_bool             m_started {false};
-        std::optional<AsyncFault>    m_invalidFault {};
+        handle_type                        m_handle {};
+        NGIN::Execution::ExecutorRef       m_executor {};
+        std::atomic_bool                   m_started {false};
+        std::optional<Completion<void, E>> m_invalidCompletion {};
     };
 }// namespace NGIN::Async
 
@@ -2212,8 +2116,10 @@ namespace NGIN::Async
         template<typename T, typename E, typename Func>
         auto ContinueWithImpl(Task<T, E>* parent, TaskContext* context, Func func) -> std::invoke_result_t<Func, T>
         {
-            using NextTask  = std::invoke_result_t<Func, T>;
-            using NextValue = TaskValueType<NextTask>;
+            using NextTask       = std::invoke_result_t<Func, T>;
+            using NextValue      = TaskValueType<NextTask>;
+            using NextError      = typename NextTask::ErrorType;
+            using NextCompletion = Completion<NextValue, NextError>;
 
             parent->Schedule(*context);
 
@@ -2222,103 +2128,103 @@ namespace NGIN::Async
             {
                 if constexpr (std::is_void_v<NextValue>)
                 {
-                    co_await NextTask::ReturnCanceled();
+                    co_await NGIN::Async::Canceled();
                     co_return;
                 }
                 else
                 {
-                    co_return Sentinels::Canceled;
+                    co_return NextCompletion::Canceled();
                 }
             }
 
-            auto parentOutcome = parent->Get();
-            if (parentOutcome.IsDomainError())
+            auto parentCompletion = parent->Get();
+            if (parentCompletion.IsDomainError())
             {
                 if constexpr (std::is_void_v<NextValue>)
                 {
-                    co_await NextTask::ReturnError(parentOutcome.DomainError());
+                    co_await NGIN::Async::DomainFailure(parentCompletion.DomainError());
                     co_return;
                 }
                 else
                 {
-                    co_return NGIN::Utilities::Unexpected<E>(parentOutcome.DomainError());
+                    co_return NextCompletion::DomainFailure(parentCompletion.DomainError());
                 }
             }
-            if (parentOutcome.IsCanceled())
+            if (parentCompletion.IsCanceled())
             {
                 if constexpr (std::is_void_v<NextValue>)
                 {
-                    co_await NextTask::ReturnCanceled();
+                    co_await NGIN::Async::Canceled();
                     co_return;
                 }
                 else
                 {
-                    co_return Sentinels::Canceled;
+                    co_return NextCompletion::Canceled();
                 }
             }
-            if (parentOutcome.IsFault())
+            if (parentCompletion.IsFault())
             {
                 if constexpr (std::is_void_v<NextValue>)
                 {
-                    co_await NextTask::ReturnFault(parentOutcome.Fault());
+                    co_await NGIN::Async::Faulted(parentCompletion.Fault());
                     co_return;
                 }
                 else
                 {
-                    co_return Fault(parentOutcome.Fault());
+                    co_return NextCompletion::Faulted(parentCompletion.Fault());
                 }
             }
 
-            auto next = std::invoke(std::move(func), std::move(parentOutcome.Value()));
+            auto       next      = std::invoke(std::move(func), std::move(parentCompletion.Value()));
             const auto nextIndex = co_await WhenAny(*context, next);
             if (context->IsCancellationRequested() || nextIndex == static_cast<NGIN::UIntSize>(-1))
             {
                 if constexpr (std::is_void_v<NextValue>)
                 {
-                    co_await NextTask::ReturnCanceled();
+                    co_await NGIN::Async::Canceled();
                     co_return;
                 }
                 else
                 {
-                    co_return Sentinels::Canceled;
+                    co_return NextCompletion::Canceled();
                 }
             }
 
-            auto nextOutcome = next.Get();
-            if (nextOutcome.IsDomainError())
+            auto nextCompletion = next.Get();
+            if (nextCompletion.IsDomainError())
             {
                 if constexpr (std::is_void_v<NextValue>)
                 {
-                    co_await NextTask::ReturnError(nextOutcome.DomainError());
+                    co_await NGIN::Async::DomainFailure(nextCompletion.DomainError());
                     co_return;
                 }
                 else
                 {
-                    co_return NGIN::Utilities::Unexpected<E>(nextOutcome.DomainError());
+                    co_return NextCompletion::DomainFailure(nextCompletion.DomainError());
                 }
             }
-            if (nextOutcome.IsCanceled())
+            if (nextCompletion.IsCanceled())
             {
                 if constexpr (std::is_void_v<NextValue>)
                 {
-                    co_await NextTask::ReturnCanceled();
+                    co_await NGIN::Async::Canceled();
                     co_return;
                 }
                 else
                 {
-                    co_return Sentinels::Canceled;
+                    co_return NextCompletion::Canceled();
                 }
             }
-            if (nextOutcome.IsFault())
+            if (nextCompletion.IsFault())
             {
                 if constexpr (std::is_void_v<NextValue>)
                 {
-                    co_await NextTask::ReturnFault(nextOutcome.Fault());
+                    co_await NGIN::Async::Faulted(nextCompletion.Fault());
                     co_return;
                 }
                 else
                 {
-                    co_return Fault(nextOutcome.Fault());
+                    co_return NextCompletion::Faulted(nextCompletion.Fault());
                 }
             }
 
@@ -2328,15 +2234,17 @@ namespace NGIN::Async
             }
             else
             {
-                co_return std::move(nextOutcome.Value());
+                co_return std::move(nextCompletion.Value());
             }
         }
 
         template<typename E, typename Func>
         auto ContinueWithImpl(Task<void, E>* parent, TaskContext* context, Func func) -> std::invoke_result_t<Func>
         {
-            using NextTask  = std::invoke_result_t<Func>;
-            using NextValue = TaskValueType<NextTask>;
+            using NextTask       = std::invoke_result_t<Func>;
+            using NextValue      = TaskValueType<NextTask>;
+            using NextError      = typename NextTask::ErrorType;
+            using NextCompletion = Completion<NextValue, NextError>;
 
             parent->Schedule(*context);
 
@@ -2345,103 +2253,103 @@ namespace NGIN::Async
             {
                 if constexpr (std::is_void_v<NextValue>)
                 {
-                    co_await NextTask::ReturnCanceled();
+                    co_await NGIN::Async::Canceled();
                     co_return;
                 }
                 else
                 {
-                    co_return Sentinels::Canceled;
+                    co_return NextCompletion::Canceled();
                 }
             }
 
-            auto parentOutcome = parent->Get();
-            if (parentOutcome.IsDomainError())
+            auto parentCompletion = parent->Get();
+            if (parentCompletion.IsDomainError())
             {
                 if constexpr (std::is_void_v<NextValue>)
                 {
-                    co_await NextTask::ReturnError(parentOutcome.DomainError());
+                    co_await NGIN::Async::DomainFailure(parentCompletion.DomainError());
                     co_return;
                 }
                 else
                 {
-                    co_return NGIN::Utilities::Unexpected<E>(parentOutcome.DomainError());
+                    co_return NextCompletion::DomainFailure(parentCompletion.DomainError());
                 }
             }
-            if (parentOutcome.IsCanceled())
+            if (parentCompletion.IsCanceled())
             {
                 if constexpr (std::is_void_v<NextValue>)
                 {
-                    co_await NextTask::ReturnCanceled();
+                    co_await NGIN::Async::Canceled();
                     co_return;
                 }
                 else
                 {
-                    co_return Sentinels::Canceled;
+                    co_return NextCompletion::Canceled();
                 }
             }
-            if (parentOutcome.IsFault())
+            if (parentCompletion.IsFault())
             {
                 if constexpr (std::is_void_v<NextValue>)
                 {
-                    co_await NextTask::ReturnFault(parentOutcome.Fault());
+                    co_await NGIN::Async::Faulted(parentCompletion.Fault());
                     co_return;
                 }
                 else
                 {
-                    co_return Fault(parentOutcome.Fault());
+                    co_return NextCompletion::Faulted(parentCompletion.Fault());
                 }
             }
 
-            auto next = std::invoke(std::move(func));
+            auto       next      = std::invoke(std::move(func));
             const auto nextIndex = co_await WhenAny(*context, next);
             if (context->IsCancellationRequested() || nextIndex == static_cast<NGIN::UIntSize>(-1))
             {
                 if constexpr (std::is_void_v<NextValue>)
                 {
-                    co_await NextTask::ReturnCanceled();
+                    co_await NGIN::Async::Canceled();
                     co_return;
                 }
                 else
                 {
-                    co_return Sentinels::Canceled;
+                    co_return NextCompletion::Canceled();
                 }
             }
 
-            auto nextOutcome = next.Get();
-            if (nextOutcome.IsDomainError())
+            auto nextCompletion = next.Get();
+            if (nextCompletion.IsDomainError())
             {
                 if constexpr (std::is_void_v<NextValue>)
                 {
-                    co_await NextTask::ReturnError(nextOutcome.DomainError());
+                    co_await NGIN::Async::DomainFailure(nextCompletion.DomainError());
                     co_return;
                 }
                 else
                 {
-                    co_return NGIN::Utilities::Unexpected<E>(nextOutcome.DomainError());
+                    co_return NextCompletion::DomainFailure(nextCompletion.DomainError());
                 }
             }
-            if (nextOutcome.IsCanceled())
+            if (nextCompletion.IsCanceled())
             {
                 if constexpr (std::is_void_v<NextValue>)
                 {
-                    co_await NextTask::ReturnCanceled();
+                    co_await NGIN::Async::Canceled();
                     co_return;
                 }
                 else
                 {
-                    co_return Sentinels::Canceled;
+                    co_return NextCompletion::Canceled();
                 }
             }
-            if (nextOutcome.IsFault())
+            if (nextCompletion.IsFault())
             {
                 if constexpr (std::is_void_v<NextValue>)
                 {
-                    co_await NextTask::ReturnFault(nextOutcome.Fault());
+                    co_await NGIN::Async::Faulted(nextCompletion.Fault());
                     co_return;
                 }
                 else
                 {
-                    co_return Fault(nextOutcome.Fault());
+                    co_return NextCompletion::Faulted(nextCompletion.Fault());
                 }
             }
 
@@ -2451,10 +2359,310 @@ namespace NGIN::Async
             }
             else
             {
-                co_return std::move(nextOutcome.Value());
+                co_return std::move(nextCompletion.Value());
             }
         }
+
+        template<typename T, typename E, typename F>
+        auto MapErrorImpl(Task<T, E>* task, F func) -> Task<T, std::invoke_result_t<F, const E&>>
+        {
+            using E2            = std::invoke_result_t<F, const E&>;
+            using OutCompletion = Completion<T, E2>;
+
+            auto completion = co_await task->AsCompletion();
+            if (completion.Succeeded())
+            {
+                co_return std::move(completion.Value());
+            }
+            if (completion.IsDomainError())
+            {
+                co_return OutCompletion::DomainFailure(std::invoke(func, completion.DomainError()));
+            }
+            if (completion.IsCanceled())
+            {
+                co_return OutCompletion::Canceled();
+            }
+
+            co_return OutCompletion::Faulted(completion.Fault());
+        }
+
+        template<typename E, typename F>
+        auto MapErrorImpl(Task<void, E>* task, F func) -> Task<void, std::invoke_result_t<F, const E&>>
+        {
+            auto completion = co_await task->AsCompletion();
+            if (completion.Succeeded())
+            {
+                co_return;
+            }
+            if (completion.IsDomainError())
+            {
+                co_await NGIN::Async::DomainFailure(std::invoke(func, completion.DomainError()));
+                co_return;
+            }
+            if (completion.IsCanceled())
+            {
+                co_await NGIN::Async::Canceled();
+                co_return;
+            }
+
+            co_await NGIN::Async::Faulted(completion.Fault());
+            co_return;
+        }
+
+        template<typename T, typename E, typename F>
+        auto MapValueImpl(Task<T, E>* task, F func) -> Task<std::invoke_result_t<F, T>, E>
+        {
+            using U             = std::invoke_result_t<F, T>;
+            using OutCompletion = Completion<U, E>;
+
+            auto completion = co_await task->AsCompletion();
+            if (completion.IsDomainError())
+            {
+                if constexpr (std::is_void_v<U>)
+                {
+                    co_await NGIN::Async::DomainFailure(completion.DomainError());
+                    co_return;
+                }
+                else
+                {
+                    co_return OutCompletion::DomainFailure(completion.DomainError());
+                }
+            }
+            if (completion.IsCanceled())
+            {
+                if constexpr (std::is_void_v<U>)
+                {
+                    co_await NGIN::Async::Canceled();
+                    co_return;
+                }
+                else
+                {
+                    co_return OutCompletion::Canceled();
+                }
+            }
+            if (completion.IsFault())
+            {
+                if constexpr (std::is_void_v<U>)
+                {
+                    co_await NGIN::Async::Faulted(completion.Fault());
+                    co_return;
+                }
+                else
+                {
+                    co_return OutCompletion::Faulted(completion.Fault());
+                }
+            }
+
+            if constexpr (std::is_void_v<U>)
+            {
+                std::invoke(func, std::move(completion.Value()));
+                co_return;
+            }
+            else
+            {
+                co_return std::invoke(func, std::move(completion.Value()));
+            }
+        }
+
+        template<typename E, typename F>
+        auto MapValueImpl(Task<void, E>* task, F func) -> Task<std::invoke_result_t<F>, E>
+        {
+            using U             = std::invoke_result_t<F>;
+            using OutCompletion = Completion<U, E>;
+
+            auto completion = co_await task->AsCompletion();
+            if (completion.IsDomainError())
+            {
+                if constexpr (std::is_void_v<U>)
+                {
+                    co_await NGIN::Async::DomainFailure(completion.DomainError());
+                    co_return;
+                }
+                else
+                {
+                    co_return OutCompletion::DomainFailure(completion.DomainError());
+                }
+            }
+            if (completion.IsCanceled())
+            {
+                if constexpr (std::is_void_v<U>)
+                {
+                    co_await NGIN::Async::Canceled();
+                    co_return;
+                }
+                else
+                {
+                    co_return OutCompletion::Canceled();
+                }
+            }
+            if (completion.IsFault())
+            {
+                if constexpr (std::is_void_v<U>)
+                {
+                    co_await NGIN::Async::Faulted(completion.Fault());
+                    co_return;
+                }
+                else
+                {
+                    co_return OutCompletion::Faulted(completion.Fault());
+                }
+            }
+
+            if constexpr (std::is_void_v<U>)
+            {
+                std::invoke(func);
+                co_return;
+            }
+            else
+            {
+                co_return std::invoke(func);
+            }
+        }
+
+        template<typename T, typename E, typename F>
+        auto MapCompletionImpl(Task<T, E>* task, F func)
+                -> Task<typename std::invoke_result_t<F, TaskResult<T, E>>::ValueType,
+                        typename std::invoke_result_t<F, TaskResult<T, E>>::ErrorType>
+        {
+            using OutCompletion = std::invoke_result_t<F, TaskResult<T, E>>;
+            using U             = typename OutCompletion::ValueType;
+
+            auto completion = co_await task->AsCompletion();
+            auto mapped     = std::invoke(func, completion);
+            if constexpr (std::is_void_v<U>)
+            {
+                if (mapped.Succeeded())
+                {
+                    co_return;
+                }
+                if (mapped.IsDomainError())
+                {
+                    co_await NGIN::Async::DomainFailure(std::move(mapped).DomainError());
+                    co_return;
+                }
+                if (mapped.IsCanceled())
+                {
+                    co_await NGIN::Async::Canceled();
+                    co_return;
+                }
+
+                co_await NGIN::Async::Faulted(std::move(mapped).Fault());
+                co_return;
+            }
+            else
+            {
+                co_return mapped;
+            }
+        }
+
+        template<typename T, typename E2, typename E, typename F>
+        auto MapErrorTypeImpl(Task<T, E>* task, F func) -> Task<T, E2>
+        {
+            using OutCompletion = Completion<T, E2>;
+            auto completion     = co_await task->AsCompletion();
+            if (completion.Succeeded())
+            {
+                co_return std::move(completion.Value());
+            }
+            if (completion.IsDomainError())
+            {
+                co_return OutCompletion::DomainFailure(std::invoke(func, completion.DomainError()));
+            }
+            if (completion.IsCanceled())
+            {
+                co_return OutCompletion::Canceled();
+            }
+
+            co_return OutCompletion::Faulted(completion.Fault());
+        }
+
+        template<typename E2, typename E, typename F>
+        auto MapErrorTypeImpl(Task<void, E>* task, F func) -> Task<void, E2>
+        {
+            auto completion = co_await task->AsCompletion();
+            if (completion.Succeeded())
+            {
+                co_return;
+            }
+            if (completion.IsDomainError())
+            {
+                co_await NGIN::Async::DomainFailure(std::invoke(func, completion.DomainError()));
+                co_return;
+            }
+            if (completion.IsCanceled())
+            {
+                co_await NGIN::Async::Canceled();
+                co_return;
+            }
+
+            co_await NGIN::Async::Faulted(completion.Fault());
+            co_return;
+        }
     }// namespace detail
+
+    template<typename T, typename E>
+    template<typename F>
+    auto Task<T, E>::MapError(F&& func) &
+    {
+        using Func = std::decay_t<F>;
+        return detail::MapErrorImpl(this, Func(std::forward<F>(func)));
+    }
+
+    template<typename E>
+    template<typename F>
+    auto Task<void, E>::MapError(F&& func) &
+    {
+        using Func = std::decay_t<F>;
+        return detail::MapErrorImpl(this, Func(std::forward<F>(func)));
+    }
+
+    template<typename T, typename E>
+    template<typename F>
+    auto Task<T, E>::MapValue(F&& func) &
+    {
+        using Func = std::decay_t<F>;
+        return detail::MapValueImpl(this, Func(std::forward<F>(func)));
+    }
+
+    template<typename E>
+    template<typename F>
+    auto Task<void, E>::MapValue(F&& func) &
+    {
+        using Func = std::decay_t<F>;
+        return detail::MapValueImpl(this, Func(std::forward<F>(func)));
+    }
+
+    template<typename T, typename E>
+    template<typename F>
+    auto Task<T, E>::MapCompletion(F&& func) &
+    {
+        using Func = std::decay_t<F>;
+        return detail::MapCompletionImpl(this, Func(std::forward<F>(func)));
+    }
+
+    template<typename E>
+    template<typename F>
+    auto Task<void, E>::MapCompletion(F&& func) &
+    {
+        using Func = std::decay_t<F>;
+        return detail::MapCompletionImpl(this, Func(std::forward<F>(func)));
+    }
+
+    template<typename T, typename E>
+    template<typename E2, typename F>
+    auto Task<T, E>::As(F&& func) &
+    {
+        using Func = std::decay_t<F>;
+        return detail::MapErrorTypeImpl<T, E2>(this, Func(std::forward<F>(func)));
+    }
+
+    template<typename E>
+    template<typename E2, typename F>
+    auto Task<void, E>::As(F&& func) &
+    {
+        using Func = std::decay_t<F>;
+        return detail::MapErrorTypeImpl<E2>(this, Func(std::forward<F>(func)));
+    }
 
     template<typename T, typename E>
     template<typename F>
@@ -2463,7 +2671,7 @@ namespace NGIN::Async
         using Func     = std::decay_t<F>;
         using NextTask = std::invoke_result_t<Func, T>;
         static_assert(detail::IsTaskTypeV<NextTask>, "ContinueWith expects a function returning Task<...>.");
-        static_assert(std::is_same_v<typename NextTask::ErrorType, E>, "ContinueWith requires identical error types in v1.");
+        static_assert(std::is_same_v<typename NextTask::ErrorType, E>, "ContinueWith requires identical error types.");
         return detail::ContinueWithImpl<T, E, Func>(this, &ctx, Func(std::forward<F>(func)));
     }
 
@@ -2474,7 +2682,7 @@ namespace NGIN::Async
         using Func     = std::decay_t<F>;
         using NextTask = std::invoke_result_t<Func>;
         static_assert(detail::IsTaskTypeV<NextTask>, "ContinueWith expects a function returning Task<...>.");
-        static_assert(std::is_same_v<typename NextTask::ErrorType, E>, "ContinueWith requires identical error types in v1.");
+        static_assert(std::is_same_v<typename NextTask::ErrorType, E>, "ContinueWith requires identical error types.");
         return detail::ContinueWithImpl<E, Func>(this, &ctx, Func(std::forward<F>(func)));
     }
 }// namespace NGIN::Async

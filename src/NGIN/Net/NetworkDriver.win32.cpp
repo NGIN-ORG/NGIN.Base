@@ -1737,7 +1737,7 @@ namespace NGIN::Net
             co_await awaiter;
             if (token.IsCancellationRequested())
             {
-                co_await NGIN::Async::Task<void, NetError>::ReturnCanceled();
+                co_await NGIN::Async::Canceled();
                 co_return;
             }
             co_return;
@@ -1757,7 +1757,7 @@ namespace NGIN::Net
             co_await awaiter;
             if (token.IsCancellationRequested())
             {
-                co_await NGIN::Async::Task<void, NetError>::ReturnCanceled();
+                co_await NGIN::Async::Canceled();
                 co_return;
             }
             co_return;
@@ -1779,12 +1779,12 @@ namespace NGIN::Net
             auto result    = co_await awaiter;
             if (token.IsCancellationRequested() || awaiter.op.error.native == ERROR_OPERATION_ABORTED)
             {
-                co_await NGIN::Async::Task<NGIN::UInt32, NetError>::ReturnCanceled();
+                co_await NGIN::Async::Canceled();
                 co_return 0;
             }
             if (!result)
             {
-                co_await NGIN::Async::Task<NGIN::UInt32, NetError>::ReturnError(result.Error());
+                co_await NGIN::Async::DomainFailure(result.Error());
                 co_return 0;
             }
             co_return std::move(result).Value();
@@ -1805,12 +1805,12 @@ namespace NGIN::Net
             auto result         = co_await awaiter;
             if (token.IsCancellationRequested() || awaiter.op.error.native == ERROR_OPERATION_ABORTED)
             {
-                co_await NGIN::Async::Task<NGIN::UInt32, NetError>::ReturnCanceled();
+                co_await NGIN::Async::Canceled();
                 co_return 0;
             }
             if (!result)
             {
-                co_await NGIN::Async::Task<NGIN::UInt32, NetError>::ReturnError(result.Error());
+                co_await NGIN::Async::DomainFailure(result.Error());
                 co_return 0;
             }
             co_return std::move(result).Value();
@@ -1833,12 +1833,12 @@ namespace NGIN::Net
             auto result            = co_await awaiter;
             if (token.IsCancellationRequested() || awaiter.op.error.native == ERROR_OPERATION_ABORTED)
             {
-                co_await NGIN::Async::Task<NGIN::UInt32, NetError>::ReturnCanceled();
+                co_await NGIN::Async::Canceled();
                 co_return 0;
             }
             if (!result)
             {
-                co_await NGIN::Async::Task<NGIN::UInt32, NetError>::ReturnError(result.Error());
+                co_await NGIN::Async::DomainFailure(result.Error());
                 co_return 0;
             }
             co_return std::move(result).Value();
@@ -1859,12 +1859,12 @@ namespace NGIN::Net
             auto result         = co_await awaiter;
             if (token.IsCancellationRequested() || awaiter.op.error.native == ERROR_OPERATION_ABORTED)
             {
-                co_await NGIN::Async::Task<DatagramReceiveResult, NetError>::ReturnCanceled();
+                co_await NGIN::Async::Canceled();
                 co_return DatagramReceiveResult {};
             }
             if (!result)
             {
-                co_await NGIN::Async::Task<DatagramReceiveResult, NetError>::ReturnError(result.Error());
+                co_await NGIN::Async::DomainFailure(result.Error());
                 co_return DatagramReceiveResult {};
             }
             co_return std::move(result).Value();
@@ -1885,12 +1885,12 @@ namespace NGIN::Net
             auto result            = co_await awaiter;
             if (token.IsCancellationRequested() || awaiter.op.error.native == ERROR_OPERATION_ABORTED)
             {
-                co_await NGIN::Async::Task<void, NetError>::ReturnCanceled();
+                co_await NGIN::Async::Canceled();
                 co_return;
             }
             if (!result)
             {
-                co_await NGIN::Async::Task<void, NetError>::ReturnError(result.Error());
+                co_await NGIN::Async::DomainFailure(result.Error());
                 co_return;
             }
             co_return;
@@ -1909,12 +1909,12 @@ namespace NGIN::Net
             auto result          = co_await awaiter;
             if (token.IsCancellationRequested() || awaiter.op.error.native == ERROR_OPERATION_ABORTED)
             {
-                co_await NGIN::Async::Task<SocketHandle, NetError>::ReturnCanceled();
+                co_await NGIN::Async::Canceled();
                 co_return SocketHandle {};
             }
             if (!result)
             {
-                co_await NGIN::Async::Task<SocketHandle, NetError>::ReturnError(result.Error());
+                co_await NGIN::Async::DomainFailure(result.Error());
                 co_return SocketHandle {};
             }
             co_return std::move(result).Value();

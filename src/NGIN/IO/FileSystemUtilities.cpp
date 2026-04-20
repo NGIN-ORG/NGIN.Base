@@ -156,7 +156,7 @@ namespace NGIN::IO
             const UIntSize n = co_await file.WriteAsync(ctx, bytes.subspan(total));
             if (n == 0)
             {
-                co_await AsyncTaskVoid::ReturnError(MakeError(IOErrorCode::SystemError, "short write", path));
+                co_await NGIN::Async::DomainFailure(MakeError(IOErrorCode::SystemError, "short write", path));
                 co_return;
             }
             total += n;

@@ -89,7 +89,7 @@ namespace NGIN::IO
         {
             if (!IsValid() || m_operations->flush == nullptr)
             {
-                co_await AsyncTaskVoid::ReturnError(MakeInvalidHandleError("async file handle is empty"));
+                co_await NGIN::Async::DomainFailure(MakeInvalidHandleError("async file handle is empty"));
                 co_return;
             }
             co_await m_operations->flush(m_state, ctx);
@@ -100,7 +100,7 @@ namespace NGIN::IO
         {
             if (!IsValid() || m_operations->close == nullptr)
             {
-                co_await AsyncTaskVoid::ReturnError(MakeInvalidHandleError("async file handle is empty"));
+                co_await NGIN::Async::DomainFailure(MakeInvalidHandleError("async file handle is empty"));
                 co_return;
             }
             co_await m_operations->close(m_state, ctx);

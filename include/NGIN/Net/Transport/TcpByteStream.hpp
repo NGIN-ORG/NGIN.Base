@@ -52,7 +52,8 @@ namespace NGIN::Net::Transport
         {
             if (!driver)
             {
-                co_return NGIN::Async::Fault(NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidState));
+                co_return NGIN::Async::Completion<NGIN::UInt32, NGIN::Net::NetError>::Faulted(
+                        NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidState));
             }
             co_return co_await socket.ReceiveAsync(ctx, *driver, destination, token);
         }
@@ -65,7 +66,8 @@ namespace NGIN::Net::Transport
         {
             if (!driver)
             {
-                co_return NGIN::Async::Fault(NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidState));
+                co_return NGIN::Async::Completion<NGIN::UInt32, NGIN::Net::NetError>::Faulted(
+                        NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidState));
             }
             co_return co_await socket.SendAsync(ctx, *driver, source, token);
         }

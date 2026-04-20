@@ -33,13 +33,14 @@ namespace
     }
 
     template<typename T>
-    auto RunAsyncTask(NGIN::IO::AsyncTask<T>& task, NGIN::Async::TaskContext& ctx) -> NGIN::Async::TaskOutcome<T, NGIN::IO::IOError>
+    auto RunAsyncTask(NGIN::IO::AsyncTask<T>& task, NGIN::Async::TaskContext& ctx) -> NGIN::Async::TaskResult<T, NGIN::IO::IOError>
     {
         task.Schedule(ctx);
         return task.Get();
     }
 
-    auto RunAsyncTask(NGIN::IO::AsyncTaskVoid& task, NGIN::Async::TaskContext& ctx) -> NGIN::Async::TaskOutcome<void, NGIN::IO::IOError>
+    auto RunAsyncTask(NGIN::IO::AsyncTaskVoid& task, NGIN::Async::TaskContext& ctx)
+            -> NGIN::Async::TaskResult<void, NGIN::IO::IOError>
     {
         task.Schedule(ctx);
         return task.Get();

@@ -802,24 +802,24 @@ namespace NGIN::IO
         auto fromResolved = ResolvePath(from);
         if (!fromResolved.HasValue())
         {
-            co_await AsyncTaskVoid::ReturnError(std::move(fromResolved).TakeError());
+            co_await NGIN::Async::DomainFailure(std::move(fromResolved).TakeError());
             co_return;
         }
         auto toResolved = ResolvePath(to);
         if (!toResolved.HasValue())
         {
-            co_await AsyncTaskVoid::ReturnError(std::move(toResolved).TakeError());
+            co_await NGIN::Async::DomainFailure(std::move(toResolved).TakeError());
             co_return;
         }
         if (fromResolved.Value().mount != toResolved.Value().mount)
         {
-            co_await AsyncTaskVoid::ReturnError(MakeError(IOErrorCode::CrossDevice, "cross-mount async copy not implemented", from, to));
+            co_await NGIN::Async::DomainFailure(MakeError(IOErrorCode::CrossDevice, "cross-mount async copy not implemented", from, to));
             co_return;
         }
         auto* asyncFs = fromResolved.Value().mount->GetAsyncFileSystem();
         if (!asyncFs)
         {
-            co_await AsyncTaskVoid::ReturnError(MakeError(IOErrorCode::Unsupported, "mount has no async filesystem", from, to));
+            co_await NGIN::Async::DomainFailure(MakeError(IOErrorCode::Unsupported, "mount has no async filesystem", from, to));
             co_return;
         }
         co_await asyncFs->CopyFileAsync(ctx, fromResolved.Value().translatedPath, toResolved.Value().translatedPath, options);

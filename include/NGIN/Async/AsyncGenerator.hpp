@@ -210,6 +210,12 @@ namespace NGIN::Async
                 canceled = true;
             }
 
+            void SetDomainError(E error) noexcept
+            {
+                NGIN::Sync::LockGuard guard(lock);
+                domainError = std::move(error);
+            }
+
             void SetFault(AsyncFault asyncFault) noexcept
             {
                 NGIN::Sync::LockGuard guard(lock);
@@ -391,11 +397,13 @@ namespace NGIN::Async
 
         [[nodiscard]] Task<GeneratorNext<T>, E> Next(TaskContext& ctx)
         {
+            using NextCompletion = Completion<GeneratorNext<T>, E>;
+
             co_await AdvanceAwaiter {*this, ctx};
 
             if (ctx.IsCancellationRequested())
             {
-                co_return Sentinels::Canceled;
+                co_return NextCompletion::Canceled();
             }
 
             if (!m_handle)
@@ -408,17 +416,17 @@ namespace NGIN::Async
 
             if (promise.fault.has_value())
             {
-                co_return Fault(*promise.fault);
+                co_return NextCompletion::Faulted(*promise.fault);
             }
 
             if (promise.canceled)
             {
-                co_return Sentinels::Canceled;
+                co_return NextCompletion::Canceled();
             }
 
             if (promise.domainError.has_value())
             {
-                co_return NGIN::Utilities::Unexpected(*promise.domainError);
+                co_return NextCompletion::DomainFailure(*promise.domainError);
             }
 
             if (promise.current.has_value())
@@ -429,68 +437,6 @@ namespace NGIN::Async
             }
 
             co_return GeneratorNext<T>::End();
-        }
-
-        struct ReturnErrorAwaiter final
-        {
-            E error {};
-
-            bool await_ready() const noexcept { return false; }
-
-            bool await_suspend(std::coroutine_handle<promise_type> handle) const noexcept
-            {
-                auto& promise = handle.promise();
-                {
-                    NGIN::Sync::LockGuard guard(promise.lock);
-                    promise.domainError = error;
-                }
-                return false;
-            }
-
-            void await_resume() const noexcept {}
-        };
-
-        struct ReturnCanceledAwaiter final
-        {
-            bool await_ready() const noexcept { return false; }
-
-            bool await_suspend(std::coroutine_handle<promise_type> handle) const noexcept
-            {
-                handle.promise().SetCanceled();
-                return false;
-            }
-
-            void await_resume() const noexcept {}
-        };
-
-        struct ReturnFaultAwaiter final
-        {
-            AsyncFault fault {};
-
-            bool await_ready() const noexcept { return false; }
-
-            bool await_suspend(std::coroutine_handle<promise_type> handle) const noexcept
-            {
-                handle.promise().SetFault(fault);
-                return false;
-            }
-
-            void await_resume() const noexcept {}
-        };
-
-        [[nodiscard]] static ReturnErrorAwaiter ReturnError(E error) noexcept
-        {
-            return ReturnErrorAwaiter {std::move(error)};
-        }
-
-        [[nodiscard]] static ReturnCanceledAwaiter ReturnCanceled() noexcept
-        {
-            return {};
-        }
-
-        [[nodiscard]] static ReturnFaultAwaiter ReturnFault(AsyncFault fault) noexcept
-        {
-            return ReturnFaultAwaiter {std::move(fault)};
         }
 
     private:

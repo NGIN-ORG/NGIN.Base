@@ -104,7 +104,7 @@ int main()
                     auto yieldResult = co_await ctx.YieldNow();
                     if (!yieldResult)
                     {
-                        co_await NGIN::Async::Task<void>::ReturnError(yieldResult.Error());
+                        co_await NGIN::Async::DomainFailure(yieldResult.Error());
                         co_return;
                     }
                 }
@@ -385,7 +385,7 @@ int main()
                 auto yieldResult = co_await ctx.YieldNow();
                 if (!yieldResult)
                 {
-                    co_await NGIN::Async::Task<void>::ReturnError(yieldResult.Error());
+                    co_await NGIN::Async::DomainFailure(yieldResult.Error());
                     co_return;
                 }
                 completed.fetch_add(1, std::memory_order_release);
@@ -425,7 +425,7 @@ int main()
                     auto yieldResult = co_await ctx.YieldNow();
                     if (!yieldResult)
                     {
-                        co_await NGIN::Async::Task<void>::ReturnError(yieldResult.Error());
+                        co_await NGIN::Async::DomainFailure(yieldResult.Error());
                         co_return;
                     }
                 }
@@ -498,7 +498,7 @@ int main()
                 auto yieldResult = co_await ctx.YieldNow();
                 if (!yieldResult)
                 {
-                    co_await NGIN::Async::Task<void>::ReturnError(yieldResult.Error());
+                    co_await NGIN::Async::DomainFailure(yieldResult.Error());
                     co_return;
                 }
                 co_return;
@@ -512,7 +512,7 @@ int main()
                 auto allResult = co_await NGIN::Async::WhenAll(ctx, a, b);
                 if (!allResult)
                 {
-                    co_await NGIN::Async::Task<void>::ReturnError(allResult.Error());
+                    co_await NGIN::Async::DomainFailure(allResult.Error());
                     co_return;
                 }
                 completed.fetch_add(1, std::memory_order_release);
@@ -573,7 +573,7 @@ int main()
                 auto yieldResult = co_await ctx.YieldNow();
                 if (!yieldResult)
                 {
-                    co_await NGIN::Async::Task<void>::ReturnError(yieldResult.Error());
+                    co_await NGIN::Async::DomainFailure(yieldResult.Error());
                     co_return;
                 }
                 completed.fetch_add(1, std::memory_order_relaxed);
@@ -608,7 +608,7 @@ int main()
                     auto yieldResult = co_await ctx.YieldNow();
                     if (!yieldResult)
                     {
-                        co_await NGIN::Async::Task<void>::ReturnError(yieldResult.Error());
+                        co_await NGIN::Async::DomainFailure(yieldResult.Error());
                         co_return;
                     }
                 }
@@ -673,7 +673,7 @@ int main()
                 auto yieldResult = co_await ctx.YieldNow();
                 if (!yieldResult)
                 {
-                    co_await NGIN::Async::Task<void>::ReturnError(yieldResult.Error());
+                    co_await NGIN::Async::DomainFailure(yieldResult.Error());
                     co_return;
                 }
                 co_return;
@@ -687,7 +687,7 @@ int main()
                 auto allResult = co_await NGIN::Async::WhenAll(ctx, a, b);
                 if (!allResult)
                 {
-                    co_await NGIN::Async::Task<void>::ReturnError(allResult.Error());
+                    co_await NGIN::Async::DomainFailure(allResult.Error());
                     co_return;
                 }
                 completed.fetch_add(1, std::memory_order_relaxed);

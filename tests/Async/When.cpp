@@ -129,7 +129,8 @@ namespace
         throw std::runtime_error("boom");
 #else
         co_await ctx.YieldNow();
-        co_return NGIN::Async::Fault(NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::Unknown));
+        co_return NGIN::Async::Completion<int, NGIN::Async::NoError>::Faulted(
+                NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::Unknown));
 #endif
     }
 

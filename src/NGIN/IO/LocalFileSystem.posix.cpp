@@ -1547,12 +1547,12 @@ namespace NGIN::IO
             });
             if (completion.IsCanceled())
             {
-                co_await AsyncTask<UIntSize>::ReturnCanceled();
+                co_await NGIN::Async::Canceled();
                 co_return 0;
             }
             if (completion.IsFault())
             {
-                co_await AsyncTask<UIntSize>::ReturnFault(std::move(*completion.fault));
+                co_await NGIN::Async::Faulted(std::move(*completion.fault));
                 co_return 0;
             }
             auto result = std::move(*completion.result);
@@ -1570,12 +1570,12 @@ namespace NGIN::IO
             });
             if (completion.IsCanceled())
             {
-                co_await AsyncTask<UIntSize>::ReturnCanceled();
+                co_await NGIN::Async::Canceled();
                 co_return 0;
             }
             if (completion.IsFault())
             {
-                co_await AsyncTask<UIntSize>::ReturnFault(std::move(*completion.fault));
+                co_await NGIN::Async::Faulted(std::move(*completion.fault));
                 co_return 0;
             }
             auto result = std::move(*completion.result);
@@ -1595,12 +1595,12 @@ namespace NGIN::IO
             });
             if (completion.IsCanceled())
             {
-                co_await AsyncTask<UIntSize>::ReturnCanceled();
+                co_await NGIN::Async::Canceled();
                 co_return 0;
             }
             if (completion.IsFault())
             {
-                co_await AsyncTask<UIntSize>::ReturnFault(std::move(*completion.fault));
+                co_await NGIN::Async::Faulted(std::move(*completion.fault));
                 co_return 0;
             }
             auto result = std::move(*completion.result);
@@ -1620,12 +1620,12 @@ namespace NGIN::IO
             });
             if (completion.IsCanceled())
             {
-                co_await AsyncTask<UIntSize>::ReturnCanceled();
+                co_await NGIN::Async::Canceled();
                 co_return 0;
             }
             if (completion.IsFault())
             {
-                co_await AsyncTask<UIntSize>::ReturnFault(std::move(*completion.fault));
+                co_await NGIN::Async::Faulted(std::move(*completion.fault));
                 co_return 0;
             }
             auto result = std::move(*completion.result);
@@ -1642,18 +1642,18 @@ namespace NGIN::IO
             });
             if (completion.IsCanceled())
             {
-                co_await AsyncTaskVoid::ReturnCanceled();
+                co_await NGIN::Async::Canceled();
                 co_return;
             }
             if (completion.IsFault())
             {
-                co_await AsyncTaskVoid::ReturnFault(std::move(*completion.fault));
+                co_await NGIN::Async::Faulted(std::move(*completion.fault));
                 co_return;
             }
             auto result = std::move(*completion.result);
             if (!result)
             {
-                co_await AsyncTaskVoid::ReturnError(std::move(result).TakeError());
+                co_await NGIN::Async::DomainFailure(std::move(result).TakeError());
                 co_return;
             }
             co_return;
@@ -1667,12 +1667,12 @@ namespace NGIN::IO
             });
             if (completion.IsCanceled())
             {
-                co_await AsyncTaskVoid::ReturnCanceled();
+                co_await NGIN::Async::Canceled();
                 co_return;
             }
             if (completion.IsFault())
             {
-                co_await AsyncTaskVoid::ReturnFault(std::move(*completion.fault));
+                co_await NGIN::Async::Faulted(std::move(*completion.fault));
                 co_return;
             }
             co_return;
@@ -1715,12 +1715,12 @@ namespace NGIN::IO
 
             if (completion.IsCanceled())
             {
-                co_await AsyncTask<bool>::ReturnCanceled();
+                co_await NGIN::Async::Canceled();
                 co_return false;
             }
             if (completion.IsFault())
             {
-                co_await AsyncTask<bool>::ReturnFault(std::move(*completion.fault));
+                co_await NGIN::Async::Faulted(std::move(*completion.fault));
                 co_return false;
             }
 
@@ -1742,12 +1742,12 @@ namespace NGIN::IO
 
             if (completion.IsCanceled())
             {
-                co_await AsyncTask<FileInfo>::ReturnCanceled();
+                co_await NGIN::Async::Canceled();
                 co_return FileInfo {};
             }
             if (completion.IsFault())
             {
-                co_await AsyncTask<FileInfo>::ReturnFault(std::move(*completion.fault));
+                co_await NGIN::Async::Faulted(std::move(*completion.fault));
                 co_return FileInfo {};
             }
 
@@ -1774,12 +1774,12 @@ namespace NGIN::IO
 
             if (completion.IsCanceled())
             {
-                co_await AsyncTask<AsyncFileHandle>::ReturnCanceled();
+                co_await NGIN::Async::Canceled();
                 co_return AsyncFileHandle {};
             }
             if (completion.IsFault())
             {
-                co_await AsyncTask<AsyncFileHandle>::ReturnFault(std::move(*completion.fault));
+                co_await NGIN::Async::Faulted(std::move(*completion.fault));
                 co_return AsyncFileHandle {};
             }
 
@@ -1804,12 +1804,12 @@ namespace NGIN::IO
 
             if (completion.IsCanceled())
             {
-                co_await AsyncTask<AsyncDirectoryHandle>::ReturnCanceled();
+                co_await NGIN::Async::Canceled();
                 co_return AsyncDirectoryHandle {};
             }
             if (completion.IsFault())
             {
-                co_await AsyncTask<AsyncDirectoryHandle>::ReturnFault(std::move(*completion.fault));
+                co_await NGIN::Async::Faulted(std::move(*completion.fault));
                 co_return AsyncDirectoryHandle {};
             }
 
@@ -1834,12 +1834,12 @@ namespace NGIN::IO
 
             if (completion.IsCanceled())
             {
-                co_await AsyncTask<Path>::ReturnCanceled();
+                co_await NGIN::Async::Canceled();
                 co_return Path {};
             }
             if (completion.IsFault())
             {
-                co_await AsyncTask<Path>::ReturnFault(std::move(*completion.fault));
+                co_await NGIN::Async::Faulted(std::move(*completion.fault));
                 co_return Path {};
             }
 
@@ -1880,12 +1880,12 @@ namespace NGIN::IO
 
         if (completion.IsCanceled())
         {
-            co_await AsyncTask<AsyncFileHandle>::ReturnCanceled();
+            co_await NGIN::Async::Canceled();
             co_return AsyncFileHandle {};
         }
         if (completion.IsFault())
         {
-            co_await AsyncTask<AsyncFileHandle>::ReturnFault(std::move(*completion.fault));
+            co_await NGIN::Async::Faulted(std::move(*completion.fault));
             co_return AsyncFileHandle {};
         }
 
@@ -1908,12 +1908,12 @@ namespace NGIN::IO
 
         if (completion.IsCanceled())
         {
-            co_await AsyncTask<AsyncDirectoryHandle>::ReturnCanceled();
+            co_await NGIN::Async::Canceled();
             co_return AsyncDirectoryHandle {};
         }
         if (completion.IsFault())
         {
-            co_await AsyncTask<AsyncDirectoryHandle>::ReturnFault(std::move(*completion.fault));
+            co_await NGIN::Async::Faulted(std::move(*completion.fault));
             co_return AsyncDirectoryHandle {};
         }
 

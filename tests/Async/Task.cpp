@@ -19,6 +19,11 @@ namespace
         int code {0};
     };
 
+    struct MappedError final
+    {
+        int mappedCode {0};
+    };
+
     class ManualTimerExecutor
     {
     public:
@@ -85,7 +90,7 @@ namespace
     {
         if (ctx.CheckCancellation())
         {
-            co_await NGIN::Async::Task<void>::ReturnCanceled();
+            co_await NGIN::Async::Canceled();
             co_return;
         }
         co_return;
@@ -110,7 +115,8 @@ namespace
         throw std::runtime_error("boom");
 #else
         co_await ctx.YieldNow();
-        co_return NGIN::Async::Fault(NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::Unknown));
+        co_return NGIN::Async::Completion<int, NGIN::Async::NoError>::Faulted(
+                NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::Unknown));
 #endif
     }
 
@@ -129,7 +135,7 @@ namespace
     NGIN::Async::Task<void, TestDomainError> VoidDomainErrorAfterYield(NGIN::Async::TaskContext& ctx)
     {
         co_await ctx.YieldNow();
-        co_await NGIN::Async::Task<void, TestDomainError>::ReturnError(TestDomainError {23});
+        co_await NGIN::Async::DomainFailure(TestDomainError {23});
         co_return;
     }
 
@@ -145,9 +151,8 @@ namespace
     {
         try
         {
-            static_cast<void>(co_await DomainErrorAfterYield(ctx).Throwing());
-        }
-        catch (const NGIN::Async::AsyncDomainErrorException<TestDomainError>& ex)
+            static_cast<void>(co_await DomainErrorAfterYield(ctx).AsThrowing());
+        } catch (const NGIN::Async::AsyncDomainErrorException<TestDomainError>& ex)
         {
             co_return ex.Error().code;
         }
@@ -275,7 +280,7 @@ TEST_CASE("Task can be awaited without calling Start() on the child task")
 }
 
 #if NGIN_ASYNC_HAS_EXCEPTIONS
-TEST_CASE("Task GetOrThrow returns successful values")
+TEST_CASE("Task AsThrowing().Get returns successful values")
 {
     NGIN::Execution::CooperativeScheduler scheduler;
     NGIN::Async::TaskContext              ctx(scheduler);
@@ -286,10 +291,10 @@ TEST_CASE("Task GetOrThrow returns successful values")
     scheduler.RunUntilIdle();
 
     REQUIRE(task.IsCompleted());
-    REQUIRE(task.GetOrThrow() == 7);
+    REQUIRE(task.AsThrowing().Get() == 7);
 }
 
-TEST_CASE("Task GetOrThrow throws typed domain errors")
+TEST_CASE("Task AsThrowing().Get throws typed domain errors")
 {
     NGIN::Execution::CooperativeScheduler scheduler;
     NGIN::Async::TaskContext              ctx(scheduler);
@@ -305,16 +310,15 @@ TEST_CASE("Task GetOrThrow throws typed domain errors")
 
     try
     {
-        static_cast<void>(task.GetOrThrow());
+        static_cast<void>(task.AsThrowing().Get());
         FAIL("expected typed domain error");
-    }
-    catch (const NGIN::Async::AsyncDomainErrorException<TestDomainError>& ex)
+    } catch (const NGIN::Async::AsyncDomainErrorException<TestDomainError>& ex)
     {
         REQUIRE(ex.Error().code == 17);
     }
 }
 
-TEST_CASE("Task Throwing awaiter converts domain errors into exceptions")
+TEST_CASE("Task AsThrowing awaiter converts domain errors into exceptions")
 {
     NGIN::Execution::CooperativeScheduler scheduler;
     NGIN::Async::TaskContext              ctx(scheduler);
@@ -329,7 +333,66 @@ TEST_CASE("Task Throwing awaiter converts domain errors into exceptions")
     REQUIRE(*result == 17);
 }
 
-TEST_CASE("Task WaitOrThrow throws for void task domain errors")
+TEST_CASE("Task AsCompletion exposes terminal completion without propagation")
+{
+    NGIN::Execution::CooperativeScheduler scheduler;
+    NGIN::Async::TaskContext              ctx(scheduler);
+
+    auto task = [](NGIN::Async::TaskContext& ctx) -> NGIN::Async::Task<int> {
+        auto completion = co_await DomainErrorAfterYield(ctx).AsCompletion();
+        if (completion.IsDomainError())
+        {
+            co_return completion.DomainError().code;
+        }
+
+        co_return -1;
+    }(ctx);
+
+    task.Schedule(ctx);
+    scheduler.RunUntilIdle();
+
+    const auto result = task.Get();
+    REQUIRE(result);
+    REQUIRE(*result == 17);
+}
+
+TEST_CASE("Task MapError remaps domain failures explicitly")
+{
+    NGIN::Execution::CooperativeScheduler scheduler;
+    NGIN::Async::TaskContext              ctx(scheduler);
+
+    auto source = DomainErrorAfterYield(ctx);
+    auto task   = source.MapError([](const TestDomainError& error) {
+        return MappedError {.mappedCode = error.code + 100};
+    });
+    task.Schedule(ctx);
+    scheduler.RunUntilIdle();
+
+    const auto result = task.Get();
+    REQUIRE_FALSE(result);
+    REQUIRE(result.IsDomainError());
+    REQUIRE(result.DomainError().mappedCode == 117);
+}
+
+TEST_CASE("Task As<E2> remaps errors across domains")
+{
+    NGIN::Execution::CooperativeScheduler scheduler;
+    NGIN::Async::TaskContext              ctx(scheduler);
+
+    auto source = DomainErrorAfterYield(ctx);
+    auto task   = source.As<MappedError>([](const TestDomainError& error) {
+        return MappedError {.mappedCode = error.code * 2};
+    });
+    task.Schedule(ctx);
+    scheduler.RunUntilIdle();
+
+    const auto result = task.Get();
+    REQUIRE_FALSE(result);
+    REQUIRE(result.IsDomainError());
+    REQUIRE(result.DomainError().mappedCode == 34);
+}
+
+TEST_CASE("Task AsThrowing().Get throws for void task domain errors")
 {
     NGIN::Execution::CooperativeScheduler scheduler;
     NGIN::Async::TaskContext              ctx(scheduler);
@@ -343,16 +406,29 @@ TEST_CASE("Task WaitOrThrow throws for void task domain errors")
 
     try
     {
-        task.WaitOrThrow();
+        task.AsThrowing().Get();
         FAIL("expected typed domain error");
-    }
-    catch (const NGIN::Async::AsyncDomainErrorException<TestDomainError>& ex)
+    } catch (const NGIN::Async::AsyncDomainErrorException<TestDomainError>& ex)
     {
         REQUIRE(ex.Error().code == 23);
     }
 }
 
-TEST_CASE("Task WaitOrThrow throws for canceled void tasks")
+TEST_CASE("Task AsThrowing is the explicit exception view")
+{
+    NGIN::Execution::CooperativeScheduler scheduler;
+    NGIN::Async::TaskContext              ctx(scheduler);
+
+    auto task = CatchThrownDomainError(ctx);
+    task.Schedule(ctx);
+    scheduler.RunUntilIdle();
+
+    const auto result = task.Get();
+    REQUIRE(result);
+    REQUIRE(*result == 17);
+}
+
+TEST_CASE("Task AsThrowing().Get throws for canceled void tasks")
 {
     NGIN::Execution::InlineScheduler scheduler;
     NGIN::Async::CancellationSource  source;
@@ -364,10 +440,10 @@ TEST_CASE("Task WaitOrThrow throws for canceled void tasks")
 
     REQUIRE(task.IsCompleted());
     REQUIRE(task.IsCanceled());
-    REQUIRE_THROWS_AS(task.WaitOrThrow(), NGIN::Async::AsyncCanceledException);
+    REQUIRE_THROWS_AS(task.AsThrowing().Get(), NGIN::Async::AsyncCanceledException);
 }
 
-TEST_CASE("Task GetOrThrow rethrows captured exceptions from faults")
+TEST_CASE("Task AsThrowing().Get rethrows captured exceptions from faults")
 {
     NGIN::Execution::CooperativeScheduler scheduler;
     NGIN::Async::TaskContext              ctx(scheduler);
@@ -380,9 +456,9 @@ TEST_CASE("Task GetOrThrow rethrows captured exceptions from faults")
     REQUIRE(task.IsCompleted());
     REQUIRE(task.IsFaulted());
 #if NGIN_ASYNC_CAPTURE_EXCEPTIONS
-    REQUIRE_THROWS_AS(task.GetOrThrow(), std::runtime_error);
+    REQUIRE_THROWS_AS(task.AsThrowing().Get(), std::runtime_error);
 #else
-    REQUIRE_THROWS_AS(task.GetOrThrow(), NGIN::Async::AsyncFaultException);
+    REQUIRE_THROWS_AS(task.AsThrowing().Get(), NGIN::Async::AsyncFaultException);
 #endif
 }
 #endif

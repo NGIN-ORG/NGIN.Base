@@ -19,7 +19,7 @@ Task<void> SimpleTask(TaskContext& ctx, int id)
     auto yieldResult = co_await ctx.YieldNow();
     if (!yieldResult)
     {
-        co_await NGIN::Async::Task<void>::ReturnError(yieldResult.Error());
+        co_await NGIN::Async::DomainFailure(yieldResult.Error());
         co_return;
     }
     std::cout << "[SimpleTask " << id << "] resumed after Yield\n";
@@ -49,19 +49,19 @@ Task<void> WhenAllCombinator(TaskContext& ctx)
     auto r1Result = co_await t1;
     if (!r1Result)
     {
-        co_await NGIN::Async::Task<void>::ReturnError(r1Result.Error());
+        co_await NGIN::Async::DomainFailure(r1Result.Error());
         co_return;
     }
     auto r2Result = co_await t2;
     if (!r2Result)
     {
-        co_await NGIN::Async::Task<void>::ReturnError(r2Result.Error());
+        co_await NGIN::Async::DomainFailure(r2Result.Error());
         co_return;
     }
     auto r3Result = co_await t3;
     if (!r3Result)
     {
-        co_await NGIN::Async::Task<void>::ReturnError(r3Result.Error());
+        co_await NGIN::Async::DomainFailure(r3Result.Error());
         co_return;
     }
 
@@ -94,7 +94,7 @@ void RunAllSchedulerTests(const char* schedulerName, int numThreadsOrFibers = 2)
             auto delayResult = co_await ctx.Delay(Milliseconds {500.0});
             if (!delayResult)
             {
-                co_await NGIN::Async::Task<void>::ReturnError(delayResult.Error());
+                co_await NGIN::Async::DomainFailure(delayResult.Error());
                 co_return;
             }
             std::cout << "[Continuation] Done after delay.\n";
@@ -102,7 +102,7 @@ void RunAllSchedulerTests(const char* schedulerName, int numThreadsOrFibers = 2)
         });
         if (!thenResult)
         {
-            co_await NGIN::Async::Task<void>::ReturnError(thenResult.Error());
+            co_await NGIN::Async::DomainFailure(thenResult.Error());
             co_return;
         }
         co_return;
@@ -134,7 +134,7 @@ void RunAllSchedulerTests(const char* schedulerName, int numThreadsOrFibers = 2)
             auto delayResult = co_await ctx.Delay(Milliseconds {300.0});
             if (!delayResult)
             {
-                co_await NGIN::Async::Task<void>::ReturnError(delayResult.Error());
+                co_await NGIN::Async::DomainFailure(delayResult.Error());
                 co_return;
             }
             std::cout << "[Continuation] Done after delay.\n";
@@ -142,7 +142,7 @@ void RunAllSchedulerTests(const char* schedulerName, int numThreadsOrFibers = 2)
         });
         if (!thenResult)
         {
-            co_await NGIN::Async::Task<void>::ReturnError(thenResult.Error());
+            co_await NGIN::Async::DomainFailure(thenResult.Error());
             co_return;
         }
         co_return;
