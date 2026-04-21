@@ -43,6 +43,11 @@ namespace NGIN::Text::Unicode
         }
     }// namespace detail
 
+    /// @brief Converts UTF-8 input into `UTF32String`.
+    ///
+    /// @param input Source UTF-8 code units.
+    /// @param policy Error-handling policy applied to malformed input.
+    /// @return Converted UTF-32 text or the first strict-mode error.
     [[nodiscard]] inline Utilities::Expected<UTF32String, ConversionError> ToUtf32(std::string_view input, ErrorPolicy policy = ErrorPolicy::Strict)
     {
         UTF32String output;
@@ -72,6 +77,7 @@ namespace NGIN::Text::Unicode
         return Utilities::Expected<UTF32String, ConversionError>(std::move(output));
     }
 
+    /// @brief Converts UTF-16 input into `UTF32String`.
     [[nodiscard]] inline Utilities::Expected<UTF32String, ConversionError> ToUtf32(std::u16string_view input, ErrorPolicy policy = ErrorPolicy::Strict)
     {
         UTF32String output;
@@ -101,6 +107,7 @@ namespace NGIN::Text::Unicode
         return Utilities::Expected<UTF32String, ConversionError>(std::move(output));
     }
 
+    /// @brief Converts UTF-8 input into `UTF16String`.
     [[nodiscard]] inline Utilities::Expected<UTF16String, ConversionError> ToUtf16(std::string_view input, ErrorPolicy policy = ErrorPolicy::Strict)
     {
         UTF16String output;
@@ -130,6 +137,7 @@ namespace NGIN::Text::Unicode
         return Utilities::Expected<UTF16String, ConversionError>(std::move(output));
     }
 
+    /// @brief Converts UTF-32 input into `UTF16String`.
     [[nodiscard]] inline Utilities::Expected<UTF16String, ConversionError> ToUtf16(std::u32string_view input, ErrorPolicy policy = ErrorPolicy::Strict)
     {
         UTF16String output;
@@ -157,6 +165,7 @@ namespace NGIN::Text::Unicode
         return Utilities::Expected<UTF16String, ConversionError>(std::move(output));
     }
 
+    /// @brief Converts UTF-16 input into `UTF8String`.
     [[nodiscard]] inline Utilities::Expected<UTF8String, ConversionError> ToUtf8(std::u16string_view input, ErrorPolicy policy = ErrorPolicy::Strict)
     {
         UTF8String output;
@@ -186,6 +195,7 @@ namespace NGIN::Text::Unicode
         return Utilities::Expected<UTF8String, ConversionError>(std::move(output));
     }
 
+    /// @brief Converts UTF-32 input into `UTF8String`.
     [[nodiscard]] inline Utilities::Expected<UTF8String, ConversionError> ToUtf8(std::u32string_view input, ErrorPolicy policy = ErrorPolicy::Strict)
     {
         UTF8String output;
@@ -213,6 +223,11 @@ namespace NGIN::Text::Unicode
         return Utilities::Expected<UTF8String, ConversionError>(std::move(output));
     }
 
+    /// @brief Counts Unicode code points in UTF-8 input.
+    ///
+    /// @param input Source UTF-8 bytes.
+    /// @param policy Error-handling policy applied while counting.
+    /// @return Number of code points or the first strict-mode error.
     [[nodiscard]] inline Utilities::Expected<UIntSize, ConversionError> CountCodePoints(std::string_view input, ErrorPolicy policy = ErrorPolicy::Strict)
     {
         UIntSize count  = 0;
@@ -240,6 +255,7 @@ namespace NGIN::Text::Unicode
         return Utilities::Expected<UIntSize, ConversionError>(count);
     }
 
+    /// @brief Returns whether the entire byte range is ASCII.
     [[nodiscard]] inline constexpr bool IsAscii(std::string_view input) noexcept
     {
         for (const char ch: input)
@@ -250,6 +266,10 @@ namespace NGIN::Text::Unicode
         return true;
     }
 
+    /// @brief Detects a leading Unicode byte-order mark.
+    ///
+    /// @param bytes Raw input bytes to inspect.
+    /// @return Detected BOM kind and byte count, or `BomKind::None`.
     [[nodiscard]] inline constexpr BomInfo DetectBom(std::span<const Byte> bytes) noexcept
     {
         auto byteAt = [&](UIntSize index) noexcept -> unsigned char
@@ -279,6 +299,10 @@ namespace NGIN::Text::Unicode
         return BomInfo {};
     }
 
+    /// @brief Removes a UTF-8 BOM prefix when present.
+    ///
+    /// @param input UTF-8 byte range.
+    /// @return `input` without a leading UTF-8 BOM.
     [[nodiscard]] inline constexpr std::string_view StripBom(std::string_view input) noexcept
     {
         return input.starts_with("\xEF\xBB\xBF") ? input.substr(3) : input;

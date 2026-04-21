@@ -8,6 +8,11 @@
 
 namespace NGIN::Text::Unicode
 {
+    /// @brief Decodes one UTF-16 sequence starting at `offset`.
+    ///
+    /// @param input UTF-16 code units to decode from.
+    /// @param offset Code-unit offset into `input`.
+    /// @return Decode result including the decoded code point or the encountered error.
     [[nodiscard]] inline constexpr DecodeResult DecodeUtf16(std::u16string_view input, UIntSize offset = 0) noexcept
     {
         if (offset >= input.size())
@@ -33,6 +38,11 @@ namespace NGIN::Text::Unicode
         return DecodeResult {static_cast<CodePoint>(0x10000u + ((high << 10u) | low)), 2, EncodingError::None};
     }
 
+    /// @brief Encodes one code point as UTF-16.
+    ///
+    /// @param codePoint Unicode scalar value to encode. Invalid values are sanitized to U+FFFD.
+    /// @param out Output buffer with space for at least 2 code units.
+    /// @return Number of UTF-16 code units written to `out`.
     [[nodiscard]] inline constexpr UIntSize EncodeUtf16(CodePoint codePoint, char16_t* out) noexcept
     {
         const CodePoint value = detail::SanitizeForEncoding(codePoint);
@@ -48,6 +58,7 @@ namespace NGIN::Text::Unicode
         return 2;
     }
 
+    /// @brief Returns whether the entire code-unit range is valid UTF-16.
     [[nodiscard]] inline constexpr bool IsValidUtf16(std::u16string_view input) noexcept
     {
         UIntSize offset = 0;

@@ -8,6 +8,11 @@
 
 namespace NGIN::Text::Unicode
 {
+    /// @brief Decodes one UTF-8 sequence starting at `offset`.
+    ///
+    /// @param input UTF-8 byte sequence to decode from.
+    /// @param offset Code-unit offset into `input`.
+    /// @return Decode result including the decoded code point or the encountered error.
     [[nodiscard]] inline constexpr DecodeResult DecodeUtf8(std::string_view input, UIntSize offset = 0) noexcept
     {
         if (offset >= input.size())
@@ -64,6 +69,11 @@ namespace NGIN::Text::Unicode
         return DecodeResult {codePoint, expectedUnits, EncodingError::None};
     }
 
+    /// @brief Encodes one code point as UTF-8.
+    ///
+    /// @param codePoint Unicode scalar value to encode. Invalid values are sanitized to U+FFFD.
+    /// @param out Output buffer with space for at least 4 bytes.
+    /// @return Number of bytes written to `out`.
     [[nodiscard]] inline constexpr UIntSize EncodeUtf8(CodePoint codePoint, char* out) noexcept
     {
         const CodePoint value = detail::SanitizeForEncoding(codePoint);
@@ -93,6 +103,7 @@ namespace NGIN::Text::Unicode
         return 4;
     }
 
+    /// @brief Returns whether the entire byte range is valid UTF-8.
     [[nodiscard]] inline constexpr bool IsValidUtf8(std::string_view input) noexcept
     {
         UIntSize offset = 0;
