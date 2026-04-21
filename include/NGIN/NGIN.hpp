@@ -15,6 +15,8 @@
 #include <NGIN/Memory/TrackingAllocator.hpp>
 #include <NGIN/Meta/EnumTraits.hpp>
 #include <NGIN/Meta/FunctionTraits.hpp>
+#include <NGIN/Meta/ReflectionIdentity.hpp>
+#include <NGIN/Meta/SymbolId.hpp>
 #include <NGIN/Meta/TypeId.hpp>
 #include <NGIN/Meta/TypeTraits.hpp>
 #include <NGIN/Primitives.hpp>
@@ -29,6 +31,7 @@
 #include <NGIN/Utilities/LSBFlag.hpp>
 #include <NGIN/Utilities/MSBFlag.hpp>
 #include <NGIN/Utilities/Optional.hpp>
+#include <NGIN/Utilities/SymbolTable.hpp>
 #include <NGIN/Utilities/StringInterner.hpp>
 
 
