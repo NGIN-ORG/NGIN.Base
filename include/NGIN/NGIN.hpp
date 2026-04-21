@@ -1,6 +1,7 @@
 #pragma once
 #include <NGIN/Containers/HashMap.hpp>
 #include <NGIN/Text/String.hpp>
+#include <NGIN/Text/Unicode.hpp>
 #include <NGIN/Containers/Vector.hpp>
 #include <NGIN/Defines.hpp>
 #include <NGIN/Exceptions/Exception.hpp>

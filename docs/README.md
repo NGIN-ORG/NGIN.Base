@@ -56,6 +56,17 @@ Use it for:
 - tracking and thread-safe allocator wrappers
 - allocator-aware containers
 
+### I need strings, UTF validation, or encoding conversion
+
+Read [Text.md](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/Text.md).
+
+Use it for:
+
+- `BasicString`
+- `UTF8String` / `UTF16String` / `UTF32String`
+- `NGIN::Text::Unicode`
+- UTF-8 code-point iteration and conversion policy
+
 ## Which Docs Are For Users?
 
 Start with these:
@@ -64,6 +75,7 @@ Start with these:
 - [IO.md](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/IO.md)
 - [Network.md](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/Network.md)
 - [Memory.md](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/Memory.md)
+- [Text.md](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/Text.md)
 
 These are practical guides. They explain when to use each subsystem, the normal workflow, and the main types you
 actually need.

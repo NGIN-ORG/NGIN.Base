@@ -2,6 +2,7 @@
 
 #include <NGIN/Containers/Vector.hpp>
 #include <NGIN/SIMD/Scan.hpp>
+#include <NGIN/Text/Unicode/Utf8.hpp>
 
 #include <cctype>
 #include <cstring>
@@ -190,33 +191,6 @@ namespace NGIN::Serialization
             return true;
         }
 
-        [[nodiscard]] UIntSize EncodeUtf8(UInt32 codepoint, char* out) noexcept
-        {
-            if (codepoint <= 0x7F)
-            {
-                out[0] = static_cast<char>(codepoint);
-                return 1;
-            }
-            if (codepoint <= 0x7FF)
-            {
-                out[0] = static_cast<char>(0xC0 | (codepoint >> 6));
-                out[1] = static_cast<char>(0x80 | (codepoint & 0x3F));
-                return 2;
-            }
-            if (codepoint <= 0xFFFF)
-            {
-                out[0] = static_cast<char>(0xE0 | (codepoint >> 12));
-                out[1] = static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F));
-                out[2] = static_cast<char>(0x80 | (codepoint & 0x3F));
-                return 3;
-            }
-            out[0] = static_cast<char>(0xF0 | (codepoint >> 18));
-            out[1] = static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F));
-            out[2] = static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F));
-            out[3] = static_cast<char>(0x80 | (codepoint & 0x3F));
-            return 4;
-        }
-
         NGIN::Utilities::Expected<std::string_view, ParseError> DecodeEntitiesInternal(XmlParseContext& ctx, std::string_view input)
         {
             if (!ctx.options.decodeEntities)
@@ -305,7 +279,7 @@ namespace NGIN::Serialization
                         return NGIN::Utilities::Expected<std::string_view, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
                                 MakeError(ctx, ParseErrorCode::InvalidEntity, "Invalid numeric entity")));
                     }
-                    write += EncodeUtf8(codepoint, write);
+                    write += NGIN::Text::Unicode::EncodeUtf8(static_cast<NGIN::Text::Unicode::CodePoint>(codepoint), write);
                 }
                 else
                 {

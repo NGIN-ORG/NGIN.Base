@@ -89,3 +89,17 @@ TEST_CASE("JsonParser rejects invalid unicode escape", "[serialization][json]")
     auto        result = JsonParser::Parse(std::string_view {input});
     REQUIRE_FALSE(result.HasValue());
 }
+
+TEST_CASE("JsonParser decodes surrogate pairs into UTF-8", "[serialization][json]")
+{
+    using namespace NGIN::Serialization;
+
+    const char* input  = R"({"a": "\uD83D\uDE00"})";
+    auto        result = JsonParser::Parse(std::string_view {input});
+    REQUIRE(result.HasValue());
+
+    const JsonValue* value = result.Value().Root().AsObject().Find("a");
+    REQUIRE(value != nullptr);
+    REQUIRE(value->IsString());
+    CHECK(value->AsString() == std::string_view("\xF0\x9F\x98\x80", 4));
+}

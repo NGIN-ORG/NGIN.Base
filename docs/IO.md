@@ -293,7 +293,8 @@ If symlink-follow behavior matters, pass `MetadataOptions` instead of relying on
 ### Text helpers do not solve encoding policy for you
 
 `ReadAllText` and `WriteAllText` are convenient whole-file helpers. They do not define your application’s text
-encoding policy beyond the bytes and string types you pass through them.
+encoding policy beyond the bytes and string types you pass through them. Use `NGIN::Text::Unicode` when you need
+explicit validation, conversion, or UTF-8 iteration policy.
 
 ### Metadata richness can vary by backend and platform
 

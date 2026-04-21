@@ -948,3 +948,55 @@ TEST_CASE("String operator plus supports c-string and char overloads", "[Text][S
     CHECK(('[' + value).View() == std::string_view("[mid"));
     CHECK((value + ']').View() == std::string_view("mid]"));
 }
+
+TEST_CASE("String exposes forward and reverse iterators across storage modes", "[Text][String]")
+{
+    SECTION("small")
+    {
+        String value("abc");
+        std::string forward;
+        for (char ch: value)
+            forward.push_back(ch);
+        CHECK(forward == "abc");
+
+        value.begin()[1] = 'Z';
+        CHECK(value.View() == std::string_view("aZc"));
+
+        std::string reverse;
+        for (auto it = value.rbegin(); it != value.rend(); ++it)
+            reverse.push_back(*it);
+        CHECK(reverse == "cZa");
+    }
+
+    SECTION("heap")
+    {
+        String value(std::string(80, 'x').c_str());
+        REQUIRE(value.begin() != value.end());
+        *value.begin() = 'y';
+        CHECK(value.Front() == 'y');
+        CHECK(*value.rbegin() == 'x');
+    }
+}
+
+TEST_CASE("String UTF-8 operations stay code-unit based", "[Text][String]")
+{
+    String value("\xC3\xA5\xC3\xA4\xC3\xB6");
+
+    CHECK(value.Size() == 6U);
+    CHECK(static_cast<unsigned char>(value[0]) == 0xC3u);
+    CHECK(static_cast<unsigned char>(value[1]) == 0xA5u);
+    CHECK(value.Substr(0, 2).View() == std::string_view("\xC3\xA5", 2));
+    CHECK(value.Find(std::string_view("\xC3\xA4", 2)) == 2U);
+}
+
+TEST_CASE("String reverse two-byte search is bounds-safe at the tail", "[Text][String]")
+{
+    String value("abcab");
+
+    CHECK(value.RFind("ab") == 3U);
+    CHECK(value.RFind("bc", 4) == 1U);
+    CHECK(value.RFind("zz") == String::npos);
+
+    String single("a");
+    CHECK(single.RFind("ab") == String::npos);
+}

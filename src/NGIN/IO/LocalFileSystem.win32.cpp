@@ -3,6 +3,7 @@
 #include "AsyncDispatch.hpp"
 #include "NativeFileSystemBackend.hpp"
 
+#include <NGIN/Text/Unicode/Convert.hpp>
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -85,12 +86,16 @@ namespace NGIN::IO
             if (utf8.empty())
                 return {};
 
-            const int wideLength = MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()), nullptr, 0);
-            if (wideLength <= 0)
+            const auto wideResult = NGIN::Text::Unicode::ToUtf16(utf8, NGIN::Text::Unicode::ErrorPolicy::Strict);
+            if (!wideResult.HasValue())
                 return {};
 
-            NativePath result(static_cast<std::size_t>(wideLength), L'\0');
-            (void) MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()), result.data(), wideLength);
+            const auto& wide = wideResult.Value();
+            NativePath  result;
+            result.reserve(static_cast<std::size_t>(wide.Size()));
+            for (char16_t ch: wide)
+                result.push_back(static_cast<wchar_t>(ch));
+
             for (auto& ch: result)
             {
                 if (ch == L'/')
@@ -104,13 +109,14 @@ namespace NGIN::IO
             if (nativePath.empty())
                 return {};
 
-            const int utf8Length = WideCharToMultiByte(CP_UTF8, 0, nativePath.data(), static_cast<int>(nativePath.size()), nullptr, 0, nullptr, nullptr);
-            if (utf8Length <= 0)
+            static_assert(sizeof(wchar_t) == sizeof(char16_t), "Windows Unicode conversion expects 16-bit wchar_t.");
+            const auto utf8Result = NGIN::Text::Unicode::ToUtf8(
+                    std::u16string_view {reinterpret_cast<const char16_t*>(nativePath.data()), nativePath.size()},
+                    NGIN::Text::Unicode::ErrorPolicy::Strict);
+            if (!utf8Result.HasValue())
                 return {};
 
-            std::string utf8(static_cast<std::size_t>(utf8Length), '\0');
-            (void) WideCharToMultiByte(CP_UTF8, 0, nativePath.data(), static_cast<int>(nativePath.size()), utf8.data(), utf8Length, nullptr, nullptr);
-            Path path {utf8};
+            Path path {utf8Result.Value().View()};
             path.Normalize();
             return path;
         }

@@ -54,3 +54,21 @@ TEST_CASE("XmlParser rejects mismatched tags", "[serialization][xml]")
     auto        result = XmlParser::Parse(std::string_view {input});
     REQUIRE_FALSE(result.HasValue());
 }
+
+TEST_CASE("XmlParser decodes numeric entities into UTF-8", "[serialization][xml]")
+{
+    using namespace NGIN::Serialization;
+
+    const char*     input = R"(<root>&#x1F600;</root>)";
+    XmlParseOptions options;
+    options.decodeEntities = true;
+
+    auto result = XmlParser::Parse(std::string_view {input}, options);
+    REQUIRE(result.HasValue());
+
+    const XmlElement* root = result.Value().Root();
+    REQUIRE(root != nullptr);
+    REQUIRE(root->children.Size() == 1U);
+    REQUIRE(root->children[0].type == XmlNode::Type::Text);
+    CHECK(root->children[0].text == std::string_view("\xF0\x9F\x98\x80", 4));
+}

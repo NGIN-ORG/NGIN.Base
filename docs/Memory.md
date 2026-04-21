@@ -307,6 +307,14 @@ Allocator propagation follows `AllocatorPropagationTraits<Alloc>` (move-propagat
 - SBO sized in **bytes** (works for any `CharT`)
 - allocator-backed heap growth beyond SBO
 - traits-aware comparisons and views
+- contiguous iterators over code units
+- null-terminated storage for interop
+
+Important semantics:
+
+- `Size()` counts code units
+- indexing, substring, and search APIs are code-unit based
+- Unicode validation and encoding conversion live in `NGIN::Text::Unicode`, not in `BasicString`
 
 ```cpp
 using String = NGIN::Text::String; // alias in String.hpp

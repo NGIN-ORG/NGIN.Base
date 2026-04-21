@@ -6,11 +6,13 @@
 
 namespace NGIN::Text
 {
+    // These aliases intentionally share the same container implementation while expressing different text contracts.
     using String      = BasicString<char, 48, NGIN::Memory::SystemAllocator, DefaultGrowthPolicy>;
     using WString     = BasicString<wchar_t, 48, NGIN::Memory::SystemAllocator, DefaultGrowthPolicy>;
     using AnsiString  = BasicString<char, 16, NGIN::Memory::SystemAllocator, DefaultGrowthPolicy>;
     using AsciiString = BasicString<char, 16, NGIN::Memory::SystemAllocator, DefaultGrowthPolicy>;
 
+    // UTF aliases remain code-unit containers; validation and conversion live in NGIN::Text::Unicode.
     using UTF8String  = BasicString<char, 48, NGIN::Memory::SystemAllocator, DefaultGrowthPolicy>;
     using UTF16String = BasicString<char16_t, 48, NGIN::Memory::SystemAllocator, DefaultGrowthPolicy>;
     using UTF32String = BasicString<char32_t, 48, NGIN::Memory::SystemAllocator, DefaultGrowthPolicy>;

@@ -1,4 +1,5 @@
 #include <NGIN/Execution/Thread.hpp>
+#include <NGIN/Text/Unicode/Convert.hpp>
 
 #include <Windows.h>
 #include <process.h>
@@ -23,16 +24,22 @@ namespace NGIN::Execution
 
         bool Utf8ToWide(std::string_view utf8, std::array<wchar_t, 64>& output) noexcept
         {
-            constexpr unsigned long flags      = 0ul;
-            const auto              sourceSize = static_cast<int>(std::min<std::size_t>(utf8.size(), output.size() - 1));
-            const int               written    =
-                    ::MultiByteToWideChar(CP_UTF8, flags, utf8.data(), sourceSize, output.data(), static_cast<int>(output.size() - 1));
-            if (written <= 0)
-            {
-                return false;
-            }
+            static_assert(sizeof(wchar_t) == sizeof(char16_t), "Windows thread naming expects 16-bit wchar_t.");
 
-            output[static_cast<std::size_t>(written)] = L'\0';
+            const std::string_view clipped = utf8.substr(0, output.size() - 1);
+            const auto             wideResult =
+                    NGIN::Text::Unicode::ToUtf16(clipped, NGIN::Text::Unicode::ErrorPolicy::Strict);
+            if (!wideResult.HasValue())
+                return false;
+
+            const auto& wide = wideResult.Value();
+            if (wide.Size() > output.size() - 1)
+                return false;
+
+            std::fill(output.begin(), output.end(), L'\0');
+            for (std::size_t index = 0; index < wide.Size(); ++index)
+                output[index] = static_cast<wchar_t>(wide[index]);
+
             return true;
         }
 

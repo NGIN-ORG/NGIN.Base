@@ -14,6 +14,7 @@
 #include <cstddef>
 #include <cstring>
 #include <functional>
+#include <iterator>
 #include <limits>
 #include <stdexcept>
 #include <string_view>
@@ -85,6 +86,10 @@ namespace NGIN::Text
         using size_type   = UIntSize;
         using traits_type = Traits;
         using view_type   = std::basic_string_view<CharT, Traits>;
+        using iterator               = CharT*;
+        using const_iterator         = const CharT*;
+        using reverse_iterator       = std::reverse_iterator<iterator>;
+        using const_reverse_iterator = std::reverse_iterator<const_iterator>;
 
         static constexpr size_type npos = static_cast<size_type>(view_type::npos);
 
@@ -203,6 +208,7 @@ namespace NGIN::Text
             return *this;
         }
 
+        /// @brief Returns the number of stored code units, not Unicode scalar values.
         [[nodiscard]] size_type Size() const noexcept { return m_size; }
         [[nodiscard]] bool      Empty() const noexcept { return m_size == 0; }
         [[nodiscard]] size_type Capacity() const noexcept { return m_isSmall ? sbo_chars : m_heapCapacity; }
@@ -225,7 +231,9 @@ namespace NGIN::Text
         [[nodiscard]] UIntSize GetSize() const noexcept { return Size(); }
         [[nodiscard]] UIntSize GetCapacity() const noexcept { return Capacity(); }
 
+        /// @brief Returns the code unit at @p index without bounds checking.
         const CharT& operator[](size_type index) const noexcept { return Data()[index]; }
+        /// @brief Returns the code unit at @p index without bounds checking.
         CharT&       operator[](size_type index) noexcept { return Data()[index]; }
 
         const CharT& At(size_type index) const
@@ -249,6 +257,19 @@ namespace NGIN::Text
         CharT&       Back() { return At(Size() - 1); }
 
         explicit operator view_type() const noexcept { return View(); }
+
+        [[nodiscard]] iterator               begin() noexcept { return Data(); }
+        [[nodiscard]] iterator               end() noexcept { return Data() + Size(); }
+        [[nodiscard]] const_iterator         begin() const noexcept { return Data(); }
+        [[nodiscard]] const_iterator         end() const noexcept { return Data() + Size(); }
+        [[nodiscard]] const_iterator         cbegin() const noexcept { return begin(); }
+        [[nodiscard]] const_iterator         cend() const noexcept { return end(); }
+        [[nodiscard]] reverse_iterator       rbegin() noexcept { return reverse_iterator(end()); }
+        [[nodiscard]] reverse_iterator       rend() noexcept { return reverse_iterator(begin()); }
+        [[nodiscard]] const_reverse_iterator rbegin() const noexcept { return const_reverse_iterator(end()); }
+        [[nodiscard]] const_reverse_iterator rend() const noexcept { return const_reverse_iterator(begin()); }
+        [[nodiscard]] const_reverse_iterator crbegin() const noexcept { return const_reverse_iterator(cend()); }
+        [[nodiscard]] const_reverse_iterator crend() const noexcept { return const_reverse_iterator(cbegin()); }
 
         void Clear() noexcept
         {
@@ -334,6 +355,7 @@ namespace NGIN::Text
             if (count <= sbo_chars)
             {
                 SmallStorage temp {};
+                // Stage through temporary small storage so overlapping self-views remain valid.
                 CopyChars(temp.data(), source, count);
                 temp[count] = CharT(0);
                 CommitSmall(temp.data(), count);
@@ -443,6 +465,7 @@ namespace NGIN::Text
             }
         }
 
+        /// @brief Returns a code-unit slice of the string.
         [[nodiscard]] ThisType Substr(size_type pos = 0, size_type count = npos) const
         {
             if (pos > Size())
@@ -659,6 +682,7 @@ namespace NGIN::Text
                                    : npos;
         }
 
+        /// @brief Finds a code-unit sequence within the string.
         [[nodiscard]] size_type Find(view_type value, size_type pos = 0) const noexcept
         {
             const view_type haystack = View();
@@ -701,6 +725,7 @@ namespace NGIN::Text
                                    : npos;
         }
 
+        /// @brief Reverse-finds a code-unit sequence within the string.
         [[nodiscard]] size_type RFind(view_type value, size_type pos = npos) const noexcept
         {
             const view_type haystack = View();
@@ -1160,7 +1185,10 @@ namespace NGIN::Text
 
         [[nodiscard]] static size_type RFindTwoRawChars(view_type haystack, CharT first, CharT second, size_type pos) noexcept
         {
-            size_type index = pos;
+            if (haystack.size() < 2)
+                return npos;
+
+            size_type index = std::min(pos, haystack.size() - 2);
             while (true)
             {
                 if (haystack[index] == first && haystack[index + 1] == second)
@@ -1407,6 +1435,7 @@ namespace NGIN::Text
                 const size_type newCapacity = CheckedGrow(Capacity(), newSize);
                 CharT* const    newData     = AllocateWith(m_allocator, newCapacity);
 
+                // Copy the original prefix first so appended self-views survive reallocation.
                 CopyChars(newData, dataStart, oldSize);
                 CopyChars(newData + oldSize, source, appendCount);
                 newData[newSize] = CharT(0);
@@ -1452,6 +1481,7 @@ namespace NGIN::Text
             {
                 SmallStorage buffer {};
 
+                // Rebuild through temporary storage so replacement bytes can come from this string itself.
                 CopyChars(buffer.data(), Data(), pos);
                 CopyChars(buffer.data() + pos, replacement.data(), replacement.size());
                 CopyChars(buffer.data() + pos + replacement.size(),
