@@ -64,8 +64,18 @@ namespace NGIN::Memory
             {
                 if (base)
                 {
-                    alloc.Deallocate(base, totalBytes, allocAlignment);
+                    auto        allocCopy = alloc;
+                    void*       basePtr = base;
+                    const auto  bytes = totalBytes;
+                    const auto  alignment = allocAlignment;
+
                     base = nullptr;
+                    totalBytes = 0;
+                    allocAlignment = alignof(std::max_align_t);
+                    objectPtr = nullptr;
+                    destroyObjectFn = nullptr;
+
+                    allocCopy.Deallocate(basePtr, bytes, alignment);
                 }
             }
         };
