@@ -57,9 +57,9 @@ namespace NGIN::Async
         std::exception_ptr capturedException {};
 #endif
 
-        constexpr AsyncFault() noexcept = default;
+        AsyncFault() noexcept = default;
 
-        constexpr explicit AsyncFault(AsyncFaultCode faultCode, int nativeCode = 0, std::string_view faultMessage = {}) noexcept
+        explicit AsyncFault(AsyncFaultCode faultCode, int nativeCode = 0, std::string_view faultMessage = {}) noexcept
             : code(faultCode), native(nativeCode), message(faultMessage)
         {
         }
@@ -75,8 +75,7 @@ namespace NGIN::Async
         }
     };
 
-    [[nodiscard]] constexpr AsyncFault MakeAsyncFault(
-            AsyncFaultCode code, int native = 0, std::string_view message = {}) noexcept
+    [[nodiscard]] inline AsyncFault MakeAsyncFault(AsyncFaultCode code, int native = 0, std::string_view message = {}) noexcept
     {
         return AsyncFault {code, native, message};
     }

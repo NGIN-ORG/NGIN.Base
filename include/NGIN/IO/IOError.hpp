@@ -43,9 +43,9 @@ namespace NGIN::IO
         Path        secondaryPath {};
         String      message {};
 
-        constexpr IOError() noexcept = default;
+        IOError() noexcept = default;
 
-        constexpr explicit IOError(IOErrorCode errorCode, Int32 errorSystemCode = 0) noexcept
+        explicit IOError(IOErrorCode errorCode, Int32 errorSystemCode = 0) noexcept
             : code(errorCode)
             , systemCode(errorSystemCode)
         {
