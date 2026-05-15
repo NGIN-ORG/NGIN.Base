@@ -9,6 +9,23 @@
 #endif
 #include <windows.h>
 
+// Avoid Win32 A/W macro aliases rewriting NGIN API method names below.
+#ifdef CreateDirectory
+#undef CreateDirectory
+#endif
+#ifdef CreateHardLink
+#undef CreateHardLink
+#endif
+#ifdef RemoveDirectory
+#undef RemoveDirectory
+#endif
+#ifdef ReplaceFile
+#undef ReplaceFile
+#endif
+#ifdef CopyFile
+#undef CopyFile
+#endif
+
 #include <NGIN/Utilities/Expected.hpp>
 
 #include <algorithm>
