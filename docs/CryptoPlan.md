@@ -350,12 +350,12 @@ all complete for the intended phase.
 | [x] | Platform random backend | 1 | None beyond `Random/*` and neutral backend capability reporting | `Random/SecureRandom.*.cpp`, `Backends/BackendDispatch.cpp` | Same as random tests | Only randomness in core backend at first; not a user-included backend type. |
 | [ ] | Windows CNG backend | 3 | None | `Backends/CngBackend.win32.cpp` | Backend known-answer tests on Windows | Native algorithms through BCrypt/NCrypt where supported. |
 | [ ] | Apple security backend | 3 | None | `Backends/AppleSecurityBackend.apple.cpp` | Backend known-answer tests on Apple | Use Security/CommonCrypto/CryptoKit availability carefully. |
-| [ ] | OpenSSL backend | 3 | None | `Backends/OpenSslBackend.cpp` | Backend known-answer tests | Optional approved dependency/package, not default NGIN.Base core dependency. |
+| [x] | OpenSSL backend skeleton | 3 | None | `Backends/OpenSslBackend.cpp` | SHA known-answer tests when enabled | Optional approved dependency/package, not default NGIN.Base core dependency; initial skeleton wires SHA-256/SHA-512 only. |
 | [ ] | BoringSSL backend | 4 | None | `Backends/BoringSslBackend.cpp` | Backend known-answer tests | Only if workspace needs it separately from OpenSSL. |
 | [ ] | Libsodium backend | 3 | None | `Backends/LibsodiumBackend.cpp` | Backend known-answer tests | Best fit for XChaCha20-Poly1305, Ed25519, X25519, Argon2id. |
 | [x] | Hash abstraction | 2 | `Hashing/Hash.hpp`, `Hashing/HashAlgorithm.hpp`, `Hashing/Digest.hpp` | `Hashing/Hash.cpp` | Hash API tests | Common one-shot, streaming, fixed digest type contracts. |
-| [ ] | SHA-256 | 3 | `Hashing/Sha256.hpp` | Backend-backed | NIST/RFC known-answer tests, benchmark | Required baseline hash. |
-| [ ] | SHA-512 | 3 | `Hashing/Sha512.hpp` | Backend-backed | Known-answer tests, benchmark | Required for HMAC-SHA512 and interoperability. |
+| [x] | SHA-256 | 3 | `Hashing/Sha256.hpp` | OpenSSL-backed when `NGIN_BASE_CRYPTO_OPENSSL=ON` | NIST/RFC known-answer tests, benchmark | Required baseline hash. |
+| [x] | SHA-512 | 3 | `Hashing/Sha512.hpp` | OpenSSL-backed when `NGIN_BASE_CRYPTO_OPENSSL=ON` | Known-answer tests, benchmark | Required for HMAC-SHA512 and interoperability. |
 | [ ] | SHA-3 | 4 | `Hashing/Sha3.hpp` | Backend-backed | Known-answer tests | Add if backend support and use cases justify it. |
 | [ ] | BLAKE3 | 4 | `Hashing/Blake3.hpp` | Backend-backed or approved package | Official vector tests, benchmark | High-performance optional algorithm; dependency approval required. |
 | [x] | MAC abstraction | 2 | `Mac/Mac.hpp`, `Mac/MacAlgorithm.hpp` | `Mac/Hmac.cpp` | MAC API tests | Keep tag length and verification explicit. |

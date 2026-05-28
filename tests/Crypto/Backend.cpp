@@ -52,15 +52,25 @@ TEST_CASE("CryptoContext reports unsupported algorithms as values", "[Crypto][Ba
     REQUIRE(result.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
 }
 
-TEST_CASE("CreateContext returns platform random backend context", "[Crypto][Backend]")
+TEST_CASE("CreateContext returns configured default backend context", "[Crypto][Backend]")
 {
     auto context = NGIN::Crypto::Backend::CreateContext();
 
     REQUIRE(context.HasValue());
-    REQUIRE(context.Value().Info().Kind() == NGIN::Crypto::Backend::BackendKind::Platform);
-    REQUIRE(context.Value().Info().Name() == "platform-random");
     REQUIRE(context.Value().SupportsRandom());
-    REQUIRE_FALSE(context.Value().Supports(NGIN::Crypto::HashAlgorithm::Sha256));
+
+    if (context.Value().Info().Name() == "openssl")
+    {
+        REQUIRE(context.Value().Info().Kind() == NGIN::Crypto::Backend::BackendKind::ExternalPackage);
+        REQUIRE(context.Value().Supports(NGIN::Crypto::HashAlgorithm::Sha256));
+        REQUIRE(context.Value().Supports(NGIN::Crypto::HashAlgorithm::Sha512));
+    }
+    else
+    {
+        REQUIRE(context.Value().Info().Kind() == NGIN::Crypto::Backend::BackendKind::Platform);
+        REQUIRE(context.Value().Info().Name() == "platform-random");
+        REQUIRE_FALSE(context.Value().Supports(NGIN::Crypto::HashAlgorithm::Sha256));
+    }
 }
 
 TEST_CASE("CryptoContext fills random bytes when capability is present", "[Crypto][Backend]")

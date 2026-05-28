@@ -25,6 +25,7 @@ option(NGIN_BASE_ENABLE_LTO        "Enable Link Time Optimization for Release/Re
 option(NGIN_BASE_STRICT_WARNINGS   "Enable extra warning flags" ON)
 option(NGIN_BASE_ALL_FEATURES      "Convenience: enable tests + examples + benchmarks" OFF)
 option(NGIN_BASE_EXPORT_COMPILE_COMMANDS "Generate compile_commands.json" ON)
+option(NGIN_BASE_CRYPTO_OPENSSL    "Enable optional OpenSSL-backed crypto algorithms" OFF)
 
 set(NGIN_BASE_CLANG_GCC_TOOLCHAIN "" CACHE PATH "Clang (Linux): GCC toolchain root passed via --gcc-toolchain")
 
@@ -149,6 +150,8 @@ endif()
 
 set(NGIN_BASE_EXPORT_TARGETS)
 set(ngin_base_primary_target "")
+set(NGIN_BASE_PRIVATE_DEFINITIONS)
+set(NGIN_BASE_PRIVATE_LIBRARIES)
 
 set(NGIN_BASE_CORE_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/CoreInit.cpp
@@ -180,6 +183,15 @@ set(NGIN_BASE_CORE_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Serialization/XML/XmlParser.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Serialization/XML/XmlArchive.cpp
 )
+
+if(NGIN_BASE_CRYPTO_OPENSSL)
+  find_package(OpenSSL REQUIRED COMPONENTS Crypto)
+  list(APPEND NGIN_BASE_CORE_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Crypto/Backends/OpenSslBackend.cpp
+  )
+  list(APPEND NGIN_BASE_PRIVATE_DEFINITIONS NGIN_BASE_CRYPTO_HAS_OPENSSL)
+  list(APPEND NGIN_BASE_PRIVATE_LIBRARIES OpenSSL::Crypto)
+endif()
 
 if(WIN32)
   list(APPEND NGIN_BASE_CORE_SOURCES
@@ -293,8 +305,8 @@ if(NGIN_BASE_BUILD_STATIC OR NGIN_BASE_BUILD_SHARED)
   target_compile_features(NGIN.Base.Object PRIVATE cxx_std_23)
   set_target_properties(NGIN.Base.Object PROPERTIES CXX_EXTENSIONS OFF)
   target_include_directories(NGIN.Base.Object PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-  target_compile_definitions(NGIN.Base.Object PRIVATE ${NGIN_BASE_PLATFORM_DEFINITIONS})
-  target_link_libraries(NGIN.Base.Object PRIVATE NGIN.Base.BuildOptions)
+  target_compile_definitions(NGIN.Base.Object PRIVATE ${NGIN_BASE_PLATFORM_DEFINITIONS} ${NGIN_BASE_PRIVATE_DEFINITIONS})
+  target_link_libraries(NGIN.Base.Object PRIVATE NGIN.Base.BuildOptions ${NGIN_BASE_PRIVATE_LIBRARIES})
   ngin_enable_warnings(NGIN.Base.Object)
 endif()
 
@@ -321,7 +333,7 @@ if(NGIN_BASE_BUILD_STATIC)
   set_target_properties(NGIN.Base.Static PROPERTIES
     OUTPUT_NAME "NGINBase"
     EXPORT_NAME BaseStatic)
-  target_link_libraries(NGIN.Base.Static PRIVATE NGIN.Base.BuildOptions)
+  target_link_libraries(NGIN.Base.Static PRIVATE NGIN.Base.BuildOptions ${NGIN_BASE_PRIVATE_LIBRARIES})
   ngin_enable_warnings(NGIN.Base.Static)
   list(APPEND NGIN_BASE_EXPORT_TARGETS NGIN.Base.Static)
   add_library(NGIN::Base::Static ALIAS NGIN.Base.Static)
@@ -354,7 +366,7 @@ if(NGIN_BASE_BUILD_SHARED)
       SOVERSION ${PROJECT_VERSION_MAJOR}
       VERSION ${PROJECT_VERSION})
   endif()
-  target_link_libraries(NGIN.Base.Shared PRIVATE NGIN.Base.BuildOptions)
+  target_link_libraries(NGIN.Base.Shared PRIVATE NGIN.Base.BuildOptions ${NGIN_BASE_PRIVATE_LIBRARIES})
   ngin_enable_warnings(NGIN.Base.Shared)
   if(WIN32)
     set_target_properties(NGIN.Base.Shared PROPERTIES ARCHIVE_OUTPUT_NAME "NGINBaseShared")
