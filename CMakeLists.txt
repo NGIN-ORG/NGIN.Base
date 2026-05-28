@@ -228,7 +228,7 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/FileSystemDriver.linux.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/LocalFileSystem.posix.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/LocalFileSystem.linux.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/SocketPlatform.linux.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/SocketPlatform.posix.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/NetworkDriver.linux.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/TcpSocket.posix.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/UdpSocket.posix.cpp

@@ -7,14 +7,13 @@
 
 namespace NGIN::Net::detail
 {
-#if defined(NGIN_PLATFORM_WINDOWS)
     namespace
     {
-        std::once_flag s_wsaOnce;
+        std::once_flag    s_wsaOnce;
         std::atomic<bool> s_wsaOk {false};
-        std::once_flag s_extOnce;
-        AcceptExFn s_acceptEx = nullptr;
-        ConnectExFn s_connectEx = nullptr;
+        std::once_flag    s_extOnce;
+        AcceptExFn        s_acceptEx  = nullptr;
+        ConnectExFn       s_connectEx = nullptr;
 
         void LoadExtensions() noexcept
         {
@@ -29,7 +28,7 @@ namespace NGIN::Net::detail
                 return;
             }
 
-            DWORD bytes = 0;
+            DWORD bytes      = 0;
             GUID  acceptGuid = WSAID_ACCEPTEX;
             ::WSAIoctl(probe,
                        SIO_GET_EXTENSION_FUNCTION_POINTER,
@@ -54,82 +53,77 @@ namespace NGIN::Net::detail
 
             ::closesocket(probe);
         }
-    }
-#endif
+    }// namespace
 
     bool EnsureInitialized() noexcept
     {
-#if defined(NGIN_PLATFORM_WINDOWS)
         std::call_once(s_wsaOnce, []() {
-            WSADATA data {};
+            WSADATA   data {};
             const int result = ::WSAStartup(MAKEWORD(2, 2), &data);
             s_wsaOk.store(result == 0, std::memory_order_release);
         });
         return s_wsaOk.load(std::memory_order_acquire);
-#else
-        return true;
-#endif
     }
 
     NetError MapError(int native) noexcept
     {
         NetErrorCode code = NetErrorCode::Unknown;
-#if defined(NGIN_PLATFORM_WINDOWS)
         switch (native)
         {
-            case WSAEWOULDBLOCK: code = NetErrorCode::WouldBlock; break;
-            case WSAETIMEDOUT: code = NetErrorCode::TimedOut; break;
-            case WSAECONNRESET: code = NetErrorCode::ConnectionReset; break;
-            case WSAECONNABORTED: code = NetErrorCode::Disconnected; break;
-            case WSAENETUNREACH: code = NetErrorCode::HostUnreachable; break;
-            case WSAEMSGSIZE: code = NetErrorCode::MessageTooLarge; break;
-            case WSAEACCES: code = NetErrorCode::PermissionDenied; break;
-            case WSAECONNREFUSED: code = NetErrorCode::Disconnected; break;
-            case ERROR_SEM_TIMEOUT: code = NetErrorCode::TimedOut; break;
-            case ERROR_NETNAME_DELETED: code = NetErrorCode::ConnectionReset; break;
-            case ERROR_CONNECTION_ABORTED: code = NetErrorCode::Disconnected; break;
-            case ERROR_CONNECTION_REFUSED: code = NetErrorCode::Disconnected; break;
-            case ERROR_NETWORK_UNREACHABLE: code = NetErrorCode::HostUnreachable; break;
-            case ERROR_HOST_UNREACHABLE: code = NetErrorCode::HostUnreachable; break;
-            case ERROR_ACCESS_DENIED: code = NetErrorCode::PermissionDenied; break;
-            default: break;
+            case WSAEWOULDBLOCK:
+                code = NetErrorCode::WouldBlock;
+                break;
+            case WSAETIMEDOUT:
+                code = NetErrorCode::TimedOut;
+                break;
+            case WSAECONNRESET:
+                code = NetErrorCode::ConnectionReset;
+                break;
+            case WSAECONNABORTED:
+                code = NetErrorCode::Disconnected;
+                break;
+            case WSAENETUNREACH:
+                code = NetErrorCode::HostUnreachable;
+                break;
+            case WSAEMSGSIZE:
+                code = NetErrorCode::MessageTooLarge;
+                break;
+            case WSAEACCES:
+                code = NetErrorCode::PermissionDenied;
+                break;
+            case WSAECONNREFUSED:
+                code = NetErrorCode::Disconnected;
+                break;
+            case ERROR_SEM_TIMEOUT:
+                code = NetErrorCode::TimedOut;
+                break;
+            case ERROR_NETNAME_DELETED:
+                code = NetErrorCode::ConnectionReset;
+                break;
+            case ERROR_CONNECTION_ABORTED:
+                code = NetErrorCode::Disconnected;
+                break;
+            case ERROR_CONNECTION_REFUSED:
+                code = NetErrorCode::Disconnected;
+                break;
+            case ERROR_NETWORK_UNREACHABLE:
+                code = NetErrorCode::HostUnreachable;
+                break;
+            case ERROR_HOST_UNREACHABLE:
+                code = NetErrorCode::HostUnreachable;
+                break;
+            case ERROR_ACCESS_DENIED:
+                code = NetErrorCode::PermissionDenied;
+                break;
+            default:
+                break;
         }
-#else
-        switch (native)
-        {
-            case EWOULDBLOCK:
-#if defined(EAGAIN) && EAGAIN != EWOULDBLOCK
-            case EAGAIN:
-#endif
-                code = NetErrorCode::WouldBlock; break;
-            case ETIMEDOUT: code = NetErrorCode::TimedOut; break;
-            case ECONNRESET: code = NetErrorCode::ConnectionReset; break;
-            case ECONNABORTED: code = NetErrorCode::Disconnected; break;
-            case ENETUNREACH:
-#if defined(EHOSTUNREACH)
-            case EHOSTUNREACH:
-#endif
-                code = NetErrorCode::HostUnreachable; break;
-            case EMSGSIZE: code = NetErrorCode::MessageTooLarge; break;
-            case EACCES:
-#if defined(EPERM)
-            case EPERM:
-#endif
-                code = NetErrorCode::PermissionDenied; break;
-            case ECONNREFUSED: code = NetErrorCode::Disconnected; break;
-            default: break;
-        }
-#endif
         return NetError {code, native};
     }
 
     NetError LastError() noexcept
     {
-#if defined(NGIN_PLATFORM_WINDOWS)
         return MapError(::WSAGetLastError());
-#else
-        return MapError(errno);
-#endif
     }
 
     bool IsWouldBlock(const NetError& error) noexcept
@@ -139,11 +133,7 @@ namespace NGIN::Net::detail
 
     bool IsInProgress(const NetError& error) noexcept
     {
-#if defined(NGIN_PLATFORM_WINDOWS)
         return error.native == WSAEINPROGRESS || error.native == WSAEWOULDBLOCK || error.native == WSAEALREADY;
-#else
-        return error.native == EINPROGRESS || error.native == EALREADY;
-#endif
     }
 
     NativeSocket ToNative(const SocketHandle& handle) noexcept
@@ -157,10 +147,10 @@ namespace NGIN::Net::detail
     }
 
     SocketHandle CreateSocket(AddressFamily family,
-                              int type,
-                              int protocol,
-                              bool nonBlocking,
-                              NetError& error) noexcept
+                              int           type,
+                              int           protocol,
+                              bool          nonBlocking,
+                              NetError&     error) noexcept
     {
         if (!EnsureInitialized())
         {
@@ -174,12 +164,7 @@ namespace NGIN::Net::detail
             af = AF_INET6;
         }
 
-        const NativeSocket sock =
-#if defined(NGIN_PLATFORM_WINDOWS)
-                ::WSASocketW(af, type, protocol, nullptr, 0, WSA_FLAG_OVERLAPPED);
-#else
-                ::socket(af, type, protocol);
-#endif
+        const NativeSocket sock = ::WSASocketW(af, type, protocol, nullptr, 0, WSA_FLAG_OVERLAPPED);
         if (sock == InvalidNativeSocket)
         {
             error = LastError();
@@ -201,66 +186,50 @@ namespace NGIN::Net::detail
     bool SetNonBlocking(SocketHandle& handle, bool value) noexcept
     {
         const NativeSocket sock = ToNative(handle);
-#if defined(NGIN_PLATFORM_WINDOWS)
-        u_long mode = value ? 1UL : 0UL;
+        u_long             mode = value ? 1UL : 0UL;
         return ::ioctlsocket(sock, static_cast<long>(FIONBIO), &mode) == 0;
-#else
-        const int flags = ::fcntl(sock, F_GETFL, 0);
-        if (flags < 0)
-        {
-            return false;
-        }
-        const int newFlags = value ? (flags | O_NONBLOCK) : (flags & ~O_NONBLOCK);
-        return ::fcntl(sock, F_SETFL, newFlags) == 0;
-#endif
     }
 
     bool SetReuseAddress(SocketHandle& handle, bool value) noexcept
     {
         const NativeSocket sock = ToNative(handle);
-        const int opt = value ? 1 : 0;
+        const int          opt  = value ? 1 : 0;
         return ::setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&opt), sizeof(opt)) == 0;
     }
 
     bool SetReusePort(SocketHandle& handle, bool value) noexcept
     {
-#if defined(SO_REUSEPORT)
-        const NativeSocket sock = ToNative(handle);
-        const int opt = value ? 1 : 0;
-        return ::setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, reinterpret_cast<const char*>(&opt), sizeof(opt)) == 0;
-#else
-        (void)handle;
-        (void)value;
+        (void) handle;
+        (void) value;
         return true;
-#endif
     }
 
     bool SetNoDelay(SocketHandle& handle, bool value) noexcept
     {
         const NativeSocket sock = ToNative(handle);
-        const int opt = value ? 1 : 0;
+        const int          opt  = value ? 1 : 0;
         return ::setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&opt), sizeof(opt)) == 0;
     }
 
     bool SetBroadcast(SocketHandle& handle, bool value) noexcept
     {
         const NativeSocket sock = ToNative(handle);
-        const int opt = value ? 1 : 0;
+        const int          opt  = value ? 1 : 0;
         return ::setsockopt(sock, SOL_SOCKET, SO_BROADCAST, reinterpret_cast<const char*>(&opt), sizeof(opt)) == 0;
     }
 
     bool SetV6Only(SocketHandle& handle, bool value) noexcept
     {
         const NativeSocket sock = ToNative(handle);
-        const int opt = value ? 1 : 0;
+        const int          opt  = value ? 1 : 0;
         return ::setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, reinterpret_cast<const char*>(&opt), sizeof(opt)) == 0;
     }
 
-    NetExpected<void> ApplySocketOptions(SocketHandle& handle,
-                                         AddressFamily family,
+    NetExpected<void> ApplySocketOptions(SocketHandle&        handle,
+                                         AddressFamily        family,
                                          const SocketOptions& options,
-                                         bool isTcp,
-                                         bool isUdp) noexcept
+                                         bool                 isTcp,
+                                         bool                 isUdp) noexcept
     {
         if (options.reuseAddress && !SetReuseAddress(handle, true))
         {
@@ -299,8 +268,7 @@ namespace NGIN::Net::detail
     NetExpected<void> Shutdown(SocketHandle& handle, ShutdownMode mode) noexcept
     {
         const NativeSocket sock = ToNative(handle);
-#if defined(NGIN_PLATFORM_WINDOWS)
-        int how = SD_BOTH;
+        int                how  = SD_BOTH;
         if (mode == ShutdownMode::Receive)
         {
             how = SD_RECEIVE;
@@ -309,17 +277,7 @@ namespace NGIN::Net::detail
         {
             how = SD_SEND;
         }
-#else
-        int how = SHUT_RDWR;
-        if (mode == ShutdownMode::Receive)
-        {
-            how = SHUT_RD;
-        }
-        else if (mode == ShutdownMode::Send)
-        {
-            how = SHUT_WR;
-        }
-#endif
+
         if (::shutdown(sock, how) == 0)
         {
             return {};
@@ -335,11 +293,8 @@ namespace NGIN::Net::detail
             handle.Reset();
             return true;
         }
-#if defined(NGIN_PLATFORM_WINDOWS)
+
         const int result = ::closesocket(sock);
-#else
-        const int result = ::close(sock);
-#endif
         handle.Reset();
         return result == 0;
     }
@@ -351,8 +306,8 @@ namespace NGIN::Net::detail
         {
             sockaddr_in addr {};
             addr.sin_family = AF_INET;
-            addr.sin_port = htons(endpoint.port);
-            auto bytes = endpoint.address.Bytes();
+            addr.sin_port   = htons(endpoint.port);
+            auto bytes      = endpoint.address.Bytes();
             std::memcpy(&addr.sin_addr, bytes.data(), bytes.size());
             std::memcpy(&storage, &addr, sizeof(addr));
             length = static_cast<socklen_t>(sizeof(sockaddr_in));
@@ -361,8 +316,8 @@ namespace NGIN::Net::detail
 
         sockaddr_in6 addr6 {};
         addr6.sin6_family = AF_INET6;
-        addr6.sin6_port = htons(endpoint.port);
-        auto bytes = endpoint.address.Bytes();
+        addr6.sin6_port   = htons(endpoint.port);
+        auto bytes        = endpoint.address.Bytes();
         std::memcpy(&addr6.sin6_addr, bytes.data(), bytes.size());
         std::memcpy(&storage, &addr6, sizeof(addr6));
         length = static_cast<socklen_t>(sizeof(sockaddr_in6));
@@ -379,7 +334,7 @@ namespace NGIN::Net::detail
             std::array<NGIN::Byte, IpAddress::V6Size> bytes {};
             std::memcpy(bytes.data(), &addr.sin_addr, IpAddress::V4Size);
             endpoint.address = IpAddress(AddressFamily::V4, bytes);
-            endpoint.port = ntohs(addr.sin_port);
+            endpoint.port    = ntohs(addr.sin_port);
             return endpoint;
         }
 
@@ -388,15 +343,15 @@ namespace NGIN::Net::detail
         std::array<NGIN::Byte, IpAddress::V6Size> bytes {};
         std::memcpy(bytes.data(), &addr6.sin6_addr, IpAddress::V6Size);
         endpoint.address = IpAddress(AddressFamily::V6, bytes);
-        endpoint.port = ntohs(addr6.sin6_port);
+        endpoint.port    = ntohs(addr6.sin6_port);
         return endpoint;
     }
 
     NetExpected<void> CheckConnectResult(SocketHandle& handle) noexcept
     {
-        const NativeSocket sock = ToNative(handle);
-        int error = 0;
-        socklen_t len = static_cast<socklen_t>(sizeof(error));
+        const NativeSocket sock  = ToNative(handle);
+        int                error = 0;
+        socklen_t          len   = static_cast<socklen_t>(sizeof(error));
         if (::getsockopt(sock, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&error), &len) != 0)
         {
             return NGIN::Utilities::Unexpected(LastError());
@@ -408,7 +363,6 @@ namespace NGIN::Net::detail
         return NGIN::Utilities::Unexpected(MapError(error));
     }
 
-#if defined(NGIN_PLATFORM_WINDOWS)
     AcceptExFn GetAcceptEx() noexcept
     {
         std::call_once(s_extOnce, &LoadExtensions);
@@ -424,8 +378,8 @@ namespace NGIN::Net::detail
     AddressFamily GetSocketFamily(SocketHandle& handle) noexcept
     {
         sockaddr_storage storage {};
-        int length = static_cast<int>(sizeof(storage));
-        const auto sock = ToNative(handle);
+        int              length = static_cast<int>(sizeof(storage));
+        const auto       sock   = ToNative(handle);
         if (::getsockname(sock, reinterpret_cast<sockaddr*>(&storage), &length) != 0)
         {
             return AddressFamily::V4;
@@ -441,8 +395,8 @@ namespace NGIN::Net::detail
     bool EnsureBoundForConnectEx(SocketHandle& handle, const Endpoint& remoteEndpoint) noexcept
     {
         sockaddr_storage storage {};
-        int length = static_cast<int>(sizeof(storage));
-        const auto sock = ToNative(handle);
+        int              length = static_cast<int>(sizeof(storage));
+        const auto       sock   = ToNative(handle);
         if (::getsockname(sock, reinterpret_cast<sockaddr*>(&storage), &length) != 0)
         {
             const int err = ::WSAGetLastError();
@@ -481,7 +435,7 @@ namespace NGIN::Net::detail
         }
         local.port = 0;
 
-        socklen_t bindLength = 0;
+        socklen_t        bindLength = 0;
         sockaddr_storage bindStorage {};
         if (!ToSockAddr(local, bindStorage, bindLength))
         {
@@ -493,22 +447,21 @@ namespace NGIN::Net::detail
 
     bool IsV6Only(SocketHandle& handle) noexcept
     {
-        const auto sock = ToNative(handle);
-        int value = 0;
-        int length = static_cast<int>(sizeof(value));
+        const auto sock   = ToNative(handle);
+        int        value  = 0;
+        int        length = static_cast<int>(sizeof(value));
         if (::getsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, reinterpret_cast<char*>(&value), &length) != 0)
         {
             return true;
         }
         return value != 0;
     }
-#endif
-}
+}// namespace NGIN::Net::detail
 
 namespace NGIN::Net
 {
     void SocketHandle::Close() noexcept
     {
-        (void)detail::CloseSocket(*this);
+        (void) detail::CloseSocket(*this);
     }
-}
+}// namespace NGIN::Net
