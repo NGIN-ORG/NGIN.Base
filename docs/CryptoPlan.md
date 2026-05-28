@@ -361,7 +361,7 @@ all complete for the intended phase.
 | [x] | MAC abstraction | 2 | `Mac/Mac.hpp`, `Mac/MacAlgorithm.hpp` | `Mac/Hmac.cpp` | MAC API tests | Keep tag length and verification explicit. |
 | [ ] | HMAC-SHA256 | 3 | `Mac/HmacSha256.hpp` | Backend-backed | RFC vector tests | Preferred baseline HMAC. |
 | [ ] | HMAC-SHA512 | 3 | `Mac/HmacSha512.hpp` | Backend-backed | RFC vector tests | Add with SHA-512. |
-| [ ] | KDF abstraction | 2 | `Kdf/KeyDerivation.hpp` | None or backend dispatch | KDF API tests | Inputs are spans; outputs caller-owned or secure buffers. |
+| [x] | KDF abstraction | 2 | `Kdf/KeyDerivation.hpp` | `Kdf/KeyDerivation.cpp` | KDF API tests | Inputs are spans; outputs caller-owned or secure buffers. |
 | [ ] | HKDF | 3 | `Kdf/Hkdf.hpp` | Backend-backed or HMAC composition if backend-approved | RFC 5869 vectors | Extract and expand API plus one-shot derive. |
 | [ ] | PBKDF2 | 3 | `Kdf/Pbkdf2.hpp` | Backend-backed | Known-answer tests | Interop only; docs should prefer Argon2id for password storage. |
 | [ ] | Argon2id | 3 | `Kdf/Argon2id.hpp` | Backend-backed | RFC 9106 vectors, parameter validation tests | Do not implement core algorithm in-house. |

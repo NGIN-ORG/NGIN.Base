@@ -14,6 +14,10 @@
 #include <NGIN/Crypto/Hashing/Digest.hpp>
 #include <NGIN/Crypto/Hashing/Hash.hpp>
 #include <NGIN/Crypto/Hashing/HashAlgorithm.hpp>
+#include <NGIN/Crypto/Kdf/Argon2id.hpp>
+#include <NGIN/Crypto/Kdf/Hkdf.hpp>
+#include <NGIN/Crypto/Kdf/KeyDerivation.hpp>
+#include <NGIN/Crypto/Kdf/Pbkdf2.hpp>
 #include <NGIN/Crypto/Mac/Hmac.hpp>
 #include <NGIN/Crypto/Mac/HmacSha256.hpp>
 #include <NGIN/Crypto/Mac/HmacSha512.hpp>
