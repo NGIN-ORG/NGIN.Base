@@ -3,6 +3,9 @@
 #include <NGIN/Crypto/Algorithm.hpp>
 #include <NGIN/Crypto/ByteBuffer.hpp>
 #include <NGIN/Crypto/Concepts.hpp>
+#include <NGIN/Crypto/Encoding/Base64.hpp>
+#include <NGIN/Crypto/Encoding/Base64Url.hpp>
+#include <NGIN/Crypto/Encoding/Hex.hpp>
 #include <NGIN/Crypto/Errors/CryptoError.hpp>
 #include <NGIN/Crypto/Memory/ConstantTime.hpp>
 #include <NGIN/Crypto/Memory/Secret.hpp>

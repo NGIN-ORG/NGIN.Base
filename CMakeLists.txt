@@ -159,6 +159,9 @@ set(NGIN_BASE_CORE_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/FileSystemUtilities.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/LocalFileSystem.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Crypto/Errors/CryptoError.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Crypto/Encoding/Base64.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Crypto/Encoding/Base64Url.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Crypto/Encoding/Hex.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Crypto/Memory/ConstantTime.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Crypto/Memory/ZeroMemory.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Crypto/Memory/SecureBuffer.cpp

@@ -340,9 +340,9 @@ all complete for the intended phase.
 | [ ] | Secure string | 2 | `Memory/SecureString.hpp` | Optional | Wipe and conversion tests | Add only if real text secret use cases remain after `SecureBuffer`. |
 | [x] | OS random bytes | 1 | `Random/Random.hpp`, `Random/RandomBytes.hpp`, `Random/SecureRandom.hpp`, `Random/RandomError.hpp` | `Random/SecureRandom.*.cpp` | `RandomTests.cpp` | Linux `getrandom`, Windows `BCryptGenRandom`, Apple `SecRandomCopyBytes`, POSIX fallback policy. |
 | [ ] | Entropy source abstraction | 2 | `Random/EntropySource.hpp` | `Random/SecureRandom.cpp` | Deterministic test source tests | For tests and backend integration, not for userland PRNG security claims. |
-| [ ] | Hex encoding | 1 | `Encoding/Hex.hpp` | `Encoding/Hex.cpp` | `EncodingTests.cpp`, invalid input tests | Constant-time decode is not required unless used for secret comparison. |
-| [ ] | Base64 | 1 | `Encoding/Base64.hpp` | `Encoding/Base64.cpp` | RFC vector tests, invalid input tests | Strict decoder by default; no whitespace unless option enables it. |
-| [ ] | Base64Url | 1 | `Encoding/Base64Url.hpp` | `Encoding/Base64Url.cpp` | RFC vector tests | Required by tokens; padding policy explicit. |
+| [x] | Hex encoding | 1 | `Encoding/Hex.hpp` | `Encoding/Hex.cpp` | `EncodingTests.cpp`, invalid input tests | Constant-time decode is not required unless used for secret comparison. |
+| [x] | Base64 | 1 | `Encoding/Base64.hpp` | `Encoding/Base64.cpp` | RFC vector tests, invalid input tests | Strict decoder by default; no whitespace unless option enables it. |
+| [x] | Base64Url | 1 | `Encoding/Base64Url.hpp` | `Encoding/Base64Url.cpp` | RFC vector tests | Required by tokens; padding policy explicit. |
 | [ ] | PEM | 3 | `Encoding/Pem.hpp` | `Encoding/Pem.cpp` | PEM parse and reject tests | Parser only; key interpretation belongs to backend/key modules. |
 | [ ] | DER | 3 | `Encoding/Der.hpp` | `Encoding/Der.cpp` | DER length and malformed tests | Minimal strict DER reader/writer needed by keys/certs; avoid full ASN.1 generality in phase 1. |
 | [ ] | Backend context | 2 | `Backend/CryptoContext.hpp`, `Backend/BackendCapabilities.hpp`, `Backend/BackendInfo.hpp`, `Backend/BackendOptions.hpp` | `Backends/BackendDispatch.cpp` | Fake backend tests | Stable neutral contract for algorithms, capabilities, diagnostics, and policy. No public backend-specific C++ classes. |
