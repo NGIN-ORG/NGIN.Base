@@ -62,6 +62,22 @@ namespace NGIN::Crypto::Kdf
             return supported.Error();
         }
 
+        switch (parameters.Algorithm())
+        {
+            case KdfAlgorithm::HkdfSha256:
+            case KdfAlgorithm::HkdfSha512:
+                return context.HkdfInto(
+                        parameters.Algorithm(),
+                        parameters.Hkdf()->inputKeyMaterial,
+                        parameters.Hkdf()->salt,
+                        parameters.Hkdf()->info,
+                        output);
+            case KdfAlgorithm::Pbkdf2Sha256:
+            case KdfAlgorithm::Pbkdf2Sha512:
+            case KdfAlgorithm::Argon2id:
+                return UnsupportedAlgorithm();
+        }
+
         return UnsupportedAlgorithm();
     }
 

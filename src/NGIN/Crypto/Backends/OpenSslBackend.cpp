@@ -4,6 +4,7 @@
 
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
+#include <openssl/kdf.h>
 #include <openssl/opensslv.h>
 
 #include <limits>
@@ -56,6 +57,28 @@ namespace NGIN::Crypto::Backend::detail
 
             return nullptr;
         }
+
+        [[nodiscard]] const EVP_MD* SelectDigest(KdfAlgorithm algorithm) noexcept
+        {
+            switch (algorithm)
+            {
+                case KdfAlgorithm::HkdfSha256:
+                case KdfAlgorithm::Pbkdf2Sha256:
+                    return EVP_sha256();
+                case KdfAlgorithm::HkdfSha512:
+                case KdfAlgorithm::Pbkdf2Sha512:
+                    return EVP_sha512();
+                case KdfAlgorithm::Argon2id:
+                    return nullptr;
+            }
+
+            return nullptr;
+        }
+
+        [[nodiscard]] bool FitsOpenSslInt(NGIN::UIntSize size) noexcept
+        {
+            return size <= static_cast<NGIN::UIntSize>(std::numeric_limits<int>::max());
+        }
     }// namespace
 
     CryptoExpected<CryptoContext> CreateOpenSslContext(const BackendOptions& options) noexcept
@@ -68,6 +91,7 @@ namespace NGIN::Crypto::Backend::detail
                 .Enable(HashAlgorithm::Sha512)
                 .Enable(MacAlgorithm::HmacSha256)
                 .Enable(MacAlgorithm::HmacSha512);
+        capabilities.Enable(KdfAlgorithm::HkdfSha256).Enable(KdfAlgorithm::HkdfSha512);
 
         return CryptoContext {
                 BackendInfo {
@@ -132,7 +156,7 @@ namespace NGIN::Crypto::Backend::detail
         }
 
         const auto keyBytes = key.Bytes();
-        if (keyBytes.size() > static_cast<NGIN::UIntSize>(std::numeric_limits<int>::max()))
+        if (!FitsOpenSslInt(keyBytes.size()))
         {
             return InvalidKey();
         }
@@ -155,5 +179,74 @@ namespace NGIN::Crypto::Backend::detail
         }
 
         return static_cast<NGIN::UIntSize>(produced) == output.size() ? CryptoExpected<void> {} : InternalError();
+    }
+
+    CryptoExpected<void> HkdfOpenSsl(
+            KdfAlgorithm                     algorithm,
+            NGIN::Crypto::Memory::SecretView inputKeyMaterial,
+            ConstByteSpan                    salt,
+            ConstByteSpan                    info,
+            ByteSpan                         output) noexcept
+    {
+        const EVP_MD* digest = SelectDigest(algorithm);
+        if (digest == nullptr || (algorithm != KdfAlgorithm::HkdfSha256 && algorithm != KdfAlgorithm::HkdfSha512))
+        {
+            return UnsupportedAlgorithm();
+        }
+        if (!FitsOpenSslInt(inputKeyMaterial.Size()) || !FitsOpenSslInt(salt.size()) || !FitsOpenSslInt(info.size()))
+        {
+            return InvalidKey();
+        }
+
+        EVP_PKEY_CTX* context = EVP_PKEY_CTX_new_id(EVP_PKEY_HKDF, nullptr);
+        if (context == nullptr)
+        {
+            return InternalError();
+        }
+
+        const auto  inputBytes = inputKeyMaterial.Bytes();
+        const auto  zeroByte   = NGIN::Byte {0};
+        const auto* inputData  = inputBytes.empty() ? &zeroByte : inputBytes.data();
+
+        if (EVP_PKEY_derive_init(context) <= 0 ||
+            EVP_PKEY_CTX_set_hkdf_md(context, digest) <= 0 ||
+            EVP_PKEY_CTX_set1_hkdf_key(
+                    context,
+                    reinterpret_cast<const unsigned char*>(inputData),
+                    static_cast<int>(inputBytes.size())) <= 0)
+        {
+            EVP_PKEY_CTX_free(context);
+            return InternalError();
+        }
+
+        if (!salt.empty() &&
+            EVP_PKEY_CTX_set1_hkdf_salt(
+                    context,
+                    reinterpret_cast<const unsigned char*>(salt.data()),
+                    static_cast<int>(salt.size())) <= 0)
+        {
+            EVP_PKEY_CTX_free(context);
+            return InternalError();
+        }
+
+        if (!info.empty() &&
+            EVP_PKEY_CTX_add1_hkdf_info(
+                    context,
+                    reinterpret_cast<const unsigned char*>(info.data()),
+                    static_cast<int>(info.size())) <= 0)
+        {
+            EVP_PKEY_CTX_free(context);
+            return InternalError();
+        }
+
+        auto outputSize = output.size();
+        if (EVP_PKEY_derive(context, reinterpret_cast<unsigned char*>(output.data()), &outputSize) <= 0)
+        {
+            EVP_PKEY_CTX_free(context);
+            return InternalError();
+        }
+
+        EVP_PKEY_CTX_free(context);
+        return outputSize == output.size() ? CryptoExpected<void> {} : InternalError();
     }
 }// namespace NGIN::Crypto::Backend::detail

@@ -16,4 +16,11 @@ namespace NGIN::Crypto::Backend::detail
             NGIN::Crypto::Memory::SecretView key,
             ConstByteSpan                    input,
             ByteSpan                         output) noexcept;
+
+    [[nodiscard]] CryptoExpected<void> HkdfOpenSsl(
+            KdfAlgorithm                     algorithm,
+            NGIN::Crypto::Memory::SecretView inputKeyMaterial,
+            ConstByteSpan                    salt,
+            ConstByteSpan                    info,
+            ByteSpan                         output) noexcept;
 }// namespace NGIN::Crypto::Backend::detail
