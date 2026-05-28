@@ -370,7 +370,8 @@ all complete for the intended phase.
 | [ ] | ChaCha20-Poly1305 | 3 | `Symmetric/ChaCha20Poly1305.hpp` | Backend-backed | RFC 8439 vectors, invalid tag tests | Prefer where AES acceleration is unavailable. |
 | [ ] | XChaCha20-Poly1305 | 3 | `Symmetric/XChaCha20Poly1305.hpp` | Libsodium or approved backend | Known-answer tests | Preferred random-nonce AEAD when backend exists. |
 | [ ] | SecretBox | 4 | `Symmetric/SecretBox.hpp` | Backend-backed | Roundtrip and invalid tag tests | Convenience wrapper over XChaCha20-Poly1305 or backend equivalent. |
-| [ ] | Key type wrappers | 2 | `Asymmetric/KeyTypes.hpp`, `PublicKey.hpp`, `PrivateKey.hpp`, `KeyPair.hpp` | `Asymmetric/KeyTypes.cpp` | Type size, move, wipe tests | Strong algorithm-specific key types prevent accidental key reuse. |
+| [x] | Key type wrappers | 2 | `Asymmetric/KeyTypes.hpp`, `PublicKey.hpp`, `PrivateKey.hpp`, `KeyPair.hpp` | Header-only | Type size, move, wipe tests | Strong algorithm-specific key types prevent accidental key reuse. |
+| [x] | Signature abstraction | 2 | `Signatures/Signature.hpp`, `Sign.hpp`, `Verify.hpp` | `Signatures/Signature.cpp` | Signature API tests | Sign/verify contract only; concrete algorithms remain backend-backed. |
 | [ ] | Ed25519 | 3 | `Asymmetric/Ed25519.hpp`, `Signatures/Sign.hpp`, `Verify.hpp`, `Signature.hpp` | Backend-backed | RFC 8032 vectors | Preferred signature API. |
 | [ ] | X25519 | 3 | `Asymmetric/X25519.hpp` | Backend-backed | RFC 7748 vectors | Key agreement only; pair with HKDF for derived keys. |
 | [ ] | ECDSA | 4 | `Asymmetric/Ecdsa.hpp` | Backend-backed | Backend vectors and DER signature tests | Interop API; avoid making it the default recommendation. |

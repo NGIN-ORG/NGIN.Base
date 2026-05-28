@@ -163,6 +163,8 @@ set(NGIN_BASE_CORE_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Crypto/Encoding/Base64.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Crypto/Encoding/Base64Url.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Crypto/Encoding/Hex.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Crypto/Asymmetric/Ed25519.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Crypto/Asymmetric/X25519.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Crypto/Memory/ConstantTime.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Crypto/Memory/ZeroMemory.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Crypto/Memory/SecureBuffer.cpp
@@ -170,6 +172,7 @@ set(NGIN_BASE_CORE_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Crypto/Kdf/KeyDerivation.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Crypto/Mac/Hmac.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Crypto/Random/SecureRandom.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Crypto/Signatures/Signature.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Crypto/Symmetric/Aead.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Serialization/JSON/JsonParser.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Serialization/JSON/JsonArchive.cpp

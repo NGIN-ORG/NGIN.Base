@@ -86,6 +86,16 @@ namespace NGIN::Crypto::Backend
             return Supports(algorithm) ? CryptoExpected<void> {} : CryptoError {CryptoErrorCode::UnsupportedAlgorithm};
         }
 
+        [[nodiscard]] constexpr CryptoExpected<void> EnsureSupports(KeyAgreementAlgorithm algorithm) const noexcept
+        {
+            return Supports(algorithm) ? CryptoExpected<void> {} : CryptoError {CryptoErrorCode::UnsupportedAlgorithm};
+        }
+
+        [[nodiscard]] constexpr CryptoExpected<void> EnsureSupports(SignatureAlgorithm algorithm) const noexcept
+        {
+            return Supports(algorithm) ? CryptoExpected<void> {} : CryptoError {CryptoErrorCode::UnsupportedAlgorithm};
+        }
+
     private:
         BackendInfo         m_info;
         BackendCapabilities m_capabilities;

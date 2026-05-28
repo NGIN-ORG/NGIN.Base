@@ -1,6 +1,12 @@
 #pragma once
 
 #include <NGIN/Crypto/Algorithm.hpp>
+#include <NGIN/Crypto/Asymmetric/Ed25519.hpp>
+#include <NGIN/Crypto/Asymmetric/KeyPair.hpp>
+#include <NGIN/Crypto/Asymmetric/KeyTypes.hpp>
+#include <NGIN/Crypto/Asymmetric/PrivateKey.hpp>
+#include <NGIN/Crypto/Asymmetric/PublicKey.hpp>
+#include <NGIN/Crypto/Asymmetric/X25519.hpp>
 #include <NGIN/Crypto/Backend/BackendCapabilities.hpp>
 #include <NGIN/Crypto/Backend/BackendInfo.hpp>
 #include <NGIN/Crypto/Backend/BackendOptions.hpp>
@@ -30,6 +36,9 @@
 #include <NGIN/Crypto/Memory/ZeroMemory.hpp>
 #include <NGIN/Crypto/Random/Random.hpp>
 #include <NGIN/Crypto/Result.hpp>
+#include <NGIN/Crypto/Signatures/Sign.hpp>
+#include <NGIN/Crypto/Signatures/Signature.hpp>
+#include <NGIN/Crypto/Signatures/Verify.hpp>
 #include <NGIN/Crypto/Symmetric/Aead.hpp>
 #include <NGIN/Crypto/Symmetric/AeadAlgorithm.hpp>
 #include <NGIN/Crypto/Symmetric/AesGcm.hpp>
