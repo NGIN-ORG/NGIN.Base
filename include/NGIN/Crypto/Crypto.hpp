@@ -11,6 +11,9 @@
 #include <NGIN/Crypto/Encoding/Base64Url.hpp>
 #include <NGIN/Crypto/Encoding/Hex.hpp>
 #include <NGIN/Crypto/Errors/CryptoError.hpp>
+#include <NGIN/Crypto/Hashing/Digest.hpp>
+#include <NGIN/Crypto/Hashing/Hash.hpp>
+#include <NGIN/Crypto/Hashing/HashAlgorithm.hpp>
 #include <NGIN/Crypto/Memory/ConstantTime.hpp>
 #include <NGIN/Crypto/Memory/Secret.hpp>
 #include <NGIN/Crypto/Memory/SecretView.hpp>

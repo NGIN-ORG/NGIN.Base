@@ -353,7 +353,7 @@ all complete for the intended phase.
 | [ ] | OpenSSL backend | 3 | None | `Backends/OpenSslBackend.cpp` | Backend known-answer tests | Optional approved dependency/package, not default NGIN.Base core dependency. |
 | [ ] | BoringSSL backend | 4 | None | `Backends/BoringSslBackend.cpp` | Backend known-answer tests | Only if workspace needs it separately from OpenSSL. |
 | [ ] | Libsodium backend | 3 | None | `Backends/LibsodiumBackend.cpp` | Backend known-answer tests | Best fit for XChaCha20-Poly1305, Ed25519, X25519, Argon2id. |
-| [ ] | Hash abstraction | 2 | `Hashing/Hash.hpp`, `Hashing/HashAlgorithm.hpp`, `Hashing/Digest.hpp` | `Hashing/Hash.cpp` | Hash API tests | Common one-shot, streaming, fixed digest type contracts. |
+| [x] | Hash abstraction | 2 | `Hashing/Hash.hpp`, `Hashing/HashAlgorithm.hpp`, `Hashing/Digest.hpp` | `Hashing/Hash.cpp` | Hash API tests | Common one-shot, streaming, fixed digest type contracts. |
 | [ ] | SHA-256 | 3 | `Hashing/Sha256.hpp` | Backend-backed | NIST/RFC known-answer tests, benchmark | Required baseline hash. |
 | [ ] | SHA-512 | 3 | `Hashing/Sha512.hpp` | Backend-backed | Known-answer tests, benchmark | Required for HMAC-SHA512 and interoperability. |
 | [ ] | SHA-3 | 4 | `Hashing/Sha3.hpp` | Backend-backed | Known-answer tests | Add if backend support and use cases justify it. |
