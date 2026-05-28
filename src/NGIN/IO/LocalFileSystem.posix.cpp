@@ -124,6 +124,34 @@ namespace NGIN::IO
             return EntryType::Other;
         }
 
+        [[nodiscard]] EntryType ToEntryType(const dirent& entry) noexcept
+        {
+#if defined(DT_REG)
+            switch (entry.d_type)
+            {
+                case DT_REG:
+                    return EntryType::File;
+                case DT_DIR:
+                    return EntryType::Directory;
+                case DT_LNK:
+                    return EntryType::Symlink;
+                case DT_BLK:
+                    return EntryType::BlockDevice;
+                case DT_CHR:
+                    return EntryType::CharacterDevice;
+                case DT_FIFO:
+                    return EntryType::Fifo;
+                case DT_SOCK:
+                    return EntryType::Socket;
+                default:
+                    return EntryType::Unknown;
+            }
+#else
+            (void) entry;
+            return EntryType::Unknown;
+#endif
+        }
+
         [[nodiscard]] bool IsSizedEntryType(const EntryType type) noexcept
         {
             switch (type)
@@ -155,6 +183,43 @@ namespace NGIN::IO
                     return options.includeSymlinks;
                 default:
                     return true;
+            }
+        }
+
+        [[nodiscard]] bool IncludesAllEntryTypes(const EnumerateOptions& options) noexcept
+        {
+            return options.includeFiles && options.includeDirectories && options.includeSymlinks;
+        }
+
+        [[nodiscard]] bool NeedsMetadataForEnumeration(const EntryType type, const EnumerateOptions& options) noexcept
+        {
+            if (options.populateInfo)
+                return true;
+            if (options.followSymlinks && type == EntryType::Symlink)
+                return true;
+            if (type == EntryType::Unknown)
+                return options.recursive || !IncludesAllEntryTypes(options);
+            return false;
+        }
+
+        void SortEntries(std::vector<DirectoryEntry>& entries, const DirectorySortOrder sortOrder)
+        {
+            switch (sortOrder)
+            {
+                case DirectorySortOrder::LexicalPath:
+                    std::sort(entries.begin(), entries.end(), [](const DirectoryEntry& left, const DirectoryEntry& right) {
+                        return left.path.View() < right.path.View();
+                    });
+                    break;
+                case DirectorySortOrder::LexicalName:
+                    std::sort(entries.begin(), entries.end(), [](const DirectoryEntry& left, const DirectoryEntry& right) {
+                        if (left.name.View() != right.name.View())
+                            return left.name.View() < right.name.View();
+                        return left.path.View() < right.path.View();
+                    });
+                    break;
+                case DirectorySortOrder::Unspecified:
+                    break;
             }
         }
 
@@ -194,7 +259,7 @@ namespace NGIN::IO
                 if (errno == ENOENT || errno == ENOTDIR)
                 {
                     info.exists = false;
-                    info.type   = EntryType::None;
+                    info.type   = EntryType::Unknown;
                     return Result<FileInfo>(std::move(info));
                 }
 
@@ -378,7 +443,7 @@ namespace NGIN::IO
                 if (errno == ENOENT || errno == ENOTDIR)
                 {
                     info.exists = false;
-                    info.type   = EntryType::None;
+                    info.type   = EntryType::Unknown;
                     return Result<FileInfo>(std::move(info));
                 }
 
@@ -419,27 +484,16 @@ namespace NGIN::IO
             {
             }
 
-            Result<bool> Next() noexcept override
+            Result<DirectoryEnumerationNext> Next() noexcept override
             {
                 if (m_index >= m_entries.size())
-                    return Result<bool>(false);
-                m_current = m_index;
-                ++m_index;
-                return Result<bool>(true);
-            }
-
-            [[nodiscard]] const DirectoryEntry& Current() const noexcept override
-            {
-                static const DirectoryEntry empty {};
-                if (m_current >= m_entries.size())
-                    return empty;
-                return m_entries[m_current];
+                    return Result<DirectoryEnumerationNext>(DirectoryEnumerationNext {});
+                return Result<DirectoryEnumerationNext>(DirectoryEnumerationNext(std::move(m_entries[m_index++])));
             }
 
         private:
             std::vector<DirectoryEntry> m_entries {};
             std::size_t                 m_index {0};
-            std::size_t                 m_current {static_cast<std::size_t>(-1)};
         };
 
         class LocalFileHandle final : public IFileHandle
@@ -961,28 +1015,33 @@ namespace NGIN::IO
                     if (nameView == "." || nameView == "..")
                         continue;
 
-                    Path            childPath = directoryPath.Join(nameView);
-                    MetadataOptions metadataOptions;
-                    metadataOptions.symlinkMode = options.followSymlinks ? SymlinkMode::Follow : SymlinkMode::DoNotFollow;
-                    auto infoResult             = BuildFileInfo(childPath, metadataOptions);
-                    if (!infoResult.HasValue())
-                    {
-                        const IOError error = std::move(infoResult.Error());
-                        ::closedir(directory);
-                        return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(error)));
-                    }
-
                     DirectoryEntry entry;
-                    entry.path = childPath;
-                    entry.name = Path {nameView};
-                    entry.type = infoResult.Value().type;
-                    if (options.populateInfo)
-                        entry.info = std::move(infoResult.Value());
+                    Path           childPath = directoryPath.Join(nameView);
+                    entry.path               = childPath;
+                    entry.name               = Path {nameView};
+                    entry.type               = ToEntryType(*record);
+
+                    if (NeedsMetadataForEnumeration(entry.type, options))
+                    {
+                        MetadataOptions metadataOptions;
+                        metadataOptions.symlinkMode = options.followSymlinks ? SymlinkMode::Follow : SymlinkMode::DoNotFollow;
+                        auto infoResult             = BuildFileInfo(childPath, metadataOptions);
+                        if (!infoResult.HasValue())
+                        {
+                            const IOError error = std::move(infoResult.Error());
+                            ::closedir(directory);
+                            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(error)));
+                        }
+
+                        entry.type = infoResult.Value().type;
+                        if (options.populateInfo)
+                            entry.info = std::move(infoResult.Value());
+                    }
 
                     if (IncludeEntry(entry, options))
                         entries.push_back(std::move(entry));
 
-                    if (options.recursive && infoResult.Value().type == EntryType::Directory)
+                    if (options.recursive && entry.type == EntryType::Directory)
                     {
                         auto childResult = self(self, childPath);
                         if (!childResult.HasValue())
@@ -1003,12 +1062,7 @@ namespace NGIN::IO
             if (!collectResult.HasValue())
                 return Result<std::vector<DirectoryEntry>>(NGIN::Utilities::Unexpected<IOError>(std::move(collectResult.Error())));
 
-            if (options.stableSort)
-            {
-                std::sort(entries.begin(), entries.end(), [](const DirectoryEntry& left, const DirectoryEntry& right) {
-                    return left.path.View() < right.path.View();
-                });
-            }
+            SortEntries(entries, options.sortOrder);
 
             return Result<std::vector<DirectoryEntry>>(std::move(entries));
         }
@@ -1530,9 +1584,9 @@ namespace NGIN::IO
     {
         struct LocalAsyncDirectoryState final
         {
-            std::shared_ptr<FileSystemDriver> driver {};
+            std::shared_ptr<FileSystemDriver>     driver {};
             std::unique_ptr<LocalDirectoryHandle> handle {};
-            Path                              path {};
+            Path                                  path {};
         };
 
         extern const AsyncDirectoryHandle::Operations LocalAsyncDirectoryOperations;
@@ -1541,7 +1595,7 @@ namespace NGIN::IO
         AsyncTask<UIntSize> LocalAsyncFileRead(
                 const std::shared_ptr<void>& rawState, NGIN::Async::TaskContext& ctx, std::span<NGIN::Byte> destination)
         {
-            auto state = std::static_pointer_cast<LocalAsyncFileState>(rawState);
+            auto state      = std::static_pointer_cast<LocalAsyncFileState>(rawState);
             auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [state, destination]() mutable noexcept {
                 return detail::LocalAsyncFileReadSync(*state, destination);
             });
@@ -1564,7 +1618,7 @@ namespace NGIN::IO
         AsyncTask<UIntSize> LocalAsyncFileWrite(
                 const std::shared_ptr<void>& rawState, NGIN::Async::TaskContext& ctx, std::span<const NGIN::Byte> source)
         {
-            auto state = std::static_pointer_cast<LocalAsyncFileState>(rawState);
+            auto state      = std::static_pointer_cast<LocalAsyncFileState>(rawState);
             auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [state, source]() mutable noexcept {
                 return detail::LocalAsyncFileWriteSync(*state, source);
             });
@@ -1585,11 +1639,11 @@ namespace NGIN::IO
         }
 
         AsyncTask<UIntSize> LocalAsyncFileReadAt(const std::shared_ptr<void>& rawState,
-                                                 NGIN::Async::TaskContext&  ctx,
-                                                 UInt64                     offset,
-                                                 std::span<NGIN::Byte>      destination)
+                                                 NGIN::Async::TaskContext&    ctx,
+                                                 UInt64                       offset,
+                                                 std::span<NGIN::Byte>        destination)
         {
-            auto state = std::static_pointer_cast<LocalAsyncFileState>(rawState);
+            auto state      = std::static_pointer_cast<LocalAsyncFileState>(rawState);
             auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [state, offset, destination]() mutable noexcept {
                 return detail::LocalAsyncFileReadAtSync(*state, offset, destination);
             });
@@ -1610,11 +1664,11 @@ namespace NGIN::IO
         }
 
         AsyncTask<UIntSize> LocalAsyncFileWriteAt(const std::shared_ptr<void>& rawState,
-                                                  NGIN::Async::TaskContext&  ctx,
-                                                  UInt64                     offset,
-                                                  std::span<const NGIN::Byte> source)
+                                                  NGIN::Async::TaskContext&    ctx,
+                                                  UInt64                       offset,
+                                                  std::span<const NGIN::Byte>  source)
         {
-            auto state = std::static_pointer_cast<LocalAsyncFileState>(rawState);
+            auto state      = std::static_pointer_cast<LocalAsyncFileState>(rawState);
             auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [state, offset, source]() mutable noexcept {
                 return detail::LocalAsyncFileWriteAtSync(*state, offset, source);
             });
@@ -1636,7 +1690,7 @@ namespace NGIN::IO
 
         AsyncTaskVoid LocalAsyncFileFlush(const std::shared_ptr<void>& rawState, NGIN::Async::TaskContext& ctx)
         {
-            auto state = std::static_pointer_cast<LocalAsyncFileState>(rawState);
+            auto state      = std::static_pointer_cast<LocalAsyncFileState>(rawState);
             auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [state]() mutable noexcept {
                 return detail::LocalAsyncFileFlushSync(*state);
             });
@@ -1661,7 +1715,7 @@ namespace NGIN::IO
 
         AsyncTaskVoid LocalAsyncFileClose(const std::shared_ptr<void>& rawState, NGIN::Async::TaskContext& ctx)
         {
-            auto state = std::static_pointer_cast<LocalAsyncFileState>(rawState);
+            auto state      = std::static_pointer_cast<LocalAsyncFileState>(rawState);
             auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [state]() mutable noexcept {
                 return detail::LocalAsyncFileCloseSync(*state);
             });
@@ -1690,13 +1744,13 @@ namespace NGIN::IO
         }
 
         const AsyncFileHandle::Operations LocalAsyncFileOperations {
-                .read = &LocalAsyncFileRead,
-                .write = &LocalAsyncFileWrite,
-                .readAt = &LocalAsyncFileReadAt,
+                .read    = &LocalAsyncFileRead,
+                .write   = &LocalAsyncFileWrite,
+                .readAt  = &LocalAsyncFileReadAt,
                 .writeAt = &LocalAsyncFileWriteAt,
-                .flush = &LocalAsyncFileFlush,
-                .close = &LocalAsyncFileClose,
-                .isOpen = &LocalAsyncFileIsOpen,
+                .flush   = &LocalAsyncFileFlush,
+                .close   = &LocalAsyncFileClose,
+                .isOpen  = &LocalAsyncFileIsOpen,
         };
 #endif
 
@@ -1731,9 +1785,9 @@ namespace NGIN::IO
         }
 
         AsyncTask<FileInfo> LocalAsyncDirectoryGetInfo(const std::shared_ptr<void>& rawState,
-                                                       NGIN::Async::TaskContext&  ctx,
-                                                       const Path&                path,
-                                                       const MetadataOptions&     options)
+                                                       NGIN::Async::TaskContext&    ctx,
+                                                       const Path&                  path,
+                                                       const MetadataOptions&       options)
         {
             auto state      = std::static_pointer_cast<LocalAsyncDirectoryState>(rawState);
             auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [state, path, options]() mutable noexcept {
@@ -1758,9 +1812,9 @@ namespace NGIN::IO
         }
 
         AsyncTask<AsyncFileHandle> LocalAsyncDirectoryOpenFile(const std::shared_ptr<void>& rawState,
-                                                               NGIN::Async::TaskContext&  ctx,
-                                                               const Path&                path,
-                                                               const FileOpenOptions&     options)
+                                                               NGIN::Async::TaskContext&    ctx,
+                                                               const Path&                  path,
+                                                               const FileOpenOptions&       options)
         {
             auto state      = std::static_pointer_cast<LocalAsyncDirectoryState>(rawState);
             auto normalized = NormalizeRelativeHandlePath(path);
@@ -1768,7 +1822,7 @@ namespace NGIN::IO
                 co_return NGIN::Utilities::Unexpected<IOError>(std::move(normalized).TakeError());
 
             const Path resolvedPath = ResolveAsyncDirectoryPath(*state, normalized.Value());
-            auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [resolvedPath, options]() mutable noexcept {
+            auto       completion   = co_await detail::DispatchToDriver(*state->driver, ctx, [resolvedPath, options]() mutable noexcept {
                 return OpenAsyncPosixFile(resolvedPath, options);
             });
 
@@ -1798,7 +1852,7 @@ namespace NGIN::IO
                 co_return NGIN::Utilities::Unexpected<IOError>(std::move(normalized).TakeError());
 
             const Path resolvedPath = ResolveAsyncDirectoryPath(*state, normalized.Value());
-            auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [resolvedPath]() mutable noexcept {
+            auto       completion   = co_await detail::DispatchToDriver(*state->driver, ctx, [resolvedPath]() mutable noexcept {
                 return LocalDirectoryHandle::Open(resolvedPath);
             });
 
@@ -1850,11 +1904,11 @@ namespace NGIN::IO
         }
 
         const AsyncDirectoryHandle::Operations LocalAsyncDirectoryOperations {
-                .exists = &LocalAsyncDirectoryExists,
-                .getInfo = &LocalAsyncDirectoryGetInfo,
-                .openFile = &LocalAsyncDirectoryOpenFile,
+                .exists        = &LocalAsyncDirectoryExists,
+                .getInfo       = &LocalAsyncDirectoryGetInfo,
+                .openFile      = &LocalAsyncDirectoryOpenFile,
                 .openDirectory = &LocalAsyncDirectoryOpenDirectory,
-                .readSymlink = &LocalAsyncDirectoryReadSymlink,
+                .readSymlink   = &LocalAsyncDirectoryReadSymlink,
         };
     }// namespace
 
@@ -1862,7 +1916,7 @@ namespace NGIN::IO
     [[nodiscard]] AsyncFileHandle detail::MakeAsyncPosixFileHandle(
             std::shared_ptr<FileSystemDriver> driver, OpenedAsyncPosixFile opened)
     {
-        auto state = std::make_shared<LocalAsyncFileState>();
+        auto state      = std::make_shared<LocalAsyncFileState>();
         state->driver   = std::move(driver);
         state->path     = std::move(opened.path);
         state->canRead  = opened.canRead;

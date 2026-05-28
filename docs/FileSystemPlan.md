@@ -578,17 +578,29 @@ Dangling symlink handling must also be specified explicitly.
 
 ## Directory Enumeration
 
-Enumeration should become a streaming operation rather than a full eager materialization by default.
+Enumeration should expose an explicit next-entry result instead of a hidden `Next()` + `Current()` state pair.
 
 Required behaviors:
 
 - recursive and non-recursive enumeration
 - symlink handling policy
-- stable ordering when requested
+- opt-in deterministic ordering through `DirectorySortOrder`
 - optional metadata prefetch
 - defined behavior for permission-denied entries
 - correct handling of `.` and `..`
 - explicit lifetime and invalidation rules for iteration entries
+
+`DirectoryEnumerator::Next()` returns a `Result<DirectoryEnumerationNext>`. An IO error is represented by the result
+error, end-of-sequence is represented by `HasEntry() == false`, and an entry is accessed through `Entry()` only when
+`HasEntry()` is true.
+
+`EnumerateOptions::populateInfo = false` should keep name-only enumeration cheap. `DirectoryEntry::name` and
+`DirectoryEntry::path` are always populated. `DirectoryEntry::type` uses cheap backend data when available and otherwise
+remains `EntryType::Unknown`, unless filtering, recursion, or symlink following requires a metadata query to make a
+correct decision. `DirectoryEntry::info` is populated only when requested.
+
+`DirectorySortOrder::LexicalPath` sorts by path. `DirectorySortOrder::LexicalName` sorts by name and then by path so
+recursive enumeration remains deterministic when multiple directories contain the same filename.
 
 The current vector-backed enumerator may remain as an adapter or convenience layer, but should not be the only model.
 
@@ -657,6 +669,12 @@ Required topics:
 
 The library should avoid vague language around "atomic" unless the same-filesystem and cross-filesystem cases are
 explicitly separated.
+
+The current atomic whole-file helpers are overwrite-oriented. They create a temp file in the destination directory,
+write the payload, optionally flush file data through `FileHandle::Flush()`, close the handle, and replace the
+destination. They do not provide race-free no-overwrite semantics; that requires a future primitive such as
+`RenameNoReplace` or replace options. Full crash durability of the directory entry after replacement is best-effort
+until the API can express directory sync support.
 
 ## Error Mapping Contract
 

@@ -25,21 +25,11 @@ namespace NGIN::IO
         [[nodiscard]] bool IsValid() const noexcept { return static_cast<bool>(m_enumerator); }
         explicit           operator bool() const noexcept { return IsValid(); }
 
-        Result<bool> Next() noexcept
+        Result<DirectoryEnumerationNext> Next() noexcept
         {
             if (!m_enumerator)
-                return Result<bool>(NGIN::Utilities::Unexpected<IOError>(MakeInvalidEnumeratorError()));
+                return Result<DirectoryEnumerationNext>(NGIN::Utilities::Unexpected<IOError>(MakeInvalidEnumeratorError()));
             return m_enumerator->Next();
-        }
-
-        [[nodiscard]] const DirectoryEntry& Current() const noexcept
-        {
-            if (!m_enumerator)
-            {
-                NGIN_ASSERT(false && "NGIN::IO::DirectoryEnumerator::Current called on empty enumerator");
-                NGIN_ABORT("NGIN::IO::DirectoryEnumerator::Current called on empty enumerator");
-            }
-            return m_enumerator->Current();
         }
 
     private:

@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <string>
+#include <vector>
 
 #if !defined(_WIN32)
 #include <cstring>
@@ -44,6 +45,24 @@ namespace
         options.recursive     = true;
         options.ignoreMissing = true;
         REQUIRE(fs.RemoveDirectory(path, options).HasValue());
+    }
+
+    [[nodiscard]] std::vector<NGIN::IO::DirectoryEntry> CollectEntries(
+            NGIN::IO::LocalFileSystem& fs, const NGIN::IO::Path& path, const NGIN::IO::EnumerateOptions& options)
+    {
+        auto enumerator = fs.Enumerate(path, options);
+        REQUIRE(enumerator.HasValue());
+
+        std::vector<NGIN::IO::DirectoryEntry> entries;
+        while (true)
+        {
+            auto next = enumerator->Next();
+            REQUIRE(next.HasValue());
+            if (!next->HasEntry())
+                break;
+            entries.push_back(next->Entry());
+        }
+        return entries;
     }
 
     template<typename T>
@@ -100,14 +119,101 @@ TEST_CASE("IO.LocalFileSystem basic read write enumerate", "[IO][LocalFileSystem
 
     auto next = enumerator->Next();
     REQUIRE(next.HasValue());
-    REQUIRE(next.Value());
-    REQUIRE(enumerator->Current().name.View() == "hello.txt");
-    REQUIRE(enumerator->Current().info.has_value());
-    REQUIRE(enumerator->Current().info->type == NGIN::IO::EntryType::File);
+    REQUIRE(next->HasEntry());
+    REQUIRE(next->Entry().name.View() == "hello.txt");
+    REQUIRE(next->Entry().info.has_value());
+    REQUIRE(next->Entry().info->type == NGIN::IO::EntryType::File);
+
+    auto end = enumerator->Next();
+    REQUIRE(end.HasValue());
+    REQUIRE_FALSE(end->HasEntry());
 
     const auto capabilities = fs.GetCapabilities();
     REQUIRE(capabilities.memoryMappedFiles);
     REQUIRE(capabilities.metadataNoFollow);
+
+    RemoveTempDir(fs, root);
+}
+
+TEST_CASE("IO.LocalFileSystem enumeration supports no-info and deterministic sorting", "[IO][LocalFileSystem]")
+{
+    NGIN::IO::LocalFileSystem fs;
+    const auto                root  = MakeTempDir(fs);
+    const auto                alpha = root.Join("alpha");
+    const auto                beta  = root.Join("beta");
+
+    REQUIRE(fs.CreateDirectories(alpha).HasValue());
+    REQUIRE(fs.CreateDirectories(beta).HasValue());
+    REQUIRE(NGIN::IO::WriteAllText(fs, alpha.Join("same.txt"), "alpha").HasValue());
+    REQUIRE(NGIN::IO::WriteAllText(fs, beta.Join("same.txt"), "beta").HasValue());
+    REQUIRE(NGIN::IO::WriteAllText(fs, root.Join("zeta.txt"), "zeta").HasValue());
+
+    NGIN::IO::EnumerateOptions nameOnlyOptions;
+    nameOnlyOptions.includeDirectories = false;
+    auto nameOnlyEntries               = CollectEntries(fs, root, nameOnlyOptions);
+    REQUIRE(nameOnlyEntries.size() == 1);
+    REQUIRE(nameOnlyEntries.front().name.View() == "zeta.txt");
+    REQUIRE_FALSE(nameOnlyEntries.front().info.has_value());
+
+    NGIN::IO::EnumerateOptions pathSortOptions;
+    pathSortOptions.recursive          = true;
+    pathSortOptions.includeDirectories = false;
+    pathSortOptions.sortOrder          = NGIN::IO::DirectorySortOrder::LexicalPath;
+    auto pathSortedEntries             = CollectEntries(fs, root, pathSortOptions);
+    REQUIRE(pathSortedEntries.size() == 3);
+    for (std::size_t i = 1; i < pathSortedEntries.size(); ++i)
+        REQUIRE(pathSortedEntries[i - 1].path.View() < pathSortedEntries[i].path.View());
+
+    NGIN::IO::EnumerateOptions nameSortOptions;
+    nameSortOptions.recursive          = true;
+    nameSortOptions.includeDirectories = false;
+    nameSortOptions.sortOrder          = NGIN::IO::DirectorySortOrder::LexicalName;
+    auto nameSortedEntries             = CollectEntries(fs, root, nameSortOptions);
+    REQUIRE(nameSortedEntries.size() == 3);
+    for (std::size_t i = 1; i < nameSortedEntries.size(); ++i)
+    {
+        const auto previousName = nameSortedEntries[i - 1].name.View();
+        const auto currentName  = nameSortedEntries[i].name.View();
+        if (previousName == currentName)
+            REQUIRE(nameSortedEntries[i - 1].path.View() < nameSortedEntries[i].path.View());
+        else
+            REQUIRE(previousName < currentName);
+    }
+
+    RemoveTempDir(fs, root);
+}
+
+TEST_CASE("IO.LocalFileSystem atomic text writes replace existing content", "[IO][LocalFileSystem]")
+{
+    NGIN::IO::LocalFileSystem fs;
+    const auto                root     = MakeTempDir(fs);
+    const auto                filePath = root.Join("atomic.txt");
+    const auto                nested   = root.Join("nested/created.txt");
+
+    REQUIRE(NGIN::IO::WriteAllText(fs, filePath, "old").HasValue());
+    REQUIRE(NGIN::IO::WriteAllTextAtomic(fs, filePath, "new").HasValue());
+
+    auto replaced = NGIN::IO::ReadAllText(fs, filePath);
+    REQUIRE(replaced.HasValue());
+    REQUIRE(std::string(replaced.Value().Data(), replaced.Value().Size()) == "new");
+
+    NGIN::IO::AtomicWriteOptions options;
+    options.createParentDirectories = true;
+    REQUIRE(NGIN::IO::WriteAllTextAtomic(fs, nested, "created", options).HasValue());
+
+    auto created = NGIN::IO::ReadAllText(fs, nested);
+    REQUIRE(created.HasValue());
+    REQUIRE(std::string(created.Value().Data(), created.Value().Size()) == "created");
+
+    const auto directoryDestination = root.Join("directory-target");
+    REQUIRE(fs.CreateDirectory(directoryDestination).HasValue());
+    auto failed = NGIN::IO::WriteAllTextAtomic(fs, directoryDestination, "not a file");
+    REQUIRE_FALSE(failed.HasValue());
+
+    auto directoryInfo = fs.GetInfo(directoryDestination);
+    REQUIRE(directoryInfo.HasValue());
+    REQUIRE(directoryInfo.Value().exists);
+    REQUIRE(directoryInfo.Value().type == NGIN::IO::EntryType::Directory);
 
     RemoveTempDir(fs, root);
 }
@@ -487,10 +593,10 @@ TEST_CASE("IO.LocalFileSystem POSIX metadata and file types", "[IO][LocalFileSys
     {
         auto next = enumerator->Next();
         REQUIRE(next.HasValue());
-        if (!next.Value())
+        if (!next->HasEntry())
             break;
 
-        const auto& entry = enumerator->Current();
+        const auto& entry = next->Entry();
         REQUIRE(entry.info.has_value());
         sawFifo    = sawFifo || entry.type == NGIN::IO::EntryType::Fifo;
         sawSocket  = sawSocket || entry.type == NGIN::IO::EntryType::Socket;

@@ -2,6 +2,8 @@
 
 #include <NGIN/Utilities/Expected.hpp>
 
+#include <chrono>
+#include <string>
 #include <string_view>
 
 namespace NGIN::IO
@@ -15,6 +17,39 @@ namespace NGIN::IO
             error.path    = path;
             error.message = message;
             return error;
+        }
+
+        [[nodiscard]] Path MakeAtomicTempPath(const Path& path, const AtomicWriteOptions& options, const UInt64 uniqueValue, const UIntSize attempt)
+        {
+            std::string name;
+            name.append(options.tempPrefix);
+            const auto filename = path.Filename();
+            name.append(filename.empty() ? "file" : filename);
+            name.push_back('.');
+            name.append(std::to_string(uniqueValue));
+            name.push_back('.');
+            name.append(std::to_string(attempt));
+
+            const auto parent = path.Parent();
+            if (parent.IsEmpty())
+                return Path {name};
+            return parent.Join(name);
+        }
+
+        ResultVoid WriteAllBytesToOpenFile(FileHandle& file, const Path& path, std::span<const NGIN::Byte> bytes) noexcept
+        {
+            UIntSize total = 0;
+            while (total < bytes.size())
+            {
+                auto write = file.Write(bytes.subspan(total));
+                if (!write.HasValue())
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(write.Error())));
+                const UIntSize n = write.Value();
+                if (n == 0)
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::SystemError, "short write", path)));
+                total += n;
+            }
+            return {};
         }
     }// namespace
 
@@ -76,23 +111,98 @@ namespace NGIN::IO
         if (!fileResult.HasValue())
             return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(fileResult.Error())));
 
-        UIntSize total = 0;
-        while (total < bytes.size())
-        {
-            auto write = fileResult->Write(bytes.subspan(total));
-            if (!write.HasValue())
-                return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(write.Error())));
-            const UIntSize n = write.Value();
-            if (n == 0)
-                return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::SystemError, "short write", path)));
-            total += n;
-        }
+        auto wrote = WriteAllBytesToOpenFile(fileResult.Value(), path, bytes);
+        if (!wrote.HasValue())
+            return wrote;
         return fileResult->Flush();
     }
 
     ResultVoid WriteAllText(IFileSystem& fs, const Path& path, std::string_view text) noexcept
     {
         return WriteAllBytes(fs, path, std::span<const NGIN::Byte>(reinterpret_cast<const NGIN::Byte*>(text.data()), text.size()));
+    }
+
+    ResultVoid WriteAllBytesAtomic(IFileSystem& fs, const Path& path, std::span<const NGIN::Byte> bytes, const AtomicWriteOptions& options) noexcept
+    {
+        if (options.createParentDirectories)
+        {
+            const auto parent = path.Parent();
+            if (!parent.IsEmpty() && parent.View() != path.View())
+            {
+                auto directory = EnsureDirectory(fs, parent);
+                if (!directory.HasValue())
+                    return directory;
+            }
+        }
+
+        FileOpenOptions openOptions;
+        openOptions.access      = FileAccess::Write;
+        openOptions.disposition = FileCreateDisposition::CreateNew;
+        openOptions.flags       = options.bestEffortDurable ? FileOpenFlags::WriteThrough : FileOpenFlags::None;
+
+        const auto uniqueValue = static_cast<UInt64>(std::chrono::steady_clock::now().time_since_epoch().count());
+
+        IOError lastAlreadyExistsError;
+        for (UIntSize attempt = 0; attempt < 64; ++attempt)
+        {
+            const auto tempPath = MakeAtomicTempPath(path, options, uniqueValue, attempt);
+            auto       file     = fs.OpenFile(tempPath, openOptions);
+            if (!file.HasValue())
+            {
+                if (file.Error().code == IOErrorCode::AlreadyExists)
+                {
+                    lastAlreadyExistsError = std::move(file.Error());
+                    continue;
+                }
+                return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(file.Error())));
+            }
+
+            auto wrote = WriteAllBytesToOpenFile(file.Value(), tempPath, bytes);
+            if (!wrote.HasValue())
+            {
+                file->Close();
+                RemoveOptions removeOptions;
+                removeOptions.ignoreMissing = true;
+                (void) fs.RemoveFile(tempPath, removeOptions);
+                return wrote;
+            }
+
+            if (options.bestEffortDurable)
+            {
+                auto flushed = file->Flush();
+                if (!flushed.HasValue())
+                {
+                    file->Close();
+                    RemoveOptions removeOptions;
+                    removeOptions.ignoreMissing = true;
+                    (void) fs.RemoveFile(tempPath, removeOptions);
+                    return flushed;
+                }
+            }
+
+            file->Close();
+
+            auto replaced = fs.ReplaceFile(tempPath, path);
+            if (!replaced.HasValue())
+            {
+                RemoveOptions removeOptions;
+                removeOptions.ignoreMissing = true;
+                (void) fs.RemoveFile(tempPath, removeOptions);
+                return replaced;
+            }
+
+            return {};
+        }
+
+        if (lastAlreadyExistsError.code != IOErrorCode::None)
+            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(lastAlreadyExistsError)));
+        return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::AlreadyExists, "could not create atomic temp file", path)));
+    }
+
+    ResultVoid WriteAllTextAtomic(IFileSystem& fs, const Path& path, std::string_view text, const AtomicWriteOptions& options) noexcept
+    {
+        return WriteAllBytesAtomic(
+                fs, path, std::span<const NGIN::Byte>(reinterpret_cast<const NGIN::Byte*>(text.data()), text.size()), options);
     }
 
     ResultVoid AppendAllText(IFileSystem& fs, const Path& path, std::string_view text) noexcept

@@ -5,12 +5,13 @@
 #include <NGIN/Primitives.hpp>
 
 #include <optional>
+#include <utility>
 
 namespace NGIN::IO
 {
     enum class EntryType : UInt8
     {
-        None,
+        Unknown,
         File,
         Directory,
         Symlink,
@@ -44,11 +45,11 @@ namespace NGIN::IO
 
     enum class FileShare : UInt8
     {
-        None  = 0,
-        Read  = 1u << 0u,
-        Write = 1u << 1u,
+        None   = 0,
+        Read   = 1u << 0u,
+        Write  = 1u << 1u,
         Delete = 1u << 2u,
-        All   = Read | Write | Delete,
+        All    = Read | Write | Delete,
     };
 
     constexpr FileShare operator|(FileShare a, FileShare b) noexcept
@@ -75,12 +76,12 @@ namespace NGIN::IO
 
     enum class FileOpenFlags : UInt16
     {
-        None         = 0,
-        Sequential   = 1u << 0u,
-        RandomAccess = 1u << 1u,
-        WriteThrough = 1u << 2u,
-        Temporary    = 1u << 3u,
-        DeleteOnClose = 1u << 4u,
+        None           = 0,
+        Sequential     = 1u << 0u,
+        RandomAccess   = 1u << 1u,
+        WriteThrough   = 1u << 2u,
+        Temporary      = 1u << 3u,
+        DeleteOnClose  = 1u << 4u,
         AsyncPreferred = 1u << 5u,
     };
 
@@ -123,15 +124,22 @@ namespace NGIN::IO
         bool ignoreIfExists {true};
     };
 
+    enum class DirectorySortOrder : UInt8
+    {
+        Unspecified,
+        LexicalPath,
+        LexicalName,
+    };
+
     struct EnumerateOptions
     {
-        bool recursive {false};
-        bool includeFiles {true};
-        bool includeDirectories {true};
-        bool includeSymlinks {false};
-        bool followSymlinks {false};
-        bool populateInfo {false};
-        bool stableSort {false};
+        bool               recursive {false};
+        bool               includeFiles {true};
+        bool               includeDirectories {true};
+        bool               includeSymlinks {false};
+        bool               followSymlinks {false};
+        bool               populateInfo {false};
+        DirectorySortOrder sortOrder {DirectorySortOrder::Unspecified};
     };
 
     struct MetadataOptions
@@ -174,7 +182,7 @@ namespace NGIN::IO
     struct FileInfo
     {
         Path            path {};
-        EntryType       type {EntryType::None};
+        EntryType       type {EntryType::Unknown};
         UInt64          size {0};
         FileTime        created {};
         FileTime        modified {};
@@ -198,8 +206,46 @@ namespace NGIN::IO
     {
         Path                    path {};
         Path                    name {};
-        EntryType               type {EntryType::None};
+        EntryType               type {EntryType::Unknown};
         std::optional<FileInfo> info {};
+    };
+
+    class DirectoryEnumerationNext
+    {
+    public:
+        DirectoryEnumerationNext() noexcept = default;
+
+        explicit DirectoryEnumerationNext(DirectoryEntry entry)
+            : m_hasEntry(true), m_entry(std::move(entry))
+        {
+        }
+
+        [[nodiscard]] bool HasEntry() const noexcept { return m_hasEntry; }
+        explicit           operator bool() const noexcept { return HasEntry(); }
+
+        [[nodiscard]] const DirectoryEntry& Entry() const noexcept
+        {
+            if (!m_hasEntry)
+            {
+                NGIN_ASSERT(false && "NGIN::IO::DirectoryEnumerationNext::Entry called without an entry");
+                NGIN_ABORT("NGIN::IO::DirectoryEnumerationNext::Entry called without an entry");
+            }
+            return m_entry;
+        }
+
+        [[nodiscard]] DirectoryEntry& Entry() noexcept
+        {
+            if (!m_hasEntry)
+            {
+                NGIN_ASSERT(false && "NGIN::IO::DirectoryEnumerationNext::Entry called without an entry");
+                NGIN_ABORT("NGIN::IO::DirectoryEnumerationNext::Entry called without an entry");
+            }
+            return m_entry;
+        }
+
+    private:
+        bool           m_hasEntry {false};
+        DirectoryEntry m_entry {};
     };
 
     struct FileSystemCapabilities

@@ -192,6 +192,38 @@ namespace NGIN::IO
             }
         }
 
+        [[nodiscard]] bool NeedsMetadataForEnumeration(const EntryType type, const EnumerateOptions& options) noexcept
+        {
+            if (options.populateInfo)
+                return true;
+            if (options.followSymlinks && type == EntryType::Symlink)
+                return true;
+            if (type == EntryType::Unknown)
+                return options.recursive || !(options.includeFiles && options.includeDirectories && options.includeSymlinks);
+            return false;
+        }
+
+        void SortEntries(std::vector<DirectoryEntry>& entries, const DirectorySortOrder sortOrder)
+        {
+            switch (sortOrder)
+            {
+                case DirectorySortOrder::LexicalPath:
+                    std::sort(entries.begin(), entries.end(), [](const DirectoryEntry& left, const DirectoryEntry& right) {
+                        return left.path.View() < right.path.View();
+                    });
+                    break;
+                case DirectorySortOrder::LexicalName:
+                    std::sort(entries.begin(), entries.end(), [](const DirectoryEntry& left, const DirectoryEntry& right) {
+                        if (left.name.View() != right.name.View())
+                            return left.name.View() < right.name.View();
+                        return left.path.View() < right.path.View();
+                    });
+                    break;
+                case DirectorySortOrder::Unspecified:
+                    break;
+            }
+        }
+
         [[nodiscard]] Result<FileInfo> BuildFileInfo(const Path& path, const MetadataOptions& options) noexcept
         {
             const NativePath nativePath = ToNativePath(path);
@@ -220,7 +252,7 @@ namespace NGIN::IO
                 if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND || error == ERROR_INVALID_NAME)
                 {
                     info.exists = false;
-                    info.type   = EntryType::None;
+                    info.type   = EntryType::Unknown;
                     return Result<FileInfo>(std::move(info));
                 }
                 return Result<FileInfo>(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(error, "CreateFileW failed", path)));
@@ -354,27 +386,16 @@ namespace NGIN::IO
             {
             }
 
-            Result<bool> Next() noexcept override
+            Result<DirectoryEnumerationNext> Next() noexcept override
             {
                 if (m_index >= m_entries.size())
-                    return Result<bool>(false);
-                m_current = m_index;
-                ++m_index;
-                return Result<bool>(true);
-            }
-
-            [[nodiscard]] const DirectoryEntry& Current() const noexcept override
-            {
-                static const DirectoryEntry empty {};
-                if (m_current >= m_entries.size())
-                    return empty;
-                return m_entries[m_current];
+                    return Result<DirectoryEnumerationNext>(DirectoryEnumerationNext {});
+                return Result<DirectoryEnumerationNext>(DirectoryEnumerationNext(std::move(m_entries[m_index++])));
             }
 
         private:
             std::vector<DirectoryEntry> m_entries {};
             std::size_t                 m_index {0};
-            std::size_t                 m_current {static_cast<std::size_t>(-1)};
         };
 
         class LocalFileHandle final : public IFileHandle
@@ -847,27 +868,32 @@ namespace NGIN::IO
                     const Path childName = FromNativePath(nameView);
                     Path       childPath = directoryPath.Join(childName.View());
 
-                    MetadataOptions metadataOptions;
-                    metadataOptions.symlinkMode = options.followSymlinks ? SymlinkMode::Follow : SymlinkMode::DoNotFollow;
-                    auto infoResult             = BuildFileInfo(childPath, metadataOptions);
-                    if (!infoResult.HasValue())
-                    {
-                        const IOError error = std::move(infoResult.Error());
-                        FindClose(handle);
-                        return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(error)));
-                    }
-
                     DirectoryEntry entry;
                     entry.path = childPath;
                     entry.name = childName;
-                    entry.type = infoResult.Value().type;
-                    if (options.populateInfo)
-                        entry.info = std::move(infoResult.Value());
+                    entry.type = ToEntryType(findData.dwFileAttributes);
+
+                    if (NeedsMetadataForEnumeration(entry.type, options))
+                    {
+                        MetadataOptions metadataOptions;
+                        metadataOptions.symlinkMode = options.followSymlinks ? SymlinkMode::Follow : SymlinkMode::DoNotFollow;
+                        auto infoResult             = BuildFileInfo(childPath, metadataOptions);
+                        if (!infoResult.HasValue())
+                        {
+                            const IOError error = std::move(infoResult.Error());
+                            FindClose(handle);
+                            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(error)));
+                        }
+
+                        entry.type = infoResult.Value().type;
+                        if (options.populateInfo)
+                            entry.info = std::move(infoResult.Value());
+                    }
 
                     if (IncludeEntry(entry, options))
                         entries.push_back(std::move(entry));
 
-                    if (options.recursive && infoResult.Value().type == EntryType::Directory)
+                    if (options.recursive && entry.type == EntryType::Directory)
                     {
                         auto childResult = self(self, childPath);
                         if (!childResult.HasValue())
@@ -890,12 +916,7 @@ namespace NGIN::IO
             if (!collectResult.HasValue())
                 return Result<std::vector<DirectoryEntry>>(NGIN::Utilities::Unexpected<IOError>(std::move(collectResult.Error())));
 
-            if (options.stableSort)
-            {
-                std::sort(entries.begin(), entries.end(), [](const DirectoryEntry& left, const DirectoryEntry& right) {
-                    return left.path.View() < right.path.View();
-                });
-            }
+            SortEntries(entries, options.sortOrder);
 
             return Result<std::vector<DirectoryEntry>>(std::move(entries));
         }
@@ -905,7 +926,7 @@ namespace NGIN::IO
             EnumerateOptions enumerateOptions;
             enumerateOptions.recursive       = true;
             enumerateOptions.includeSymlinks = true;
-            enumerateOptions.stableSort      = true;
+            enumerateOptions.sortOrder       = DirectorySortOrder::LexicalPath;
             auto entries                     = EnumerateEntries(path, enumerateOptions);
             if (!entries.HasValue())
                 return Result<UInt64>(NGIN::Utilities::Unexpected<IOError>(std::move(entries.Error())));
@@ -1279,9 +1300,9 @@ namespace NGIN::IO
 
         struct LocalAsyncDirectoryState final
         {
-            std::shared_ptr<FileSystemDriver> driver {};
+            std::shared_ptr<FileSystemDriver>     driver {};
             std::unique_ptr<LocalDirectoryHandle> handle {};
-            Path                              path {};
+            Path                                  path {};
         };
 
         extern const AsyncDirectoryHandle::Operations LocalAsyncDirectoryOperations;
@@ -1370,13 +1391,13 @@ namespace NGIN::IO
         [[nodiscard]] UInt64 ReserveSequentialOffset(LocalAsyncFileState& state, const UInt64 requestedSize) noexcept
         {
             std::lock_guard<std::mutex> guard(state.mutex);
-            UInt64 offset = state.cursor;
+            UInt64                      offset = state.cursor;
             if (state.appendMode)
             {
                 LARGE_INTEGER size {};
                 if (GetFileSizeEx(state.handle, &size))
                 {
-                    offset      = static_cast<UInt64>(size.QuadPart);
+                    offset       = static_cast<UInt64>(size.QuadPart);
                     state.cursor = offset;
                 }
             }
@@ -1485,13 +1506,9 @@ namespace NGIN::IO
         {
         public:
             NativeWindowsFileAwaiter(detail::NativeFileBackend& backend,
-                                     NGIN::Async::TaskContext& ctx,
-                                     detail::NativeFileRequest request) noexcept
-                : m_backend(backend)
-                , m_resumeExecutor(ctx.GetExecutor())
-                , m_cancellation(ctx.GetCancellationToken())
-                , m_request(std::move(request))
-                , m_state(std::make_shared<State>())
+                                     NGIN::Async::TaskContext&  ctx,
+                                     detail::NativeFileRequest  request) noexcept
+                : m_backend(backend), m_resumeExecutor(ctx.GetExecutor()), m_cancellation(ctx.GetCancellationToken()), m_request(std::move(request)), m_state(std::make_shared<State>())
             {
             }
 
@@ -1509,7 +1526,7 @@ namespace NGIN::IO
                     return;
                 }
 
-                m_request.userData = m_state.get();
+                m_request.userData   = m_state.get();
                 m_request.completion = +[](void* rawState, detail::NativeFileCompletion completion) noexcept {
                     auto* state = static_cast<State*>(rawState);
                     if (state == nullptr)
@@ -1574,8 +1591,8 @@ namespace NGIN::IO
         };
 
         [[nodiscard]] auto SubmitNativeWindowsFile(detail::NativeFileBackend& backend,
-                                                   NGIN::Async::TaskContext& ctx,
-                                                   detail::NativeFileRequest request) noexcept
+                                                   NGIN::Async::TaskContext&  ctx,
+                                                   detail::NativeFileRequest  request) noexcept
         {
             return NativeWindowsFileAwaiter(backend, ctx, std::move(request));
         }
@@ -1586,16 +1603,16 @@ namespace NGIN::IO
             auto state = std::static_pointer_cast<LocalAsyncFileState>(rawState);
             if (auto* backend = detail::GetNativeFileBackend(*state->driver); backend != nullptr)
             {
-                const auto offset = ReserveSequentialOffset(*state, destination.size());
-                auto completion = co_await SubmitNativeWindowsFile(
+                const auto offset     = ReserveSequentialOffset(*state, destination.size());
+                auto       completion = co_await SubmitNativeWindowsFile(
                         *backend,
                         ctx,
                         detail::NativeFileRequest {
-                                .kind = detail::NativeFileOperationKind::Read,
-                                .handleValue = reinterpret_cast<std::uintptr_t>(state->handle),
-                                .offset = offset,
-                                .buffer = destination.data(),
-                                .size = static_cast<UInt32>(destination.size()),
+                                      .kind        = detail::NativeFileOperationKind::Read,
+                                      .handleValue = reinterpret_cast<std::uintptr_t>(state->handle),
+                                      .offset      = offset,
+                                      .buffer      = destination.data(),
+                                      .size        = static_cast<UInt32>(destination.size()),
                         });
                 if (completion.status == NativeWindowsFileCompletion::Status::Canceled)
                 {
@@ -1643,16 +1660,16 @@ namespace NGIN::IO
             auto state = std::static_pointer_cast<LocalAsyncFileState>(rawState);
             if (auto* backend = detail::GetNativeFileBackend(*state->driver); backend != nullptr)
             {
-                const auto offset = ReserveSequentialOffset(*state, source.size());
-                auto completion = co_await SubmitNativeWindowsFile(
+                const auto offset     = ReserveSequentialOffset(*state, source.size());
+                auto       completion = co_await SubmitNativeWindowsFile(
                         *backend,
                         ctx,
                         detail::NativeFileRequest {
-                                .kind = detail::NativeFileOperationKind::Write,
-                                .handleValue = reinterpret_cast<std::uintptr_t>(state->handle),
-                                .offset = offset,
-                                .buffer = const_cast<NGIN::Byte*>(source.data()),
-                                .size = static_cast<UInt32>(source.size()),
+                                      .kind        = detail::NativeFileOperationKind::Write,
+                                      .handleValue = reinterpret_cast<std::uintptr_t>(state->handle),
+                                      .offset      = offset,
+                                      .buffer      = const_cast<NGIN::Byte*>(source.data()),
+                                      .size        = static_cast<UInt32>(source.size()),
                         });
                 if (completion.status == NativeWindowsFileCompletion::Status::Canceled)
                 {
@@ -1691,9 +1708,9 @@ namespace NGIN::IO
         }
 
         AsyncTask<UIntSize> LocalAsyncFileReadAt(const std::shared_ptr<void>& rawState,
-                                                 NGIN::Async::TaskContext&  ctx,
-                                                 UInt64                     offset,
-                                                 std::span<NGIN::Byte>      destination)
+                                                 NGIN::Async::TaskContext&    ctx,
+                                                 UInt64                       offset,
+                                                 std::span<NGIN::Byte>        destination)
         {
             auto state = std::static_pointer_cast<LocalAsyncFileState>(rawState);
             if (auto* backend = detail::GetNativeFileBackend(*state->driver); backend != nullptr)
@@ -1702,11 +1719,11 @@ namespace NGIN::IO
                         *backend,
                         ctx,
                         detail::NativeFileRequest {
-                                .kind = detail::NativeFileOperationKind::Read,
+                                .kind        = detail::NativeFileOperationKind::Read,
                                 .handleValue = reinterpret_cast<std::uintptr_t>(state->handle),
-                                .offset = offset,
-                                .buffer = destination.data(),
-                                .size = static_cast<UInt32>(destination.size()),
+                                .offset      = offset,
+                                .buffer      = destination.data(),
+                                .size        = static_cast<UInt32>(destination.size()),
                         });
                 if (completion.status == NativeWindowsFileCompletion::Status::Canceled)
                 {
@@ -1749,9 +1766,9 @@ namespace NGIN::IO
         }
 
         AsyncTask<UIntSize> LocalAsyncFileWriteAt(const std::shared_ptr<void>& rawState,
-                                                  NGIN::Async::TaskContext&  ctx,
-                                                  UInt64                     offset,
-                                                  std::span<const NGIN::Byte> source)
+                                                  NGIN::Async::TaskContext&    ctx,
+                                                  UInt64                       offset,
+                                                  std::span<const NGIN::Byte>  source)
         {
             auto state = std::static_pointer_cast<LocalAsyncFileState>(rawState);
             if (auto* backend = detail::GetNativeFileBackend(*state->driver); backend != nullptr)
@@ -1760,11 +1777,11 @@ namespace NGIN::IO
                         *backend,
                         ctx,
                         detail::NativeFileRequest {
-                                .kind = detail::NativeFileOperationKind::Write,
+                                .kind        = detail::NativeFileOperationKind::Write,
                                 .handleValue = reinterpret_cast<std::uintptr_t>(state->handle),
-                                .offset = offset,
-                                .buffer = const_cast<NGIN::Byte*>(source.data()),
-                                .size = static_cast<UInt32>(source.size()),
+                                .offset      = offset,
+                                .buffer      = const_cast<NGIN::Byte*>(source.data()),
+                                .size        = static_cast<UInt32>(source.size()),
                         });
                 if (completion.status == NativeWindowsFileCompletion::Status::Canceled)
                 {
@@ -1811,7 +1828,7 @@ namespace NGIN::IO
                         *backend,
                         ctx,
                         detail::NativeFileRequest {
-                                .kind = detail::NativeFileOperationKind::Flush,
+                                .kind        = detail::NativeFileOperationKind::Flush,
                                 .handleValue = reinterpret_cast<std::uintptr_t>(state->handle),
                         });
                 if (completion.status == NativeWindowsFileCompletion::Status::Canceled)
@@ -1873,7 +1890,7 @@ namespace NGIN::IO
                         *backend,
                         ctx,
                         detail::NativeFileRequest {
-                                .kind = detail::NativeFileOperationKind::Close,
+                                .kind        = detail::NativeFileOperationKind::Close,
                                 .handleValue = reinterpret_cast<std::uintptr_t>(handleToClose),
                         });
                 if (completion.status == NativeWindowsFileCompletion::Status::Canceled)
@@ -1920,19 +1937,19 @@ namespace NGIN::IO
         }
 
         const AsyncFileHandle::Operations LocalAsyncFileOperations {
-                .read = &LocalAsyncFileRead,
-                .write = &LocalAsyncFileWrite,
-                .readAt = &LocalAsyncFileReadAt,
+                .read    = &LocalAsyncFileRead,
+                .write   = &LocalAsyncFileWrite,
+                .readAt  = &LocalAsyncFileReadAt,
                 .writeAt = &LocalAsyncFileWriteAt,
-                .flush = &LocalAsyncFileFlush,
-                .close = &LocalAsyncFileClose,
-                .isOpen = &LocalAsyncFileIsOpen,
+                .flush   = &LocalAsyncFileFlush,
+                .close   = &LocalAsyncFileClose,
+                .isOpen  = &LocalAsyncFileIsOpen,
         };
 
         [[nodiscard]] AsyncFileHandle MakeAsyncFileHandle(
                 std::shared_ptr<FileSystemDriver> driver, OpenedAsyncWindowsFile opened)
         {
-            auto state = std::make_shared<LocalAsyncFileState>();
+            auto state        = std::make_shared<LocalAsyncFileState>();
             state->driver     = std::move(driver);
             state->handle     = opened.handle;
             state->path       = std::move(opened.path);
@@ -1972,9 +1989,9 @@ namespace NGIN::IO
         }
 
         AsyncTask<FileInfo> LocalAsyncDirectoryGetInfo(const std::shared_ptr<void>& rawState,
-                                                       NGIN::Async::TaskContext&  ctx,
-                                                       const Path&                path,
-                                                       const MetadataOptions&     options)
+                                                       NGIN::Async::TaskContext&    ctx,
+                                                       const Path&                  path,
+                                                       const MetadataOptions&       options)
         {
             auto state      = std::static_pointer_cast<LocalAsyncDirectoryState>(rawState);
             auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [state, path, options]() mutable noexcept {
@@ -1997,9 +2014,9 @@ namespace NGIN::IO
         }
 
         AsyncTask<AsyncFileHandle> LocalAsyncDirectoryOpenFile(const std::shared_ptr<void>& rawState,
-                                                               NGIN::Async::TaskContext&  ctx,
-                                                               const Path&                path,
-                                                               const FileOpenOptions&     options)
+                                                               NGIN::Async::TaskContext&    ctx,
+                                                               const Path&                  path,
+                                                               const FileOpenOptions&       options)
         {
             auto state      = std::static_pointer_cast<LocalAsyncDirectoryState>(rawState);
             auto normalized = NormalizeRelativeHandlePath(path);
@@ -2007,7 +2024,7 @@ namespace NGIN::IO
                 co_return NGIN::Utilities::Unexpected<IOError>(std::move(normalized).TakeError());
 
             const Path resolvedPath = ResolveAsyncDirectoryPath(*state, normalized.Value());
-            auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [resolvedPath, options]() mutable noexcept {
+            auto       completion   = co_await detail::DispatchToDriver(*state->driver, ctx, [resolvedPath, options]() mutable noexcept {
                 return OpenAsyncWindowsFile(resolvedPath, options);
             });
             if (completion.IsCanceled())
@@ -2035,7 +2052,7 @@ namespace NGIN::IO
                 co_return NGIN::Utilities::Unexpected<IOError>(std::move(normalized).TakeError());
 
             const Path resolvedPath = ResolveAsyncDirectoryPath(*state, normalized.Value());
-            auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [resolvedPath]() mutable noexcept {
+            auto       completion   = co_await detail::DispatchToDriver(*state->driver, ctx, [resolvedPath]() mutable noexcept {
                 return LocalDirectoryHandle::Open(resolvedPath);
             });
             if (completion.IsCanceled())
@@ -2083,11 +2100,11 @@ namespace NGIN::IO
         }
 
         const AsyncDirectoryHandle::Operations LocalAsyncDirectoryOperations {
-                .exists = &LocalAsyncDirectoryExists,
-                .getInfo = &LocalAsyncDirectoryGetInfo,
-                .openFile = &LocalAsyncDirectoryOpenFile,
+                .exists        = &LocalAsyncDirectoryExists,
+                .getInfo       = &LocalAsyncDirectoryGetInfo,
+                .openFile      = &LocalAsyncDirectoryOpenFile,
                 .openDirectory = &LocalAsyncDirectoryOpenDirectory,
-                .readSymlink = &LocalAsyncDirectoryReadSymlink,
+                .readSymlink   = &LocalAsyncDirectoryReadSymlink,
         };
     }// namespace
 

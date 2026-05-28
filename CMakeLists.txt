@@ -158,6 +158,11 @@ set(NGIN_BASE_CORE_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/FileSystemDriver.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/FileSystemUtilities.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/LocalFileSystem.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Crypto/Errors/CryptoError.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Crypto/Memory/ConstantTime.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Crypto/Memory/ZeroMemory.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Crypto/Memory/SecureBuffer.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Crypto/Random/SecureRandom.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Serialization/JSON/JsonParser.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Serialization/JSON/JsonArchive.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Serialization/XML/XmlParser.cpp
@@ -214,6 +219,24 @@ if(WIN32)
     ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/NetworkDriver.win32.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/TcpSocket.win32.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/UdpSocket.win32.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Crypto/Random/SecureRandom.win32.cpp
+  )
+elseif(APPLE)
+  list(APPEND NGIN_BASE_CORE_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/DynamicLibrary.posix.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Time/MonotonicClock.posix.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Time/Sleep.posix.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Execution/ThisThread.posix.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Execution/Thread.posix.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/File.posix.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/FileView.posix.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/FileSystemDriver.posix.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/LocalFileSystem.posix.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/SocketPlatform.posix.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/NetworkDriver.posix.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/TcpSocket.posix.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/UdpSocket.posix.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Crypto/Random/SecureRandom.apple.cpp
   )
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   list(APPEND NGIN_BASE_CORE_SOURCES
@@ -232,6 +255,7 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/NetworkDriver.linux.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/TcpSocket.posix.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/UdpSocket.posix.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Crypto/Random/SecureRandom.linux.cpp
   )
 elseif(UNIX)
   list(APPEND NGIN_BASE_CORE_SOURCES
@@ -248,6 +272,7 @@ elseif(UNIX)
     ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/NetworkDriver.posix.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/TcpSocket.posix.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Net/UdpSocket.posix.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Crypto/Random/SecureRandom.posix.cpp
   )
 endif()
 
@@ -364,16 +389,16 @@ if(NGIN_BASE_ENABLE_LTO)
   endif()
 endif()
 
-# Windows: link Synchronization and Winsock for WaitOnAddress/WakeByAddress*
-# and socket APIs. For MSVC, rely on the toolchain's default library search
+# Windows: link Synchronization, Winsock, and BCrypt for WaitOnAddress/WakeByAddress*,
+# socket APIs, and platform secure random. For MSVC, rely on the toolchain's default library search
 # instead of find_library, which is brittle on hosted CI images.
 if(WIN32)
   if(MSVC)
     if(TARGET NGIN.Base.Static)
-      target_link_libraries(NGIN.Base.Static PUBLIC Synchronization Ws2_32)
+      target_link_libraries(NGIN.Base.Static PUBLIC Synchronization Ws2_32 Bcrypt)
     endif()
     if(TARGET NGIN.Base.Shared)
-      target_link_libraries(NGIN.Base.Shared PRIVATE Synchronization Ws2_32)
+      target_link_libraries(NGIN.Base.Shared PRIVATE Synchronization Ws2_32 Bcrypt)
     endif()
   else()
     find_library(_ngin_synchronization_lib NAMES Synchronization synchronization)
@@ -399,6 +424,32 @@ if(WIN32)
     else()
       message(WARNING "Windows Ws2_32.lib not found; socket APIs will fail to link")
     endif()
+
+    find_library(_ngin_bcrypt_lib NAMES Bcrypt bcrypt)
+    if(_ngin_bcrypt_lib)
+      if(TARGET NGIN.Base.Static)
+        target_link_libraries(NGIN.Base.Static PUBLIC ${_ngin_bcrypt_lib})
+      endif()
+      if(TARGET NGIN.Base.Shared)
+        target_link_libraries(NGIN.Base.Shared PRIVATE ${_ngin_bcrypt_lib})
+      endif()
+    else()
+      message(WARNING "Windows Bcrypt.lib not found; secure random APIs will fail to link")
+    endif()
+  endif()
+endif()
+
+if(APPLE)
+  find_library(_ngin_security_framework Security)
+  if(_ngin_security_framework)
+    if(TARGET NGIN.Base.Static)
+      target_link_libraries(NGIN.Base.Static PUBLIC ${_ngin_security_framework})
+    endif()
+    if(TARGET NGIN.Base.Shared)
+      target_link_libraries(NGIN.Base.Shared PRIVATE ${_ngin_security_framework})
+    endif()
+  else()
+    message(WARNING "Apple Security framework not found; secure random APIs will fail to link")
   endif()
 endif()
 

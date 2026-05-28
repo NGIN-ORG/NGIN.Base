@@ -52,6 +52,7 @@ You probably do not need it when:
   - use `Path`
 - Need to read or write an entire file:
   - use `ReadAllText`, `WriteAllText`, `ReadAllBytes`, or `WriteAllBytes`
+  - use `WriteAllTextAtomic` or `WriteAllBytesAtomic` when replacing a file should avoid partially written destination contents
 - Need general synchronous filesystem operations:
   - use `IFileSystem` or `LocalFileSystem`
 - Need operations relative to an open directory:
@@ -131,12 +132,17 @@ if (!entries)
 while (true)
 {
     auto next = entries->Next();
-    if (!next || !next.Value())
+    if (!next)
+    {
+        return;
+    }
+
+    if (!next->HasEntry())
     {
         break;
     }
 
-    const auto& entry = entries->Current();
+    const auto& entry = next->Entry();
     Use(entry.name);
 }
 ```
@@ -223,6 +229,45 @@ options.symlinkMode = NGIN::IO::SymlinkMode::DoNotFollow;
 
 auto info = fs.GetInfo(path, options);
 ```
+
+`FileInfo::type` is meaningful only when `FileInfo::exists` is true. A directory entry can report
+`EntryType::Unknown` when the backend cannot classify it cheaply and the caller did not request metadata.
+
+### Use enumeration options deliberately
+
+`EnumerateOptions::populateInfo` controls whether `DirectoryEntry::info` is filled. When it is false, `name` and
+`path` are still populated, and `type` is filled from cheap backend data when available. If filtering, recursion, or
+symlink following requires reliable type information, the backend may query metadata internally while still leaving
+`info` empty.
+
+Enumeration order is unspecified unless `sortOrder` is set:
+
+```cpp
+NGIN::IO::EnumerateOptions options;
+options.sortOrder = NGIN::IO::DirectorySortOrder::LexicalPath;
+```
+
+`LexicalPath` sorts by path. `LexicalName` sorts by name and then by path to keep recursive enumeration deterministic
+when different directories contain entries with the same name.
+
+### Use atomic writes for replacement-sensitive files
+
+`WriteAllTextAtomic` and `WriteAllBytesAtomic` are overwrite-oriented helpers. They create a temporary file in the
+destination directory, write the payload, optionally flush the file data, close the file, and replace the destination.
+
+```cpp
+NGIN::IO::AtomicWriteOptions options;
+options.createParentDirectories = true;
+
+auto wrote = NGIN::IO::WriteAllTextAtomic(fs, NGIN::IO::Path {"cache/state.json"}, text, options);
+```
+
+These helpers do not offer no-replace semantics. A future filesystem primitive such as `RenameNoReplace` or
+`ReplaceFileOptions` is needed for a race-free no-overwrite operation.
+
+`bestEffortDurable` flushes file data through `FileHandle::Flush()` before replacement. Full crash durability of the
+directory entry after replacement is backend- and platform-dependent until the filesystem API can express directory
+sync support.
 
 ### Use async only when it fits the rest of your program
 

@@ -10,8 +10,6 @@ namespace NGIN::IO
     public:
         virtual ~IDirectoryEnumerator() = default;
 
-        virtual Result<bool>           Next() noexcept = 0;
-        [[nodiscard]] virtual const DirectoryEntry& Current() const noexcept = 0;
+        virtual Result<DirectoryEnumerationNext> Next() noexcept = 0;
     };
 }// namespace NGIN::IO
-
