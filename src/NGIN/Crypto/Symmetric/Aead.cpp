@@ -26,11 +26,6 @@ namespace NGIN::Crypto::Symmetric
             return CryptoError {CryptoErrorCode::OutputBufferTooSmall};
         }
 
-        [[nodiscard]] constexpr CryptoError UnsupportedAlgorithm() noexcept
-        {
-            return CryptoError {CryptoErrorCode::UnsupportedAlgorithm};
-        }
-
         [[nodiscard]] CryptoExpected<void> ValidateCommon(
                 AeadAlgorithm                    algorithm,
                 NGIN::Crypto::Memory::SecretView key,
@@ -73,7 +68,14 @@ namespace NGIN::Crypto::Symmetric
             return supported.Error();
         }
 
-        return UnsupportedAlgorithm();
+        return context.AeadSealInto(
+                algorithm,
+                input.key,
+                input.nonce,
+                input.plaintext,
+                input.associatedData,
+                ciphertext,
+                tag);
     }
 
     CryptoExpected<void> OpenInto(
@@ -103,7 +105,14 @@ namespace NGIN::Crypto::Symmetric
             return supported.Error();
         }
 
-        return UnsupportedAlgorithm();
+        return context.AeadOpenInto(
+                algorithm,
+                input.key,
+                input.nonce,
+                input.ciphertext,
+                input.associatedData,
+                input.tag,
+                plaintext);
     }
 
     CryptoExpected<AeadSealResult> Seal(

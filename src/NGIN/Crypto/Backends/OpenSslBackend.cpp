@@ -1,6 +1,7 @@
 #include "OpenSslBackend.hpp"
 
 #include <NGIN/Crypto/Errors/CryptoError.hpp>
+#include <NGIN/Crypto/Memory/ZeroMemory.hpp>
 
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
@@ -31,6 +32,11 @@ namespace NGIN::Crypto::Backend::detail
         [[nodiscard]] constexpr CryptoError UnsupportedAlgorithm() noexcept
         {
             return CryptoError {CryptoErrorCode::UnsupportedAlgorithm};
+        }
+
+        [[nodiscard]] constexpr CryptoError AuthenticationFailed() noexcept
+        {
+            return CryptoError {CryptoErrorCode::AuthenticationFailed};
         }
 
         [[nodiscard]] const EVP_MD* SelectDigest(HashAlgorithm algorithm) noexcept
@@ -80,6 +86,22 @@ namespace NGIN::Crypto::Backend::detail
             return nullptr;
         }
 
+        [[nodiscard]] const EVP_CIPHER* SelectCipher(AeadAlgorithm algorithm) noexcept
+        {
+            switch (algorithm)
+            {
+                case AeadAlgorithm::Aes128Gcm:
+                    return EVP_aes_128_gcm();
+                case AeadAlgorithm::Aes256Gcm:
+                    return EVP_aes_256_gcm();
+                case AeadAlgorithm::ChaCha20Poly1305:
+                case AeadAlgorithm::XChaCha20Poly1305:
+                    return nullptr;
+            }
+
+            return nullptr;
+        }
+
         [[nodiscard]] bool FitsOpenSslInt(NGIN::UIntSize size) noexcept
         {
             return size <= static_cast<NGIN::UIntSize>(std::numeric_limits<int>::max());
@@ -100,6 +122,7 @@ namespace NGIN::Crypto::Backend::detail
                 .Enable(KdfAlgorithm::HkdfSha512)
                 .Enable(KdfAlgorithm::Pbkdf2Sha256)
                 .Enable(KdfAlgorithm::Pbkdf2Sha512);
+        capabilities.Enable(AeadAlgorithm::Aes128Gcm).Enable(AeadAlgorithm::Aes256Gcm);
 
         return CryptoContext {
                 BackendInfo {
@@ -297,5 +320,181 @@ namespace NGIN::Crypto::Backend::detail
                 reinterpret_cast<unsigned char*>(output.data()));
 
         return result == 1 ? CryptoExpected<void> {} : InternalError();
+    }
+
+    CryptoExpected<void> AeadSealOpenSsl(
+            AeadAlgorithm                    algorithm,
+            NGIN::Crypto::Memory::SecretView key,
+            ConstByteSpan                    nonce,
+            ConstByteSpan                    plaintext,
+            ConstByteSpan                    associatedData,
+            ByteSpan                         ciphertext,
+            ByteSpan                         tag) noexcept
+    {
+        const EVP_CIPHER* cipher = SelectCipher(algorithm);
+        if (cipher == nullptr)
+        {
+            return UnsupportedAlgorithm();
+        }
+        if (!FitsOpenSslInt(plaintext.size()) || !FitsOpenSslInt(associatedData.size()))
+        {
+            return InvalidArgument();
+        }
+
+        EVP_CIPHER_CTX* context = EVP_CIPHER_CTX_new();
+        if (context == nullptr)
+        {
+            return InternalError();
+        }
+
+        const auto keyBytes = key.Bytes();
+        int        produced = 0;
+        int        total    = 0;
+
+        if (EVP_EncryptInit_ex(context, cipher, nullptr, nullptr, nullptr) != 1 ||
+            EVP_CIPHER_CTX_ctrl(context, EVP_CTRL_GCM_SET_IVLEN, static_cast<int>(nonce.size()), nullptr) != 1 ||
+            EVP_EncryptInit_ex(
+                    context,
+                    nullptr,
+                    nullptr,
+                    reinterpret_cast<const unsigned char*>(keyBytes.data()),
+                    reinterpret_cast<const unsigned char*>(nonce.data())) != 1)
+        {
+            EVP_CIPHER_CTX_free(context);
+            return InternalError();
+        }
+
+        if (!associatedData.empty() &&
+            EVP_EncryptUpdate(
+                    context,
+                    nullptr,
+                    &produced,
+                    reinterpret_cast<const unsigned char*>(associatedData.data()),
+                    static_cast<int>(associatedData.size())) != 1)
+        {
+            EVP_CIPHER_CTX_free(context);
+            return InternalError();
+        }
+
+        if (!plaintext.empty() &&
+            EVP_EncryptUpdate(
+                    context,
+                    reinterpret_cast<unsigned char*>(ciphertext.data()),
+                    &produced,
+                    reinterpret_cast<const unsigned char*>(plaintext.data()),
+                    static_cast<int>(plaintext.size())) != 1)
+        {
+            EVP_CIPHER_CTX_free(context);
+            return InternalError();
+        }
+        total += produced;
+
+        if (EVP_EncryptFinal_ex(context, reinterpret_cast<unsigned char*>(ciphertext.data()) + total, &produced) != 1)
+        {
+            EVP_CIPHER_CTX_free(context);
+            return InternalError();
+        }
+        total += produced;
+
+        if (static_cast<NGIN::UIntSize>(total) != ciphertext.size() ||
+            EVP_CIPHER_CTX_ctrl(context, EVP_CTRL_GCM_GET_TAG, static_cast<int>(tag.size()), tag.data()) != 1)
+        {
+            EVP_CIPHER_CTX_free(context);
+            return InternalError();
+        }
+
+        EVP_CIPHER_CTX_free(context);
+        return {};
+    }
+
+    CryptoExpected<void> AeadOpenOpenSsl(
+            AeadAlgorithm                    algorithm,
+            NGIN::Crypto::Memory::SecretView key,
+            ConstByteSpan                    nonce,
+            ConstByteSpan                    ciphertext,
+            ConstByteSpan                    associatedData,
+            ConstByteSpan                    tag,
+            ByteSpan                         plaintext) noexcept
+    {
+        const EVP_CIPHER* cipher = SelectCipher(algorithm);
+        if (cipher == nullptr)
+        {
+            return UnsupportedAlgorithm();
+        }
+        if (!FitsOpenSslInt(ciphertext.size()) || !FitsOpenSslInt(associatedData.size()))
+        {
+            return InvalidArgument();
+        }
+
+        EVP_CIPHER_CTX* context = EVP_CIPHER_CTX_new();
+        if (context == nullptr)
+        {
+            return InternalError();
+        }
+
+        const auto keyBytes = key.Bytes();
+        int        produced = 0;
+        int        total    = 0;
+
+        if (EVP_DecryptInit_ex(context, cipher, nullptr, nullptr, nullptr) != 1 ||
+            EVP_CIPHER_CTX_ctrl(context, EVP_CTRL_GCM_SET_IVLEN, static_cast<int>(nonce.size()), nullptr) != 1 ||
+            EVP_DecryptInit_ex(
+                    context,
+                    nullptr,
+                    nullptr,
+                    reinterpret_cast<const unsigned char*>(keyBytes.data()),
+                    reinterpret_cast<const unsigned char*>(nonce.data())) != 1)
+        {
+            EVP_CIPHER_CTX_free(context);
+            return InternalError();
+        }
+
+        if (!associatedData.empty() &&
+            EVP_DecryptUpdate(
+                    context,
+                    nullptr,
+                    &produced,
+                    reinterpret_cast<const unsigned char*>(associatedData.data()),
+                    static_cast<int>(associatedData.size())) != 1)
+        {
+            EVP_CIPHER_CTX_free(context);
+            return InternalError();
+        }
+
+        if (!ciphertext.empty() &&
+            EVP_DecryptUpdate(
+                    context,
+                    reinterpret_cast<unsigned char*>(plaintext.data()),
+                    &produced,
+                    reinterpret_cast<const unsigned char*>(ciphertext.data()),
+                    static_cast<int>(ciphertext.size())) != 1)
+        {
+            EVP_CIPHER_CTX_free(context);
+            NGIN::Crypto::Memory::SecureZero(plaintext);
+            return InternalError();
+        }
+        total += produced;
+
+        if (EVP_CIPHER_CTX_ctrl(
+                    context,
+                    EVP_CTRL_GCM_SET_TAG,
+                    static_cast<int>(tag.size()),
+                    const_cast<NGIN::Byte*>(tag.data())) != 1)
+        {
+            EVP_CIPHER_CTX_free(context);
+            NGIN::Crypto::Memory::SecureZero(plaintext);
+            return InternalError();
+        }
+
+        if (EVP_DecryptFinal_ex(context, reinterpret_cast<unsigned char*>(plaintext.data()) + total, &produced) != 1)
+        {
+            EVP_CIPHER_CTX_free(context);
+            NGIN::Crypto::Memory::SecureZero(plaintext);
+            return AuthenticationFailed();
+        }
+        total += produced;
+
+        EVP_CIPHER_CTX_free(context);
+        return static_cast<NGIN::UIntSize>(total) == plaintext.size() ? CryptoExpected<void> {} : InternalError();
     }
 }// namespace NGIN::Crypto::Backend::detail

@@ -132,6 +132,70 @@ namespace NGIN::Crypto::Backend
         return UnsupportedAlgorithm();
     }
 
+    CryptoExpected<void> CryptoContext::AeadSealInto(
+            AeadAlgorithm                    algorithm,
+            NGIN::Crypto::Memory::SecretView key,
+            ConstByteSpan                    nonce,
+            ConstByteSpan                    plaintext,
+            ConstByteSpan                    associatedData,
+            ByteSpan                         ciphertext,
+            ByteSpan                         tag) const noexcept
+    {
+        auto supported = EnsureSupports(algorithm);
+        if (!supported.HasValue())
+        {
+            return supported.Error();
+        }
+
+#if defined(NGIN_BASE_CRYPTO_HAS_OPENSSL)
+        if (Info().Kind() == BackendKind::ExternalPackage && Info().Name() == "openssl")
+        {
+            return detail::AeadSealOpenSsl(algorithm, key, nonce, plaintext, associatedData, ciphertext, tag);
+        }
+#else
+        (void) key;
+        (void) nonce;
+        (void) plaintext;
+        (void) associatedData;
+        (void) ciphertext;
+        (void) tag;
+#endif
+
+        return UnsupportedAlgorithm();
+    }
+
+    CryptoExpected<void> CryptoContext::AeadOpenInto(
+            AeadAlgorithm                    algorithm,
+            NGIN::Crypto::Memory::SecretView key,
+            ConstByteSpan                    nonce,
+            ConstByteSpan                    ciphertext,
+            ConstByteSpan                    associatedData,
+            ConstByteSpan                    tag,
+            ByteSpan                         plaintext) const noexcept
+    {
+        auto supported = EnsureSupports(algorithm);
+        if (!supported.HasValue())
+        {
+            return supported.Error();
+        }
+
+#if defined(NGIN_BASE_CRYPTO_HAS_OPENSSL)
+        if (Info().Kind() == BackendKind::ExternalPackage && Info().Name() == "openssl")
+        {
+            return detail::AeadOpenOpenSsl(algorithm, key, nonce, ciphertext, associatedData, tag, plaintext);
+        }
+#else
+        (void) key;
+        (void) nonce;
+        (void) ciphertext;
+        (void) associatedData;
+        (void) tag;
+        (void) plaintext;
+#endif
+
+        return UnsupportedAlgorithm();
+    }
+
     CryptoExpected<CryptoContext> CreateContext(const BackendOptions& options) noexcept
     {
         if (options.requireSecureRandom && !NGIN::Crypto::Random::IsAvailable())

@@ -92,6 +92,24 @@ namespace NGIN::Crypto::Backend
                 NGIN::UInt32                     iterations,
                 ByteSpan                         output) const noexcept;
 
+        [[nodiscard]] CryptoExpected<void> AeadSealInto(
+                AeadAlgorithm                    algorithm,
+                NGIN::Crypto::Memory::SecretView key,
+                ConstByteSpan                    nonce,
+                ConstByteSpan                    plaintext,
+                ConstByteSpan                    associatedData,
+                ByteSpan                         ciphertext,
+                ByteSpan                         tag) const noexcept;
+
+        [[nodiscard]] CryptoExpected<void> AeadOpenInto(
+                AeadAlgorithm                    algorithm,
+                NGIN::Crypto::Memory::SecretView key,
+                ConstByteSpan                    nonce,
+                ConstByteSpan                    ciphertext,
+                ConstByteSpan                    associatedData,
+                ConstByteSpan                    tag,
+                ByteSpan                         plaintext) const noexcept;
+
         [[nodiscard]] constexpr CryptoExpected<void> EnsureSupports(HashAlgorithm algorithm) const noexcept
         {
             return Supports(algorithm) ? CryptoExpected<void> {} : CryptoError {CryptoErrorCode::UnsupportedAlgorithm};

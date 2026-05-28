@@ -30,4 +30,22 @@ namespace NGIN::Crypto::Backend::detail
             ConstByteSpan                    salt,
             NGIN::UInt32                     iterations,
             ByteSpan                         output) noexcept;
+
+    [[nodiscard]] CryptoExpected<void> AeadSealOpenSsl(
+            AeadAlgorithm                    algorithm,
+            NGIN::Crypto::Memory::SecretView key,
+            ConstByteSpan                    nonce,
+            ConstByteSpan                    plaintext,
+            ConstByteSpan                    associatedData,
+            ByteSpan                         ciphertext,
+            ByteSpan                         tag) noexcept;
+
+    [[nodiscard]] CryptoExpected<void> AeadOpenOpenSsl(
+            AeadAlgorithm                    algorithm,
+            NGIN::Crypto::Memory::SecretView key,
+            ConstByteSpan                    nonce,
+            ConstByteSpan                    ciphertext,
+            ConstByteSpan                    associatedData,
+            ConstByteSpan                    tag,
+            ByteSpan                         plaintext) noexcept;
 }// namespace NGIN::Crypto::Backend::detail

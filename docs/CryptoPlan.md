@@ -350,7 +350,7 @@ all complete for the intended phase.
 | [x] | Platform random backend | 1 | None beyond `Random/*` and neutral backend capability reporting | `Random/SecureRandom.*.cpp`, `Backends/BackendDispatch.cpp` | Same as random tests | Only randomness in core backend at first; not a user-included backend type. |
 | [ ] | Windows CNG backend | 3 | None | `Backends/CngBackend.win32.cpp` | Backend known-answer tests on Windows | Native algorithms through BCrypt/NCrypt where supported. |
 | [ ] | Apple security backend | 3 | None | `Backends/AppleSecurityBackend.apple.cpp` | Backend known-answer tests on Apple | Use Security/CommonCrypto/CryptoKit availability carefully. |
-| [x] | OpenSSL backend skeleton | 3 | None | `Backends/OpenSslBackend.cpp` | SHA/HMAC/HKDF/PBKDF2 known-answer tests when enabled | Optional approved dependency/package, not default NGIN.Base core dependency; wires SHA-256/SHA-512, HMAC, HKDF, and PBKDF2 first. |
+| [x] | OpenSSL backend skeleton | 3 | None | `Backends/OpenSslBackend.cpp` | SHA/HMAC/HKDF/PBKDF2/AES-GCM known-answer tests when enabled | Optional approved dependency/package, not default NGIN.Base core dependency; wires SHA-256/SHA-512, HMAC, KDF, and AES-GCM first. |
 | [ ] | BoringSSL backend | 4 | None | `Backends/BoringSslBackend.cpp` | Backend known-answer tests | Only if workspace needs it separately from OpenSSL. |
 | [ ] | Libsodium backend | 3 | None | `Backends/LibsodiumBackend.cpp` | Backend known-answer tests | Best fit for XChaCha20-Poly1305, Ed25519, X25519, Argon2id. |
 | [x] | Hash abstraction | 2 | `Hashing/Hash.hpp`, `Hashing/HashAlgorithm.hpp`, `Hashing/Digest.hpp` | `Hashing/Hash.cpp` | Hash API tests | Common one-shot, streaming, fixed digest type contracts. |
@@ -366,7 +366,7 @@ all complete for the intended phase.
 | [x] | PBKDF2 | 3 | `Kdf/Pbkdf2.hpp` | OpenSSL-backed when `NGIN_BASE_CRYPTO_OPENSSL=ON` | Known-answer tests | Interop only; docs should prefer Argon2id for password storage. |
 | [ ] | Argon2id | 3 | `Kdf/Argon2id.hpp` | Backend-backed | RFC 9106 vectors, parameter validation tests | Do not implement core algorithm in-house. |
 | [x] | AEAD abstraction | 2 | `Symmetric/Aead.hpp`, `Symmetric/AeadAlgorithm.hpp` | `Symmetric/Aead.cpp` | AEAD API tests | Seal/open only; no unauthenticated encryption first-class API. |
-| [ ] | AES-GCM | 3 | `Symmetric/AesGcm.hpp` | Backend-backed | NIST vectors, invalid tag tests, benchmark | Nonce-size policy must be explicit; 96-bit nonce fast path. |
+| [x] | AES-GCM | 3 | `Symmetric/AesGcm.hpp` | OpenSSL-backed when `NGIN_BASE_CRYPTO_OPENSSL=ON` | NIST vectors, invalid tag tests, benchmark | Nonce-size policy must be explicit; 96-bit nonce fast path. |
 | [ ] | ChaCha20-Poly1305 | 3 | `Symmetric/ChaCha20Poly1305.hpp` | Backend-backed | RFC 8439 vectors, invalid tag tests | Prefer where AES acceleration is unavailable. |
 | [ ] | XChaCha20-Poly1305 | 3 | `Symmetric/XChaCha20Poly1305.hpp` | Libsodium or approved backend | Known-answer tests | Preferred random-nonce AEAD when backend exists. |
 | [ ] | SecretBox | 4 | `Symmetric/SecretBox.hpp` | Backend-backed | Roundtrip and invalid tag tests | Convenience wrapper over XChaCha20-Poly1305 or backend equivalent. |
