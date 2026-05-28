@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <span>
 #include <string_view>
 
 namespace
@@ -38,6 +39,11 @@ namespace
         auto decoded = NGIN::Crypto::Encoding::DecodeHex(text);
         REQUIRE(decoded.HasValue());
         return decoded.Value();
+    }
+
+    [[nodiscard]] NGIN::Crypto::ConstByteSpan Bytes(std::string_view text) noexcept
+    {
+        return std::as_bytes(std::span<const char> {text.data(), text.size()});
     }
 
     void RequireBytesEqual(NGIN::Crypto::ConstByteSpan actual, NGIN::Crypto::ConstByteSpan expected)
@@ -178,6 +184,48 @@ TEST_CASE("HKDF-SHA256 matches RFC 5869 test vector when backend supports it", "
     RequireBytesEqual(
             NGIN::Crypto::ConstByteSpan {output.Value().data(), output.Value().Size()},
             NGIN::Crypto::ConstByteSpan {expected.data(), expected.Size()});
+}
+
+TEST_CASE("PBKDF2-HMAC-SHA256 and SHA512 match known-answer vectors when backend supports them", "[Crypto][Kdf]")
+{
+    auto context = NGIN::Crypto::Backend::CreateContext();
+    REQUIRE(context.HasValue());
+    if (!context.Value().Supports(NGIN::Crypto::KdfAlgorithm::Pbkdf2Sha256) ||
+        !context.Value().Supports(NGIN::Crypto::KdfAlgorithm::Pbkdf2Sha512))
+    {
+        return;
+    }
+
+    const auto expectedSha256 = DecodeHex("ae4d0c95af6b46d32d0adff928f06dd02a303f8ef3c251dfd6e2d85a95474c43");
+    const auto expectedSha512 = DecodeHex(
+            "e1d9c16aa681708a45f5c7c4e215ceb6"
+            "6e011a2e9f0040713f18aefdb866d53c"
+            "f76cab2868a39b9f7840edce4fef5a82"
+            "be67335c77a6068e04112754f27ccf4e");
+
+    NGIN::Crypto::Kdf::Pbkdf2Parameters parameters {
+            .password   = NGIN::Crypto::Memory::SecretView {Bytes("password")},
+            .salt       = Bytes("salt"),
+            .iterations = 2,
+    };
+
+    auto sha256Output = NGIN::Crypto::Kdf::DeriveKey(
+            context.Value(),
+            NGIN::Crypto::Kdf::KeyDerivationParameters {NGIN::Crypto::KdfAlgorithm::Pbkdf2Sha256, parameters},
+            expectedSha256.Size());
+    auto sha512Output = NGIN::Crypto::Kdf::DeriveKey(
+            context.Value(),
+            NGIN::Crypto::Kdf::KeyDerivationParameters {NGIN::Crypto::KdfAlgorithm::Pbkdf2Sha512, parameters},
+            expectedSha512.Size());
+
+    REQUIRE(sha256Output.HasValue());
+    REQUIRE(sha512Output.HasValue());
+    RequireBytesEqual(
+            NGIN::Crypto::ConstByteSpan {sha256Output.Value().data(), sha256Output.Value().Size()},
+            NGIN::Crypto::ConstByteSpan {expectedSha256.data(), expectedSha256.Size()});
+    RequireBytesEqual(
+            NGIN::Crypto::ConstByteSpan {sha512Output.Value().data(), sha512Output.Value().Size()},
+            NGIN::Crypto::ConstByteSpan {expectedSha512.data(), expectedSha512.Size()});
 }
 
 TEST_CASE("KDF contract does not fake implementation even if capability is manually enabled", "[Crypto][Kdf]")

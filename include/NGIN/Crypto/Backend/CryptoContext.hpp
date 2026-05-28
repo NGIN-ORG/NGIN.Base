@@ -85,6 +85,13 @@ namespace NGIN::Crypto::Backend
                 ConstByteSpan                    info,
                 ByteSpan                         output) const noexcept;
 
+        [[nodiscard]] CryptoExpected<void> Pbkdf2Into(
+                KdfAlgorithm                     algorithm,
+                NGIN::Crypto::Memory::SecretView password,
+                ConstByteSpan                    salt,
+                NGIN::UInt32                     iterations,
+                ByteSpan                         output) const noexcept;
+
         [[nodiscard]] constexpr CryptoExpected<void> EnsureSupports(HashAlgorithm algorithm) const noexcept
         {
             return Supports(algorithm) ? CryptoExpected<void> {} : CryptoError {CryptoErrorCode::UnsupportedAlgorithm};

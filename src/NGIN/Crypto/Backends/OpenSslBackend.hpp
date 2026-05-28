@@ -23,4 +23,11 @@ namespace NGIN::Crypto::Backend::detail
             ConstByteSpan                    salt,
             ConstByteSpan                    info,
             ByteSpan                         output) noexcept;
+
+    [[nodiscard]] CryptoExpected<void> Pbkdf2OpenSsl(
+            KdfAlgorithm                     algorithm,
+            NGIN::Crypto::Memory::SecretView password,
+            ConstByteSpan                    salt,
+            NGIN::UInt32                     iterations,
+            ByteSpan                         output) noexcept;
 }// namespace NGIN::Crypto::Backend::detail

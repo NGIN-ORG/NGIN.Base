@@ -104,6 +104,34 @@ namespace NGIN::Crypto::Backend
         return UnsupportedAlgorithm();
     }
 
+    CryptoExpected<void> CryptoContext::Pbkdf2Into(
+            KdfAlgorithm                     algorithm,
+            NGIN::Crypto::Memory::SecretView password,
+            ConstByteSpan                    salt,
+            NGIN::UInt32                     iterations,
+            ByteSpan                         output) const noexcept
+    {
+        auto supported = EnsureSupports(algorithm);
+        if (!supported.HasValue())
+        {
+            return supported.Error();
+        }
+
+#if defined(NGIN_BASE_CRYPTO_HAS_OPENSSL)
+        if (Info().Kind() == BackendKind::ExternalPackage && Info().Name() == "openssl")
+        {
+            return detail::Pbkdf2OpenSsl(algorithm, password, salt, iterations, output);
+        }
+#else
+        (void) password;
+        (void) salt;
+        (void) iterations;
+        (void) output;
+#endif
+
+        return UnsupportedAlgorithm();
+    }
+
     CryptoExpected<CryptoContext> CreateContext(const BackendOptions& options) noexcept
     {
         if (options.requireSecureRandom && !NGIN::Crypto::Random::IsAvailable())

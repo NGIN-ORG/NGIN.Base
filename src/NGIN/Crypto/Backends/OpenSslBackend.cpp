@@ -23,6 +23,11 @@ namespace NGIN::Crypto::Backend::detail
             return CryptoError {CryptoErrorCode::InvalidKey};
         }
 
+        [[nodiscard]] constexpr CryptoError InvalidArgument() noexcept
+        {
+            return CryptoError {CryptoErrorCode::InvalidArgument};
+        }
+
         [[nodiscard]] constexpr CryptoError UnsupportedAlgorithm() noexcept
         {
             return CryptoError {CryptoErrorCode::UnsupportedAlgorithm};
@@ -91,7 +96,10 @@ namespace NGIN::Crypto::Backend::detail
                 .Enable(HashAlgorithm::Sha512)
                 .Enable(MacAlgorithm::HmacSha256)
                 .Enable(MacAlgorithm::HmacSha512);
-        capabilities.Enable(KdfAlgorithm::HkdfSha256).Enable(KdfAlgorithm::HkdfSha512);
+        capabilities.Enable(KdfAlgorithm::HkdfSha256)
+                .Enable(KdfAlgorithm::HkdfSha512)
+                .Enable(KdfAlgorithm::Pbkdf2Sha256)
+                .Enable(KdfAlgorithm::Pbkdf2Sha512);
 
         return CryptoContext {
                 BackendInfo {
@@ -248,5 +256,46 @@ namespace NGIN::Crypto::Backend::detail
 
         EVP_PKEY_CTX_free(context);
         return outputSize == output.size() ? CryptoExpected<void> {} : InternalError();
+    }
+
+    CryptoExpected<void> Pbkdf2OpenSsl(
+            KdfAlgorithm                     algorithm,
+            NGIN::Crypto::Memory::SecretView password,
+            ConstByteSpan                    salt,
+            NGIN::UInt32                     iterations,
+            ByteSpan                         output) noexcept
+    {
+        const EVP_MD* digest = SelectDigest(algorithm);
+        if (digest == nullptr || (algorithm != KdfAlgorithm::Pbkdf2Sha256 && algorithm != KdfAlgorithm::Pbkdf2Sha512))
+        {
+            return UnsupportedAlgorithm();
+        }
+        if (!FitsOpenSslInt(password.Size()))
+        {
+            return InvalidKey();
+        }
+        if (!FitsOpenSslInt(salt.size()) ||
+            !FitsOpenSslInt(output.size()) ||
+            iterations > static_cast<NGIN::UInt32>(std::numeric_limits<int>::max()))
+        {
+            return InvalidArgument();
+        }
+
+        const auto  passwordBytes = password.Bytes();
+        const auto  zeroByte      = NGIN::Byte {0};
+        const auto* passwordData  = passwordBytes.empty() ? &zeroByte : passwordBytes.data();
+        const auto* saltData      = salt.empty() ? &zeroByte : salt.data();
+
+        const int result = PKCS5_PBKDF2_HMAC(
+                reinterpret_cast<const char*>(passwordData),
+                static_cast<int>(passwordBytes.size()),
+                reinterpret_cast<const unsigned char*>(saltData),
+                static_cast<int>(salt.size()),
+                static_cast<int>(iterations),
+                digest,
+                static_cast<int>(output.size()),
+                reinterpret_cast<unsigned char*>(output.data()));
+
+        return result == 1 ? CryptoExpected<void> {} : InternalError();
     }
 }// namespace NGIN::Crypto::Backend::detail
