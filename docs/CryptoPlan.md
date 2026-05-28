@@ -365,7 +365,7 @@ all complete for the intended phase.
 | [ ] | HKDF | 3 | `Kdf/Hkdf.hpp` | Backend-backed or HMAC composition if backend-approved | RFC 5869 vectors | Extract and expand API plus one-shot derive. |
 | [ ] | PBKDF2 | 3 | `Kdf/Pbkdf2.hpp` | Backend-backed | Known-answer tests | Interop only; docs should prefer Argon2id for password storage. |
 | [ ] | Argon2id | 3 | `Kdf/Argon2id.hpp` | Backend-backed | RFC 9106 vectors, parameter validation tests | Do not implement core algorithm in-house. |
-| [ ] | AEAD abstraction | 2 | `Symmetric/Aead.hpp`, `Symmetric/AeadAlgorithm.hpp` | `Symmetric/Aead.cpp` | AEAD API tests | Seal/open only; no unauthenticated encryption first-class API. |
+| [x] | AEAD abstraction | 2 | `Symmetric/Aead.hpp`, `Symmetric/AeadAlgorithm.hpp` | `Symmetric/Aead.cpp` | AEAD API tests | Seal/open only; no unauthenticated encryption first-class API. |
 | [ ] | AES-GCM | 3 | `Symmetric/AesGcm.hpp` | Backend-backed | NIST vectors, invalid tag tests, benchmark | Nonce-size policy must be explicit; 96-bit nonce fast path. |
 | [ ] | ChaCha20-Poly1305 | 3 | `Symmetric/ChaCha20Poly1305.hpp` | Backend-backed | RFC 8439 vectors, invalid tag tests | Prefer where AES acceleration is unavailable. |
 | [ ] | XChaCha20-Poly1305 | 3 | `Symmetric/XChaCha20Poly1305.hpp` | Libsodium or approved backend | Known-answer tests | Preferred random-nonce AEAD when backend exists. |

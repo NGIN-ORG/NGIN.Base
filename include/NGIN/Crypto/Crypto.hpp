@@ -30,4 +30,9 @@
 #include <NGIN/Crypto/Memory/ZeroMemory.hpp>
 #include <NGIN/Crypto/Random/Random.hpp>
 #include <NGIN/Crypto/Result.hpp>
+#include <NGIN/Crypto/Symmetric/Aead.hpp>
+#include <NGIN/Crypto/Symmetric/AeadAlgorithm.hpp>
+#include <NGIN/Crypto/Symmetric/AesGcm.hpp>
+#include <NGIN/Crypto/Symmetric/ChaCha20Poly1305.hpp>
+#include <NGIN/Crypto/Symmetric/XChaCha20Poly1305.hpp>
 #include <NGIN/Crypto/Types.hpp>

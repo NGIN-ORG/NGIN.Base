@@ -170,6 +170,7 @@ set(NGIN_BASE_CORE_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Crypto/Kdf/KeyDerivation.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Crypto/Mac/Hmac.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Crypto/Random/SecureRandom.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Crypto/Symmetric/Aead.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Serialization/JSON/JsonParser.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Serialization/JSON/JsonArchive.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Serialization/XML/XmlParser.cpp
