@@ -158,6 +158,7 @@ set(NGIN_BASE_CORE_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/FileSystemDriver.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/FileSystemUtilities.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/IO/LocalFileSystem.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Crypto/Backends/BackendDispatch.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Crypto/Errors/CryptoError.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Crypto/Encoding/Base64.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/NGIN/Crypto/Encoding/Base64Url.cpp

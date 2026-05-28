@@ -1,6 +1,10 @@
 #pragma once
 
 #include <NGIN/Crypto/Algorithm.hpp>
+#include <NGIN/Crypto/Backend/BackendCapabilities.hpp>
+#include <NGIN/Crypto/Backend/BackendInfo.hpp>
+#include <NGIN/Crypto/Backend/BackendOptions.hpp>
+#include <NGIN/Crypto/Backend/CryptoContext.hpp>
 #include <NGIN/Crypto/ByteBuffer.hpp>
 #include <NGIN/Crypto/Concepts.hpp>
 #include <NGIN/Crypto/Encoding/Base64.hpp>
