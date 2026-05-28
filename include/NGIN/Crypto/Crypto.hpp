@@ -14,6 +14,11 @@
 #include <NGIN/Crypto/Hashing/Digest.hpp>
 #include <NGIN/Crypto/Hashing/Hash.hpp>
 #include <NGIN/Crypto/Hashing/HashAlgorithm.hpp>
+#include <NGIN/Crypto/Mac/Hmac.hpp>
+#include <NGIN/Crypto/Mac/HmacSha256.hpp>
+#include <NGIN/Crypto/Mac/HmacSha512.hpp>
+#include <NGIN/Crypto/Mac/Mac.hpp>
+#include <NGIN/Crypto/Mac/MacAlgorithm.hpp>
 #include <NGIN/Crypto/Memory/ConstantTime.hpp>
 #include <NGIN/Crypto/Memory/Secret.hpp>
 #include <NGIN/Crypto/Memory/SecretView.hpp>
