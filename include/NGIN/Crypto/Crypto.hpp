@@ -44,4 +44,6 @@
 #include <NGIN/Crypto/Symmetric/AesGcm.hpp>
 #include <NGIN/Crypto/Symmetric/ChaCha20Poly1305.hpp>
 #include <NGIN/Crypto/Symmetric/XChaCha20Poly1305.hpp>
+#include <NGIN/Crypto/Tokens/SecureToken.hpp>
+#include <NGIN/Crypto/Tokens/TokenGenerator.hpp>
 #include <NGIN/Crypto/Types.hpp>

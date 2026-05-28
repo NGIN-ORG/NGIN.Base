@@ -378,7 +378,7 @@ all complete for the intended phase.
 | [ ] | RSA | 4 | `Asymmetric/Rsa.hpp` | Backend-backed | PSS/OAEP tests only | Interop API; no PKCS#1 v1.5 signing as a recommended default. |
 | [ ] | Password policy | 3 | Optional low-level parameter validation only | Optional | Parameter validation tests | Application login policy, migration rules, and recommended settings belong in a higher-level security package. |
 | [ ] | Password hashing | 3 | `Passwords/PasswordHash.hpp`, `PasswordVerify.hpp` | `Passwords/PasswordHash.cpp` | OWASP-aligned tests, rehash-needed tests | Backend-backed PHC string handling may live in Crypto; policy defaults and account-flow behavior do not. |
-| [ ] | Secure token generator | 2 | `Tokens/TokenGenerator.hpp`, `Tokens/SecureToken.hpp` | `Tokens/TokenGenerator.cpp` | Length, alphabet, entropy tests | Random opaque tokens first; simplest safe token primitive. |
+| [x] | Secure token generator | 2 | `Tokens/TokenGenerator.hpp`, `Tokens/SecureToken.hpp` | `Tokens/TokenGenerator.cpp` | Length, alphabet, entropy tests | Random opaque tokens first; simplest safe token primitive. |
 | [ ] | JWT | 4 | `Tokens/Jwt.hpp` | `Tokens/Jwt.cpp` | Strict parse, alg allowlist, claim validation tests | Must require explicit allowed algorithms and validation policy. |
 | [ ] | PASETO | 4 | `Tokens/Paseto.hpp` | `Tokens/Paseto.cpp` | Official vectors | Prefer over JWT for new designs if backend support is practical. |
 | [ ] | Certificate model | 4 | `Certificates/Certificate.hpp`, `CertificateChain.hpp` | `Certificates/Certificate.cpp` | Parse and lifetime tests | Lightweight handles over backend-owned X.509 objects. |
@@ -507,14 +507,18 @@ Benchmark dimensions:
 | Backend | Random | SHA/HMAC/HKDF | PBKDF2 | Argon2id | AES-GCM | ChaCha20-Poly1305 | XChaCha20-Poly1305 | Ed25519 | X25519 | X.509/TLS |
 |---|---|---|---|---|---|---|---|---|---|---|
 | Platform random | Yes | No | No | No | No | No | No | No | No | No |
-| Windows CNG | Yes | Yes | Yes | No | Yes | Maybe | No | Maybe | Maybe | Partial |
-| Apple Security/CommonCrypto/CryptoKit | Yes | Yes | Yes | No | Yes | Maybe | No | Maybe | Maybe | Partial |
-| OpenSSL | Yes | Yes | Yes | Backend/version dependent | Yes | Yes | No | Yes | Yes | Yes |
+| Windows CNG | Yes | Yes | Yes | No | Yes | Yes, Windows 10+ | No | Version/API dependent | Version/API dependent | Partial |
+| Apple Security/CommonCrypto/CryptoKit | Yes | Yes | Yes | No | Yes | Yes, with CryptoKit | No | Yes, with CryptoKit | Yes, with CryptoKit | Partial |
+| OpenSSL | Yes | Yes | Yes | Version dependent, OpenSSL 3.2+ | Yes | Yes | No | Yes | Yes | Yes |
 | BoringSSL | Yes | Yes | Yes | No | Yes | Yes | No | Yes | Yes | Yes |
-| Libsodium | Yes | Limited | No | Yes | No | Yes | Yes | Yes | Yes | No |
+| Libsodium | Yes | Partial/Yes-ish | No | Yes | Optional/CPU-dependent | Yes | Yes | Yes | Yes | No |
 
 The matrix must be verified against the exact backend versions used by the workspace before it becomes user-facing
-documentation.
+documentation. "Yes" still means the NGIN wrapper must probe the exact OS, library version, enabled provider set, and
+API shape. Windows CNG includes documented ChaCha20-Poly1305 and Curve25519 support on supported Windows versions, but
+the Ed25519/X25519 wrapper contract should stay version/API-shape gated. Apple support assumes CryptoKit is available
+and allowed for the target. Libsodium is strongest for Argon2id, ChaCha20-Poly1305, XChaCha20-Poly1305, Ed25519, and
+X25519; its SHA/HMAC/HKDF and AES-GCM coverage should be treated as narrower than OpenSSL/BoringSSL.
 
 ## CMake and Packaging
 
