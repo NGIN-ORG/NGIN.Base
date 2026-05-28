@@ -3,16 +3,12 @@
 #include <NGIN/Crypto/Errors/CryptoError.hpp>
 #include <NGIN/Crypto/Mac/HmacSha256.hpp>
 #include <NGIN/Crypto/Mac/HmacSha512.hpp>
+#include <NGIN/Crypto/Memory/ConstantTime.hpp>
 
 namespace NGIN::Crypto::Mac
 {
     namespace
     {
-        [[nodiscard]] constexpr CryptoError UnsupportedAlgorithm() noexcept
-        {
-            return CryptoError {CryptoErrorCode::UnsupportedAlgorithm};
-        }
-
         [[nodiscard]] constexpr CryptoError OutputBufferTooSmall() noexcept
         {
             return CryptoError {CryptoErrorCode::OutputBufferTooSmall};
@@ -21,6 +17,11 @@ namespace NGIN::Crypto::Mac
         [[nodiscard]] constexpr CryptoError InvalidTag() noexcept
         {
             return CryptoError {CryptoErrorCode::InvalidTag};
+        }
+
+        [[nodiscard]] constexpr CryptoError AuthenticationFailed() noexcept
+        {
+            return CryptoError {CryptoErrorCode::AuthenticationFailed};
         }
     }// namespace
 
@@ -31,21 +32,12 @@ namespace NGIN::Crypto::Mac
             ConstByteSpan                               input,
             ByteSpan                                    output) noexcept
     {
-        (void) key;
-        (void) input;
-
         if (output.size() != MacTagSize(algorithm))
         {
             return OutputBufferTooSmall();
         }
 
-        auto supported = context.EnsureSupports(algorithm);
-        if (!supported.HasValue())
-        {
-            return supported.Error();
-        }
-
-        return UnsupportedAlgorithm();
+        return context.MacInto(algorithm, key, input, output);
     }
 
     CryptoExpected<ByteBuffer> ComputeMac(
@@ -71,21 +63,26 @@ namespace NGIN::Crypto::Mac
             ConstByteSpan                               input,
             ConstByteSpan                               expectedTag) noexcept
     {
-        (void) key;
-        (void) input;
-
         if (expectedTag.size() != MacTagSize(algorithm))
         {
             return InvalidTag();
         }
 
-        auto supported = context.EnsureSupports(algorithm);
-        if (!supported.HasValue())
+        auto computed = MakeByteBuffer(MacTagSize(algorithm));
+        auto result   = MacInto(context, algorithm, key, input, ByteSpan {computed.data(), computed.Size()});
+        if (!result.HasValue())
         {
-            return supported.Error();
+            return result.Error();
         }
 
-        return UnsupportedAlgorithm();
+        if (!NGIN::Crypto::Memory::ConstantTimeEqual(
+                    ConstByteSpan {computed.data(), computed.Size()},
+                    expectedTag))
+        {
+            return AuthenticationFailed();
+        }
+
+        return {};
     }
 
     CryptoExpected<HmacSha256Tag> HmacSha256(

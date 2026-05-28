@@ -64,6 +64,8 @@ TEST_CASE("CreateContext returns configured default backend context", "[Crypto][
         REQUIRE(context.Value().Info().Kind() == NGIN::Crypto::Backend::BackendKind::ExternalPackage);
         REQUIRE(context.Value().Supports(NGIN::Crypto::HashAlgorithm::Sha256));
         REQUIRE(context.Value().Supports(NGIN::Crypto::HashAlgorithm::Sha512));
+        REQUIRE(context.Value().Supports(NGIN::Crypto::MacAlgorithm::HmacSha256));
+        REQUIRE(context.Value().Supports(NGIN::Crypto::MacAlgorithm::HmacSha512));
     }
     else
     {

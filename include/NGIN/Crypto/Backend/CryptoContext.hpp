@@ -3,6 +3,7 @@
 #include <NGIN/Crypto/Backend/BackendCapabilities.hpp>
 #include <NGIN/Crypto/Backend/BackendInfo.hpp>
 #include <NGIN/Crypto/Backend/BackendOptions.hpp>
+#include <NGIN/Crypto/Memory/SecretView.hpp>
 #include <NGIN/Crypto/Result.hpp>
 #include <NGIN/Crypto/Types.hpp>
 
@@ -65,6 +66,17 @@ namespace NGIN::Crypto::Backend
         }
 
         [[nodiscard]] CryptoExpected<void> FillRandom(ByteSpan output) const noexcept;
+
+        [[nodiscard]] CryptoExpected<void> HashInto(
+                HashAlgorithm algorithm,
+                ConstByteSpan input,
+                ByteSpan      output) const noexcept;
+
+        [[nodiscard]] CryptoExpected<void> MacInto(
+                MacAlgorithm                     algorithm,
+                NGIN::Crypto::Memory::SecretView key,
+                ConstByteSpan                    input,
+                ByteSpan                         output) const noexcept;
 
         [[nodiscard]] constexpr CryptoExpected<void> EnsureSupports(HashAlgorithm algorithm) const noexcept
         {

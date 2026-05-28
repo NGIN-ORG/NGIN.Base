@@ -8,6 +8,14 @@
 
 namespace NGIN::Crypto::Backend
 {
+    namespace
+    {
+        [[nodiscard]] constexpr CryptoError UnsupportedAlgorithm() noexcept
+        {
+            return CryptoError {CryptoErrorCode::UnsupportedAlgorithm};
+        }
+    }// namespace
+
     CryptoExpected<void> CryptoContext::FillRandom(ByteSpan output) const noexcept
     {
         if (!SupportsRandom())
@@ -16,6 +24,56 @@ namespace NGIN::Crypto::Backend
         }
 
         return NGIN::Crypto::Random::Fill(output);
+    }
+
+    CryptoExpected<void> CryptoContext::HashInto(
+            HashAlgorithm algorithm,
+            ConstByteSpan input,
+            ByteSpan      output) const noexcept
+    {
+        auto supported = EnsureSupports(algorithm);
+        if (!supported.HasValue())
+        {
+            return supported.Error();
+        }
+
+#if defined(NGIN_BASE_CRYPTO_HAS_OPENSSL)
+        if (Info().Kind() == BackendKind::ExternalPackage && Info().Name() == "openssl")
+        {
+            return detail::HashOpenSsl(algorithm, input, output);
+        }
+#else
+        (void) input;
+        (void) output;
+#endif
+
+        return UnsupportedAlgorithm();
+    }
+
+    CryptoExpected<void> CryptoContext::MacInto(
+            MacAlgorithm                     algorithm,
+            NGIN::Crypto::Memory::SecretView key,
+            ConstByteSpan                    input,
+            ByteSpan                         output) const noexcept
+    {
+        auto supported = EnsureSupports(algorithm);
+        if (!supported.HasValue())
+        {
+            return supported.Error();
+        }
+
+#if defined(NGIN_BASE_CRYPTO_HAS_OPENSSL)
+        if (Info().Kind() == BackendKind::ExternalPackage && Info().Name() == "openssl")
+        {
+            return detail::MacOpenSsl(algorithm, key, input, output);
+        }
+#else
+        (void) key;
+        (void) input;
+        (void) output;
+#endif
+
+        return UnsupportedAlgorithm();
     }
 
     CryptoExpected<CryptoContext> CreateContext(const BackendOptions& options) noexcept

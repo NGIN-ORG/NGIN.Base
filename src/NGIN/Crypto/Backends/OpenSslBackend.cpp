@@ -3,7 +3,10 @@
 #include <NGIN/Crypto/Errors/CryptoError.hpp>
 
 #include <openssl/evp.h>
+#include <openssl/hmac.h>
 #include <openssl/opensslv.h>
+
+#include <limits>
 
 namespace NGIN::Crypto::Backend::detail
 {
@@ -12,6 +15,11 @@ namespace NGIN::Crypto::Backend::detail
         [[nodiscard]] constexpr CryptoError InternalError() noexcept
         {
             return CryptoError {CryptoErrorCode::InternalError};
+        }
+
+        [[nodiscard]] constexpr CryptoError InvalidKey() noexcept
+        {
+            return CryptoError {CryptoErrorCode::InvalidKey};
         }
 
         [[nodiscard]] constexpr CryptoError UnsupportedAlgorithm() noexcept
@@ -35,6 +43,19 @@ namespace NGIN::Crypto::Backend::detail
 
             return nullptr;
         }
+
+        [[nodiscard]] const EVP_MD* SelectDigest(MacAlgorithm algorithm) noexcept
+        {
+            switch (algorithm)
+            {
+                case MacAlgorithm::HmacSha256:
+                    return EVP_sha256();
+                case MacAlgorithm::HmacSha512:
+                    return EVP_sha512();
+            }
+
+            return nullptr;
+        }
     }// namespace
 
     CryptoExpected<CryptoContext> CreateOpenSslContext(const BackendOptions& options) noexcept
@@ -44,7 +65,9 @@ namespace NGIN::Crypto::Backend::detail
         BackendCapabilities capabilities;
         capabilities.EnableRandom()
                 .Enable(HashAlgorithm::Sha256)
-                .Enable(HashAlgorithm::Sha512);
+                .Enable(HashAlgorithm::Sha512)
+                .Enable(MacAlgorithm::HmacSha256)
+                .Enable(MacAlgorithm::HmacSha512);
 
         return CryptoContext {
                 BackendInfo {
@@ -93,6 +116,44 @@ namespace NGIN::Crypto::Backend::detail
         }
 
         EVP_MD_CTX_free(context);
+        return static_cast<NGIN::UIntSize>(produced) == output.size() ? CryptoExpected<void> {} : InternalError();
+    }
+
+    CryptoExpected<void> MacOpenSsl(
+            MacAlgorithm                     algorithm,
+            NGIN::Crypto::Memory::SecretView key,
+            ConstByteSpan                    input,
+            ByteSpan                         output) noexcept
+    {
+        const EVP_MD* digest = SelectDigest(algorithm);
+        if (digest == nullptr)
+        {
+            return UnsupportedAlgorithm();
+        }
+
+        const auto keyBytes = key.Bytes();
+        if (keyBytes.size() > static_cast<NGIN::UIntSize>(std::numeric_limits<int>::max()))
+        {
+            return InvalidKey();
+        }
+
+        const auto* keyData   = keyBytes.empty() ? nullptr : reinterpret_cast<const unsigned char*>(keyBytes.data());
+        const auto* inputData = input.empty() ? nullptr : reinterpret_cast<const unsigned char*>(input.data());
+
+        unsigned int   produced = 0;
+        unsigned char* result   = HMAC(
+                digest,
+                keyData,
+                static_cast<int>(keyBytes.size()),
+                inputData,
+                input.size(),
+                reinterpret_cast<unsigned char*>(output.data()),
+                &produced);
+        if (result == nullptr)
+        {
+            return InternalError();
+        }
+
         return static_cast<NGIN::UIntSize>(produced) == output.size() ? CryptoExpected<void> {} : InternalError();
     }
 }// namespace NGIN::Crypto::Backend::detail

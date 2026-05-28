@@ -10,4 +10,10 @@ namespace NGIN::Crypto::Backend::detail
             HashAlgorithm algorithm,
             ConstByteSpan input,
             ByteSpan      output) noexcept;
+
+    [[nodiscard]] CryptoExpected<void> MacOpenSsl(
+            MacAlgorithm                     algorithm,
+            NGIN::Crypto::Memory::SecretView key,
+            ConstByteSpan                    input,
+            ByteSpan                         output) noexcept;
 }// namespace NGIN::Crypto::Backend::detail

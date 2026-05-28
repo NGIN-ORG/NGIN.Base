@@ -2,19 +2,10 @@
 
 #include <NGIN/Crypto/Errors/CryptoError.hpp>
 
-#if defined(NGIN_BASE_CRYPTO_HAS_OPENSSL)
-#include "../Backends/OpenSslBackend.hpp"
-#endif
-
 namespace NGIN::Crypto::Hashing
 {
     namespace
     {
-        [[nodiscard]] constexpr CryptoError UnsupportedAlgorithm() noexcept
-        {
-            return CryptoError {CryptoErrorCode::UnsupportedAlgorithm};
-        }
-
         [[nodiscard]] constexpr CryptoError OutputBufferTooSmall() noexcept
         {
             return CryptoError {CryptoErrorCode::OutputBufferTooSmall};
@@ -27,29 +18,12 @@ namespace NGIN::Crypto::Hashing
             ConstByteSpan                               input,
             ByteSpan                                    output) noexcept
     {
-#if !defined(NGIN_BASE_CRYPTO_HAS_OPENSSL)
-        (void) input;
-#endif
-
         if (output.size() != DigestSize(algorithm))
         {
             return OutputBufferTooSmall();
         }
 
-        auto supported = context.EnsureSupports(algorithm);
-        if (!supported.HasValue())
-        {
-            return supported.Error();
-        }
-
-#if defined(NGIN_BASE_CRYPTO_HAS_OPENSSL)
-        if (context.Info().Kind() == NGIN::Crypto::Backend::BackendKind::ExternalPackage && context.Info().Name() == "openssl")
-        {
-            return NGIN::Crypto::Backend::detail::HashOpenSsl(algorithm, input, output);
-        }
-#endif
-
-        return UnsupportedAlgorithm();
+        return context.HashInto(algorithm, input, output);
     }
 
     CryptoExpected<ByteBuffer> Hash(
