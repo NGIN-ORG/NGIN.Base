@@ -72,6 +72,7 @@ TEST_CASE("CreateContext returns configured default backend context", "[Crypto][
         REQUIRE(context.Value().Supports(NGIN::Crypto::KdfAlgorithm::Pbkdf2Sha512));
         REQUIRE(context.Value().Supports(NGIN::Crypto::AeadAlgorithm::Aes128Gcm));
         REQUIRE(context.Value().Supports(NGIN::Crypto::AeadAlgorithm::Aes256Gcm));
+        REQUIRE(context.Value().Supports(NGIN::Crypto::AeadAlgorithm::ChaCha20Poly1305));
         REQUIRE(context.Value().Supports(NGIN::Crypto::SignatureAlgorithm::Ed25519));
         REQUIRE(context.Value().Supports(NGIN::Crypto::KeyAgreementAlgorithm::X25519));
     }

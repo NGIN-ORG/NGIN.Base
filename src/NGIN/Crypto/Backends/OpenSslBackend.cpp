@@ -95,6 +95,7 @@ namespace NGIN::Crypto::Backend::detail
                 case AeadAlgorithm::Aes256Gcm:
                     return EVP_aes_256_gcm();
                 case AeadAlgorithm::ChaCha20Poly1305:
+                    return EVP_chacha20_poly1305();
                 case AeadAlgorithm::XChaCha20Poly1305:
                     return nullptr;
             }
@@ -167,7 +168,9 @@ namespace NGIN::Crypto::Backend::detail
                 .Enable(KdfAlgorithm::HkdfSha512)
                 .Enable(KdfAlgorithm::Pbkdf2Sha256)
                 .Enable(KdfAlgorithm::Pbkdf2Sha512);
-        capabilities.Enable(AeadAlgorithm::Aes128Gcm).Enable(AeadAlgorithm::Aes256Gcm);
+        capabilities.Enable(AeadAlgorithm::Aes128Gcm)
+                .Enable(AeadAlgorithm::Aes256Gcm)
+                .Enable(AeadAlgorithm::ChaCha20Poly1305);
         capabilities.Enable(SignatureAlgorithm::Ed25519).Enable(KeyAgreementAlgorithm::X25519);
 
         return CryptoContext {

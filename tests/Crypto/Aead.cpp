@@ -388,6 +388,94 @@ TEST_CASE("AES-GCM opens valid ciphertext and rejects invalid tags when backend 
     REQUIRE(rejected.Error().Code() == NGIN::Crypto::CryptoErrorCode::AuthenticationFailed);
 }
 
+TEST_CASE("ChaCha20-Poly1305 matches RFC 8439 vector and rejects invalid tags when backend supports it", "[Crypto][Aead]")
+{
+    auto context = NGIN::Crypto::Backend::CreateContext();
+    REQUIRE(context.HasValue());
+    if (!context.Value().Supports(NGIN::Crypto::AeadAlgorithm::ChaCha20Poly1305))
+    {
+        return;
+    }
+
+    const auto key       = DecodeHex("1c9240a5eb55d38af333888604f6b5f0"
+                                           "473917c1402b80099dca5cbc207075c0");
+    const auto nonce     = DecodeHex("000000000102030405060708");
+    const auto aad       = DecodeHex("f33388860000000000004e91");
+    const auto plaintext = DecodeHex(
+            "496e7465726e65742d4472616674732061726520647261667420646f63756d656e74732076616c696420666f72206120"
+            "6d6178696d756d206f6620736978206d6f6e74687320616e64206d617920626520757064617465642c207265706c6163"
+            "65642c206f72206f62736f6c65746564206279206f7468657220646f63756d656e747320617420616e792074696d652e"
+            "20497420697320696e617070726f70726961746520746f2075736520496e7465726e65742d4472616674732061732072"
+            "65666572656e6365206d6174657269616c206f7220746f2063697465207468656d206f74686572207468616e20617320"
+            "2fe2809c776f726b20696e2070726f67726573732e2fe2809d");
+    const auto expectedCiphertext = DecodeHex(
+            "64a0861575861af460f062c79be643bd"
+            "5e805cfd345cf389f108670ac76c8cb2"
+            "4c6cfc18755d43eea09ee94e382d26b0"
+            "bdb7b73c321b0100d4f03b7f355894cf"
+            "332f830e710b97ce98c8a84abd0b9481"
+            "14ad176e008d33bd60f982b1ff37c855"
+            "9797a06ef4f0ef61c186324e2b350638"
+            "3606907b6a7c02b0f9f6157b53c867e4"
+            "b9166c767b804d46a59b5216cde7a4e9"
+            "9040c5a40433225ee282a1b0a06c523e"
+            "af4534d7f83fa1155b0047718cbc546a"
+            "0d072b04b3564eea1b422273f548271a"
+            "0bb2316053fa76991955ebd63159434e"
+            "cebb4e466dae5a1073a6727627097a10"
+            "49e617d91d361094fa68f0ff77987130"
+            "305beaba2eda04df997b714d6c6f2c29"
+            "a6ad5cb4022b02709b");
+    const auto expectedTag = DecodeHex("eead9d67890cbb22392336fea1851f38");
+
+    NGIN::Crypto::Symmetric::AeadSealInput sealInput {
+            .key            = NGIN::Crypto::Memory::SecretView {NGIN::Crypto::ConstByteSpan {key.data(), key.Size()}},
+            .nonce          = NGIN::Crypto::ConstByteSpan {nonce.data(), nonce.Size()},
+            .plaintext      = NGIN::Crypto::ConstByteSpan {plaintext.data(), plaintext.Size()},
+            .associatedData = NGIN::Crypto::ConstByteSpan {aad.data(), aad.Size()},
+    };
+
+    auto sealed = NGIN::Crypto::Symmetric::Seal(
+            context.Value(),
+            NGIN::Crypto::AeadAlgorithm::ChaCha20Poly1305,
+            sealInput);
+    REQUIRE(sealed.HasValue());
+    RequireBytesEqual(
+            NGIN::Crypto::ConstByteSpan {sealed.Value().ciphertext.data(), sealed.Value().ciphertext.Size()},
+            NGIN::Crypto::ConstByteSpan {expectedCiphertext.data(), expectedCiphertext.Size()});
+    RequireBytesEqual(
+            NGIN::Crypto::ConstByteSpan {sealed.Value().tag.data(), sealed.Value().tag.size()},
+            NGIN::Crypto::ConstByteSpan {expectedTag.data(), expectedTag.Size()});
+
+    NGIN::Crypto::Symmetric::AeadOpenInput openInput {
+            .key            = NGIN::Crypto::Memory::SecretView {NGIN::Crypto::ConstByteSpan {key.data(), key.Size()}},
+            .nonce          = NGIN::Crypto::ConstByteSpan {nonce.data(), nonce.Size()},
+            .ciphertext     = NGIN::Crypto::ConstByteSpan {sealed.Value().ciphertext.data(), sealed.Value().ciphertext.Size()},
+            .associatedData = NGIN::Crypto::ConstByteSpan {aad.data(), aad.Size()},
+            .tag            = NGIN::Crypto::ConstByteSpan {sealed.Value().tag.data(), sealed.Value().tag.size()},
+    };
+
+    auto opened = NGIN::Crypto::Symmetric::Open(
+            context.Value(),
+            NGIN::Crypto::AeadAlgorithm::ChaCha20Poly1305,
+            openInput);
+    REQUIRE(opened.HasValue());
+    RequireBytesEqual(
+            NGIN::Crypto::ConstByteSpan {opened.Value().data(), opened.Value().Size()},
+            NGIN::Crypto::ConstByteSpan {plaintext.data(), plaintext.Size()});
+
+    auto badTag = sealed.Value().tag;
+    badTag[0] ^= NGIN::Byte {0x01};
+    openInput.tag = NGIN::Crypto::ConstByteSpan {badTag.data(), badTag.size()};
+
+    auto rejected = NGIN::Crypto::Symmetric::Open(
+            context.Value(),
+            NGIN::Crypto::AeadAlgorithm::ChaCha20Poly1305,
+            openInput);
+    REQUIRE_FALSE(rejected.HasValue());
+    REQUIRE(rejected.Error().Code() == NGIN::Crypto::CryptoErrorCode::AuthenticationFailed);
+}
+
 TEST_CASE("AEAD contract does not fake implementation even if capability is manually enabled", "[Crypto][Aead]")
 {
     NGIN::Crypto::Backend::BackendCapabilities capabilities;
