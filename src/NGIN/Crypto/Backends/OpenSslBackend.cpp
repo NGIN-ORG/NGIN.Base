@@ -106,6 +106,51 @@ namespace NGIN::Crypto::Backend::detail
         {
             return size <= static_cast<NGIN::UIntSize>(std::numeric_limits<int>::max());
         }
+
+        [[nodiscard]] const unsigned char* DataOrNull(ConstByteSpan bytes) noexcept
+        {
+            return bytes.empty() ? nullptr : reinterpret_cast<const unsigned char*>(bytes.data());
+        }
+
+        [[nodiscard]] unsigned char* DataOrNull(ByteSpan bytes) noexcept
+        {
+            return bytes.empty() ? nullptr : reinterpret_cast<unsigned char*>(bytes.data());
+        }
+
+        [[nodiscard]] CryptoExpected<void> GenerateRawKeyPairOpenSsl(
+                int      keyType,
+                ByteSpan publicKey,
+                ByteSpan privateKey) noexcept
+        {
+            EVP_PKEY_CTX* context = EVP_PKEY_CTX_new_id(keyType, nullptr);
+            if (context == nullptr)
+            {
+                return InternalError();
+            }
+
+            EVP_PKEY* key = nullptr;
+            if (EVP_PKEY_keygen_init(context) <= 0 || EVP_PKEY_keygen(context, &key) <= 0 || key == nullptr)
+            {
+                EVP_PKEY_CTX_free(context);
+                return InternalError();
+            }
+
+            auto publicKeySize  = publicKey.size();
+            auto privateKeySize = privateKey.size();
+            if (EVP_PKEY_get_raw_public_key(key, DataOrNull(publicKey), &publicKeySize) != 1 ||
+                EVP_PKEY_get_raw_private_key(key, DataOrNull(privateKey), &privateKeySize) != 1)
+            {
+                EVP_PKEY_free(key);
+                EVP_PKEY_CTX_free(context);
+                return InternalError();
+            }
+
+            EVP_PKEY_free(key);
+            EVP_PKEY_CTX_free(context);
+            return publicKeySize == publicKey.size() && privateKeySize == privateKey.size()
+                           ? CryptoExpected<void> {}
+                           : InternalError();
+        }
     }// namespace
 
     CryptoExpected<CryptoContext> CreateOpenSslContext(const BackendOptions& options) noexcept
@@ -123,6 +168,7 @@ namespace NGIN::Crypto::Backend::detail
                 .Enable(KdfAlgorithm::Pbkdf2Sha256)
                 .Enable(KdfAlgorithm::Pbkdf2Sha512);
         capabilities.Enable(AeadAlgorithm::Aes128Gcm).Enable(AeadAlgorithm::Aes256Gcm);
+        capabilities.Enable(SignatureAlgorithm::Ed25519).Enable(KeyAgreementAlgorithm::X25519);
 
         return CryptoContext {
                 BackendInfo {
@@ -496,5 +542,164 @@ namespace NGIN::Crypto::Backend::detail
 
         EVP_CIPHER_CTX_free(context);
         return static_cast<NGIN::UIntSize>(total) == plaintext.size() ? CryptoExpected<void> {} : InternalError();
+    }
+
+    CryptoExpected<void> GenerateEd25519KeyPairOpenSsl(
+            ByteSpan publicKey,
+            ByteSpan privateKey) noexcept
+    {
+        return GenerateRawKeyPairOpenSsl(EVP_PKEY_ED25519, publicKey, privateKey);
+    }
+
+    CryptoExpected<void> SignOpenSsl(
+            SignatureAlgorithm               algorithm,
+            NGIN::Crypto::Memory::SecretView privateKey,
+            ConstByteSpan                    message,
+            ByteSpan                         signature) noexcept
+    {
+        if (algorithm != SignatureAlgorithm::Ed25519)
+        {
+            return UnsupportedAlgorithm();
+        }
+
+        const auto privateKeyBytes = privateKey.Bytes();
+        EVP_PKEY*  key             = EVP_PKEY_new_raw_private_key(
+                EVP_PKEY_ED25519,
+                nullptr,
+                DataOrNull(privateKeyBytes),
+                privateKeyBytes.size());
+        if (key == nullptr)
+        {
+            return InvalidKey();
+        }
+
+        EVP_MD_CTX* context = EVP_MD_CTX_new();
+        if (context == nullptr)
+        {
+            EVP_PKEY_free(key);
+            return InternalError();
+        }
+
+        auto signatureSize = signature.size();
+        if (EVP_DigestSignInit(context, nullptr, nullptr, nullptr, key) != 1 ||
+            EVP_DigestSign(context, DataOrNull(signature), &signatureSize, DataOrNull(message), message.size()) != 1)
+        {
+            EVP_MD_CTX_free(context);
+            EVP_PKEY_free(key);
+            return InternalError();
+        }
+
+        EVP_MD_CTX_free(context);
+        EVP_PKEY_free(key);
+        return signatureSize == signature.size() ? CryptoExpected<void> {} : InternalError();
+    }
+
+    CryptoExpected<void> VerifySignatureOpenSsl(
+            SignatureAlgorithm algorithm,
+            ConstByteSpan      publicKey,
+            ConstByteSpan      message,
+            ConstByteSpan      signature) noexcept
+    {
+        if (algorithm != SignatureAlgorithm::Ed25519)
+        {
+            return UnsupportedAlgorithm();
+        }
+
+        EVP_PKEY* key = EVP_PKEY_new_raw_public_key(
+                EVP_PKEY_ED25519,
+                nullptr,
+                DataOrNull(publicKey),
+                publicKey.size());
+        if (key == nullptr)
+        {
+            return InvalidKey();
+        }
+
+        EVP_MD_CTX* context = EVP_MD_CTX_new();
+        if (context == nullptr)
+        {
+            EVP_PKEY_free(key);
+            return InternalError();
+        }
+
+        if (EVP_DigestVerifyInit(context, nullptr, nullptr, nullptr, key) != 1)
+        {
+            EVP_MD_CTX_free(context);
+            EVP_PKEY_free(key);
+            return InternalError();
+        }
+
+        const int result = EVP_DigestVerify(context, DataOrNull(signature), signature.size(), DataOrNull(message), message.size());
+        EVP_MD_CTX_free(context);
+        EVP_PKEY_free(key);
+
+        if (result == 1)
+        {
+            return {};
+        }
+        if (result == 0)
+        {
+            return AuthenticationFailed();
+        }
+        return InternalError();
+    }
+
+    CryptoExpected<void> GenerateX25519KeyPairOpenSsl(
+            ByteSpan publicKey,
+            ByteSpan privateKey) noexcept
+    {
+        return GenerateRawKeyPairOpenSsl(EVP_PKEY_X25519, publicKey, privateKey);
+    }
+
+    CryptoExpected<void> DeriveX25519SharedSecretOpenSsl(
+            NGIN::Crypto::Memory::SecretView privateKey,
+            ConstByteSpan                    peerPublicKey,
+            ByteSpan                         output) noexcept
+    {
+        const auto privateKeyBytes = privateKey.Bytes();
+        EVP_PKEY*  privatePkey     = EVP_PKEY_new_raw_private_key(
+                EVP_PKEY_X25519,
+                nullptr,
+                DataOrNull(privateKeyBytes),
+                privateKeyBytes.size());
+        if (privatePkey == nullptr)
+        {
+            return InvalidKey();
+        }
+
+        EVP_PKEY* peerPkey = EVP_PKEY_new_raw_public_key(
+                EVP_PKEY_X25519,
+                nullptr,
+                DataOrNull(peerPublicKey),
+                peerPublicKey.size());
+        if (peerPkey == nullptr)
+        {
+            EVP_PKEY_free(privatePkey);
+            return InvalidKey();
+        }
+
+        EVP_PKEY_CTX* context = EVP_PKEY_CTX_new(privatePkey, nullptr);
+        if (context == nullptr)
+        {
+            EVP_PKEY_free(peerPkey);
+            EVP_PKEY_free(privatePkey);
+            return InternalError();
+        }
+
+        auto outputSize = output.size();
+        if (EVP_PKEY_derive_init(context) <= 0 ||
+            EVP_PKEY_derive_set_peer(context, peerPkey) <= 0 ||
+            EVP_PKEY_derive(context, DataOrNull(output), &outputSize) <= 0)
+        {
+            EVP_PKEY_CTX_free(context);
+            EVP_PKEY_free(peerPkey);
+            EVP_PKEY_free(privatePkey);
+            return InternalError();
+        }
+
+        EVP_PKEY_CTX_free(context);
+        EVP_PKEY_free(peerPkey);
+        EVP_PKEY_free(privatePkey);
+        return outputSize == output.size() ? CryptoExpected<void> {} : InternalError();
     }
 }// namespace NGIN::Crypto::Backend::detail

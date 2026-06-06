@@ -54,7 +54,7 @@ namespace NGIN::Crypto::Signatures
             return supported.Error();
         }
 
-        return UnsupportedAlgorithm();
+        return context.SignInto(algorithm, input.privateKey, input.message, signature);
     }
 
     CryptoExpected<ByteBuffer> Sign(
@@ -103,6 +103,6 @@ namespace NGIN::Crypto::Signatures
             return supported.Error();
         }
 
-        return UnsupportedAlgorithm();
+        return context.VerifySignature(algorithm, input.publicKey, input.message, input.signature);
     }
 }// namespace NGIN::Crypto::Signatures

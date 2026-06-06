@@ -110,6 +110,31 @@ namespace NGIN::Crypto::Backend
                 ConstByteSpan                    tag,
                 ByteSpan                         plaintext) const noexcept;
 
+        [[nodiscard]] CryptoExpected<void> GenerateEd25519KeyPairInto(
+                ByteSpan publicKey,
+                ByteSpan privateKey) const noexcept;
+
+        [[nodiscard]] CryptoExpected<void> SignInto(
+                SignatureAlgorithm               algorithm,
+                NGIN::Crypto::Memory::SecretView privateKey,
+                ConstByteSpan                    message,
+                ByteSpan                         signature) const noexcept;
+
+        [[nodiscard]] CryptoExpected<void> VerifySignature(
+                SignatureAlgorithm algorithm,
+                ConstByteSpan      publicKey,
+                ConstByteSpan      message,
+                ConstByteSpan      signature) const noexcept;
+
+        [[nodiscard]] CryptoExpected<void> GenerateX25519KeyPairInto(
+                ByteSpan publicKey,
+                ByteSpan privateKey) const noexcept;
+
+        [[nodiscard]] CryptoExpected<void> DeriveX25519SharedSecretInto(
+                NGIN::Crypto::Memory::SecretView privateKey,
+                ConstByteSpan                    peerPublicKey,
+                ByteSpan                         output) const noexcept;
+
         [[nodiscard]] constexpr CryptoExpected<void> EnsureSupports(HashAlgorithm algorithm) const noexcept
         {
             return Supports(algorithm) ? CryptoExpected<void> {} : CryptoError {CryptoErrorCode::UnsupportedAlgorithm};

@@ -48,4 +48,29 @@ namespace NGIN::Crypto::Backend::detail
             ConstByteSpan                    associatedData,
             ConstByteSpan                    tag,
             ByteSpan                         plaintext) noexcept;
+
+    [[nodiscard]] CryptoExpected<void> GenerateEd25519KeyPairOpenSsl(
+            ByteSpan publicKey,
+            ByteSpan privateKey) noexcept;
+
+    [[nodiscard]] CryptoExpected<void> SignOpenSsl(
+            SignatureAlgorithm               algorithm,
+            NGIN::Crypto::Memory::SecretView privateKey,
+            ConstByteSpan                    message,
+            ByteSpan                         signature) noexcept;
+
+    [[nodiscard]] CryptoExpected<void> VerifySignatureOpenSsl(
+            SignatureAlgorithm algorithm,
+            ConstByteSpan      publicKey,
+            ConstByteSpan      message,
+            ConstByteSpan      signature) noexcept;
+
+    [[nodiscard]] CryptoExpected<void> GenerateX25519KeyPairOpenSsl(
+            ByteSpan publicKey,
+            ByteSpan privateKey) noexcept;
+
+    [[nodiscard]] CryptoExpected<void> DeriveX25519SharedSecretOpenSsl(
+            NGIN::Crypto::Memory::SecretView privateKey,
+            ConstByteSpan                    peerPublicKey,
+            ByteSpan                         output) noexcept;
 }// namespace NGIN::Crypto::Backend::detail

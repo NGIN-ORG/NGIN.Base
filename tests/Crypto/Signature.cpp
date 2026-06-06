@@ -1,8 +1,12 @@
 #include <NGIN/Crypto/Asymmetric/Ed25519.hpp>
+#include <NGIN/Crypto/Encoding/Hex.hpp>
 #include <NGIN/Crypto/Signatures/Sign.hpp>
 #include <NGIN/Crypto/Signatures/Verify.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+
+#include <algorithm>
+#include <string_view>
 
 namespace
 {
@@ -16,6 +20,24 @@ namespace
     {
         static constexpr auto SECRET = ZeroBytes<32>();
         return NGIN::Crypto::Memory::SecretView {SECRET};
+    }
+
+    template<NGIN::UIntSize Size>
+    [[nodiscard]] NGIN::Crypto::FixedBytes<Size> DecodeFixedHex(std::string_view text)
+    {
+        auto decoded = NGIN::Crypto::Encoding::DecodeHex(text);
+        REQUIRE(decoded.HasValue());
+        REQUIRE(decoded.Value().Size() == Size);
+
+        NGIN::Crypto::FixedBytes<Size> output {};
+        std::copy(decoded.Value().begin(), decoded.Value().end(), output.begin());
+        return output;
+    }
+
+    void RequireBytesEqual(NGIN::Crypto::ConstByteSpan actual, NGIN::Crypto::ConstByteSpan expected)
+    {
+        REQUIRE(actual.size() == expected.size());
+        REQUIRE(std::equal(actual.begin(), actual.end(), expected.begin(), expected.end()));
     }
 }// namespace
 
@@ -102,6 +124,83 @@ TEST_CASE("Verify validates public key and signature sizes before backend suppor
 
     REQUIRE_FALSE(invalidSignature.HasValue());
     REQUIRE(invalidSignature.Error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidTag);
+}
+
+TEST_CASE("Ed25519 generated keys sign and verify when backend supports them", "[Crypto][Signature]")
+{
+    auto context = NGIN::Crypto::Backend::CreateContext();
+    REQUIRE(context.HasValue());
+    if (!context.Value().Supports(NGIN::Crypto::SignatureAlgorithm::Ed25519))
+    {
+        return;
+    }
+
+    auto keyPair = NGIN::Crypto::Asymmetric::GenerateEd25519KeyPair(context.Value());
+    REQUIRE(keyPair.HasValue());
+
+    auto message   = DecodeFixedHex<32>("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
+    auto signature = NGIN::Crypto::Asymmetric::SignEd25519(context.Value(), keyPair.Value().privateKey, message);
+    REQUIRE(signature.HasValue());
+
+    auto verified = NGIN::Crypto::Asymmetric::VerifyEd25519(
+            context.Value(),
+            keyPair.Value().publicKey,
+            message,
+            signature.Value());
+    REQUIRE(verified.HasValue());
+
+    auto tamperedMessage = message;
+    tamperedMessage[0] ^= NGIN::Byte {0x01};
+    auto rejectedMessage = NGIN::Crypto::Asymmetric::VerifyEd25519(
+            context.Value(),
+            keyPair.Value().publicKey,
+            tamperedMessage,
+            signature.Value());
+    REQUIRE_FALSE(rejectedMessage.HasValue());
+    REQUIRE(rejectedMessage.Error().Code() == NGIN::Crypto::CryptoErrorCode::AuthenticationFailed);
+
+    auto tamperedSignature = signature.Value();
+    tamperedSignature[0] ^= NGIN::Byte {0x01};
+    auto rejectedSignature = NGIN::Crypto::Asymmetric::VerifyEd25519(
+            context.Value(),
+            keyPair.Value().publicKey,
+            message,
+            tamperedSignature);
+    REQUIRE_FALSE(rejectedSignature.HasValue());
+    REQUIRE(rejectedSignature.Error().Code() == NGIN::Crypto::CryptoErrorCode::AuthenticationFailed);
+}
+
+TEST_CASE("Ed25519 matches RFC 8032 test vector when backend supports it", "[Crypto][Signature]")
+{
+    auto context = NGIN::Crypto::Backend::CreateContext();
+    REQUIRE(context.HasValue());
+    if (!context.Value().Supports(NGIN::Crypto::SignatureAlgorithm::Ed25519))
+    {
+        return;
+    }
+
+    auto privateKey = NGIN::Crypto::Asymmetric::Ed25519PrivateKey::FromBytes(
+            DecodeFixedHex<32>("9d61b19deffd5a60ba844af492ec2cc4"
+                               "4449c5697b326919703bac031cae7f60"));
+    auto publicKey = NGIN::Crypto::Asymmetric::Ed25519PublicKey::FromBytes(
+            DecodeFixedHex<32>("d75a980182b10ab7d54bfed3c964073a"
+                               "0ee172f3daa62325af021a68f707511a"));
+    auto expectedSignature = DecodeFixedHex<64>(
+            "e5564300c360ac729086e2cc806e828a"
+            "84877f1eb8e5d974d873e06522490155"
+            "5fb8821590a33bacc61e39701cf9b46b"
+            "d25bf5f0595bbe24655141438e7a100b");
+
+    auto signature = NGIN::Crypto::Asymmetric::SignEd25519(context.Value(), privateKey, NGIN::Crypto::ConstByteSpan {});
+    REQUIRE(signature.HasValue());
+    RequireBytesEqual(signature.Value(), expectedSignature);
+
+    auto verified = NGIN::Crypto::Asymmetric::VerifyEd25519(
+            context.Value(),
+            publicKey,
+            NGIN::Crypto::ConstByteSpan {},
+            expectedSignature);
+    REQUIRE(verified.HasValue());
 }
 
 TEST_CASE("Signature contract does not fake implementation even if capability is manually enabled", "[Crypto][Signature]")

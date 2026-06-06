@@ -196,6 +196,129 @@ namespace NGIN::Crypto::Backend
         return UnsupportedAlgorithm();
     }
 
+    CryptoExpected<void> CryptoContext::GenerateEd25519KeyPairInto(
+            ByteSpan publicKey,
+            ByteSpan privateKey) const noexcept
+    {
+        auto supported = EnsureSupports(SignatureAlgorithm::Ed25519);
+        if (!supported.HasValue())
+        {
+            return supported.Error();
+        }
+
+#if defined(NGIN_BASE_CRYPTO_HAS_OPENSSL)
+        if (Info().Kind() == BackendKind::ExternalPackage && Info().Name() == "openssl")
+        {
+            return detail::GenerateEd25519KeyPairOpenSsl(publicKey, privateKey);
+        }
+#else
+        (void) publicKey;
+        (void) privateKey;
+#endif
+
+        return UnsupportedAlgorithm();
+    }
+
+    CryptoExpected<void> CryptoContext::SignInto(
+            SignatureAlgorithm               algorithm,
+            NGIN::Crypto::Memory::SecretView privateKey,
+            ConstByteSpan                    message,
+            ByteSpan                         signature) const noexcept
+    {
+        auto supported = EnsureSupports(algorithm);
+        if (!supported.HasValue())
+        {
+            return supported.Error();
+        }
+
+#if defined(NGIN_BASE_CRYPTO_HAS_OPENSSL)
+        if (Info().Kind() == BackendKind::ExternalPackage && Info().Name() == "openssl")
+        {
+            return detail::SignOpenSsl(algorithm, privateKey, message, signature);
+        }
+#else
+        (void) privateKey;
+        (void) message;
+        (void) signature;
+#endif
+
+        return UnsupportedAlgorithm();
+    }
+
+    CryptoExpected<void> CryptoContext::VerifySignature(
+            SignatureAlgorithm algorithm,
+            ConstByteSpan      publicKey,
+            ConstByteSpan      message,
+            ConstByteSpan      signature) const noexcept
+    {
+        auto supported = EnsureSupports(algorithm);
+        if (!supported.HasValue())
+        {
+            return supported.Error();
+        }
+
+#if defined(NGIN_BASE_CRYPTO_HAS_OPENSSL)
+        if (Info().Kind() == BackendKind::ExternalPackage && Info().Name() == "openssl")
+        {
+            return detail::VerifySignatureOpenSsl(algorithm, publicKey, message, signature);
+        }
+#else
+        (void) publicKey;
+        (void) message;
+        (void) signature;
+#endif
+
+        return UnsupportedAlgorithm();
+    }
+
+    CryptoExpected<void> CryptoContext::GenerateX25519KeyPairInto(
+            ByteSpan publicKey,
+            ByteSpan privateKey) const noexcept
+    {
+        auto supported = EnsureSupports(KeyAgreementAlgorithm::X25519);
+        if (!supported.HasValue())
+        {
+            return supported.Error();
+        }
+
+#if defined(NGIN_BASE_CRYPTO_HAS_OPENSSL)
+        if (Info().Kind() == BackendKind::ExternalPackage && Info().Name() == "openssl")
+        {
+            return detail::GenerateX25519KeyPairOpenSsl(publicKey, privateKey);
+        }
+#else
+        (void) publicKey;
+        (void) privateKey;
+#endif
+
+        return UnsupportedAlgorithm();
+    }
+
+    CryptoExpected<void> CryptoContext::DeriveX25519SharedSecretInto(
+            NGIN::Crypto::Memory::SecretView privateKey,
+            ConstByteSpan                    peerPublicKey,
+            ByteSpan                         output) const noexcept
+    {
+        auto supported = EnsureSupports(KeyAgreementAlgorithm::X25519);
+        if (!supported.HasValue())
+        {
+            return supported.Error();
+        }
+
+#if defined(NGIN_BASE_CRYPTO_HAS_OPENSSL)
+        if (Info().Kind() == BackendKind::ExternalPackage && Info().Name() == "openssl")
+        {
+            return detail::DeriveX25519SharedSecretOpenSsl(privateKey, peerPublicKey, output);
+        }
+#else
+        (void) privateKey;
+        (void) peerPublicKey;
+        (void) output;
+#endif
+
+        return UnsupportedAlgorithm();
+    }
+
     CryptoExpected<CryptoContext> CreateContext(const BackendOptions& options) noexcept
     {
         if (options.requireSecureRandom && !NGIN::Crypto::Random::IsAvailable())
