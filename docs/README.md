@@ -87,6 +87,7 @@ These are for contributors or readers who want implementation direction and road
 - [AsyncPlan.md](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/AsyncPlan.md)
 - [FileSystemPlan.md](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/FileSystemPlan.md)
 - [CryptoPlan.md](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/CryptoPlan.md)
+- [BaseModularizationPlan.md](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/BaseModularizationPlan.md)
 - [NetworkPlan.md](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/NetworkPlan.md)
 - [SerializationPlan.md](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/SerializationPlan.md)
 
