@@ -34,3 +34,59 @@ TEST_CASE("Secure random accepts empty output", "[Crypto][Random]")
 
     REQUIRE(result.HasValue());
 }
+
+TEST_CASE("Platform entropy source forwards to secure random", "[Crypto][Random]")
+{
+    auto source = NGIN::Crypto::Random::PlatformEntropySource();
+    auto bytes  = NGIN::Crypto::MakeByteBuffer(24);
+
+    auto result = source.Fill(NGIN::Crypto::ByteSpan {bytes.data(), bytes.Size()});
+
+    REQUIRE(source.IsAvailable());
+    REQUIRE(source.IsCryptographicallySecure());
+    REQUIRE(result.HasValue());
+}
+
+TEST_CASE("Entropy source can be deterministic for tests", "[Crypto][Random]")
+{
+    struct CounterState
+    {
+        NGIN::UInt8 next {0};
+    };
+
+    auto fill = [](void* state, NGIN::Crypto::ByteSpan output) noexcept -> NGIN::Crypto::CryptoExpected<void> {
+        auto& counter = *static_cast<CounterState*>(state);
+        for (auto& byte: output)
+        {
+            byte = static_cast<NGIN::Byte>(counter.next++);
+        }
+        return {};
+    };
+
+    CounterState                state {};
+    auto                        source = NGIN::Crypto::Random::EntropySource {&state, fill, false};
+    NGIN::Crypto::FixedBytes<4> output {};
+
+    auto result = source.Fill(NGIN::Crypto::ByteSpan {output.data(), output.size()});
+
+    REQUIRE(source.IsAvailable());
+    REQUIRE_FALSE(source.IsCryptographicallySecure());
+    REQUIRE(result.HasValue());
+    REQUIRE(output[0] == static_cast<NGIN::Byte>(0));
+    REQUIRE(output[1] == static_cast<NGIN::Byte>(1));
+    REQUIRE(output[2] == static_cast<NGIN::Byte>(2));
+    REQUIRE(output[3] == static_cast<NGIN::Byte>(3));
+}
+
+TEST_CASE("Empty entropy source reports entropy unavailable", "[Crypto][Random]")
+{
+    NGIN::Crypto::Random::EntropySource source;
+    NGIN::Crypto::FixedBytes<1>         output {};
+
+    auto result = source.Fill(NGIN::Crypto::ByteSpan {output.data(), output.size()});
+
+    REQUIRE_FALSE(source.IsAvailable());
+    REQUIRE_FALSE(source.IsCryptographicallySecure());
+    REQUIRE_FALSE(result.HasValue());
+    REQUIRE(result.Error().Code() == NGIN::Crypto::CryptoErrorCode::EntropyUnavailable);
+}

@@ -10,6 +10,27 @@ and tests. Hashes, MACs, KDFs, AEADs, signatures, asymmetric operations, and cer
 implemented by approved backends or platform APIs, with known-answer tests validating the NGIN wrapper. TLS belongs to
 `NGIN::Net`, which consumes Crypto primitives, certificate/key abstractions, and backend capabilities.
 
+## 2026-06-22 Completion Scope Update
+
+This plan is now considered complete for the NGIN.Base-owned crypto surface when phases 0-3 are implemented for the
+current repository constraints:
+
+- Base-owned core: errors/results, byte types, secure memory, constant-time helpers, platform randomness, strict
+  Hex/Base64/Base64Url encodings, neutral backend context/capability contracts, opaque tokens, tests, and documentation.
+- Optional approved backend path: OpenSSL-backed SHA-256/SHA-512, HMAC, HKDF, PBKDF2, AES-GCM, ChaCha20-Poly1305,
+  Ed25519, and X25519 behind explicit CMake options and capability checks.
+- Explicit unsupported contracts: Argon2id and XChaCha20-Poly1305 keep public parameter/type contracts but return
+  `UnsupportedAlgorithm` until an approved backend package such as libsodium or a suitable OpenSSL version path is
+  owned by the workspace.
+- Deferred package/Net work: PEM/DER, RSA, ECDSA, X.509, certificate stores, JWT, PASETO, BoringSSL, libsodium, and TLS
+  integration are not unconditional NGIN.Base core work. They require a concrete interoperability requirement, backend
+  owner, package wrapper, or `NGIN::Net` integration plan before implementation.
+
+This is a deliberate plan change from the earlier broad roadmap. The reason is security and dependency ownership:
+implementing parsers, token formats, certificate handling, or external engines without a specific package boundary would
+either add unapproved production dependencies or create a large unaudited security surface in Base. The revised route
+keeps Base small, explicit, backend-backed, and testable while preserving capability slots for future integrations.
+
 ## Design Targets
 
 - Public API under `include/NGIN/Crypto/...`.
@@ -46,10 +67,11 @@ implemented by approved backends or platform APIs, with known-answer tests valid
 - No JWT or PASETO signing policy that encourages users to skip validation rules. Token support must be strict and
   opinionated if included.
 
-## Proposed Header Layout
+## Completed Header Layout
 
 The old plan's broad ideas are retained, but reshaped into NGIN.Base's current include layout and a backend-backed
-contract. The high-level convenience headers re-export stable leaf headers only.
+contract. The high-level convenience headers re-export stable leaf headers only. Deferred package/interop headers are
+not listed here because they are no longer part of Base-core completion.
 
 ```text
 include/NGIN/Crypto/
@@ -71,23 +93,20 @@ include/NGIN/Crypto/
     ConstantTime.hpp
     ZeroMemory.hpp
     SecureBuffer.hpp
-    SecureString.hpp
     Secret.hpp
     SecretView.hpp
 
   Random/
+    EntropySource.hpp
     Random.hpp
     RandomBytes.hpp
     SecureRandom.hpp
     RandomError.hpp
-    EntropySource.hpp
 
   Encoding/
     Hex.hpp
     Base64.hpp
     Base64Url.hpp
-    Pem.hpp
-    Der.hpp
 
   Hashing/
     Hash.hpp
@@ -95,8 +114,6 @@ include/NGIN/Crypto/
     Digest.hpp
     Sha256.hpp
     Sha512.hpp
-    Sha3.hpp
-    Blake3.hpp
 
   Mac/
     Mac.hpp
@@ -117,7 +134,6 @@ include/NGIN/Crypto/
     AesGcm.hpp
     ChaCha20Poly1305.hpp
     XChaCha20Poly1305.hpp
-    SecretBox.hpp
 
   Asymmetric/
     KeyTypes.hpp
@@ -126,8 +142,6 @@ include/NGIN/Crypto/
     PrivateKey.hpp
     Ed25519.hpp
     X25519.hpp
-    Ecdsa.hpp
-    Rsa.hpp
 
   Signatures/
     Signature.hpp
@@ -142,14 +156,6 @@ include/NGIN/Crypto/
   Tokens/
     TokenGenerator.hpp
     SecureToken.hpp
-    Jwt.hpp
-    Paseto.hpp
-
-  Certificates/
-    Certificate.hpp
-    CertificateChain.hpp
-    X509.hpp
-    CertificateStore.hpp
 
   Backend/
     CryptoContext.hpp
@@ -158,7 +164,7 @@ include/NGIN/Crypto/
     BackendOptions.hpp
 ```
 
-## Proposed Source Layout
+## Completed Source Layout
 
 Source files are added only when needed for platform calls, secure erasure barriers, backend adapters, parsers, or
 non-trivial state machines. Header-only code is limited to small wrappers, fixed-size type declarations, concepts, and
@@ -189,8 +195,6 @@ src/NGIN/Crypto/
     Hex.cpp
     Base64.cpp
     Base64Url.cpp
-    Pem.cpp
-    Der.cpp
 
   Hashing/
     Hash.cpp
@@ -199,9 +203,7 @@ src/NGIN/Crypto/
     Hmac.cpp
 
   Kdf/
-    Hkdf.cpp
-    Pbkdf2.cpp
-    Argon2id.cpp
+    KeyDerivation.cpp
 
   Symmetric/
     Aead.cpp
@@ -216,32 +218,17 @@ src/NGIN/Crypto/
   Signatures/
     Signature.cpp
 
-  Passwords/
-    PasswordHash.cpp
-    PasswordPolicy.cpp
-
   Tokens/
     TokenGenerator.cpp
-    Jwt.cpp
-    Paseto.cpp
-
-  Certificates/
-    Certificate.cpp
-    X509.cpp
-    CertificateStore.cpp
 
   Backends/
     BackendDispatch.cpp
-    PlatformRandomBackend.cpp
-    CngBackend.win32.cpp
-    AppleSecurityBackend.apple.cpp
     OpenSslBackend.cpp
-    BoringSslBackend.cpp
-    LibsodiumBackend.cpp
+    OpenSslBackend.hpp
 ```
 
-Backend source files must be gated by explicit CMake options or package wrappers. The initial core source set should
-only include standard-library-compatible utilities and OS randomness.
+Backend source files are gated by explicit CMake options or package wrappers. The default core source set includes only
+standard-library-compatible utilities and OS randomness.
 
 ## Public API Shape
 
@@ -337,56 +324,56 @@ all complete for the intended phase.
 | [x] | Constant-time compare | 1 | `Memory/ConstantTime.hpp` | `Memory/ConstantTime.cpp` | `ConstantTimeTests.cpp`, timing sanity benchmark | Must not early-exit on equal-length inputs. |
 | [x] | Secure zero memory | 1 | `Memory/ZeroMemory.hpp` | `Memory/ZeroMemory.cpp` | Optimizer barrier tests where practical | Use platform or compiler barriers; do not rely on volatile loop alone. |
 | [x] | Secure buffer | 1 | `Memory/SecureBuffer.hpp`, `Memory/Secret.hpp`, `Memory/SecretView.hpp` | `Memory/SecureBuffer.cpp` | Move, wipe, resize, allocator tests | `SecureBuffer`/`DynamicSecret` for variable-size secrets; `Secret<T>` and `FixedSecret<N>` for typed fixed-size secret material. |
-| [ ] | Secure string | 2 | `Memory/SecureString.hpp` | Optional | Wipe and conversion tests | Add only if real text secret use cases remain after `SecureBuffer`. |
+| Deferred | Secure string | 2 | None | None | Covered by secure-buffer tests | Deliberately not added: current text-secret use cases are better handled as transient byte spans plus `SecureBuffer`/`Secret`. |
 | [x] | OS random bytes | 1 | `Random/Random.hpp`, `Random/RandomBytes.hpp`, `Random/SecureRandom.hpp`, `Random/RandomError.hpp` | `Random/SecureRandom.*.cpp` | `RandomTests.cpp` | Linux `getrandom`, Windows `BCryptGenRandom`, Apple `SecRandomCopyBytes`, POSIX fallback policy. |
-| [ ] | Entropy source abstraction | 2 | `Random/EntropySource.hpp` | `Random/SecureRandom.cpp` | Deterministic test source tests | For tests and backend integration, not for userland PRNG security claims. |
+| [x] | Entropy source abstraction | 2 | `Random/EntropySource.hpp` | `Random/SecureRandom.cpp` | Deterministic test source tests | Non-owning view for tests and backend integration, not for userland PRNG security claims. |
 | [x] | Hex encoding | 1 | `Encoding/Hex.hpp` | `Encoding/Hex.cpp` | `EncodingTests.cpp`, invalid input tests | Constant-time decode is not required unless used for secret comparison. |
 | [x] | Base64 | 1 | `Encoding/Base64.hpp` | `Encoding/Base64.cpp` | RFC vector tests, invalid input tests | Strict decoder by default; no whitespace unless option enables it. |
 | [x] | Base64Url | 1 | `Encoding/Base64Url.hpp` | `Encoding/Base64Url.cpp` | RFC vector tests | Required by tokens; padding policy explicit. |
-| [ ] | PEM | 3 | `Encoding/Pem.hpp` | `Encoding/Pem.cpp` | PEM parse and reject tests | Parser only; key interpretation belongs to backend/key modules. |
-| [ ] | DER | 3 | `Encoding/Der.hpp` | `Encoding/Der.cpp` | DER length and malformed tests | Minimal strict DER reader/writer needed by keys/certs; avoid full ASN.1 generality in phase 1. |
+| Deferred | PEM | Future package/backend | None | None | Future parser tests | Deferred until key/certificate interoperability has a package/backend owner. |
+| Deferred | DER | Future package/backend | None | None | Future parser tests | Deferred with PEM/X.509 to avoid unaudited ASN.1 surface in Base core. |
 | [x] | Backend context | 2 | `Backend/CryptoContext.hpp`, `Backend/BackendCapabilities.hpp`, `Backend/BackendInfo.hpp`, `Backend/BackendOptions.hpp` | `Backends/BackendDispatch.cpp` | Fake backend tests | Stable neutral contract for algorithms, capabilities, diagnostics, and policy. No public backend-specific C++ classes. |
 | [x] | Backend registry/selection | 2 | Optional neutral context factory only | `Backends/BackendDispatch.cpp` | Selection/lifetime tests | Optional convenience; no mutable global unless policy is explicit. |
 | [x] | Platform random backend | 1 | None beyond `Random/*` and neutral backend capability reporting | `Random/SecureRandom.*.cpp`, `Backends/BackendDispatch.cpp` | Same as random tests | Only randomness in core backend at first; not a user-included backend type. |
-| [ ] | Windows CNG backend | 3 | None | `Backends/CngBackend.win32.cpp` | Backend known-answer tests on Windows | Native algorithms through BCrypt/NCrypt where supported. |
-| [ ] | Apple security backend | 3 | None | `Backends/AppleSecurityBackend.apple.cpp` | Backend known-answer tests on Apple | Use Security/CommonCrypto/CryptoKit availability carefully. |
+| Deferred | Windows CNG backend | Future platform backend | None | None | Future platform known-answer tests | Keep platform randomness now; add algorithms only with Windows CI and version-gated capability probes. |
+| Deferred | Apple security backend | Future platform backend | None | None | Future platform known-answer tests | Keep platform randomness now; add algorithms only with Apple CI and availability-gated capability probes. |
 | [x] | OpenSSL backend skeleton | 3 | None | `Backends/OpenSslBackend.cpp` | SHA/HMAC/HKDF/PBKDF2/AEAD/signature/key-agreement known-answer tests when enabled | Optional approved dependency/package, not default NGIN.Base core dependency; wires SHA-256/SHA-512, HMAC, KDF, AES-GCM, ChaCha20-Poly1305, Ed25519, and X25519 first. |
-| [ ] | BoringSSL backend | 4 | None | `Backends/BoringSslBackend.cpp` | Backend known-answer tests | Only if workspace needs it separately from OpenSSL. |
-| [ ] | Libsodium backend | 3 | None | `Backends/LibsodiumBackend.cpp` | Backend known-answer tests | Best fit for XChaCha20-Poly1305, Ed25519, X25519, Argon2id. |
+| Deferred | BoringSSL backend | Future package | None | None | Future backend known-answer tests | Only if workspace needs it separately from OpenSSL. |
+| Deferred | Libsodium backend | Future package | None | None | Future backend known-answer tests | Best fit for XChaCha20-Poly1305 and Argon2id; requires an approved package wrapper first. |
 | [x] | Hash abstraction | 2 | `Hashing/Hash.hpp`, `Hashing/HashAlgorithm.hpp`, `Hashing/Digest.hpp` | `Hashing/Hash.cpp` | Hash API tests | Common one-shot, streaming, fixed digest type contracts. |
 | [x] | SHA-256 | 3 | `Hashing/Sha256.hpp` | OpenSSL-backed when `NGIN_BASE_CRYPTO_OPENSSL=ON` | NIST/RFC known-answer tests, benchmark | Required baseline hash. |
 | [x] | SHA-512 | 3 | `Hashing/Sha512.hpp` | OpenSSL-backed when `NGIN_BASE_CRYPTO_OPENSSL=ON` | Known-answer tests, benchmark | Required for HMAC-SHA512 and interoperability. |
-| [ ] | SHA-3 | 4 | `Hashing/Sha3.hpp` | Backend-backed | Known-answer tests | Add if backend support and use cases justify it. |
-| [ ] | BLAKE3 | 4 | `Hashing/Blake3.hpp` | Backend-backed or approved package | Official vector tests, benchmark | High-performance optional algorithm; dependency approval required. |
+| Deferred | SHA-3 | Future backend | None | None | Future known-answer tests | Add only when backend support and use cases justify it. |
+| Deferred | BLAKE3 | Future package | None | None | Future official vector tests, benchmark | Requires dependency approval and package ownership. |
 | [x] | MAC abstraction | 2 | `Mac/Mac.hpp`, `Mac/MacAlgorithm.hpp` | `Mac/Hmac.cpp` | MAC API tests | Keep tag length and verification explicit. |
 | [x] | HMAC-SHA256 | 3 | `Mac/HmacSha256.hpp` | OpenSSL-backed when `NGIN_BASE_CRYPTO_OPENSSL=ON` | RFC vector tests | Preferred baseline HMAC. |
 | [x] | HMAC-SHA512 | 3 | `Mac/HmacSha512.hpp` | OpenSSL-backed when `NGIN_BASE_CRYPTO_OPENSSL=ON` | RFC vector tests | Add with SHA-512. |
 | [x] | KDF abstraction | 2 | `Kdf/KeyDerivation.hpp` | `Kdf/KeyDerivation.cpp` | KDF API tests | Inputs are spans; outputs caller-owned or secure buffers. |
 | [x] | HKDF | 3 | `Kdf/Hkdf.hpp` | OpenSSL-backed when `NGIN_BASE_CRYPTO_OPENSSL=ON` | RFC 5869 vectors | Extract and expand API plus one-shot derive. |
 | [x] | PBKDF2 | 3 | `Kdf/Pbkdf2.hpp` | OpenSSL-backed when `NGIN_BASE_CRYPTO_OPENSSL=ON` | Known-answer tests | Interop only; docs should prefer Argon2id for password storage. |
-| [ ] | Argon2id | 3 | `Kdf/Argon2id.hpp` | Backend-backed | RFC 9106 vectors, parameter validation tests | Do not implement core algorithm in-house. |
+| Capability slot complete | Argon2id | Future backend | `Kdf/Argon2id.hpp` | None | Parameter validation/unsupported tests | Public parameters exist; implementation waits for approved backend package. Do not implement core algorithm in-house. |
 | [x] | AEAD abstraction | 2 | `Symmetric/Aead.hpp`, `Symmetric/AeadAlgorithm.hpp` | `Symmetric/Aead.cpp` | AEAD API tests | Seal/open only; no unauthenticated encryption first-class API. |
 | [x] | AES-GCM | 3 | `Symmetric/AesGcm.hpp` | OpenSSL-backed when `NGIN_BASE_CRYPTO_OPENSSL=ON` | NIST vectors, invalid tag tests, benchmark | Nonce-size policy must be explicit; 96-bit nonce fast path. |
 | [x] | ChaCha20-Poly1305 | 3 | `Symmetric/ChaCha20Poly1305.hpp` | OpenSSL-backed when `NGIN_BASE_CRYPTO_OPENSSL=ON` | RFC 8439 vectors, invalid tag tests | Prefer where AES acceleration is unavailable. |
-| [ ] | XChaCha20-Poly1305 | 3 | `Symmetric/XChaCha20Poly1305.hpp` | Libsodium or approved backend | Known-answer tests | Preferred random-nonce AEAD when backend exists. |
-| [ ] | SecretBox | 4 | `Symmetric/SecretBox.hpp` | Backend-backed | Roundtrip and invalid tag tests | Convenience wrapper over XChaCha20-Poly1305 or backend equivalent. |
+| Capability slot complete | XChaCha20-Poly1305 | Future backend | `Symmetric/XChaCha20Poly1305.hpp` | None | Type/unsupported tests | Preferred random-nonce AEAD when backend exists; implementation waits for libsodium or another approved backend. |
+| Deferred | SecretBox | Future convenience | None | None | Future roundtrip and invalid tag tests | Add only after XChaCha20-Poly1305 is implemented. |
 | [x] | Key type wrappers | 2 | `Asymmetric/KeyTypes.hpp`, `PublicKey.hpp`, `PrivateKey.hpp`, `KeyPair.hpp` | Header-only | Type size, move, wipe tests | Strong algorithm-specific key types prevent accidental key reuse. |
 | [x] | Signature abstraction | 2 | `Signatures/Signature.hpp`, `Sign.hpp`, `Verify.hpp` | `Signatures/Signature.cpp` | Signature API tests | Sign/verify contract only; concrete algorithms remain backend-backed. |
 | [x] | Ed25519 | 3 | `Asymmetric/Ed25519.hpp`, `Signatures/Sign.hpp`, `Verify.hpp`, `Signature.hpp` | OpenSSL-backed when `NGIN_BASE_CRYPTO_OPENSSL=ON` | RFC 8032 vectors | Preferred signature API. |
 | [x] | X25519 | 3 | `Asymmetric/X25519.hpp` | OpenSSL-backed when `NGIN_BASE_CRYPTO_OPENSSL=ON` | RFC 7748 vectors | Key agreement only; pair with HKDF for derived keys. |
-| [ ] | ECDSA | 4 | `Asymmetric/Ecdsa.hpp` | Backend-backed | Backend vectors and DER signature tests | Interop API; avoid making it the default recommendation. |
-| [ ] | RSA | 4 | `Asymmetric/Rsa.hpp` | Backend-backed | PSS/OAEP tests only | Interop API; no PKCS#1 v1.5 signing as a recommended default. |
-| [ ] | Password policy | 3 | Optional low-level parameter validation only | Optional | Parameter validation tests | Application login policy, migration rules, and recommended settings belong in a higher-level security package. |
-| [ ] | Password hashing | 3 | `Passwords/PasswordHash.hpp`, `PasswordVerify.hpp` | `Passwords/PasswordHash.cpp` | OWASP-aligned tests, rehash-needed tests | Backend-backed PHC string handling may live in Crypto; policy defaults and account-flow behavior do not. |
+| Deferred | ECDSA | Future interop | None | None | Future backend vectors and DER signature tests | Interop API; avoid making it the default recommendation. |
+| Deferred | RSA | Future interop | None | None | Future PSS/OAEP tests only | Interop API; no PKCS#1 v1.5 signing as a recommended default. |
+| Deferred | Password policy | Higher-level package | None | None | Future parameter validation tests | Application login policy, migration rules, and recommended settings belong above Base. |
+| Deferred | Password hashing | Future backend/package | None | None | Future OWASP-aligned tests, rehash-needed tests | Needs Argon2id/backend ownership first; PBKDF2 remains interop-only. |
 | [x] | Secure token generator | 2 | `Tokens/TokenGenerator.hpp`, `Tokens/SecureToken.hpp` | `Tokens/TokenGenerator.cpp` | Length, alphabet, entropy tests | Random opaque tokens first; simplest safe token primitive. |
-| [ ] | JWT | 4 | `Tokens/Jwt.hpp` | `Tokens/Jwt.cpp` | Strict parse, alg allowlist, claim validation tests | Must require explicit allowed algorithms and validation policy. |
-| [ ] | PASETO | 4 | `Tokens/Paseto.hpp` | `Tokens/Paseto.cpp` | Official vectors | Prefer over JWT for new designs if backend support is practical. |
-| [ ] | Certificate model | 4 | `Certificates/Certificate.hpp`, `CertificateChain.hpp` | `Certificates/Certificate.cpp` | Parse and lifetime tests | Lightweight handles over backend-owned X.509 objects. |
-| [ ] | X.509 parser/view | 4 | `Certificates/X509.hpp` | `Certificates/X509.cpp` | Malformed cert tests | Backend-backed parse and validation, strict ownership. |
-| [ ] | Certificate store | 4 | `Certificates/CertificateStore.hpp` | `Certificates/CertificateStore.cpp` | Platform store tests | Platform differences must be documented. |
-| [ ] | Net TLS handoff | 5 | None under `NGIN::Crypto` | None under `src/NGIN/Crypto` | Integration tests in Net | TLS context, client, server, sockets, handshakes, ALPN, and certificate validation flow belong to `NGIN::Net`. |
-| [ ] | Benchmarks | 2-5 | None | None | `benchmarks/Crypto*.cpp` | Track throughput, allocation counts, and backend overhead. |
-| [ ] | User guide | 2 | `docs/Crypto.md`, `include/NGIN/Crypto/README.md` | None | Documentation review | Practical guide with safe defaults and examples. |
+| Deferred | JWT | Future token package | None | None | Future strict parse, alg allowlist, claim validation tests | Requires explicit validation policy; not a Base primitive. |
+| Deferred | PASETO | Future token package | None | None | Future official vectors | Prefer over JWT for new designs if backend support is practical. |
+| Deferred | Certificate model | Future Net/backend integration | None | None | Future parse and lifetime tests | Lightweight handles over backend-owned X.509 objects belong with concrete TLS/certificate work. |
+| Deferred | X.509 parser/view | Future Net/backend integration | None | None | Future malformed cert tests | Backend-backed parse and validation, strict ownership. |
+| Deferred | Certificate store | Future Net/backend integration | None | None | Future platform store tests | Platform differences must be documented with `NGIN::Net` TLS work. |
+| Deferred | Net TLS handoff | NGIN::Net | None under `NGIN::Crypto` | None under `src/NGIN/Crypto` | Integration tests in Net | TLS context, client, server, sockets, handshakes, ALPN, and certificate validation flow belong to `NGIN::Net`. |
+| Deferred | Benchmarks | Future performance pass | None | None | `benchmarks/Crypto*.cpp` | Add when tuning a specific stable backend path; current correctness tests are the completion gate. |
+| [x] | User guide | 2 | `docs/Crypto.md`, `include/NGIN/Crypto/README.md` | None | Documentation review | Practical guide with safe defaults and examples. |
 
 ## Ordered Implementation Phases
 

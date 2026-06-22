@@ -67,6 +67,17 @@ Use it for:
 - `NGIN::Text::Unicode`
 - UTF-8 code-point iteration and conversion policy
 
+### I need random bytes, secure memory, encodings, or crypto wrappers
+
+Read [Crypto.md](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/Crypto.md).
+
+Use it for:
+
+- secure random bytes and opaque tokens
+- strict Hex/Base64/Base64Url encodings
+- secure buffers and constant-time helpers
+- explicit backend-backed hash, MAC, KDF, AEAD, signature, and key-agreement wrappers
+
 ## Which Docs Are For Users?
 
 Start with these:
@@ -76,6 +87,7 @@ Start with these:
 - [Network.md](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/Network.md)
 - [Memory.md](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/Memory.md)
 - [Text.md](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/Text.md)
+- [Crypto.md](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/Crypto.md)
 
 These are practical guides. They explain when to use each subsystem, the normal workflow, and the main types you
 actually need.
@@ -104,6 +116,7 @@ They are useful, but they are not the best place to start if your goal is “mak
   - async filesystem surface
   - advanced VFS behavior
   - networking higher-level guidance and examples
+  - Base-owned crypto wrappers, secure memory, randomness, and encodings
 - Design-note material:
   - the `*Plan.md` documents
 

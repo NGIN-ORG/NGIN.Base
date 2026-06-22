@@ -34,6 +34,7 @@
 #include <NGIN/Crypto/Memory/SecretView.hpp>
 #include <NGIN/Crypto/Memory/SecureBuffer.hpp>
 #include <NGIN/Crypto/Memory/ZeroMemory.hpp>
+#include <NGIN/Crypto/Random/EntropySource.hpp>
 #include <NGIN/Crypto/Random/Random.hpp>
 #include <NGIN/Crypto/Result.hpp>
 #include <NGIN/Crypto/Signatures/Sign.hpp>
