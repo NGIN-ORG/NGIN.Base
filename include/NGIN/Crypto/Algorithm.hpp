@@ -13,6 +13,7 @@ namespace NGIN::Crypto
         Kdf,
         Aead,
         KeyAgreement,
+        AsymmetricEncryption,
         Signature,
         Encoding,
         Certificate,
@@ -59,6 +60,12 @@ namespace NGIN::Crypto
     enum class KeyAgreementAlgorithm : NGIN::UInt8
     {
         X25519,
+    };
+
+    /// @brief Backend-neutral asymmetric encryption algorithm identifiers.
+    enum class AsymmetricEncryptionAlgorithm : NGIN::UInt8
+    {
+        RsaOaepSha256,
     };
 
     /// @brief Backend-neutral signature algorithm identifiers.

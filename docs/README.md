@@ -77,6 +77,8 @@ Use it for:
 - strict Hex/Base64/Base64Url encodings
 - secure buffers and constant-time helpers
 - explicit backend-backed hash, MAC, KDF, AEAD, signature, and key-agreement wrappers
+- provider capability diagnostics, including the `examples/CryptoCapabilities` smoke example
+- capability-gated crypto usage examples, including `examples/CryptoCookbook`
 
 ## Which Docs Are For Users?
 
@@ -99,6 +101,7 @@ These are for contributors or readers who want implementation direction and road
 - [AsyncPlan.md](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/AsyncPlan.md)
 - [FileSystemPlan.md](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/FileSystemPlan.md)
 - [CryptoPlan.md](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/CryptoPlan.md)
+- [CryptoPlatformAndInteropPlan.md](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/CryptoPlatformAndInteropPlan.md)
 - [BaseModularizationPlan.md](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/BaseModularizationPlan.md)
 - [NetworkPlan.md](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/NetworkPlan.md)
 - [SerializationPlan.md](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/SerializationPlan.md)

@@ -127,7 +127,7 @@ Only start this after Phase 1-3 are stable.
 | Done | Task | Files | Result |
 |---|---|---|---|
 | [x] | Create `NGINCrypto` target in the current tree or sibling tree | CMake and Crypto source lists | `NGIN::Crypto` can be built and tested separately from the full Base aggregate. |
-| [x] | Move OpenSSL option to Crypto naming | CMake | Prefer `NGIN_CRYPTO_WITH_OPENSSL`; keep `NGIN_BASE_CRYPTO_OPENSSL` as a temporary compatibility alias. |
+| [x] | Move OpenSSL option to Crypto naming | CMake | Prefer `NGIN_BASE_CRYPTO_WITH_OPENSSL`; keep `NGIN_BASE_CRYPTO_OPENSSL` and `NGIN_CRYPTO_WITH_OPENSSL` as compatibility aliases. |
 | [x] | Create `NGINNet` target | CMake and Net source lists | `NGIN::Net` depends on `NGIN::Base`, not vice versa. |
 | [x] | Decide whether Serialization leaves Base | CMake and docs | Serialization leaves the long-term Base foundation; a transitional `NGIN::Serialization` target now exists. |
 | [ ] | Update package config files | `cmake/*Config.cmake.in` | `find_package(NGINCrypto)` calls `find_dependency(NGINBase)`. |
@@ -195,7 +195,7 @@ cmake -S Dependencies/NGIN/NGIN.Base -B Dependencies/NGIN/NGIN.Base/build/crypto
   -DNGIN_BASE_BUILD_TESTS=ON \
   -DNGIN_BASE_BUILD_EXAMPLES=OFF \
   -DNGIN_BASE_BUILD_BENCHMARKS=OFF \
-  -DNGIN_BASE_CRYPTO_OPENSSL=ON
+  -DNGIN_BASE_CRYPTO_WITH_OPENSSL=ON
 
 cmake --build Dependencies/NGIN/NGIN.Base/build/crypto-openssl-dev --target Crypto_AeadTests Crypto_BackendTests
 ctest --test-dir Dependencies/NGIN/NGIN.Base/build/crypto-openssl-dev --output-on-failure -L Crypto

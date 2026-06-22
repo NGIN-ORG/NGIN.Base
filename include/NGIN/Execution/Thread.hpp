@@ -21,7 +21,7 @@ namespace NGIN::Execution
     {
     public:
         using NativeHandle = void*;
-        using ThreadId = ThisThread::ThreadId;
+        using ThreadId     = ThisThread::ThreadId;
 
         enum class OnDestruct : UInt8
         {
@@ -32,13 +32,25 @@ namespace NGIN::Execution
 
         struct Options final
         {
-            constexpr Options() noexcept = default;
+            constexpr Options(
+                    ThreadName threadName = {},
+                    UInt64     mask       = 0,
+                    int        prio       = 0,
+                    UIntSize   stack      = 0,
+                    OnDestruct destruct   = OnDestruct::Terminate) noexcept
+                : name {threadName},
+                  affinityMask {mask},
+                  priority {prio},
+                  stackSize {stack},
+                  onDestruct {destruct}
+            {
+            }
 
-            ThreadName name {};
-            UInt64     affinityMask {0};
-            int        priority {0};
-            UIntSize   stackSize {0};
-            OnDestruct onDestruct {OnDestruct::Terminate};
+            ThreadName name;
+            UInt64     affinityMask;
+            int        priority;
+            UIntSize   stackSize;
+            OnDestruct onDestruct;
         };
 
         Thread() noexcept = default;
@@ -101,7 +113,7 @@ namespace NGIN::Execution
         Options               m_options {};
         bool                  m_joinable {false};
         std::atomic<ThreadId> m_threadId {0};
-        void* m_handle {nullptr};
+        void*                 m_handle {nullptr};
     };
 
     class WorkerThread final

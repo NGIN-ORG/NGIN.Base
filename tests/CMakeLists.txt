@@ -136,3 +136,36 @@ if(TARGET IO_DynamicLibraryTests)
     NGIN_BASE_TEST_DYNAMIC_LIBRARY_FILENAME="$<TARGET_FILE_NAME:NGINBaseDynamicLibraryFixture>"
   )
 endif()
+
+if(NGIN_BASE_BUILD_FUZZERS)
+  if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    message(FATAL_ERROR "NGIN_BASE_BUILD_FUZZERS requires Clang with LLVM libFuzzer support")
+  endif()
+
+  set(NGIN_BASE_CRYPTO_FUZZERS
+    Crypto/Fuzz/DerFuzzer.cpp
+    Crypto/Fuzz/JwtFuzzer.cpp
+    Crypto/Fuzz/KeyFormatFuzzer.cpp
+    Crypto/Fuzz/PasetoFuzzer.cpp
+    Crypto/Fuzz/PemFuzzer.cpp
+    Crypto/Fuzz/X509Fuzzer.cpp
+  )
+
+  foreach(fuzzer_src IN LISTS NGIN_BASE_CRYPTO_FUZZERS)
+    get_filename_component(fuzzer_name "${fuzzer_src}" NAME_WE)
+    add_executable("Crypto_${fuzzer_name}" "${CMAKE_CURRENT_SOURCE_DIR}/${fuzzer_src}")
+    target_link_libraries("Crypto_${fuzzer_name}" PRIVATE ngin_base_test_config NGIN::Crypto)
+    target_compile_options("Crypto_${fuzzer_name}" PRIVATE -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer)
+    target_link_options("Crypto_${fuzzer_name}" PRIVATE -fsanitize=fuzzer,address,undefined)
+    set_target_properties("Crypto_${fuzzer_name}" PROPERTIES FOLDER "Fuzzers" LABELS "Crypto.Fuzz")
+    string(REGEX REPLACE "Fuzzer$" "" fuzzer_case "${fuzzer_name}")
+    add_test(
+      NAME "Base.Crypto.Fuzz.${fuzzer_case}.Startup"
+      COMMAND "Crypto_${fuzzer_name}" -runs=1
+    )
+    set_tests_properties(
+      "Base.Crypto.Fuzz.${fuzzer_case}.Startup"
+      PROPERTIES LABELS "Crypto.Fuzz"
+    )
+  endforeach()
+endif()

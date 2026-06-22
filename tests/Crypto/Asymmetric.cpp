@@ -53,6 +53,31 @@ TEST_CASE("Asymmetric key wrappers expose algorithm-specific fixed sizes", "[Cry
                     .sharedSecretSize == 32);
 }
 
+TEST_CASE("Asymmetric key wrappers validate span-sized key material", "[Crypto][Asymmetric]")
+{
+    auto publicBytes  = ZeroBytes<32>();
+    auto privateBytes = ZeroBytes<32>();
+    auto tooShort     = ZeroBytes<31>();
+
+    auto publicKey = NGIN::Crypto::Asymmetric::Ed25519PublicKey::FromBytes(
+            NGIN::Crypto::ConstByteSpan {publicBytes.data(), publicBytes.size()});
+    auto privateKey = NGIN::Crypto::Asymmetric::Ed25519PrivateKey::FromSecretBytes(
+            NGIN::Crypto::ConstByteSpan {privateBytes.data(), privateBytes.size()});
+    auto invalidPublicKey = NGIN::Crypto::Asymmetric::X25519PublicKey::FromBytes(
+            NGIN::Crypto::ConstByteSpan {tooShort.data(), tooShort.size()});
+    auto invalidPrivateKey = NGIN::Crypto::Asymmetric::X25519PrivateKey::FromSecretBytes(
+            NGIN::Crypto::ConstByteSpan {tooShort.data(), tooShort.size()});
+
+    REQUIRE(publicKey.HasValue());
+    REQUIRE(publicKey.Value().Bytes().size() == 32);
+    REQUIRE(privateKey.HasValue());
+    REQUIRE(privateKey.Value().Bytes().size() == 32);
+    REQUIRE_FALSE(invalidPublicKey.HasValue());
+    REQUIRE(invalidPublicKey.Error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidKey);
+    REQUIRE_FALSE(invalidPrivateKey.HasValue());
+    REQUIRE(invalidPrivateKey.Error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidKey);
+}
+
 TEST_CASE("Private keys and key pairs are move-only", "[Crypto][Asymmetric]")
 {
     STATIC_REQUIRE(std::is_copy_constructible_v<NGIN::Crypto::Asymmetric::Ed25519PublicKey>);

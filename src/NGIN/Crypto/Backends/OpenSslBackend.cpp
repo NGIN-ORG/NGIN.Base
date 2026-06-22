@@ -3,12 +3,25 @@
 #include <NGIN/Crypto/Errors/CryptoError.hpp>
 #include <NGIN/Crypto/Memory/ZeroMemory.hpp>
 
+#include <openssl/bn.h>
+#include <openssl/crypto.h>
+#include <openssl/ec.h>
+#include <openssl/ecdsa.h>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
 #include <openssl/kdf.h>
+#include <openssl/obj_mac.h>
 #include <openssl/opensslv.h>
+#include <openssl/rand.h>
+#include <openssl/rsa.h>
+#include <openssl/x509.h>
+#if defined(OPENSSL_IS_BORINGSSL)
+#    include <openssl/aead.h>
+#endif
 
+#include <cstring>
 #include <limits>
+#include <memory>
 
 namespace NGIN::Crypto::Backend::detail
 {
@@ -95,7 +108,11 @@ namespace NGIN::Crypto::Backend::detail
                 case AeadAlgorithm::Aes256Gcm:
                     return EVP_aes_256_gcm();
                 case AeadAlgorithm::ChaCha20Poly1305:
+#if defined(OPENSSL_IS_BORINGSSL)
+                    return nullptr;
+#else
                     return EVP_chacha20_poly1305();
+#endif
                 case AeadAlgorithm::XChaCha20Poly1305:
                     return nullptr;
             }
@@ -103,9 +120,31 @@ namespace NGIN::Crypto::Backend::detail
             return nullptr;
         }
 
+#if defined(OPENSSL_IS_BORINGSSL)
+        [[nodiscard]] const EVP_AEAD* SelectBoringSslAead(AeadAlgorithm algorithm) noexcept
+        {
+            switch (algorithm)
+            {
+                case AeadAlgorithm::ChaCha20Poly1305:
+                    return EVP_aead_chacha20_poly1305();
+                case AeadAlgorithm::Aes128Gcm:
+                case AeadAlgorithm::Aes256Gcm:
+                case AeadAlgorithm::XChaCha20Poly1305:
+                    return nullptr;
+            }
+
+            return nullptr;
+        }
+#endif
+
         [[nodiscard]] bool FitsOpenSslInt(NGIN::UIntSize size) noexcept
         {
             return size <= static_cast<NGIN::UIntSize>(std::numeric_limits<int>::max());
+        }
+
+        [[nodiscard]] bool FitsOpenSslLong(NGIN::UIntSize size) noexcept
+        {
+            return size <= static_cast<NGIN::UIntSize>(std::numeric_limits<long>::max());
         }
 
         [[nodiscard]] const unsigned char* DataOrNull(ConstByteSpan bytes) noexcept
@@ -117,6 +156,13 @@ namespace NGIN::Crypto::Backend::detail
         {
             return bytes.empty() ? nullptr : reinterpret_cast<unsigned char*>(bytes.data());
         }
+
+#if defined(OPENSSL_IS_BORINGSSL)
+        [[nodiscard]] unsigned char* MutableDataOrNull(ByteSpan bytes) noexcept
+        {
+            return bytes.empty() ? nullptr : reinterpret_cast<unsigned char*>(bytes.data());
+        }
+#endif
 
         [[nodiscard]] CryptoExpected<void> GenerateRawKeyPairOpenSsl(
                 int      keyType,
@@ -152,35 +198,333 @@ namespace NGIN::Crypto::Backend::detail
                            ? CryptoExpected<void> {}
                            : InternalError();
         }
+
+        using BnPtr        = std::unique_ptr<BIGNUM, decltype(&BN_free)>;
+        using BnContextPtr = std::unique_ptr<BN_CTX, decltype(&BN_CTX_free)>;
+        using EcKeyPtr     = std::unique_ptr<EC_KEY, decltype(&EC_KEY_free)>;
+        using EcPointPtr   = std::unique_ptr<EC_POINT, decltype(&EC_POINT_free)>;
+        using EcdsaSigPtr  = std::unique_ptr<ECDSA_SIG, decltype(&ECDSA_SIG_free)>;
+        using EvpPkeyPtr   = std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)>;
+        using EvpPkeyCtxPtr = std::unique_ptr<EVP_PKEY_CTX, decltype(&EVP_PKEY_CTX_free)>;
+
+        [[nodiscard]] CryptoExpected<FixedBytes<32>> Sha256DigestOpenSsl(ConstByteSpan input) noexcept
+        {
+            FixedBytes<32> digest {};
+            auto           result = HashOpenSsl(HashAlgorithm::Sha256, input, ByteSpan {digest.data(), digest.size()});
+            if (!result.HasValue())
+            {
+                return result.Error();
+            }
+
+            return digest;
+        }
+
+        [[nodiscard]] CryptoExpected<EcKeyPtr> CreateP256PrivateKey(ConstByteSpan privateKey) noexcept
+        {
+            EcKeyPtr key {EC_KEY_new_by_curve_name(NID_X9_62_prime256v1), EC_KEY_free};
+            if (key == nullptr)
+            {
+                return InternalError();
+            }
+
+            BnPtr privateScalar {BN_bin2bn(DataOrNull(privateKey), static_cast<int>(privateKey.size()), nullptr), BN_free};
+            if (privateScalar == nullptr || EC_KEY_set_private_key(key.get(), privateScalar.get()) != 1)
+            {
+                return InvalidKey();
+            }
+
+            const EC_GROUP* group = EC_KEY_get0_group(key.get());
+            if (group == nullptr)
+            {
+                return InternalError();
+            }
+
+            EcPointPtr   publicPoint {EC_POINT_new(group), EC_POINT_free};
+            BnContextPtr bnContext {BN_CTX_new(), BN_CTX_free};
+            if (publicPoint == nullptr || bnContext == nullptr)
+            {
+                return InternalError();
+            }
+
+            if (EC_POINT_mul(group, publicPoint.get(), privateScalar.get(), nullptr, nullptr, bnContext.get()) != 1 ||
+                EC_KEY_set_public_key(key.get(), publicPoint.get()) != 1 ||
+                EC_KEY_check_key(key.get()) != 1)
+            {
+                return InvalidKey();
+            }
+
+            return key;
+        }
+
+        [[nodiscard]] CryptoExpected<EcKeyPtr> CreateP256PublicKey(ConstByteSpan publicKey) noexcept
+        {
+            EcKeyPtr key {EC_KEY_new_by_curve_name(NID_X9_62_prime256v1), EC_KEY_free};
+            if (key == nullptr)
+            {
+                return InternalError();
+            }
+
+            const EC_GROUP* group = EC_KEY_get0_group(key.get());
+            if (group == nullptr)
+            {
+                return InternalError();
+            }
+
+            EcPointPtr   publicPoint {EC_POINT_new(group), EC_POINT_free};
+            BnContextPtr bnContext {BN_CTX_new(), BN_CTX_free};
+            if (publicPoint == nullptr || bnContext == nullptr)
+            {
+                return InternalError();
+            }
+
+            if (EC_POINT_oct2point(
+                        group,
+                        publicPoint.get(),
+                        reinterpret_cast<const unsigned char*>(publicKey.data()),
+                        publicKey.size(),
+                        bnContext.get()) != 1 ||
+                EC_KEY_set_public_key(key.get(), publicPoint.get()) != 1 ||
+                EC_KEY_check_key(key.get()) != 1)
+            {
+                return InvalidKey();
+            }
+
+            return key;
+        }
+
+        [[nodiscard]] CryptoExpected<EcdsaSigPtr> RawP256SignatureToOpenSsl(ConstByteSpan signature) noexcept
+        {
+            EcdsaSigPtr ecdsaSignature {ECDSA_SIG_new(), ECDSA_SIG_free};
+            if (ecdsaSignature == nullptr)
+            {
+                return InternalError();
+            }
+
+            BnPtr r {BN_bin2bn(
+                             reinterpret_cast<const unsigned char*>(signature.data()),
+                             32,
+                             nullptr),
+                     BN_free};
+            BnPtr s {BN_bin2bn(
+                             reinterpret_cast<const unsigned char*>(signature.data() + 32),
+                             32,
+                             nullptr),
+                     BN_free};
+            if (r == nullptr || s == nullptr)
+            {
+                return InternalError();
+            }
+
+            if (ECDSA_SIG_set0(ecdsaSignature.get(), r.get(), s.get()) != 1)
+            {
+                return InvalidKey();
+            }
+            r.release();
+            s.release();
+
+            return ecdsaSignature;
+        }
+
+        [[nodiscard]] CryptoExpected<void> OpenSslP256SignatureToRaw(
+                const ECDSA_SIG* signature,
+                ByteSpan         output) noexcept
+        {
+            const BIGNUM* r = nullptr;
+            const BIGNUM* s = nullptr;
+            ECDSA_SIG_get0(signature, &r, &s);
+            if (r == nullptr || s == nullptr)
+            {
+                return InternalError();
+            }
+
+            if (BN_bn2binpad(r, reinterpret_cast<unsigned char*>(output.data()), 32) != 32 ||
+                BN_bn2binpad(s, reinterpret_cast<unsigned char*>(output.data() + 32), 32) != 32)
+            {
+                return InternalError();
+            }
+
+            return {};
+        }
+
+        [[nodiscard]] CryptoExpected<EvpPkeyPtr> DecodePrivateKeyDer(
+                NGIN::Crypto::Memory::SecretView privateKeyDer) noexcept
+        {
+            const auto keyBytes = privateKeyDer.Bytes();
+            if (keyBytes.empty())
+            {
+                return InvalidKey();
+            }
+            if (!FitsOpenSslLong(keyBytes.size()))
+            {
+                return InvalidKey();
+            }
+
+            const auto* cursor = reinterpret_cast<const unsigned char*>(keyBytes.data());
+            const auto* end    = cursor + keyBytes.size();
+            EvpPkeyPtr  key {d2i_AutoPrivateKey(nullptr, &cursor, static_cast<long>(keyBytes.size())), EVP_PKEY_free};
+            if (key == nullptr || cursor != end)
+            {
+                return InvalidKey();
+            }
+
+            return key;
+        }
+
+        [[nodiscard]] CryptoExpected<EvpPkeyPtr> DecodePublicKeyDer(ConstByteSpan publicKeyDer) noexcept
+        {
+            if (publicKeyDer.empty())
+            {
+                return InvalidKey();
+            }
+            if (!FitsOpenSslLong(publicKeyDer.size()))
+            {
+                return InvalidKey();
+            }
+
+            const auto* cursor = reinterpret_cast<const unsigned char*>(publicKeyDer.data());
+            const auto* end    = cursor + publicKeyDer.size();
+            EvpPkeyPtr  key {d2i_PUBKEY(nullptr, &cursor, static_cast<long>(publicKeyDer.size())), EVP_PKEY_free};
+            if (key == nullptr || cursor != end)
+            {
+                return InvalidKey();
+            }
+
+            return key;
+        }
+
+        [[nodiscard]] CryptoExpected<void> ConfigureRsaPssContext(EVP_PKEY_CTX* context) noexcept
+        {
+            if (EVP_PKEY_CTX_set_rsa_padding(context, RSA_PKCS1_PSS_PADDING) <= 0 ||
+                EVP_PKEY_CTX_set_signature_md(context, EVP_sha256()) <= 0 ||
+                EVP_PKEY_CTX_set_rsa_mgf1_md(context, EVP_sha256()) <= 0 ||
+                EVP_PKEY_CTX_set_rsa_pss_saltlen(context, 32) <= 0)
+            {
+                return InvalidKey();
+            }
+
+            return {};
+        }
+
+        [[nodiscard]] CryptoExpected<void> ConfigureRsaOaepContext(
+                EVP_PKEY_CTX* context,
+                ConstByteSpan label) noexcept
+        {
+            if (EVP_PKEY_CTX_set_rsa_padding(context, RSA_PKCS1_OAEP_PADDING) <= 0 ||
+                EVP_PKEY_CTX_set_rsa_oaep_md(context, EVP_sha256()) <= 0 ||
+                EVP_PKEY_CTX_set_rsa_mgf1_md(context, EVP_sha256()) <= 0)
+            {
+                return InvalidKey();
+            }
+
+            if (label.empty())
+            {
+                return {};
+            }
+            if (!FitsOpenSslInt(label.size()))
+            {
+                return InvalidArgument();
+            }
+
+            void* labelCopy = OPENSSL_malloc(label.size());
+            if (labelCopy == nullptr)
+            {
+                return InternalError();
+            }
+            std::memcpy(labelCopy, label.data(), label.size());
+
+            if (EVP_PKEY_CTX_set0_rsa_oaep_label(
+                        context,
+                        static_cast<unsigned char*>(labelCopy),
+                        static_cast<int>(label.size())) <= 0)
+            {
+                OPENSSL_free(labelCopy);
+                return InvalidKey();
+            }
+
+            return {};
+        }
+
+        [[nodiscard]] constexpr std::string_view OpenSslCompatibleVersion() noexcept
+        {
+#if defined(OPENSSL_IS_BORINGSSL)
+            return "BoringSSL";
+#else
+            return OPENSSL_VERSION_TEXT;
+#endif
+        }
+
+        [[nodiscard]] CryptoExpected<CryptoContext> CreateOpenSslCompatibleContext(BackendInfo info) noexcept
+        {
+            BackendCapabilities capabilities;
+            capabilities.EnableRandom()
+                    .Enable(HashAlgorithm::Sha256)
+                    .Enable(HashAlgorithm::Sha512)
+                    .Enable(MacAlgorithm::HmacSha256)
+                    .Enable(MacAlgorithm::HmacSha512);
+            capabilities.Enable(KdfAlgorithm::HkdfSha256)
+                    .Enable(KdfAlgorithm::HkdfSha512)
+                    .Enable(KdfAlgorithm::Pbkdf2Sha256)
+                    .Enable(KdfAlgorithm::Pbkdf2Sha512);
+            capabilities.Enable(AeadAlgorithm::Aes128Gcm)
+                    .Enable(AeadAlgorithm::Aes256Gcm)
+                    .Enable(AeadAlgorithm::ChaCha20Poly1305);
+            capabilities.Enable(SignatureAlgorithm::Ed25519)
+                    .Enable(SignatureAlgorithm::EcdsaP256Sha256)
+                    .Enable(SignatureAlgorithm::RsaPssSha256)
+                    .Enable(AsymmetricEncryptionAlgorithm::RsaOaepSha256)
+                    .Enable(KeyAgreementAlgorithm::X25519);
+
+            return CryptoContext {
+                    info,
+                    capabilities,
+            };
+        }
     }// namespace
 
     CryptoExpected<CryptoContext> CreateOpenSslContext(const BackendOptions& options) noexcept
     {
         (void) options;
 
-        BackendCapabilities capabilities;
-        capabilities.EnableRandom()
-                .Enable(HashAlgorithm::Sha256)
-                .Enable(HashAlgorithm::Sha512)
-                .Enable(MacAlgorithm::HmacSha256)
-                .Enable(MacAlgorithm::HmacSha512);
-        capabilities.Enable(KdfAlgorithm::HkdfSha256)
-                .Enable(KdfAlgorithm::HkdfSha512)
-                .Enable(KdfAlgorithm::Pbkdf2Sha256)
-                .Enable(KdfAlgorithm::Pbkdf2Sha512);
-        capabilities.Enable(AeadAlgorithm::Aes128Gcm)
-                .Enable(AeadAlgorithm::Aes256Gcm)
-                .Enable(AeadAlgorithm::ChaCha20Poly1305);
-        capabilities.Enable(SignatureAlgorithm::Ed25519).Enable(KeyAgreementAlgorithm::X25519);
-
-        return CryptoContext {
+        return CreateOpenSslCompatibleContext(
                 BackendInfo {
                         BackendKind::ExternalPackage,
                         "openssl",
-                        OPENSSL_VERSION_TEXT,
-                },
-                capabilities,
-        };
+                        OpenSslCompatibleVersion(),
+                        "OpenSSL libcrypto",
+                        "NGIN_BASE_CRYPTO_WITH_OPENSSL",
+                        "openssl",
+                });
+    }
+
+    CryptoExpected<CryptoContext> CreateBoringSslContext(const BackendOptions& options) noexcept
+    {
+        (void) options;
+
+        return CreateOpenSslCompatibleContext(
+                BackendInfo {
+                        BackendKind::ExternalPackage,
+                        "boringssl",
+                        OpenSslCompatibleVersion(),
+                        "BoringSSL libcrypto",
+                        "NGIN_BASE_CRYPTO_WITH_BORINGSSL",
+                        "BoringSSL",
+                });
+    }
+
+    CryptoExpected<void> RandomOpenSsl(ByteSpan output) noexcept
+    {
+        if (output.empty())
+        {
+            return {};
+        }
+        if (!FitsOpenSslInt(output.size()))
+        {
+            return InvalidArgument();
+        }
+
+        return RAND_bytes(reinterpret_cast<unsigned char*>(output.data()), static_cast<int>(output.size())) == 1
+                       ? CryptoExpected<void> {}
+                       : CryptoError {CryptoErrorCode::EntropyUnavailable};
     }
 
     CryptoExpected<void> HashOpenSsl(
@@ -371,6 +715,116 @@ namespace NGIN::Crypto::Backend::detail
         return result == 1 ? CryptoExpected<void> {} : InternalError();
     }
 
+#if defined(OPENSSL_IS_BORINGSSL)
+    CryptoExpected<void> AeadSealBoringSsl(
+            AeadAlgorithm                    algorithm,
+            NGIN::Crypto::Memory::SecretView key,
+            ConstByteSpan                    nonce,
+            ConstByteSpan                    plaintext,
+            ConstByteSpan                    associatedData,
+            ByteSpan                         ciphertext,
+            ByteSpan                         tag) noexcept
+    {
+        const EVP_AEAD* aead = SelectBoringSslAead(algorithm);
+        if (aead == nullptr)
+        {
+            return UnsupportedAlgorithm();
+        }
+        if (key.Bytes().size() != EVP_AEAD_key_length(aead) || nonce.size() != EVP_AEAD_nonce_length(aead) ||
+            tag.size() > EVP_AEAD_max_tag_len(aead))
+        {
+            return InvalidArgument();
+        }
+
+        EVP_AEAD_CTX context;
+        const auto   keyBytes = key.Bytes();
+        if (EVP_AEAD_CTX_init(
+                    &context,
+                    aead,
+                    DataOrNull(keyBytes),
+                    keyBytes.size(),
+                    tag.size(),
+                    nullptr) != 1)
+        {
+            return InternalError();
+        }
+
+        NGIN::UIntSize tagLength = 0;
+        const auto     result    = EVP_AEAD_CTX_seal_scatter(
+                &context,
+                MutableDataOrNull(ciphertext),
+                MutableDataOrNull(tag),
+                &tagLength,
+                tag.size(),
+                DataOrNull(nonce),
+                nonce.size(),
+                DataOrNull(plaintext),
+                plaintext.size(),
+                nullptr,
+                0,
+                DataOrNull(associatedData),
+                associatedData.size());
+        EVP_AEAD_CTX_cleanup(&context);
+
+        return result == 1 && tagLength == tag.size() ? CryptoExpected<void> {} : InternalError();
+    }
+
+    CryptoExpected<void> AeadOpenBoringSsl(
+            AeadAlgorithm                    algorithm,
+            NGIN::Crypto::Memory::SecretView key,
+            ConstByteSpan                    nonce,
+            ConstByteSpan                    ciphertext,
+            ConstByteSpan                    associatedData,
+            ConstByteSpan                    tag,
+            ByteSpan                         plaintext) noexcept
+    {
+        const EVP_AEAD* aead = SelectBoringSslAead(algorithm);
+        if (aead == nullptr)
+        {
+            return UnsupportedAlgorithm();
+        }
+        if (key.Bytes().size() != EVP_AEAD_key_length(aead) || nonce.size() != EVP_AEAD_nonce_length(aead) ||
+            tag.size() > EVP_AEAD_max_tag_len(aead))
+        {
+            return InvalidArgument();
+        }
+
+        EVP_AEAD_CTX context;
+        const auto   keyBytes = key.Bytes();
+        if (EVP_AEAD_CTX_init(
+                    &context,
+                    aead,
+                    DataOrNull(keyBytes),
+                    keyBytes.size(),
+                    tag.size(),
+                    nullptr) != 1)
+        {
+            return InternalError();
+        }
+
+        const auto result = EVP_AEAD_CTX_open_gather(
+                &context,
+                MutableDataOrNull(plaintext),
+                DataOrNull(nonce),
+                nonce.size(),
+                DataOrNull(ciphertext),
+                ciphertext.size(),
+                DataOrNull(tag),
+                tag.size(),
+                DataOrNull(associatedData),
+                associatedData.size());
+        EVP_AEAD_CTX_cleanup(&context);
+
+        if (result != 1)
+        {
+            NGIN::Crypto::Memory::SecureZero(plaintext);
+            return AuthenticationFailed();
+        }
+
+        return {};
+    }
+#endif
+
     CryptoExpected<void> AeadSealOpenSsl(
             AeadAlgorithm                    algorithm,
             NGIN::Crypto::Memory::SecretView key,
@@ -380,6 +834,12 @@ namespace NGIN::Crypto::Backend::detail
             ByteSpan                         ciphertext,
             ByteSpan                         tag) noexcept
     {
+#if defined(OPENSSL_IS_BORINGSSL)
+        if (const EVP_AEAD* aead = SelectBoringSslAead(algorithm); aead != nullptr)
+        {
+            return AeadSealBoringSsl(algorithm, key, nonce, plaintext, associatedData, ciphertext, tag);
+        }
+#endif
         const EVP_CIPHER* cipher = SelectCipher(algorithm);
         if (cipher == nullptr)
         {
@@ -465,6 +925,12 @@ namespace NGIN::Crypto::Backend::detail
             ConstByteSpan                    tag,
             ByteSpan                         plaintext) noexcept
     {
+#if defined(OPENSSL_IS_BORINGSSL)
+        if (const EVP_AEAD* aead = SelectBoringSslAead(algorithm); aead != nullptr)
+        {
+            return AeadOpenBoringSsl(algorithm, key, nonce, ciphertext, associatedData, tag, plaintext);
+        }
+#endif
         const EVP_CIPHER* cipher = SelectCipher(algorithm);
         if (cipher == nullptr)
         {
@@ -562,7 +1028,35 @@ namespace NGIN::Crypto::Backend::detail
     {
         if (algorithm != SignatureAlgorithm::Ed25519)
         {
-            return UnsupportedAlgorithm();
+            if (algorithm != SignatureAlgorithm::EcdsaP256Sha256)
+            {
+                return UnsupportedAlgorithm();
+            }
+
+            auto key = CreateP256PrivateKey(privateKey.Bytes());
+            if (!key.HasValue())
+            {
+                return key.Error();
+            }
+
+            auto digest = Sha256DigestOpenSsl(message);
+            if (!digest.HasValue())
+            {
+                return digest.Error();
+            }
+
+            EcdsaSigPtr ecdsaSignature {
+                    ECDSA_do_sign(
+                            reinterpret_cast<const unsigned char*>(digest.Value().data()),
+                            static_cast<int>(digest.Value().size()),
+                            key.Value().get()),
+                    ECDSA_SIG_free};
+            if (ecdsaSignature == nullptr)
+            {
+                return InternalError();
+            }
+
+            return OpenSslP256SignatureToRaw(ecdsaSignature.get(), signature);
         }
 
         const auto privateKeyBytes = privateKey.Bytes();
@@ -605,7 +1099,43 @@ namespace NGIN::Crypto::Backend::detail
     {
         if (algorithm != SignatureAlgorithm::Ed25519)
         {
-            return UnsupportedAlgorithm();
+            if (algorithm != SignatureAlgorithm::EcdsaP256Sha256)
+            {
+                return UnsupportedAlgorithm();
+            }
+
+            auto key = CreateP256PublicKey(publicKey);
+            if (!key.HasValue())
+            {
+                return key.Error();
+            }
+
+            auto ecdsaSignature = RawP256SignatureToOpenSsl(signature);
+            if (!ecdsaSignature.HasValue())
+            {
+                return ecdsaSignature.Error();
+            }
+
+            auto digest = Sha256DigestOpenSsl(message);
+            if (!digest.HasValue())
+            {
+                return digest.Error();
+            }
+
+            const int result = ECDSA_do_verify(
+                    reinterpret_cast<const unsigned char*>(digest.Value().data()),
+                    static_cast<int>(digest.Value().size()),
+                    ecdsaSignature.Value().get(),
+                    key.Value().get());
+            if (result == 1)
+            {
+                return {};
+            }
+            if (result == 0)
+            {
+                return AuthenticationFailed();
+            }
+            return InternalError();
         }
 
         EVP_PKEY* key = EVP_PKEY_new_raw_public_key(
@@ -645,6 +1175,237 @@ namespace NGIN::Crypto::Backend::detail
             return AuthenticationFailed();
         }
         return InternalError();
+    }
+
+    CryptoExpected<ByteBuffer> RsaPssSha256SignOpenSsl(
+            NGIN::Crypto::Memory::SecretView privateKeyDer,
+            ConstByteSpan                    message)
+    {
+        auto key = DecodePrivateKeyDer(privateKeyDer);
+        if (!key.HasValue())
+        {
+            return key.Error();
+        }
+
+        auto digest = Sha256DigestOpenSsl(message);
+        if (!digest.HasValue())
+        {
+            return digest.Error();
+        }
+
+        EvpPkeyCtxPtr context {EVP_PKEY_CTX_new(key.Value().get(), nullptr), EVP_PKEY_CTX_free};
+        if (context == nullptr)
+        {
+            return InternalError();
+        }
+
+        if (EVP_PKEY_sign_init(context.get()) <= 0)
+        {
+            return InternalError();
+        }
+
+        auto configured = ConfigureRsaPssContext(context.get());
+        if (!configured.HasValue())
+        {
+            return configured.Error();
+        }
+
+        auto signatureSize = NGIN::UIntSize {0};
+        if (EVP_PKEY_sign(
+                    context.get(),
+                    nullptr,
+                    &signatureSize,
+                    reinterpret_cast<const unsigned char*>(digest.Value().data()),
+                    digest.Value().size()) <= 0)
+        {
+            return InternalError();
+        }
+
+        auto signature = MakeByteBuffer(signatureSize);
+        if (EVP_PKEY_sign(
+                    context.get(),
+                    reinterpret_cast<unsigned char*>(signature.data()),
+                    &signatureSize,
+                    reinterpret_cast<const unsigned char*>(digest.Value().data()),
+                    digest.Value().size()) <= 0)
+        {
+            return InternalError();
+        }
+
+        while (signature.Size() > signatureSize)
+        {
+            signature.PopBack();
+        }
+
+        return signature;
+    }
+
+    CryptoExpected<void> RsaPssSha256VerifyOpenSsl(
+            ConstByteSpan publicKeyDer,
+            ConstByteSpan message,
+            ConstByteSpan signature) noexcept
+    {
+        auto key = DecodePublicKeyDer(publicKeyDer);
+        if (!key.HasValue())
+        {
+            return key.Error();
+        }
+
+        auto digest = Sha256DigestOpenSsl(message);
+        if (!digest.HasValue())
+        {
+            return digest.Error();
+        }
+
+        EvpPkeyCtxPtr context {EVP_PKEY_CTX_new(key.Value().get(), nullptr), EVP_PKEY_CTX_free};
+        if (context == nullptr)
+        {
+            return InternalError();
+        }
+
+        if (EVP_PKEY_verify_init(context.get()) <= 0)
+        {
+            return InternalError();
+        }
+
+        auto configured = ConfigureRsaPssContext(context.get());
+        if (!configured.HasValue())
+        {
+            return configured.Error();
+        }
+
+        const int result = EVP_PKEY_verify(
+                context.get(),
+                DataOrNull(signature),
+                signature.size(),
+                reinterpret_cast<const unsigned char*>(digest.Value().data()),
+                digest.Value().size());
+        if (result == 1)
+        {
+            return {};
+        }
+        if (result == 0)
+        {
+            return AuthenticationFailed();
+        }
+        return InternalError();
+    }
+
+    CryptoExpected<ByteBuffer> RsaOaepSha256EncryptOpenSsl(
+            ConstByteSpan publicKeyDer,
+            ConstByteSpan plaintext,
+            ConstByteSpan label)
+    {
+        auto key = DecodePublicKeyDer(publicKeyDer);
+        if (!key.HasValue())
+        {
+            return key.Error();
+        }
+
+        EvpPkeyCtxPtr context {EVP_PKEY_CTX_new(key.Value().get(), nullptr), EVP_PKEY_CTX_free};
+        if (context == nullptr)
+        {
+            return InternalError();
+        }
+
+        if (EVP_PKEY_encrypt_init(context.get()) <= 0)
+        {
+            return InternalError();
+        }
+
+        auto result = ConfigureRsaOaepContext(context.get(), label);
+        if (!result.HasValue())
+        {
+            return result.Error();
+        }
+
+        auto ciphertextSize = NGIN::UIntSize {0};
+        if (EVP_PKEY_encrypt(
+                    context.get(),
+                    nullptr,
+                    &ciphertextSize,
+                    DataOrNull(plaintext),
+                    plaintext.size()) <= 0)
+        {
+            return InvalidArgument();
+        }
+
+        auto ciphertext = MakeByteBuffer(ciphertextSize);
+        if (EVP_PKEY_encrypt(
+                    context.get(),
+                    reinterpret_cast<unsigned char*>(ciphertext.data()),
+                    &ciphertextSize,
+                    DataOrNull(plaintext),
+                    plaintext.size()) <= 0)
+        {
+            return InvalidArgument();
+        }
+
+        while (ciphertext.Size() > ciphertextSize)
+        {
+            ciphertext.PopBack();
+        }
+
+        return ciphertext;
+    }
+
+    CryptoExpected<ByteBuffer> RsaOaepSha256DecryptOpenSsl(
+            NGIN::Crypto::Memory::SecretView privateKeyDer,
+            ConstByteSpan                    ciphertext,
+            ConstByteSpan                    label)
+    {
+        auto key = DecodePrivateKeyDer(privateKeyDer);
+        if (!key.HasValue())
+        {
+            return key.Error();
+        }
+
+        EvpPkeyCtxPtr context {EVP_PKEY_CTX_new(key.Value().get(), nullptr), EVP_PKEY_CTX_free};
+        if (context == nullptr)
+        {
+            return InternalError();
+        }
+
+        if (EVP_PKEY_decrypt_init(context.get()) <= 0)
+        {
+            return InternalError();
+        }
+
+        auto result = ConfigureRsaOaepContext(context.get(), label);
+        if (!result.HasValue())
+        {
+            return result.Error();
+        }
+
+        auto plaintextSize = NGIN::UIntSize {0};
+        if (EVP_PKEY_decrypt(
+                    context.get(),
+                    nullptr,
+                    &plaintextSize,
+                    DataOrNull(ciphertext),
+                    ciphertext.size()) <= 0)
+        {
+            return AuthenticationFailed();
+        }
+
+        auto plaintext = MakeByteBuffer(plaintextSize);
+        if (EVP_PKEY_decrypt(
+                    context.get(),
+                    reinterpret_cast<unsigned char*>(plaintext.data()),
+                    &plaintextSize,
+                    DataOrNull(ciphertext),
+                    ciphertext.size()) <= 0)
+        {
+            NGIN::Crypto::Memory::SecureZero(ByteSpan {plaintext.data(), plaintext.Size()});
+            return AuthenticationFailed();
+        }
+
+        while (plaintext.Size() > plaintextSize)
+        {
+            plaintext.PopBack();
+        }
+
+        return plaintext;
     }
 
     CryptoExpected<void> GenerateX25519KeyPairOpenSsl(

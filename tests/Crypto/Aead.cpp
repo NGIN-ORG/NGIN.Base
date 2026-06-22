@@ -33,6 +33,36 @@ namespace
         return decoded.Value();
     }
 
+    template<NGIN::UIntSize Size>
+    [[nodiscard]] NGIN::Crypto::Memory::FixedSecret<Size> SecretFromHex(std::string_view text)
+    {
+        auto decoded = DecodeHex(text);
+        REQUIRE(decoded.Size() == Size);
+
+        NGIN::Crypto::FixedBytes<Size> bytes {};
+        for (NGIN::UIntSize i = 0; i < Size; ++i)
+        {
+            bytes[i] = decoded.data()[i];
+        }
+
+        return NGIN::Crypto::Memory::FixedSecret<Size>::FromValue(bytes);
+    }
+
+    template<NGIN::UIntSize Size>
+    [[nodiscard]] NGIN::Crypto::FixedBytes<Size> FixedBytesFromHex(std::string_view text)
+    {
+        auto decoded = DecodeHex(text);
+        REQUIRE(decoded.Size() == Size);
+
+        NGIN::Crypto::FixedBytes<Size> bytes {};
+        for (NGIN::UIntSize i = 0; i < Size; ++i)
+        {
+            bytes[i] = decoded.data()[i];
+        }
+
+        return bytes;
+    }
+
     void RequireBytesEqual(NGIN::Crypto::ConstByteSpan actual, NGIN::Crypto::ConstByteSpan expected)
     {
         REQUIRE(actual.size() == expected.size());
@@ -84,6 +114,32 @@ TEST_CASE("AEAD algorithm headers expose typed key nonce and tag aliases", "[Cry
     REQUIRE(chachaTag.size() == 16);
     REQUIRE(xchachaNonce.size() == 24);
     REQUIRE(xchachaTag.size() == 16);
+}
+
+TEST_CASE("AEAD algorithm headers generate typed keys and nonces", "[Crypto][Aead]")
+{
+    auto aes128Key    = NGIN::Crypto::Symmetric::GenerateAes128GcmKey();
+    auto aes256Key    = NGIN::Crypto::Symmetric::GenerateAes256GcmKey();
+    auto aesNonce     = NGIN::Crypto::Symmetric::GenerateAesGcmNonce();
+    auto chachaKey    = NGIN::Crypto::Symmetric::GenerateChaCha20Poly1305Key();
+    auto chachaNonce  = NGIN::Crypto::Symmetric::GenerateChaCha20Poly1305Nonce();
+    auto xchachaKey   = NGIN::Crypto::Symmetric::GenerateXChaCha20Poly1305Key();
+    auto xchachaNonce = NGIN::Crypto::Symmetric::GenerateXChaCha20Poly1305Nonce();
+
+    REQUIRE(aes128Key.HasValue());
+    REQUIRE(aes128Key.Value().Bytes().size() == 16);
+    REQUIRE(aes256Key.HasValue());
+    REQUIRE(aes256Key.Value().Bytes().size() == 32);
+    REQUIRE(aesNonce.HasValue());
+    REQUIRE(aesNonce.Value().size() == 12);
+    REQUIRE(chachaKey.HasValue());
+    REQUIRE(chachaKey.Value().Bytes().size() == 32);
+    REQUIRE(chachaNonce.HasValue());
+    REQUIRE(chachaNonce.Value().size() == 12);
+    REQUIRE(xchachaKey.HasValue());
+    REQUIRE(xchachaKey.Value().Bytes().size() == 32);
+    REQUIRE(xchachaNonce.HasValue());
+    REQUIRE(xchachaNonce.Value().size() == 24);
 }
 
 TEST_CASE("SealInto checks output size before backend support", "[Crypto][Aead]")
@@ -273,6 +329,27 @@ TEST_CASE("AEAD owned helpers preserve validation and unsupported errors", "[Cry
     REQUIRE(openResult.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
 }
 
+TEST_CASE("Typed AEAD helpers preserve unsupported errors", "[Crypto][Aead]")
+{
+    NGIN::Crypto::Backend::CryptoContext context {
+            NGIN::Crypto::Backend::BackendInfo {NGIN::Crypto::Backend::BackendKind::Test, "empty-test"},
+            NGIN::Crypto::Backend::BackendCapabilities {},
+    };
+
+    auto key   = ZeroSecret<32>();
+    auto nonce = ZeroBytes<12>();
+    auto tag   = ZeroBytes<16>();
+    auto plain = ZeroBytes<8>();
+
+    auto sealed = NGIN::Crypto::Symmetric::SealAes256Gcm(context, key, nonce, plain);
+    auto opened = NGIN::Crypto::Symmetric::OpenAes256Gcm(context, key, nonce, plain, tag);
+
+    REQUIRE_FALSE(sealed.HasValue());
+    REQUIRE(sealed.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+    REQUIRE_FALSE(opened.HasValue());
+    REQUIRE(opened.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+}
+
 TEST_CASE("AES-GCM matches NIST vectors when backend supports it", "[Crypto][Aead]")
 {
     auto context = NGIN::Crypto::Backend::CreateContext();
@@ -328,6 +405,46 @@ TEST_CASE("AES-GCM matches NIST vectors when backend supports it", "[Crypto][Aea
     RequireBytesEqual(
             NGIN::Crypto::ConstByteSpan {aes256.Value().tag.data(), aes256.Value().tag.size()},
             NGIN::Crypto::ConstByteSpan {expectedTag256.data(), expectedTag256.Size()});
+}
+
+TEST_CASE("Typed AES-GCM helpers match NIST vector when backend supports it", "[Crypto][Aead]")
+{
+    auto context = NGIN::Crypto::Backend::CreateContext();
+    REQUIRE(context.HasValue());
+    if (!context.Value().Supports(NGIN::Crypto::AeadAlgorithm::Aes256Gcm))
+    {
+        return;
+    }
+
+    auto       key            = SecretFromHex<32>("0000000000000000000000000000000000000000000000000000000000000000");
+    auto       nonce          = FixedBytesFromHex<12>("000000000000000000000000");
+    const auto plaintext      = DecodeHex("00000000000000000000000000000000");
+    const auto expectedCipher = DecodeHex("cea7403d4d606b6e074ec5d3baf39d18");
+    const auto expectedTag    = DecodeHex("d0d1c8a799996bf0265b98b5d48ab919");
+
+    auto sealed = NGIN::Crypto::Symmetric::SealAes256Gcm(
+            context.Value(),
+            key,
+            nonce,
+            NGIN::Crypto::ConstByteSpan {plaintext.data(), plaintext.Size()});
+    REQUIRE(sealed.HasValue());
+    RequireBytesEqual(
+            NGIN::Crypto::ConstByteSpan {sealed.Value().ciphertext.data(), sealed.Value().ciphertext.Size()},
+            NGIN::Crypto::ConstByteSpan {expectedCipher.data(), expectedCipher.Size()});
+    RequireBytesEqual(
+            NGIN::Crypto::ConstByteSpan {sealed.Value().tag.data(), sealed.Value().tag.size()},
+            NGIN::Crypto::ConstByteSpan {expectedTag.data(), expectedTag.Size()});
+
+    auto opened = NGIN::Crypto::Symmetric::OpenAes256Gcm(
+            context.Value(),
+            key,
+            nonce,
+            NGIN::Crypto::ConstByteSpan {sealed.Value().ciphertext.data(), sealed.Value().ciphertext.Size()},
+            sealed.Value().tag);
+    REQUIRE(opened.HasValue());
+    RequireBytesEqual(
+            NGIN::Crypto::ConstByteSpan {opened.Value().data(), opened.Value().Size()},
+            NGIN::Crypto::ConstByteSpan {plaintext.data(), plaintext.Size()});
 }
 
 TEST_CASE("AES-GCM opens valid ciphertext and rejects invalid tags when backend supports it", "[Crypto][Aead]")

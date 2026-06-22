@@ -6,21 +6,38 @@ option(NGIN_BASE_BUILD_SHARED "Build NGIN.Base as a shared library" OFF)
 option(NGIN_BASE_BUILD_TESTS "Build NGIN.Base tests" ON)
 option(NGIN_BASE_BUILD_EXAMPLES "Build NGIN.Base examples" ON)
 option(NGIN_BASE_BUILD_BENCHMARKS "Build NGIN.Base benchmarks" ON)
+option(NGIN_BASE_BUILD_FUZZERS "Build optional LLVM libFuzzer harnesses for parser-heavy components" OFF)
 option(NGIN_BASE_DEVELOPMENT_MODE "Deprecated compatibility toggle for non-header builds" OFF)
 
 # Extended developer / diagnostics options.
+set(_ngin_base_crypto_cng_default OFF)
+if(WIN32)
+  set(_ngin_base_crypto_cng_default ON)
+endif()
+set(_ngin_base_crypto_apple_default OFF)
+if(APPLE)
+  set(_ngin_base_crypto_apple_default ON)
+endif()
+
 option(NGIN_BASE_ENABLE_ASAN "Enable Address + Undefined Sanitizers (GNU/Clang)" OFF)
 option(NGIN_BASE_ENABLE_TSAN "Enable ThreadSanitizer (GNU/Clang)" OFF)
 option(NGIN_BASE_ENABLE_LTO "Enable Link Time Optimization for Release/RelWithDebInfo" OFF)
 option(NGIN_BASE_STRICT_WARNINGS "Enable extra warning flags" ON)
 option(NGIN_BASE_ALL_FEATURES "Convenience: enable tests + examples + benchmarks" OFF)
 option(NGIN_BASE_EXPORT_COMPILE_COMMANDS "Generate compile_commands.json" ON)
+option(NGIN_BASE_CRYPTO_WITH_CNG "Enable Windows CNG-backed crypto algorithms" ${_ngin_base_crypto_cng_default})
+option(NGIN_BASE_CRYPTO_WITH_APPLE "Enable Apple CommonCrypto-backed crypto algorithms" ${_ngin_base_crypto_apple_default})
+option(NGIN_BASE_CRYPTO_WITH_OPENSSL "Enable optional OpenSSL-backed crypto algorithms" OFF)
+option(NGIN_BASE_CRYPTO_WITH_BORINGSSL "Enable optional BoringSSL-backed crypto algorithms" OFF)
+option(NGIN_BASE_CRYPTO_WITH_LIBSODIUM "Enable optional libsodium-backed crypto algorithms" OFF)
 option(NGIN_BASE_CRYPTO_OPENSSL "Enable optional OpenSSL-backed crypto algorithms" OFF)
 option(NGIN_CRYPTO_WITH_OPENSSL "Enable optional OpenSSL-backed crypto algorithms for split Crypto targets" OFF)
 option(NGIN_BASE_BUILD_SPLIT_TARGETS "Create transitional NGIN::Crypto/Net/Serialization targets" ON)
 
 set(NGIN_BASE_CLANG_GCC_TOOLCHAIN "" CACHE PATH "Clang (Linux): GCC toolchain root passed via --gcc-toolchain")
 set(NGIN_BASE_FIBER_BACKEND "default" CACHE STRING "Fiber backend: default/ucontext/winfiber/custom_asm")
+set(NGIN_BASE_CRYPTO_REQUIRE_PROVIDER "" CACHE STRING "Required crypto providers: platform, platform-random, cng, openssl, boringssl, libsodium")
+set(NGIN_BASE_CRYPTO_REQUIRE_ALGORITHMS "" CACHE STRING "Required crypto algorithms, separated by semicolons, commas, or spaces")
 set_property(CACHE NGIN_BASE_FIBER_BACKEND PROPERTY STRINGS default ucontext winfiber custom_asm)
 
 if(NGIN_BASE_ALL_FEATURES)
@@ -33,10 +50,25 @@ if(NGIN_BASE_ENABLE_ASAN AND NGIN_BASE_ENABLE_TSAN)
   message(FATAL_ERROR "Cannot enable ASAN and TSAN simultaneously")
 endif()
 
-if(NGIN_BASE_CRYPTO_OPENSSL AND NOT NGIN_CRYPTO_WITH_OPENSSL)
+if(NGIN_BASE_CRYPTO_WITH_CNG AND NOT WIN32)
+  message(FATAL_ERROR "NGIN_BASE_CRYPTO_WITH_CNG is only supported on Windows")
+endif()
+
+if(NGIN_BASE_CRYPTO_WITH_APPLE AND NOT APPLE)
+  message(FATAL_ERROR "NGIN_BASE_CRYPTO_WITH_APPLE is only supported on Apple platforms")
+endif()
+
+if(NGIN_BASE_CRYPTO_WITH_OPENSSL OR NGIN_BASE_CRYPTO_OPENSSL OR NGIN_CRYPTO_WITH_OPENSSL)
+  set(NGIN_BASE_CRYPTO_WITH_OPENSSL ON CACHE BOOL "Enable optional OpenSSL-backed crypto algorithms" FORCE)
   set(NGIN_CRYPTO_WITH_OPENSSL ON CACHE BOOL "Enable optional OpenSSL-backed crypto algorithms" FORCE)
-elseif(NGIN_CRYPTO_WITH_OPENSSL AND NOT NGIN_BASE_CRYPTO_OPENSSL)
   set(NGIN_BASE_CRYPTO_OPENSSL ON CACHE BOOL "Enable optional OpenSSL-backed crypto algorithms" FORCE)
+endif()
+
+if(NGIN_BASE_CRYPTO_WITH_OPENSSL AND NGIN_BASE_CRYPTO_WITH_BORINGSSL)
+  message(FATAL_ERROR
+    "NGIN_BASE_CRYPTO_WITH_OPENSSL and NGIN_BASE_CRYPTO_WITH_BORINGSSL cannot both be enabled in one NGIN.Base build. "
+    "Select exactly one OpenSSL-compatible libcrypto provider."
+  )
 endif()
 
 if(NGIN_BASE_DEVELOPMENT_MODE)

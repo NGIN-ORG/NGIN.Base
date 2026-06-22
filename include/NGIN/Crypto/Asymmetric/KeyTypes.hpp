@@ -1,6 +1,7 @@
 #pragma once
 
 #include <NGIN/Crypto/Algorithm.hpp>
+#include <NGIN/Crypto/Errors/CryptoError.hpp>
 #include <NGIN/Crypto/Memory/Secret.hpp>
 #include <NGIN/Crypto/Types.hpp>
 
@@ -15,6 +16,29 @@ namespace NGIN::Crypto::Asymmetric
     struct X25519KeyTag
     {
     };
+
+    struct EcdsaP256KeyTag
+    {
+    };
+
+    namespace detail
+    {
+        [[nodiscard]] constexpr CryptoError InvalidKey() noexcept
+        {
+            return CryptoError {CryptoErrorCode::InvalidKey};
+        }
+
+        template<NGIN::UIntSize Size>
+        [[nodiscard]] constexpr FixedBytes<Size> CopyFixedBytes(ConstByteSpan bytes) noexcept
+        {
+            FixedBytes<Size> output {};
+            for (NGIN::UIntSize i = 0; i < Size; ++i)
+            {
+                output[i] = bytes[i];
+            }
+            return output;
+        }
+    }// namespace detail
 
     template<class AlgorithmTag, NGIN::UIntSize Size>
     class PublicKey
@@ -35,6 +59,16 @@ namespace NGIN::Crypto::Asymmetric
         [[nodiscard]] static constexpr PublicKey FromBytes(ValueType bytes) noexcept
         {
             return PublicKey {std::move(bytes)};
+        }
+
+        [[nodiscard]] static CryptoExpected<PublicKey> FromBytes(ConstByteSpan bytes) noexcept
+        {
+            if (bytes.size() != Size)
+            {
+                return detail::InvalidKey();
+            }
+
+            return PublicKey {detail::CopyFixedBytes<Size>(bytes)};
         }
 
         [[nodiscard]] constexpr ConstByteSpan Bytes() const noexcept
@@ -76,6 +110,16 @@ namespace NGIN::Crypto::Asymmetric
         [[nodiscard]] static PrivateKey FromBytes(ValueType bytes) noexcept
         {
             return PrivateKey {SecretType::FromValue(std::move(bytes))};
+        }
+
+        [[nodiscard]] static CryptoExpected<PrivateKey> FromSecretBytes(ConstByteSpan bytes) noexcept
+        {
+            if (bytes.size() != Size)
+            {
+                return detail::InvalidKey();
+            }
+
+            return PrivateKey {SecretType::FromValue(detail::CopyFixedBytes<Size>(bytes))};
         }
 
         [[nodiscard]] ConstByteSpan Bytes() const noexcept
@@ -125,6 +169,7 @@ namespace NGIN::Crypto::Asymmetric
             case SignatureAlgorithm::Ed25519:
                 return SignatureKeySizes {.publicKeySize = 32, .privateKeySize = 32, .signatureSize = 64};
             case SignatureAlgorithm::EcdsaP256Sha256:
+                return SignatureKeySizes {.publicKeySize = 65, .privateKeySize = 32, .signatureSize = 64};
             case SignatureAlgorithm::RsaPssSha256:
                 return {};
         }

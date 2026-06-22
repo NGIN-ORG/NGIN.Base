@@ -41,6 +41,11 @@ namespace NGIN::Crypto::Backend
             return HasBit(m_keyAgreementAlgorithms, algorithm);
         }
 
+        [[nodiscard]] constexpr bool Supports(AsymmetricEncryptionAlgorithm algorithm) const noexcept
+        {
+            return HasBit(m_asymmetricEncryptionAlgorithms, algorithm);
+        }
+
         [[nodiscard]] constexpr bool Supports(SignatureAlgorithm algorithm) const noexcept
         {
             return HasBit(m_signatureAlgorithms, algorithm);
@@ -82,6 +87,12 @@ namespace NGIN::Crypto::Backend
             return *this;
         }
 
+        constexpr BackendCapabilities& Enable(AsymmetricEncryptionAlgorithm algorithm) noexcept
+        {
+            SetBit(m_asymmetricEncryptionAlgorithms, algorithm);
+            return *this;
+        }
+
         constexpr BackendCapabilities& Enable(SignatureAlgorithm algorithm) noexcept
         {
             SetBit(m_signatureAlgorithms, algorithm);
@@ -112,6 +123,7 @@ namespace NGIN::Crypto::Backend
         NGIN::UInt64 m_kdfAlgorithms {0};
         NGIN::UInt64 m_aeadAlgorithms {0};
         NGIN::UInt64 m_keyAgreementAlgorithms {0};
+        NGIN::UInt64 m_asymmetricEncryptionAlgorithms {0};
         NGIN::UInt64 m_signatureAlgorithms {0};
         bool         m_supportsRandom {false};
     };

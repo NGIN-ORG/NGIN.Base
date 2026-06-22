@@ -17,6 +17,8 @@ function(ngin_base_add_split_static_target target_name alias_name output_name)
     PUBLIC
       $<BUILD_INTERFACE:${NGIN_BASE_ROOT_DIR}/include>
       $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    PRIVATE
+      ${NGIN_BASE_PRIVATE_INCLUDE_DIRECTORIES}
   )
   target_compile_definitions(${target_name}
     PUBLIC

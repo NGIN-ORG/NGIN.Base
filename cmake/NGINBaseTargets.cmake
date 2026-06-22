@@ -8,7 +8,10 @@ if(NGIN_BASE_BUILD_STATIC OR NGIN_BASE_BUILD_SHARED)
   add_library(NGIN.Base.Object OBJECT ${NGIN_BASE_CORE_SOURCES})
   target_compile_features(NGIN.Base.Object PRIVATE cxx_std_23)
   set_target_properties(NGIN.Base.Object PROPERTIES CXX_EXTENSIONS OFF)
-  target_include_directories(NGIN.Base.Object PRIVATE ${NGIN_BASE_ROOT_DIR}/include)
+  target_include_directories(NGIN.Base.Object PRIVATE
+    ${NGIN_BASE_ROOT_DIR}/include
+    ${NGIN_BASE_PRIVATE_INCLUDE_DIRECTORIES}
+  )
   target_compile_definitions(NGIN.Base.Object
     PRIVATE
       ${NGIN_BASE_PLATFORM_DEFINITIONS}
@@ -33,6 +36,8 @@ if(NGIN_BASE_BUILD_STATIC)
     PUBLIC
       $<BUILD_INTERFACE:${NGIN_BASE_ROOT_DIR}/include>
       $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    PRIVATE
+      ${NGIN_BASE_PRIVATE_INCLUDE_DIRECTORIES}
   )
   target_compile_definitions(NGIN.Base.Static
     PUBLIC
@@ -60,6 +65,8 @@ if(NGIN_BASE_BUILD_SHARED)
     PUBLIC
       $<BUILD_INTERFACE:${NGIN_BASE_ROOT_DIR}/include>
       $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    PRIVATE
+      ${NGIN_BASE_PRIVATE_INCLUDE_DIRECTORIES}
   )
   target_compile_definitions(NGIN.Base.Shared
     PUBLIC

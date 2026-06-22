@@ -81,7 +81,13 @@ namespace NGIN::Crypto::Kdf
                         parameters.Pbkdf2()->iterations,
                         output);
             case KdfAlgorithm::Argon2id:
-                return UnsupportedAlgorithm();
+                return context.Argon2idInto(
+                        parameters.Argon2id()->password,
+                        parameters.Argon2id()->salt,
+                        parameters.Argon2id()->memoryKiB,
+                        parameters.Argon2id()->iterations,
+                        parameters.Argon2id()->parallelism,
+                        output);
         }
 
         return UnsupportedAlgorithm();

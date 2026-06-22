@@ -1,3 +1,6 @@
+#include "ProviderVectors/SignatureVectors.hpp"
+
+#include <NGIN/Crypto/Asymmetric/Ecdsa.hpp>
 #include <NGIN/Crypto/Asymmetric/Ed25519.hpp>
 #include <NGIN/Crypto/Encoding/Hex.hpp>
 #include <NGIN/Crypto/Signatures/Sign.hpp>
@@ -22,6 +25,31 @@ namespace
         return NGIN::Crypto::Memory::SecretView {SECRET};
     }
 
+    [[nodiscard]] NGIN::Crypto::ByteBuffer DecodeHexBytes(std::string_view text)
+    {
+        auto decoded = NGIN::Crypto::Encoding::DecodeHex(text);
+        REQUIRE(decoded.HasValue());
+        return decoded.Value();
+    }
+
+    [[nodiscard]] NGIN::Crypto::ConstByteSpan Bytes(const NGIN::Crypto::ByteBuffer& bytes) noexcept
+    {
+        return NGIN::Crypto::ConstByteSpan {bytes.data(), bytes.Size()};
+    }
+
+    [[nodiscard]] NGIN::Crypto::ByteBuffer Bytes(std::initializer_list<NGIN::UInt32> values)
+    {
+        auto buffer = NGIN::Crypto::MakeByteBuffer(values.size());
+
+        NGIN::UIntSize index = 0;
+        for (auto value: values)
+        {
+            buffer[index++] = static_cast<NGIN::Byte>(value);
+        }
+
+        return buffer;
+    }
+
     template<NGIN::UIntSize Size>
     [[nodiscard]] NGIN::Crypto::FixedBytes<Size> DecodeFixedHex(std::string_view text)
     {
@@ -41,10 +69,10 @@ namespace
     }
 }// namespace
 
-TEST_CASE("Signature metadata reports fixed Ed25519 signature size", "[Crypto][Signature]")
+TEST_CASE("Signature metadata reports fixed signature sizes", "[Crypto][Signature]")
 {
     REQUIRE(NGIN::Crypto::Signatures::SignatureSize(NGIN::Crypto::SignatureAlgorithm::Ed25519) == 64);
-    REQUIRE(NGIN::Crypto::Signatures::SignatureSize(NGIN::Crypto::SignatureAlgorithm::EcdsaP256Sha256) == 0);
+    REQUIRE(NGIN::Crypto::Signatures::SignatureSize(NGIN::Crypto::SignatureAlgorithm::EcdsaP256Sha256) == 64);
     REQUIRE(NGIN::Crypto::Signatures::SignatureSize(NGIN::Crypto::SignatureAlgorithm::RsaPssSha256) == 0);
 }
 
@@ -201,6 +229,138 @@ TEST_CASE("Ed25519 matches RFC 8032 test vector when backend supports it", "[Cry
             NGIN::Crypto::ConstByteSpan {},
             expectedSignature);
     REQUIRE(verified.HasValue());
+}
+
+TEST_CASE("ECDSA P-256 SHA-256 converts fixed raw signatures to and from DER", "[Crypto][Signature]")
+{
+    const auto& vector = NGIN::Crypto::Tests::ProviderVectors::ECDSA_P256_SHA256_REGRESSION;
+
+    auto rawSignature = DecodeFixedHex<64>(vector.signatureHex);
+    auto derSignature = DecodeHexBytes(
+            "3045022100d62c2d0fb80511496302798dfd800b35384feb5be149e7c035e3fcd47532ea49"
+            "02203476f395b081744f4305707efde1d76c2899e23a443b6e6c447cb6389ddf29d1");
+
+    auto encoded = NGIN::Crypto::Asymmetric::EncodeEcdsaP256Sha256SignatureDer(rawSignature);
+    REQUIRE(encoded.HasValue());
+    RequireBytesEqual(Bytes(encoded.Value()), Bytes(derSignature));
+
+    auto parsed = NGIN::Crypto::Asymmetric::ParseEcdsaP256Sha256SignatureDer(Bytes(derSignature));
+    REQUIRE(parsed.HasValue());
+    RequireBytesEqual(parsed.Value(), rawSignature);
+}
+
+TEST_CASE("ECDSA P-256 SHA-256 DER parser rejects malformed signatures", "[Crypto][Signature]")
+{
+    auto validWithTrailing = DecodeHexBytes(
+            "3006020101020101"
+            "00");
+    auto negativeInteger    = DecodeHexBytes("30060201ff020101");
+    auto nonMinimalInteger  = DecodeHexBytes("300702020001020101");
+    auto missingInteger     = DecodeHexBytes("3003020101");
+    auto wrongTopLevel      = DecodeHexBytes("020101");
+    auto oversizedComponent = Bytes({
+            0x30,
+            0x27,
+            0x02,
+            0x22,
+            0x00,
+            0x01,
+            0x02,
+            0x03,
+            0x04,
+            0x05,
+            0x06,
+            0x07,
+            0x08,
+            0x09,
+            0x0a,
+            0x0b,
+            0x0c,
+            0x0d,
+            0x0e,
+            0x0f,
+            0x10,
+            0x11,
+            0x12,
+            0x13,
+            0x14,
+            0x15,
+            0x16,
+            0x17,
+            0x18,
+            0x19,
+            0x1a,
+            0x1b,
+            0x1c,
+            0x1d,
+            0x1e,
+            0x1f,
+            0x20,
+            0x21,
+            0x02,
+            0x01,
+            0x01,
+    });
+
+    const auto requireRejected = [](NGIN::Crypto::ConstByteSpan candidate) {
+        auto parsed = NGIN::Crypto::Asymmetric::ParseEcdsaP256Sha256SignatureDer(candidate);
+        REQUIRE_FALSE(parsed.HasValue());
+        REQUIRE(parsed.Error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
+    };
+
+    requireRejected(Bytes(validWithTrailing));
+    requireRejected(Bytes(negativeInteger));
+    requireRejected(Bytes(nonMinimalInteger));
+    requireRejected(Bytes(missingInteger));
+    requireRejected(Bytes(wrongTopLevel));
+    requireRejected(Bytes(oversizedComponent));
+}
+
+TEST_CASE("ECDSA P-256 SHA-256 typed wrappers verify and sign when backend supports them", "[Crypto][Signature]")
+{
+    auto context = NGIN::Crypto::Backend::CreateContext();
+    REQUIRE(context.HasValue());
+    if (!context.Value().Supports(NGIN::Crypto::SignatureAlgorithm::EcdsaP256Sha256))
+    {
+        return;
+    }
+
+    const auto& vector = NGIN::Crypto::Tests::ProviderVectors::ECDSA_P256_SHA256_REGRESSION;
+
+    auto privateKey        = NGIN::Crypto::Asymmetric::EcdsaP256PrivateKey::FromBytes(DecodeFixedHex<32>(vector.privateKeyHex));
+    auto publicKey         = NGIN::Crypto::Asymmetric::EcdsaP256PublicKey::FromBytes(DecodeFixedHex<65>(vector.publicKeyHex));
+    auto message           = DecodeHexBytes(vector.messageHex);
+    auto expectedSignature = DecodeFixedHex<64>(vector.signatureHex);
+
+    auto verified = NGIN::Crypto::Asymmetric::VerifyEcdsaP256Sha256(
+            context.Value(),
+            publicKey,
+            Bytes(message),
+            expectedSignature);
+    REQUIRE(verified.HasValue());
+
+    auto signature = NGIN::Crypto::Asymmetric::SignEcdsaP256Sha256(
+            context.Value(),
+            privateKey,
+            Bytes(message));
+    REQUIRE(signature.HasValue());
+
+    auto generatedVerified = NGIN::Crypto::Asymmetric::VerifyEcdsaP256Sha256(
+            context.Value(),
+            publicKey,
+            Bytes(message),
+            signature.Value());
+    REQUIRE(generatedVerified.HasValue());
+
+    auto tampered = signature.Value();
+    tampered[0] ^= NGIN::Byte {0x01};
+    auto rejected = NGIN::Crypto::Asymmetric::VerifyEcdsaP256Sha256(
+            context.Value(),
+            publicKey,
+            Bytes(message),
+            tampered);
+    REQUIRE_FALSE(rejected.HasValue());
+    REQUIRE(rejected.Error().Code() == NGIN::Crypto::CryptoErrorCode::AuthenticationFailed);
 }
 
 TEST_CASE("Signature contract does not fake implementation even if capability is manually enabled", "[Crypto][Signature]")
