@@ -162,6 +162,83 @@ namespace
         const auto children = Concat({&oid, &value});
         return RequireValue(NGIN::Crypto::Encoding::EncodeDerSequence(View(children)));
     }
+
+    [[nodiscard]] NGIN::Crypto::ByteBuffer ExtensionWithCritical(
+            std::initializer_list<NGIN::UInt32> oidArcs, bool critical, const NGIN::Crypto::ByteBuffer& derValue)
+    {
+        const auto oid           = RequireValue(NGIN::Crypto::Encoding::EncodeDerObjectIdentifier(std::vector<NGIN::UInt32>(oidArcs)));
+        const auto criticalValue = Bytes({critical ? 0xffu : 0x00u});
+        const auto criticalBoolean = RequireValue(NGIN::Crypto::Encoding::EncodeDerElement(
+                NGIN::Crypto::Encoding::DerTag {
+                        .tagClass    = NGIN::Crypto::Encoding::DerTagClass::Universal,
+                        .constructed = false,
+                        .number      = 1,
+                },
+                View(criticalValue)));
+        const auto value    = RequireValue(NGIN::Crypto::Encoding::EncodeDerOctetString(View(derValue)));
+        const auto children = Concat({&oid, &criticalBoolean, &value});
+        return RequireValue(NGIN::Crypto::Encoding::EncodeDerSequence(View(children)));
+    }
+
+    [[nodiscard]] NGIN::Crypto::ByteBuffer DerBoolean(bool value)
+    {
+        const auto encodedValue = Bytes({value ? 0xffu : 0x00u});
+        return RequireValue(NGIN::Crypto::Encoding::EncodeDerElement(
+                NGIN::Crypto::Encoding::DerTag {
+                        .tagClass    = NGIN::Crypto::Encoding::DerTagClass::Universal,
+                        .constructed = false,
+                        .number      = 1,
+                },
+                View(encodedValue)));
+    }
+
+    [[nodiscard]] NGIN::Crypto::ByteBuffer CertificateWithExtensions(
+            std::initializer_list<const NGIN::Crypto::ByteBuffer*> extensions)
+    {
+        const auto versionInteger = RequireValue(NGIN::Crypto::Encoding::EncodeDerInteger(View(Bytes({0x02}))));
+        const auto version        = RequireValue(NGIN::Crypto::Encoding::EncodeDerElement(
+                NGIN::Crypto::Encoding::DerTag {
+                                .tagClass    = NGIN::Crypto::Encoding::DerTagClass::ContextSpecific,
+                                .constructed = true,
+                                .number      = 0,
+                },
+                View(versionInteger)));
+
+        const auto serial             = RequireValue(NGIN::Crypto::Encoding::EncodeDerInteger(View(Bytes({0x01}))));
+        const auto signatureAlgorithm = Ed25519AlgorithmIdentifier();
+        const auto issuerCommonName   = NameAttribute({2, 5, 4, 3}, "Example Issuer");
+        const auto subjectCommonName  = NameAttribute({2, 5, 4, 3}, "example.com");
+        const auto issuerName         = Name({&issuerCommonName});
+        const auto subjectName        = Name({&subjectCommonName});
+
+        const auto notBefore        = UtcTime("260101000000Z");
+        const auto notAfter         = UtcTime("270101000000Z");
+        const auto validityChildren = Concat({&notBefore, &notAfter});
+        const auto validity         = RequireValue(NGIN::Crypto::Encoding::EncodeDerSequence(View(validityChildren)));
+
+        const auto publicKeyBytes = RepeatedByte(0x11, 32);
+        const auto spki           = RequireValue(NGIN::Crypto::Keys::WriteSubjectPublicKeyInfo(
+                NGIN::Crypto::Keys::KeyAlgorithm::Ed25519,
+                View(publicKeyBytes)));
+
+        const auto extensionsChildren = Concat(extensions);
+        const auto extensionsSequence = RequireValue(NGIN::Crypto::Encoding::EncodeDerSequence(View(extensionsChildren)));
+        const auto encodedExtensions  = RequireValue(NGIN::Crypto::Encoding::EncodeDerElement(
+                NGIN::Crypto::Encoding::DerTag {
+                                .tagClass    = NGIN::Crypto::Encoding::DerTagClass::ContextSpecific,
+                                .constructed = true,
+                                .number      = 3,
+                },
+                View(extensionsSequence)));
+
+        const auto tbsChildren = Concat(
+                {&version, &serial, &signatureAlgorithm, &issuerName, &validity, &subjectName, &spki, &encodedExtensions});
+        const auto tbs = RequireValue(NGIN::Crypto::Encoding::EncodeDerSequence(View(tbsChildren)));
+
+        const auto signature           = RequireValue(NGIN::Crypto::Encoding::EncodeDerBitString(0, View(RepeatedByte(0x44, 64))));
+        const auto certificateChildren = Concat({&tbs, &signatureAlgorithm, &signature});
+        return RequireValue(NGIN::Crypto::Encoding::EncodeDerSequence(View(certificateChildren)));
+    }
 }// namespace
 
 TEST_CASE("X509 parser extracts certificate structure and selected extensions", "[Crypto][Certificate]")
@@ -203,6 +280,13 @@ TEST_CASE("X509 parser extracts certificate structure and selected extensions", 
     const auto keyUsageBits      = RequireValue(NGIN::Crypto::Encoding::EncodeDerBitString(5, View(Bytes({0xa0}))));
     const auto keyUsageExtension = Extension({2, 5, 29, 15}, keyUsageBits);
 
+    const auto caTrue                    = DerBoolean(true);
+    const auto pathLengthBytes           = Bytes({0x03});
+    const auto pathLength                = RequireValue(NGIN::Crypto::Encoding::EncodeDerInteger(View(pathLengthBytes)));
+    const auto basicConstraintsChildren  = Concat({&caTrue, &pathLength});
+    const auto basicConstraintsValue     = RequireValue(NGIN::Crypto::Encoding::EncodeDerSequence(View(basicConstraintsChildren)));
+    const auto basicConstraintsExtension = ExtensionWithCritical({2, 5, 29, 19}, true, basicConstraintsValue);
+
     const auto subjectKeyIdentifier          = Bytes({0x10, 0x20, 0x30, 0x40});
     const auto subjectKeyIdentifierValue     = RequireValue(NGIN::Crypto::Encoding::EncodeDerOctetString(View(subjectKeyIdentifier)));
     const auto subjectKeyIdentifierExtension = Extension({2, 5, 29, 14}, subjectKeyIdentifierValue);
@@ -220,6 +304,7 @@ TEST_CASE("X509 parser extracts certificate structure and selected extensions", 
     const auto extensionsChildren = Concat(
             {&sanExtension,
              &keyUsageExtension,
+             &basicConstraintsExtension,
              &subjectKeyIdentifierExtension,
              &authorityKeyIdentifierExtension,
              &ekuExtension});
@@ -277,6 +362,11 @@ TEST_CASE("X509 parser extracts certificate structure and selected extensions", 
     REQUIRE(parsed.Value().keyUsage.bits.Size() == 1);
     REQUIRE(parsed.Value().keyUsage.bits[0] == NGIN::Byte {0xa0});
 
+    REQUIRE(parsed.Value().hasBasicConstraints);
+    REQUIRE(parsed.Value().basicConstraints.certificateAuthority);
+    REQUIRE(parsed.Value().basicConstraints.hasPathLengthConstraint);
+    REQUIRE(parsed.Value().basicConstraints.pathLengthConstraint == 3);
+
     REQUIRE(parsed.Value().hasSubjectKeyIdentifier);
     REQUIRE(parsed.Value().subjectKeyIdentifier.Size() == subjectKeyIdentifier.Size());
     REQUIRE(parsed.Value().subjectKeyIdentifier[0] == NGIN::Byte {0x10});
@@ -289,6 +379,60 @@ TEST_CASE("X509 parser extracts certificate structure and selected extensions", 
 
     REQUIRE(parsed.Value().extendedKeyUsages.Size() == 1);
     REQUIRE(parsed.Value().extendedKeyUsages[0].Size() == serverAuthOid.size());
+}
+
+TEST_CASE("X509 parser rejects malformed known extension schemas", "[Crypto][Certificate]")
+{
+    const auto badIpName     = GeneralName(7, Bytes({127, 0, 0}));
+    const auto badSanNames   = RequireValue(NGIN::Crypto::Encoding::EncodeDerSequence(View(badIpName)));
+    const auto badSan        = Extension({2, 5, 29, 17}, badSanNames);
+    auto       parsedBadSan  = NGIN::Crypto::Certificates::ParseX509Certificate(View(CertificateWithExtensions({&badSan})));
+    REQUIRE_FALSE(parsedBadSan.HasValue());
+    REQUIRE(parsedBadSan.Error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
+
+    const auto dns          = GeneralName(2, Text("example.com"));
+    const auto sanNames     = RequireValue(NGIN::Crypto::Encoding::EncodeDerSequence(View(dns)));
+    const auto sanExtension = Extension({2, 5, 29, 17}, sanNames);
+    auto       duplicateSan = NGIN::Crypto::Certificates::ParseX509Certificate(
+            View(CertificateWithExtensions({&sanExtension, &sanExtension})));
+    REQUIRE_FALSE(duplicateSan.HasValue());
+    REQUIRE(duplicateSan.Error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
+
+    const auto emptyEkuSequence = RequireValue(NGIN::Crypto::Encoding::EncodeDerSequence(NGIN::Crypto::ConstByteSpan {}));
+    const auto emptyEku         = Extension({2, 5, 29, 37}, emptyEkuSequence);
+    auto       parsedEmptyEku   = NGIN::Crypto::Certificates::ParseX509Certificate(View(CertificateWithExtensions({&emptyEku})));
+    REQUIRE_FALSE(parsedEmptyEku.HasValue());
+    REQUIRE(parsedEmptyEku.Error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
+
+    const auto criticalFalseSan = ExtensionWithCritical({2, 5, 29, 17}, false, sanNames);
+    auto       parsedCriticalFalse =
+            NGIN::Crypto::Certificates::ParseX509Certificate(View(CertificateWithExtensions({&criticalFalseSan})));
+    REQUIRE_FALSE(parsedCriticalFalse.HasValue());
+    REQUIRE(parsedCriticalFalse.Error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
+
+    const auto explicitFalseCa        = DerBoolean(false);
+    const auto falseBasicConstraints  = RequireValue(NGIN::Crypto::Encoding::EncodeDerSequence(View(explicitFalseCa)));
+    const auto falseBasicExtension    = Extension({2, 5, 29, 19}, falseBasicConstraints);
+    auto       parsedFalseBasic       = NGIN::Crypto::Certificates::ParseX509Certificate(
+            View(CertificateWithExtensions({&falseBasicExtension})));
+    REQUIRE_FALSE(parsedFalseBasic.HasValue());
+    REQUIRE(parsedFalseBasic.Error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
+
+    const auto pathLengthOnlyInteger = Bytes({0x02, 0x01, 0x00});
+    const auto pathLengthOnlyBasic   = RequireValue(NGIN::Crypto::Encoding::EncodeDerSequence(View(pathLengthOnlyInteger)));
+    const auto pathLengthOnlyExtension = Extension({2, 5, 29, 19}, pathLengthOnlyBasic);
+    auto       parsedPathLengthOnly = NGIN::Crypto::Certificates::ParseX509Certificate(
+            View(CertificateWithExtensions({&pathLengthOnlyExtension})));
+    REQUIRE_FALSE(parsedPathLengthOnly.HasValue());
+    REQUIRE(parsedPathLengthOnly.Error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
+
+    const auto caTrue                  = DerBoolean(true);
+    const auto basicConstraintsValue   = RequireValue(NGIN::Crypto::Encoding::EncodeDerSequence(View(caTrue)));
+    const auto basicConstraints        = Extension({2, 5, 29, 19}, basicConstraintsValue);
+    auto       duplicateBasic          = NGIN::Crypto::Certificates::ParseX509Certificate(
+            View(CertificateWithExtensions({&basicConstraints, &basicConstraints})));
+    REQUIRE_FALSE(duplicateBasic.HasValue());
+    REQUIRE(duplicateBasic.Error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
 }
 
 TEST_CASE("X509 parser rejects malformed top-level certificate input", "[Crypto][Certificate]")

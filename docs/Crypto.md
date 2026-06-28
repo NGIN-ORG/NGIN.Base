@@ -108,10 +108,15 @@ storage handling; backend operations still decide whether the bytes are cryptogr
 `ImportX25519PrivateKey`, and `ImportEcdsaP256PrivateKey` bridge parsed SPKI/PKCS#8 data into the typed key wrappers
 with algorithm and size checks. The ECDSA P-256 public-key bridge accepts only 65-byte uncompressed points. Matching
 `ExportSubjectPublicKeyInfo` and `ExportPrivateKeyInfo` overloads write typed wrappers back to backend-neutral key-format
-structs.
-`ParseEncryptedPrivateKeyInfo` and `WriteEncryptedPrivateKeyInfo` support strict data-only PKCS#8 encrypted private-key
-envelopes. They preserve the encryption AlgorithmIdentifier and encrypted payload bytes, but they do not decrypt,
-interpret password KDFs, or select cipher policy.
+structs. `Keys/KeyOperations.hpp` adds context-explicit provider operation bridges over parsed key-format structs:
+Ed25519 and ECDSA signing/verification, X25519 shared-secret derivation, and RSA-PSS/OAEP operations using parsed
+SPKI/PKCS#8 objects. These bridges validate key algorithm mismatches before backend dispatch and do not expose
+provider-specific key handle types.
+`ParseEncryptedPrivateKeyInfo` and `WriteEncryptedPrivateKeyInfo` support strict PKCS#8 encrypted private-key envelopes.
+They preserve the encryption AlgorithmIdentifier and encrypted payload bytes. `DecryptEncryptedPrivateKeyInfo` adds a
+provider-backed decrypt path for explicit PBES2 + PBKDF2-HMAC-SHA256 + AES-128/256-GCM with a 16-byte authentication
+tag, using caller-provided password policy options such as a minimum PBKDF2 iteration count. Other PBES/KDF/cipher
+combinations return `UnsupportedAlgorithm` rather than falling back to weaker policy.
 
 RSA helpers are exposed through `Asymmetric/Rsa.hpp` for interoperability with existing key material. They use complete
 DER SubjectPublicKeyInfo public keys and DER PKCS#8 private keys at the API boundary, and currently cover
@@ -120,10 +125,13 @@ selected. They intentionally do not expose PKCS#1 v1.5 signing as a preferred de
 
 The X.509 helper parses certificate structure into lightweight owned fields: serial, issuer/subject DER, validity text,
 SubjectPublicKeyInfo, signature algorithm, signature bytes, and selected extensions such as subjectAltName, keyUsage,
-extendedKeyUsage, subjectKeyIdentifier, and authorityKeyIdentifier. It also exposes best-effort issuer and subject RDN
-attributes for common name, organization, organizational unit, country, locality, state/province, serial number, domain
-component, and email address OIDs while preserving raw DER for policy layers. Trust decisions, hostname validation,
-revocation, and platform store selection remain outside `NGIN::Crypto`.
+basicConstraints, extendedKeyUsage, subjectKeyIdentifier, and authorityKeyIdentifier. It also exposes best-effort issuer
+and subject RDN attributes for common name, organization, organizational unit, country, locality, state/province, serial
+number, domain component, and email address OIDs while preserving raw DER for policy layers. Parsed extension schemas
+reject malformed GeneralName choices, invalid IP-address lengths, empty key-usage or extended-key-usage values, invalid
+basicConstraints defaults or path-length constraints, empty key identifiers, duplicate known extensions, and
+DER-forbidden explicit default critical values. Trust decisions, hostname validation, revocation, and platform store
+selection remain outside `NGIN::Crypto`.
 
 `CertificateStore` currently supports explicit custom/in-memory certificate collections and lookup by subject DER,
 subject key identifier, and authority key identifier. On Linux, platform root-store opening loads common distribution CA

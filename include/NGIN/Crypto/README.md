@@ -15,7 +15,7 @@ Backend-backed crypto contracts, secure memory helpers, encodings, and platform 
 | `Backend/*` | neutral context, capability bits, diagnostic backend metadata |
 | `Certificates/*` | lightweight X.509 certificate, chain, store, and Net handoff helpers |
 | `Hashing/*` | hash algorithm contracts and SHA convenience wrappers |
-| `Keys/*` | strict SPKI/PKCS#8 key-format parsing and writing helpers, including data-only encrypted private-key envelopes |
+| `Keys/*` | strict SPKI/PKCS#8 key-format parsing/writing helpers, parsed-key operation bridges, and provider-backed PBES2 encrypted private-key decrypt |
 | `Mac/*` | MAC contracts and HMAC convenience wrappers |
 | `Kdf/*` | HKDF, PBKDF2, Argon2id, and provider-backed password-hash string contracts |
 | `Symmetric/*` | AEAD-only symmetric encryption contracts |

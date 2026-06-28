@@ -24,6 +24,7 @@ namespace NGIN::Crypto::Certificates
         constexpr std::array<NGIN::UInt32, 7> RSA_PSS_OID {1, 2, 840, 113549, 1, 1, 10};
         constexpr std::array<NGIN::UInt32, 4> SUBJECT_ALT_NAME_OID {2, 5, 29, 17};
         constexpr std::array<NGIN::UInt32, 4> KEY_USAGE_OID {2, 5, 29, 15};
+        constexpr std::array<NGIN::UInt32, 4> BASIC_CONSTRAINTS_OID {2, 5, 29, 19};
         constexpr std::array<NGIN::UInt32, 4> SUBJECT_KEY_IDENTIFIER_OID {2, 5, 29, 14};
         constexpr std::array<NGIN::UInt32, 4> AUTHORITY_KEY_IDENTIFIER_OID {2, 5, 29, 35};
         constexpr std::array<NGIN::UInt32, 4> EXTENDED_KEY_USAGE_OID {2, 5, 29, 37};
@@ -91,6 +92,64 @@ namespace NGIN::Crypto::Certificates
         [[nodiscard]] bool IsUniversal(const DerElement& element, DerUniversalTag tag, bool constructed = false) noexcept
         {
             return NGIN::Crypto::Encoding::IsDerUniversalElement(element, tag, constructed);
+        }
+
+        [[nodiscard]] CryptoExpected<DerElement> ReadSingleElement(ConstByteSpan der) noexcept
+        {
+            DerReader reader {der};
+            auto      element = reader.ReadElement();
+            if (!element.HasValue())
+            {
+                return element.Error();
+            }
+            if (!reader.IsAtEnd())
+            {
+                return ParseError();
+            }
+
+            return element.Value();
+        }
+
+        [[nodiscard]] bool IsIa5StringValue(ConstByteSpan value) noexcept
+        {
+            for (auto byte: value)
+            {
+                if (ByteValue(byte) > 0x7fu)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        [[nodiscard]] CryptoExpected<NGIN::UInt32> ReadUInt32Integer(const DerElement& element) noexcept
+        {
+            auto integer = NGIN::Crypto::Encoding::ReadDerInteger(element);
+            if (!integer.HasValue())
+            {
+                return integer.Error();
+            }
+            if (integer.Value().empty() || (ByteValue(integer.Value()[0]) & 0x80u) != 0)
+            {
+                return ParseError();
+            }
+
+            NGIN::UIntSize offset = 0;
+            if (integer.Value().size() > 1 && ByteValue(integer.Value()[0]) == 0x00u)
+            {
+                offset = 1;
+            }
+            if (integer.Value().size() - offset > sizeof(NGIN::UInt32))
+            {
+                return ParseError();
+            }
+
+            NGIN::UInt32 value = 0;
+            for (NGIN::UIntSize i = offset; i < integer.Value().size(); ++i)
+            {
+                value = static_cast<NGIN::UInt32>((value << 8u) | ByteValue(integer.Value()[i]));
+            }
+            return value;
         }
 
         [[nodiscard]] CryptoExpected<std::string> ReadTimeString(const DerElement& element)
@@ -368,6 +427,64 @@ namespace NGIN::Crypto::Certificates
             return UnsupportedAlgorithm();
         }
 
+        [[nodiscard]] CryptoExpected<void> ValidateGeneralNameSchema(const DerElement& generalName)
+        {
+            if (generalName.tag.tagClass != DerTagClass::ContextSpecific)
+            {
+                return ParseError();
+            }
+
+            switch (generalName.tag.number)
+            {
+                case 0:
+                case 3:
+                case 5:
+                    return generalName.tag.constructed && !generalName.value.empty() ? CryptoExpected<void> {}
+                                                                                     : ParseError();
+                case 1:
+                case 2:
+                case 6:
+                    return !generalName.tag.constructed && !generalName.value.empty() && IsIa5StringValue(generalName.value)
+                                   ? CryptoExpected<void> {}
+                                   : ParseError();
+                case 4:
+                {
+                    if (!generalName.tag.constructed)
+                    {
+                        return ParseError();
+                    }
+                    auto nameElement = ReadSingleElement(generalName.value);
+                    if (!nameElement.HasValue())
+                    {
+                        return nameElement.Error();
+                    }
+                    auto name = ParseDistinguishedName(nameElement.Value());
+                    return name.HasValue() ? CryptoExpected<void> {} : name.Error();
+                }
+                case 7:
+                    return !generalName.tag.constructed &&
+                                           (generalName.value.size() == 4 || generalName.value.size() == 16)
+                                   ? CryptoExpected<void> {}
+                                   : ParseError();
+                case 8:
+                {
+                    if (generalName.tag.constructed || generalName.value.empty())
+                    {
+                        return ParseError();
+                    }
+                    DerElement oidElement {
+                            .tag     = NGIN::Crypto::Encoding::MakeDerUniversalTag(DerUniversalTag::ObjectIdentifier),
+                            .value   = generalName.value,
+                            .encoded = generalName.value,
+                    };
+                    auto oid = NGIN::Crypto::Encoding::ReadDerObjectIdentifier(oidElement);
+                    return oid.HasValue() ? CryptoExpected<void> {} : oid.Error();
+                }
+                default:
+                    return ParseError();
+            }
+        }
+
         [[nodiscard]] CryptoExpected<void> ParseSubjectAltNameExtension(ConstByteSpan encodedNames, SubjectAltNames& names)
         {
             DerReader reader {encodedNames};
@@ -388,12 +505,19 @@ namespace NGIN::Crypto::Certificates
                 return generalNames.Error();
             }
 
+            bool hasAnyGeneralName = false;
             while (!generalNames.Value().IsAtEnd())
             {
                 auto generalName = generalNames.Value().ReadElement();
                 if (!generalName.HasValue())
                 {
                     return generalName.Error();
+                }
+                hasAnyGeneralName = true;
+                auto schema = ValidateGeneralNameSchema(generalName.Value());
+                if (!schema.HasValue())
+                {
+                    return schema.Error();
                 }
 
                 if (IsTag(generalName.Value(), DerTagClass::ContextSpecific, false, 1) ||
@@ -421,6 +545,11 @@ namespace NGIN::Crypto::Certificates
                 }
             }
 
+            if (!hasAnyGeneralName)
+            {
+                return ParseError();
+            }
+
             return {};
         }
 
@@ -442,9 +571,95 @@ namespace NGIN::Crypto::Certificates
             {
                 return bits.Error();
             }
+            if (bits.Value().bytes.empty() || bits.Value().bytes.size() > 2)
+            {
+                return ParseError();
+            }
+            const auto usedBits = (bits.Value().bytes.size() * 8u) - bits.Value().unusedBitCount;
+            if (usedBits == 0 || usedBits > 9)
+            {
+                return ParseError();
+            }
 
             keyUsage.unusedBitCount = bits.Value().unusedBitCount;
             keyUsage.bits           = CopyBytes(bits.Value().bytes);
+            return {};
+        }
+
+        [[nodiscard]] CryptoExpected<void> ParseBasicConstraintsExtension(
+                ConstByteSpan encodedBasicConstraints, BasicConstraints& basicConstraints)
+        {
+            DerReader reader {encodedBasicConstraints};
+            auto      top = reader.ReadElement();
+            if (!top.HasValue())
+            {
+                return top.Error();
+            }
+            if (!reader.IsAtEnd())
+            {
+                return ParseError();
+            }
+
+            DerReader parent {top.Value().encoded};
+            auto      sequence = NGIN::Crypto::Encoding::ReadDerSequence(parent, top.Value());
+            if (!sequence.HasValue())
+            {
+                return sequence.Error();
+            }
+
+            BasicConstraints parsed;
+            if (!sequence.Value().IsAtEnd())
+            {
+                auto first = sequence.Value().ReadElement();
+                if (!first.HasValue())
+                {
+                    return first.Error();
+                }
+
+                if (IsUniversal(first.Value(), DerUniversalTag::Boolean))
+                {
+                    if (first.Value().value.size() != 1 || first.Value().value[0] != NGIN::Byte {0xff})
+                    {
+                        return ParseError();
+                    }
+                    parsed.certificateAuthority = true;
+                }
+                else if (IsUniversal(first.Value(), DerUniversalTag::Integer))
+                {
+                    return ParseError();
+                }
+                else
+                {
+                    return ParseError();
+                }
+            }
+
+            if (!sequence.Value().IsAtEnd())
+            {
+                auto pathLengthElement = sequence.Value().ReadElement();
+                if (!pathLengthElement.HasValue())
+                {
+                    return pathLengthElement.Error();
+                }
+                auto pathLength = ReadUInt32Integer(pathLengthElement.Value());
+                if (!pathLength.HasValue())
+                {
+                    return pathLength.Error();
+                }
+                if (!parsed.certificateAuthority)
+                {
+                    return ParseError();
+                }
+                parsed.hasPathLengthConstraint = true;
+                parsed.pathLengthConstraint    = pathLength.Value();
+            }
+
+            if (!sequence.Value().IsAtEnd())
+            {
+                return ParseError();
+            }
+
+            basicConstraints = parsed;
             return {};
         }
 
@@ -466,6 +681,10 @@ namespace NGIN::Crypto::Certificates
             if (!keyIdentifier.HasValue())
             {
                 return keyIdentifier.Error();
+            }
+            if (keyIdentifier.Value().empty())
+            {
+                return ParseError();
             }
 
             certificate.subjectKeyIdentifier    = CopyBytes(keyIdentifier.Value());
@@ -504,8 +723,46 @@ namespace NGIN::Crypto::Certificates
 
                 if (IsTag(field.Value(), DerTagClass::ContextSpecific, false, 0))
                 {
+                    if (certificate.hasAuthorityKeyIdentifier || field.Value().value.empty())
+                    {
+                        return ParseError();
+                    }
                     certificate.authorityKeyIdentifier    = CopyBytes(field.Value().value);
                     certificate.hasAuthorityKeyIdentifier = true;
+                }
+                else if (IsTag(field.Value(), DerTagClass::ContextSpecific, true, 1))
+                {
+                    DerReader namesReader {field.Value().value};
+                    while (!namesReader.IsAtEnd())
+                    {
+                        auto generalName = namesReader.ReadElement();
+                        if (!generalName.HasValue())
+                        {
+                            return generalName.Error();
+                        }
+                        auto schema = ValidateGeneralNameSchema(generalName.Value());
+                        if (!schema.HasValue())
+                        {
+                            return schema.Error();
+                        }
+                    }
+                }
+                else if (IsTag(field.Value(), DerTagClass::ContextSpecific, false, 2))
+                {
+                    DerElement serialElement {
+                            .tag     = NGIN::Crypto::Encoding::MakeDerUniversalTag(DerUniversalTag::Integer),
+                            .value   = field.Value().value,
+                            .encoded = field.Value().value,
+                    };
+                    auto serial = NGIN::Crypto::Encoding::ReadDerInteger(serialElement);
+                    if (!serial.HasValue())
+                    {
+                        return serial.Error();
+                    }
+                }
+                else
+                {
+                    return ParseError();
                 }
             }
 
@@ -547,6 +804,10 @@ namespace NGIN::Crypto::Certificates
                 }
                 usages.PushBack(std::move(oid.Value()));
             }
+            if (usages.Size() == 0)
+            {
+                return ParseError();
+            }
 
             return {};
         }
@@ -582,6 +843,13 @@ namespace NGIN::Crypto::Certificates
                 return extensions.Error();
             }
 
+            bool sawSubjectAltName         = false;
+            bool sawKeyUsage               = false;
+            bool sawBasicConstraints        = false;
+            bool sawSubjectKeyIdentifier   = false;
+            bool sawAuthorityKeyIdentifier = false;
+            bool sawExtendedKeyUsage       = false;
+
             while (!extensions.Value().IsAtEnd())
             {
                 auto extensionElement = extensions.Value().ReadElement();
@@ -616,11 +884,11 @@ namespace NGIN::Crypto::Certificates
                 }
                 if (IsUniversal(next.Value(), static_cast<DerUniversalTag>(1)))
                 {
-                    if (next.Value().value.size() != 1)
+                    if (next.Value().value.size() != 1 || next.Value().value[0] != NGIN::Byte {0xff})
                     {
                         return ParseError();
                     }
-                    critical = ByteValue(next.Value().value[0]) != 0;
+                    critical = true;
                     next     = extensionReader.Value().ReadElement();
                     if (!next.HasValue())
                     {
@@ -642,6 +910,11 @@ namespace NGIN::Crypto::Certificates
 
                 if (OidEquals(oid.Value(), SUBJECT_ALT_NAME_OID))
                 {
+                    if (sawSubjectAltName)
+                    {
+                        return ParseError();
+                    }
+                    sawSubjectAltName = true;
                     auto result = ParseSubjectAltNameExtension(extensionValue.Value(), certificate.subjectAltNames);
                     if (!result.HasValue())
                     {
@@ -651,6 +924,11 @@ namespace NGIN::Crypto::Certificates
                 }
                 else if (OidEquals(oid.Value(), KEY_USAGE_OID))
                 {
+                    if (sawKeyUsage)
+                    {
+                        return ParseError();
+                    }
+                    sawKeyUsage = true;
                     auto result = ParseKeyUsageExtension(extensionValue.Value(), certificate.keyUsage);
                     if (!result.HasValue())
                     {
@@ -658,8 +936,27 @@ namespace NGIN::Crypto::Certificates
                     }
                     certificate.hasKeyUsage = true;
                 }
+                else if (OidEquals(oid.Value(), BASIC_CONSTRAINTS_OID))
+                {
+                    if (sawBasicConstraints)
+                    {
+                        return ParseError();
+                    }
+                    sawBasicConstraints = true;
+                    auto result = ParseBasicConstraintsExtension(extensionValue.Value(), certificate.basicConstraints);
+                    if (!result.HasValue())
+                    {
+                        return result.Error();
+                    }
+                    certificate.hasBasicConstraints = true;
+                }
                 else if (OidEquals(oid.Value(), SUBJECT_KEY_IDENTIFIER_OID))
                 {
+                    if (sawSubjectKeyIdentifier)
+                    {
+                        return ParseError();
+                    }
+                    sawSubjectKeyIdentifier = true;
                     auto result = ParseSubjectKeyIdentifierExtension(extensionValue.Value(), certificate);
                     if (!result.HasValue())
                     {
@@ -668,6 +965,11 @@ namespace NGIN::Crypto::Certificates
                 }
                 else if (OidEquals(oid.Value(), AUTHORITY_KEY_IDENTIFIER_OID))
                 {
+                    if (sawAuthorityKeyIdentifier)
+                    {
+                        return ParseError();
+                    }
+                    sawAuthorityKeyIdentifier = true;
                     auto result = ParseAuthorityKeyIdentifierExtension(extensionValue.Value(), certificate);
                     if (!result.HasValue())
                     {
@@ -676,6 +978,11 @@ namespace NGIN::Crypto::Certificates
                 }
                 else if (OidEquals(oid.Value(), EXTENDED_KEY_USAGE_OID))
                 {
+                    if (sawExtendedKeyUsage)
+                    {
+                        return ParseError();
+                    }
+                    sawExtendedKeyUsage = true;
                     auto result = ParseExtendedKeyUsageExtension(extensionValue.Value(), certificate.extendedKeyUsages);
                     if (!result.HasValue())
                     {

@@ -295,7 +295,7 @@ Route adjustment:
 
 Still pending from this workstream:
 
-- backend import/export hooks for parsed keys.
+- provider-native opaque key-handle import/export hooks for parsed keys.
 - sustained sanitizer/fuzzer runs before broad parser use.
 
 ### 2026-06-22 X.509 Certificate Slice
@@ -313,7 +313,9 @@ Implemented:
 - SubjectPublicKeyInfo extraction through the key-format layer;
 - signature algorithm identification for Ed25519, ECDSA-with-SHA256, and RSASSA-PSS OIDs;
 - subjectAltName DNS/email/IP extraction;
-- keyUsage and extendedKeyUsage extraction;
+- keyUsage, basicConstraints, and extendedKeyUsage extraction;
+- schema-level validation for parsed subjectAltName, keyUsage, basicConstraints, subjectKeyIdentifier,
+  authorityKeyIdentifier, and extendedKeyUsage extensions;
 - backend-backed certificate signature verification helper that delegates to the existing signature API.
 
 Route adjustment:
@@ -324,7 +326,7 @@ Route adjustment:
 
 Still pending from this workstream:
 
-- schema-level validation for every X.509 extension;
+- deeper schema validation for extension types that are not yet projected into the lightweight certificate model;
 - sustained sanitizer/fuzzer runs before broad parser use.
 
 ### 2026-06-22 Certificate Store Slice
@@ -457,13 +459,17 @@ Verification status:
   build, so the PASETO harness is checked against both unsupported-backend and provider-backed local-token paths.
 - A bounded sanitizer-backed local campaign completed 1,000 runs each for PEM, DER, key-format, X.509, JWT, and PASETO
   parser fuzzers in the default fuzzer build, plus 1,000 runs for the libsodium-enabled PASETO local-token harness.
+- `.github/workflows/crypto-fuzz-ci.yml` defines a repeatable Ubuntu Clang/libFuzzer gate that builds the parser
+  fuzzers with ASan/UBSan, runs the `Crypto.Fuzz` CTest startup checks, executes a bounded run-count campaign for PEM,
+  DER, key-format, X.509, JWT, and PASETO parser fuzzers, and repeats the PASETO campaign with libsodium enabled so
+  v4.local provider-backed paths are exercised.
 
 Route adjustment:
 
 - Fuzzers are opt-in and excluded from ordinary test builds because they require Clang libFuzzer support and sanitizer
   flags. The implemented slice proves harness availability and startup health; sustained fuzz campaigns remain a
-  security gate before broad parser hardening is considered complete. The 1,000-run local campaign is a smoke-level
-  sanitizer pass, not a replacement for longer CI or release-gate fuzzing.
+  security gate before broad parser hardening is considered complete. The local 1,000-run campaign and the bounded CI
+  run-count campaign are smoke-level sanitizer passes, not replacements for longer release-gate fuzzing.
 
 ### 2026-06-22 Net Handoff Material Slice
 
@@ -1090,20 +1096,23 @@ Scope:
 
 - SubjectPublicKeyInfo parse/write;
 - PKCS#8 PrivateKeyInfo parse/write;
-- PKCS#8 EncryptedPrivateKeyInfo parse/write as a data-only envelope;
+- PKCS#8 EncryptedPrivateKeyInfo parse/write plus explicit provider-backed PBES2 decrypt for supported policy;
 - algorithm OID mapping to NGIN algorithm enums;
 - typed Ed25519/X25519/ECDSA P-256 key import/export bridges between parsed key formats and fixed-size wrappers;
-- encrypted private-key decryption later, after password KDF and AEAD policy are stable;
-- backend import/export hooks.
+- parsed-key provider operation bridges and future provider-native opaque key-handle import/export hooks.
 
 Key interpretation belongs above raw PEM/DER but below certificates and TLS.
 
 Status: raw SubjectPublicKeyInfo and PKCS#8 PrivateKeyInfo parse/write are implemented. Typed Ed25519, X25519, and
 ECDSA P-256 key import/export bridges are implemented for the existing fixed-size wrappers. ECDSA P-256 public import
 requires a 65-byte uncompressed point, and private import requires a 32-byte scalar. PKCS#8 EncryptedPrivateKeyInfo
-parse/write is implemented as a strict data-only envelope that preserves encryption AlgorithmIdentifier bytes and
-encrypted payload bytes. Password decryption, password-KDF/cipher policy, and backend key-handle import/export hooks
-remain pending.
+parse/write is implemented as a strict envelope that preserves encryption AlgorithmIdentifier bytes and encrypted
+payload bytes. `DecryptEncryptedPrivateKeyInfo` implements a provider-backed decrypt path for explicit PBES2 +
+PBKDF2-HMAC-SHA256 + AES-128/256-GCM with a 16-byte authentication tag and caller-controlled PBKDF2 iteration policy.
+Unsupported PBES, KDF, PRF, cipher, default-PRF, and non-16-byte GCM tag combinations return `UnsupportedAlgorithm`
+rather than falling back. `Keys/KeyOperations.hpp` now provides context-explicit operation bridges over parsed
+SubjectPublicKeyInfo and PrivateKeyInfo objects for Ed25519/ECDSA signing and verification, X25519 shared-secret
+derivation, and RSA-PSS/OAEP operations. Provider-native opaque key-handle import/export hooks remain pending.
 
 ### X.509 Certificates
 
@@ -1120,14 +1129,14 @@ Scope:
 - strict certificate parse into lightweight views;
 - subject, issuer, serial, validity, public key info;
 - subjectAltName DNS/IP/email extraction;
-- key usage and extended key usage extraction;
+- key usage, basic constraints, and extended key usage extraction;
 - signature algorithm identification;
 - backend-backed signature verification;
 - chain container type.
 
 Status: lightweight certificate and chain containers are implemented with issuer/subject RDN extraction, selected
-extension extraction, and a backend signature verification handoff. Full path validation and trust policy remain out of
-Crypto.
+extension extraction including basicConstraints, parsed-extension schema validation, and a backend signature verification
+handoff. Full path validation and trust policy remain out of Crypto.
 
 Out of initial scope:
 

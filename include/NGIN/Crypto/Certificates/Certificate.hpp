@@ -58,6 +58,13 @@ namespace NGIN::Crypto::Certificates
         ByteBuffer  bits;
     };
 
+    struct BasicConstraints
+    {
+        bool         certificateAuthority {false};
+        bool         hasPathLengthConstraint {false};
+        NGIN::UInt32 pathLengthConstraint {0};
+    };
+
     struct Certificate
     {
         NGIN::UInt32                                                     version {1};
@@ -78,6 +85,8 @@ namespace NGIN::Crypto::Certificates
         bool                                                             hasSubjectAltNames {false};
         KeyUsage                                                         keyUsage;
         bool                                                             hasKeyUsage {false};
+        BasicConstraints                                                 basicConstraints;
+        bool                                                             hasBasicConstraints {false};
         NGIN::Containers::Vector<NGIN::Containers::Vector<NGIN::UInt32>> extendedKeyUsages;
         ByteBuffer                                                       subjectKeyIdentifier;
         bool                                                             hasSubjectKeyIdentifier {false};

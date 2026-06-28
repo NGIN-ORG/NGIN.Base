@@ -89,6 +89,7 @@ namespace NGIN::Crypto::Backend
             };
         }
 
+#if defined(NGIN_BASE_CRYPTO_HAS_CNG)
         [[nodiscard]] constexpr BackendInfo CngInfo() noexcept
         {
             return BackendInfo {
@@ -99,7 +100,9 @@ namespace NGIN::Crypto::Backend
                     "NGIN_BASE_CRYPTO_WITH_CNG",
             };
         }
+#endif
 
+#if defined(NGIN_BASE_CRYPTO_HAS_APPLE)
         [[nodiscard]] constexpr BackendInfo AppleInfo() noexcept
         {
             return BackendInfo {
@@ -110,6 +113,7 @@ namespace NGIN::Crypto::Backend
                     "NGIN_BASE_CRYPTO_WITH_APPLE",
             };
         }
+#endif
 
         [[nodiscard]] constexpr BackendInfo UnknownPackageInfo() noexcept
         {
@@ -124,11 +128,13 @@ namespace NGIN::Crypto::Backend
             return packageName == "openssl" || packageName == "boringssl" || packageName == "libsodium";
         }
 
+#if defined(NGIN_BASE_CRYPTO_HAS_OPENSSL_COMPAT)
         [[nodiscard]] constexpr bool IsOpenSslCompatiblePackage(const CryptoContext& context) noexcept
         {
             return context.Info().Kind() == BackendKind::ExternalPackage &&
                    (context.Info().Name() == "openssl" || context.Info().Name() == "boringssl");
         }
+#endif
 
         [[nodiscard]] constexpr BackendInfo KnownPackageInfo(std::string_view packageName) noexcept
         {
