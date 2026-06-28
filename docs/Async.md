@@ -9,56 +9,29 @@ Use it when you want:
 - explicit cancellation
 - task composition without hidden runtime threads
 
-Most users only need these types to get started:
+Most users only need these types:
 
-- `Task<T, E>` for an async operation that returns `T` or a domain error `E`
-- `TaskContext` for the executor and cancellation token
-- `TaskResult<T, E>` to inspect how a root task finished
+- `Task<T, E>`: a cold coroutine object
+- `Operation<T, E>`: a started task owned at a root boundary
+- `TaskContext`: executor and cancellation state
+- `Completion<T, E>`: the value-owned terminal result
+- `WhenAll` / `WhenAny`: consumed-task combinators
 
-## When To Use It
+## Core Contract
 
-Use `NGIN::Async` when:
+`Task<T, E>` is cold and move-only. Creating a task does not schedule work.
 
-- your operation can suspend
-- failures are part of the domain and should be typed
-- you want cancellation to be explicit
-- you are already using an executor and coroutine-based flow
+Start root work with:
 
-## When Not To Use It
+- `Spawn(ctx, std::move(task)) -> Operation<T, E>`
+- `Detach(ctx, std::move(task))` for explicit fire-and-forget
+- `SyncWait(ctx, std::move(task)) -> Completion<T, E>` for blocking bridge code
 
-You probably do not need it when:
+Inside another coroutine, compose child tasks with `co_await`. Child task
+failures propagate automatically.
 
-- the work is purely synchronous and has no suspension points
-- plain return values and `Expected<T, E>` are enough
-- you only need a single blocking call and no async composition
-
-## Stability
-
-- Stable:
-  - `Task<T, E>`
-  - `TaskContext`
-  - `TaskResult<T, E>`
-  - `Completion<T, E>`
-  - `WhenAll` / `WhenAny`
-- Usable and maturing:
-  - higher-level patterns built on top of the task model
-
-## Which API Should I Use?
-
-- Need an async coroutine with typed domain errors:
-  - use `Task<T, E>`
-- Need executor and cancellation access inside a coroutine:
-  - use `TaskContext`
-- Need to inspect success, domain error, cancellation, or fault at the root:
-  - use `TaskResult<T, E>` from `task.Get()`
-- Need to observe terminal completion explicitly inside another coroutine without propagation:
-  - use `co_await task.AsCompletion()`
-- Need an exception view over a task:
-  - use `task.AsThrowing()`
-- Need to wait for many child tasks:
-  - use `WhenAll` or `WhenAny`
-- Need a multi-yield async sequence:
-  - use `AsyncGenerator<T, E>`
+Root result inspection happens through `Operation::TakeResult()`, which returns
+a value-owned `Completion<T, E>`. A result can be taken once.
 
 ## Smallest Useful Example
 
@@ -82,12 +55,11 @@ int main()
     NGIN::Execution::CooperativeScheduler scheduler;
     NGIN::Async::TaskContext ctx(scheduler);
 
-    auto task = Compute(ctx);
-    task.Schedule(ctx);
+    auto operation = NGIN::Async::Spawn(ctx, Compute(ctx));
     scheduler.RunUntilIdle();
 
-    auto result = task.Get();
-    if (!result.Succeeded())
+    auto result = operation.TakeResult();
+    if (!result)
     {
         return 1;
     }
@@ -96,43 +68,9 @@ int main()
 }
 ```
 
-What to notice:
-
-- `Compute()` creates a cold task
-- `Schedule(ctx)` schedules the root task
-- if a scheduled root task object is destroyed before completion, the operation
-  is detached and the coroutine frame is cleaned up when it finishes
-- inside the coroutine, write ordinary success-path code
-- at the edge of the program, call `Get()` and inspect the owning task result
-
 ## Normal Style
 
-This is the recommended style for most code:
-
-- inside coroutines:
-  - `co_await` child tasks directly
-- at the root of the program or in tests:
-  - after the scheduler has made progress, inspect `TaskResult<T, E>` from
-    `Get()`
-- when you need explicit terminal observation without propagation:
-  - use `AsCompletion()`
-- when you want exception-based consumption:
-  - use `AsThrowing()`
-- through a composed chain:
-  - keep the same domain error type `E`
-- for cancellation:
-  - handle it separately from domain errors
-
-In normal code, do not use `Get()` as ordinary control flow inside other coroutines.
-`Get()` does not drive an executor and does not block for unfinished tasks; call
-`Wait()` deliberately if you need a blocking bridge.
-Tasks are single-consumer operations while they are running. A second concurrent
-awaiter is treated as invalid continuation state instead of replacing the first
-awaiter.
-
-## Common Workflows
-
-### Propagate a child task
+Inside coroutines:
 
 ```cpp
 NGIN::Async::Task<int, DemoError> Child(NGIN::Async::TaskContext& ctx)
@@ -143,143 +81,42 @@ NGIN::Async::Task<int, DemoError> Child(NGIN::Async::TaskContext& ctx)
 
 NGIN::Async::Task<int, DemoError> Parent(NGIN::Async::TaskContext& ctx)
 {
-    auto child = Child(ctx);
-    co_return co_await child;
+    co_return co_await Child(ctx);
 }
 ```
 
-This is the normal composition model:
+If `Child` succeeds, the value is returned. If it domain-fails, is canceled, or
+faults, that non-success propagates to `Parent`.
 
-- if `child` succeeds, the value is yielded into `Parent`
-- if `child` fails with a domain error, is canceled, or faults, that non-success propagates automatically
-
-### Return a domain error
-
-For value-returning tasks, return a failure completion:
+At root boundaries:
 
 ```cpp
-NGIN::Async::Task<int, DemoError> ParseCount(NGIN::Async::TaskContext&)
-{
-    co_return NGIN::Async::Completion<int, DemoError>::DomainFailure(DemoError::InvalidInput);
-}
+auto operation = NGIN::Async::Spawn(ctx, Parent(ctx));
+scheduler.RunUntilIdle();
+
+auto result = operation.TakeResult();
 ```
 
-`Expected<T, E>`, `Unexpected<E>`, and bare `E` domain errors also remain accepted by `Task<T, E>`.
-
-### Handle cancellation in long-running work
-
-For `Task<void, E>`, use the explicit completion awaiters:
+For blocking bridge code:
 
 ```cpp
-NGIN::Async::Task<void, DemoError> Work(NGIN::Async::TaskContext& ctx)
-{
-    for (;;)
-    {
-        if (ctx.CheckCancellation())
-        {
-            co_await NGIN::Async::Canceled();
-            co_return;
-        }
-
-        co_await ctx.YieldNow();
-    }
-}
+auto result = NGIN::Async::SyncWait(ctx, Parent(ctx));
 ```
 
-For value-returning tasks, return a canceled completion instead:
-
-```cpp
-NGIN::Async::Task<int, DemoError> ReadValue(NGIN::Async::TaskContext& ctx)
-{
-    if (ctx.CheckCancellation())
-    {
-        co_return NGIN::Async::Completion<int, DemoError>::Canceled();
-    }
-
-    co_return 42;
-}
-```
-
-Cancellation-aware await points such as `YieldNow()` and `Delay(...)` also observe cancellation automatically.
-
-### Fault or domain-fail early from `Task<void, E>`
-
-```cpp
-NGIN::Async::Task<void, DemoError> Validate(bool ok)
-{
-    if (!ok)
-    {
-        co_await NGIN::Async::DomainFailure(DemoError::InvalidInput);
-        co_return;
-    }
-
-    co_return;
-}
-```
-
-Use `NGIN::Async::Faulted(...)` only for runtime/infrastructure failures, not ordinary domain failures.
-
-### Wait for many tasks
-
-Use `WhenAll` when every child must complete successfully:
-
-```cpp
-auto a = Child(ctx);
-auto b = Child(ctx);
-auto both = co_await NGIN::Async::WhenAll(ctx, a, b);
-```
-
-Use `WhenAny` when you need the first finisher:
-
-```cpp
-auto a = Child(ctx);
-auto b = Child(ctx);
-auto index = co_await NGIN::Async::WhenAny(ctx, a, b);
-```
-
-`WhenAny` returns the index of the first completed child. The child may have succeeded, failed with a domain error,
-been canceled, or faulted.
-
-### Observe completion without propagation
-
-`AsCompletion()` lets you inspect terminal state explicitly inside another coroutine:
-
-```cpp
-NGIN::Async::Task<int, DemoError> Parent(NGIN::Async::TaskContext& ctx)
-{
-    auto completion = co_await Child(ctx).AsCompletion();
-    if (completion.IsDomainError())
-    {
-        co_return 0;
-    }
-
-    co_return completion.Value();
-}
-```
+Do not use blocking waits inside normal coroutine control flow.
 
 ## Error Handling
 
-`Task<T, E>` separates three different kinds of non-success:
+`Completion<T, E>` separates three non-success states:
 
-- domain error:
-  - the operation failed in an expected, typed way
-  - example: parse failure, IO failure, network-domain failure
-- canceled:
-  - the task stopped cooperatively because cancellation was requested
-- fault:
-  - async runtime or execution-layer failure
-  - example: invalid task usage or unhandled exception converted to a fault
+- domain error: expected typed failure from `E`
+- canceled: cooperative cancellation was requested
+- fault: async runtime or infrastructure failure
 
-At call sites:
-
-- handle domain errors as part of your ordinary program logic
-- handle cancellation separately
-- treat faults as infrastructure/runtime problems, not ordinary business errors
-
-Typical root handling looks like this:
+Typical root handling:
 
 ```cpp
-auto result = task.Get();
+auto result = operation.TakeResult();
 if (result.Succeeded())
 {
     Use(result.Value());
@@ -298,91 +135,105 @@ else
 }
 ```
 
-If exceptions are enabled and you want an exception view over the same task:
+For value-returning tasks, return a completion for explicit non-success:
 
 ```cpp
-auto value = task.AsThrowing().Get();
+NGIN::Async::Task<int, DemoError> ParseCount(NGIN::Async::TaskContext&)
+{
+    co_return NGIN::Async::Completion<int, DemoError>::DomainFailure(DemoError::InvalidInput);
+}
 ```
 
-Or inside a coroutine:
+`Expected<T, E>`, `Unexpected<E>`, and bare `E` domain errors are also accepted
+by `Task<T, E>`.
+
+For `Task<void, E>`, use explicit completion awaiters:
 
 ```cpp
-auto value = co_await task.AsThrowing();
+NGIN::Async::Task<void, DemoError> Validate(bool ok)
+{
+    if (!ok)
+    {
+        co_await NGIN::Async::DomainFailure(DemoError::InvalidInput);
+        co_return;
+    }
+
+    co_return;
+}
 ```
 
-## Core Concepts
+Use `Faulted(...)` only for runtime/infrastructure failures, not ordinary domain
+failures.
 
-### `Task<T, E>`
+## Cancellation
 
-The main async type.
+`TaskContext` carries the cancellation token. Cancellation-aware await points
+such as `YieldNow()` and `Delay(...)` observe it automatically.
 
-- cold by default
-- move-only
-- started explicitly at the root
-- safe to destroy after scheduling; incomplete scheduled roots become detached
-- normally consumed through `co_await`
-- single-consumer while running
+Manual cancellation checks:
 
-### `TaskContext`
+```cpp
+NGIN::Async::Task<void, DemoError> Work(NGIN::Async::TaskContext& ctx)
+{
+    for (;;)
+    {
+        if (ctx.CheckCancellation())
+        {
+            co_await NGIN::Async::Canceled();
+            co_return;
+        }
 
-The coroutine context.
+        co_await ctx.YieldNow();
+    }
+}
+```
 
-It carries:
+## Combinators
 
-- an executor
-- a cancellation token
+`WhenAll` and `WhenAny` consume child tasks. Pass freshly created tasks or move
+existing task objects into them.
 
-It also provides:
+```cpp
+auto both = co_await NGIN::Async::WhenAll(ctx, Child(ctx), Child(ctx));
+```
 
-- `YieldNow()`
-- `Delay(...)`
-- `CheckCancellation()`
+```cpp
+auto firstIndex = co_await NGIN::Async::WhenAny(ctx, Child(ctx), Child(ctx));
+```
 
-### `TaskResult<T, E>`
+`WhenAny` returns the index of the first completed child. The first completed
+child may have succeeded, domain-failed, been canceled, or faulted. Non-winning
+children are detached; do not pass loser tasks that depend on the parent
+coroutine frame staying alive after `WhenAny` returns.
 
-The terminal result returned by `Get()` after completion. It owns shared
-completion storage, so the result remains valid after the originating `Task`
-object is moved or destroyed.
+## Async Generators
 
-Use it at:
+Use `AsyncGenerator<T>` for multi-yield async sequences.
 
-- root-task boundaries
-- tests
-- bridge code between async and non-async parts of a program
+Advance a generator with:
 
-### `Completion<T, E>`
+```cpp
+auto next = co_await generator.Next(ctx);
+```
 
-The explicit terminal completion type.
-
-Use it when:
-
-- returning non-success explicitly from value tasks
-- observing terminal state with `AsCompletion()`
-- mapping or transforming completion state
-
-### `AsyncGenerator<T, E>`
-
-Use it when you need an async sequence instead of a single async result.
-
-Advance it with:
-
-- `Next(ctx) -> Task<GeneratorNext<T>, E>`
+`Next(ctx)` returns `Task<GeneratorNext<T>, E>`.
 
 ## Common Mistakes
 
-- Forgetting to `Schedule(ctx)` on a root task.
-- Calling `Get()` before the task is complete and expecting it to drive the
-  scheduler.
-- Using `Get()` inside normal coroutine control flow instead of `co_await`.
-- Awaiting the same running task from multiple coroutines.
+- Creating a root `Task` and never passing it to `Spawn`, `Detach`, or `SyncWait`.
+- Calling `TakeResult()` before an operation is complete.
+- Calling `TakeResult()` more than once.
+- Awaiting the same running operation from multiple consumers.
+- Passing lvalue tasks to `WhenAll` or `WhenAny` instead of moving/creating tasks.
 - Mixing incompatible error types across composed tasks.
 - Treating cancellation like a domain error.
 - Using faults for normal operation failures that should be represented by `E`.
-- Using `AsThrowing()` as your default style when typed domain handling is the actual intent.
 
 ## Reference Notes
 
-- `TaskResult<T, E>` is mainly for root boundaries and tests and keeps the terminal completion alive.
-- `Wait()` is the explicit blocking primitive; `Get()` is result inspection.
-- `Completion<T, E>` is the explicit terminal-state type.
-- Exact `E` matching matters for ordinary automatic propagation in the current model.
+- `Task<T, E>` is the coroutine return object.
+- `Operation<T, E>` is the owning handle for started root work.
+- `Completion<T, E>` is the value-owned terminal-state type.
+- `Spawn` is the normal root-start API.
+- `Detach` is the explicit fire-and-forget API.
+- `SyncWait` is the explicit blocking bridge.

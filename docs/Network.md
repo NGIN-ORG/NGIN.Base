@@ -128,12 +128,14 @@ auto task = [&]() -> NGIN::Async::Task<void, NGIN::Net::NetError>
     co_return;
 }();
 
-task.Schedule(ctx);
-while (!task.IsCompleted())
+auto operation = NGIN::Async::Spawn(ctx, std::move(task));
+while (!operation.IsCompleted())
 {
     driver->PollOnce();
     scheduler.RunUntilIdle();
 }
+
+auto result = operation.TakeResult();
 ```
 
 Use this style when the rest of your code already uses `Task<T, E>`.
@@ -217,7 +219,7 @@ Use `Task<T, NetError>`.
 
 At the root of the program or in tests:
 
-- `TaskResult<T, NetError>::IsDomainError()` means a networking-domain failure
+- `Completion<T, NetError>::IsDomainError()` means a networking-domain failure
 - `IsCanceled()` means cancellation
 - `IsFault()` means async/runtime failure
 

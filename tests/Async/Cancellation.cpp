@@ -83,17 +83,17 @@ TEST_CASE("Linked cancellation token wakes Delay")
 
     NGIN::Async::TaskContext ctx(exec, linked.GetToken());
     auto                     task = DelayForever(ctx);
-    task.Schedule(ctx);
+    auto                     op   = NGIN::Async::Spawn(ctx, std::move(task));
 
     exec.RunUntilIdle();
-    REQUIRE_FALSE(task.IsCompleted());
+    REQUIRE_FALSE(op.IsCompleted());
 
     a.Cancel();
     exec.RunUntilIdle();
 
-    REQUIRE(task.IsCompleted());
-    REQUIRE(task.IsCanceled());
-    auto result = task.Get();
+    REQUIRE(op.IsCompleted());
+    REQUIRE(op.IsCanceled());
+    auto result = op.TakeResult();
     REQUIRE_FALSE(result);
     REQUIRE(result.IsCanceled());
 }

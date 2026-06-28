@@ -33,17 +33,16 @@ namespace
     }
 
     template<typename T>
-    auto RunAsyncTask(NGIN::IO::AsyncTask<T>& task, NGIN::Async::TaskContext& ctx) -> NGIN::Async::TaskResult<T, NGIN::IO::IOError>
+    auto RunAsyncTask(NGIN::IO::AsyncTask<T>& task, NGIN::Async::TaskContext& ctx)
+            -> NGIN::Async::Completion<T, NGIN::IO::IOError>
     {
-        task.Schedule(ctx);
-        return task.Get();
+        return NGIN::Async::SyncWait(ctx, std::move(task));
     }
 
     auto RunAsyncTask(NGIN::IO::AsyncTaskVoid& task, NGIN::Async::TaskContext& ctx)
-            -> NGIN::Async::TaskResult<void, NGIN::IO::IOError>
+            -> NGIN::Async::Completion<void, NGIN::IO::IOError>
     {
-        task.Schedule(ctx);
-        return task.Get();
+        return NGIN::Async::SyncWait(ctx, std::move(task));
     }
 }// namespace
 
@@ -243,7 +242,7 @@ TEST_CASE("IO.VirtualFileSystem async directory handles stay mount scoped", "[IO
     auto directoryOpen = RunAsyncTask(directoryTask, ctx);
     REQUIRE(directoryOpen.Succeeded());
 
-    auto directory = std::move(directoryOpen.Value());
+    auto directory  = std::move(directoryOpen.Value());
     auto existsTask = directory.ExistsAsync(ctx, NGIN::IO::Path {"inside.txt"});
     auto exists     = RunAsyncTask(existsTask, ctx);
     REQUIRE(exists.Succeeded());

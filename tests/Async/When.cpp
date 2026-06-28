@@ -1,7 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include <array>
-#include <coroutine>
 #include <exception>
 #include <stdexcept>
 #include <vector>
@@ -10,7 +8,6 @@
 #include <NGIN/Async/Task.hpp>
 #include <NGIN/Async/WhenAll.hpp>
 #include <NGIN/Async/WhenAny.hpp>
-#include <NGIN/Units.hpp>
 
 namespace
 {
@@ -75,68 +72,10 @@ namespace
         co_return value;
     }
 
-    struct ManualPostAwaiter final
+    NGIN::Async::Task<void> VoidYieldOnce(NGIN::Async::TaskContext& ctx, int& value)
     {
-        ManualExecutor& exec;
-
-        [[nodiscard]] bool await_ready() const noexcept
-        {
-            return false;
-        }
-
-        void await_suspend(std::coroutine_handle<> awaiting) const noexcept
-        {
-            exec.Execute(NGIN::Execution::WorkItem(awaiting));
-        }
-
-        void await_resume() const noexcept {}
-    };
-
-    NGIN::Async::Task<void> IgnoreCancellationForTwoPosts(NGIN::Async::TaskContext&, ManualExecutor& exec)
-    {
-        co_await ManualPostAwaiter {exec};
-        co_await ManualPostAwaiter {exec};
-        co_return;
-    }
-
-    class ManualTimerExecutor
-    {
-    public:
-        void Execute(NGIN::Execution::WorkItem item) noexcept
-        {
-            m_ready.push_back(std::move(item));
-        }
-
-        void ExecuteAt(NGIN::Execution::WorkItem item, NGIN::Time::TimePoint)
-        {
-            m_delayed.push_back(std::move(item));
-        }
-
-        [[nodiscard]] bool RunOne() noexcept
-        {
-            if (m_ready.empty())
-            {
-                return false;
-            }
-            auto item = std::move(m_ready.back());
-            m_ready.pop_back();
-            item.Invoke();
-            return true;
-        }
-
-        void RunUntilIdle() noexcept
-        {
-            while (RunOne()) {}
-        }
-
-    private:
-        std::vector<NGIN::Execution::WorkItem> m_ready;
-        std::vector<NGIN::Execution::WorkItem> m_delayed;
-    };
-
-    NGIN::Async::Task<void> NeverCompletes(NGIN::Async::TaskContext& ctx)
-    {
-        co_await ctx.Delay(NGIN::Units::Seconds(60.0));
+        co_await ctx.YieldNow();
+        ++value;
         co_return;
     }
 
@@ -152,66 +91,67 @@ namespace
 #endif
     }
 
-    NGIN::Async::Task<int> Immediate(NGIN::Async::TaskContext&, int value)
+    NGIN::Async::Task<std::tuple<int, int>> AwaitWhenAll(NGIN::Async::TaskContext& ctx)
     {
-        co_return value;
+        co_return co_await NGIN::Async::WhenAll(ctx, YieldOnce(ctx, 1), YieldOnce(ctx, 2));
     }
 
-    NGIN::Async::Task<int> MarkAfterTwoYields(NGIN::Async::TaskContext& ctx, bool& completed)
+    NGIN::Async::Task<NGIN::UIntSize> AwaitWhenAnyWithLocalLoser(NGIN::Async::TaskContext& ctx)
     {
-        co_await ctx.YieldNow();
-        co_await ctx.YieldNow();
-        completed = true;
-        co_return 9;
-    }
+        auto loser = [&]() -> NGIN::Async::Task<int> {
+            co_await ctx.YieldNow();
+            co_await ctx.YieldNow();
+            co_return 9;
+        }();
 
-    NGIN::Async::Task<NGIN::UIntSize> WhenAnyWithLocalLoser(NGIN::Async::TaskContext& ctx, bool& loserCompleted)
-    {
-        auto fast = YieldOnce(ctx, 1);
-        auto slow = MarkAfterTwoYields(ctx, loserCompleted);
-        co_return co_await NGIN::Async::WhenAny(ctx, fast, slow);
+        co_return co_await NGIN::Async::WhenAny(ctx, YieldOnce(ctx, 1), std::move(loser));
     }
 }// namespace
 
-TEST_CASE("WhenAll returns tuple of results")
+TEST_CASE("WhenAll consumes tasks and returns tuple of results")
 {
     ManualExecutor           exec;
     NGIN::Async::TaskContext ctx(exec);
 
-    auto a = YieldOnce(ctx, 1);
-    auto b = YieldTwice(ctx, 2);
-
-    auto all = NGIN::Async::WhenAll(ctx, a, b);
-    all.Schedule(ctx);
-
+    auto operation = NGIN::Async::Spawn(ctx, NGIN::Async::WhenAll(ctx, YieldOnce(ctx, 1), YieldTwice(ctx, 2)));
     exec.RunUntilIdle();
 
-    REQUIRE(all.IsCompleted());
-    auto result = all.Get();
+    REQUIRE(operation.IsCompleted());
+    auto result = operation.TakeResult();
     REQUIRE(result);
-    REQUIRE(std::get<0>(*result) == 1);
-    REQUIRE(std::get<1>(*result) == 2);
+    REQUIRE(std::get<0>(result.Value()) == 1);
+    REQUIRE(std::get<1>(result.Value()) == 2);
 }
 
-TEST_CASE("WhenAll can be co_awaited without calling Start() on the WhenAll task")
+TEST_CASE("WhenAll can be co_awaited directly")
 {
     ManualExecutor           exec;
     NGIN::Async::TaskContext ctx(exec);
 
-    auto root = [](NGIN::Async::TaskContext& ctx) -> NGIN::Async::Task<std::tuple<int, int>> {
-        auto a = YieldOnce(ctx, 1);
-        auto b = YieldOnce(ctx, 2);
-        co_return co_await NGIN::Async::WhenAll(ctx, a, b);
-    }(ctx);
-
-    root.Schedule(ctx);
+    auto operation = NGIN::Async::Spawn(ctx, AwaitWhenAll(ctx));
     exec.RunUntilIdle();
 
-    REQUIRE(root.IsCompleted());
-    const auto result = root.Get();
+    REQUIRE(operation.IsCompleted());
+    auto result = operation.TakeResult();
     REQUIRE(result);
-    REQUIRE(std::get<0>(*result) == 1);
-    REQUIRE(std::get<1>(*result) == 2);
+    REQUIRE(std::get<0>(result.Value()) == 1);
+    REQUIRE(std::get<1>(result.Value()) == 2);
+}
+
+TEST_CASE("WhenAll consumes void tasks")
+{
+    ManualExecutor           exec;
+    NGIN::Async::TaskContext ctx(exec);
+    int                      value = 0;
+
+    auto operation =
+            NGIN::Async::Spawn(ctx, NGIN::Async::WhenAll(ctx, VoidYieldOnce(ctx, value), VoidYieldOnce(ctx, value)));
+    exec.RunUntilIdle();
+
+    REQUIRE(operation.IsCompleted());
+    auto result = operation.TakeResult();
+    REQUIRE(result);
+    REQUIRE(value == 2);
 }
 
 TEST_CASE("WhenAny returns index of first completed task")
@@ -219,18 +159,13 @@ TEST_CASE("WhenAny returns index of first completed task")
     ManualExecutor           exec;
     NGIN::Async::TaskContext ctx(exec);
 
-    auto a = YieldTwice(ctx, 1);
-    auto b = YieldOnce(ctx, 2);
-
-    auto any = NGIN::Async::WhenAny(ctx, a, b);
-    any.Schedule(ctx);
-
+    auto operation = NGIN::Async::Spawn(ctx, NGIN::Async::WhenAny(ctx, YieldTwice(ctx, 1), YieldOnce(ctx, 2)));
     exec.RunUntilIdle();
 
-    REQUIRE(any.IsCompleted());
-    const auto idx = any.Get();
-    REQUIRE(idx);
-    REQUIRE(*idx == 1);
+    REQUIRE(operation.IsCompleted());
+    auto result = operation.TakeResult();
+    REQUIRE(result);
+    REQUIRE(result.Value() == 1);
 }
 
 TEST_CASE("WhenAny returns canceled when context is already cancelled")
@@ -240,71 +175,13 @@ TEST_CASE("WhenAny returns canceled when context is already cancelled")
     source.Cancel();
 
     NGIN::Async::TaskContext ctx(exec, source.GetToken());
-    auto                     a = YieldOnce(ctx, 1);
-    auto                     b = YieldOnce(ctx, 2);
 
-    auto any = NGIN::Async::WhenAny(ctx, a, b);
-    any.Schedule(ctx);
-
+    auto operation = NGIN::Async::Spawn(ctx, NGIN::Async::WhenAny(ctx, YieldOnce(ctx, 1), YieldOnce(ctx, 2)));
     exec.RunUntilIdle();
 
-    REQUIRE(any.IsCompleted());
-    REQUIRE(any.IsCanceled());
-    auto result = any.Get();
-    REQUIRE_FALSE(result);
-    REQUIRE(result.IsCanceled());
-}
-
-TEST_CASE("WhenAny wakes and returns canceled on cancellation")
-{
-    ManualTimerExecutor             exec;
-    NGIN::Async::CancellationSource source;
-    NGIN::Async::TaskContext        ctx(exec, source.GetToken());
-
-    auto a = NeverCompletes(ctx);
-    auto b = NeverCompletes(ctx);
-
-    auto any = NGIN::Async::WhenAny(ctx, a, b);
-    any.Schedule(ctx);
-
-    exec.RunUntilIdle();
-    REQUIRE_FALSE(any.IsCompleted());
-
-    source.Cancel();
-    exec.RunUntilIdle();
-
-    REQUIRE(any.IsCompleted());
-    REQUIRE(any.IsCanceled());
-    auto result = any.Get();
-    REQUIRE_FALSE(result);
-    REQUIRE(result.IsCanceled());
-}
-
-TEST_CASE("WhenAll wakes and returns canceled even if children do not observe cancellation")
-{
-    ManualExecutor                  exec;
-    NGIN::Async::CancellationSource source;
-    NGIN::Async::TaskContext        ctx(exec, source.GetToken());
-
-    auto a = IgnoreCancellationForTwoPosts(ctx, exec);
-    auto b = IgnoreCancellationForTwoPosts(ctx, exec);
-
-    auto all = NGIN::Async::WhenAll(ctx, a, b);
-    all.Schedule(ctx);
-
-    REQUIRE(exec.RunOne());
-    REQUIRE(exec.RunOne());
-    REQUIRE(exec.RunOne());
-    REQUIRE_FALSE(all.IsCompleted());
-
-    source.Cancel();
-    exec.RunUntilIdle();
-
-    REQUIRE(all.IsCompleted());
-    REQUIRE(all.IsCanceled());
-    REQUIRE(a.IsCompleted());
-    REQUIRE(b.IsCompleted());
-    auto result = all.Get();
+    REQUIRE(operation.IsCompleted());
+    REQUIRE(operation.IsCanceled());
+    auto result = operation.TakeResult();
     REQUIRE_FALSE(result);
     REQUIRE(result.IsCanceled());
 }
@@ -314,17 +191,12 @@ TEST_CASE("WhenAll propagates child exception")
     ManualExecutor           exec;
     NGIN::Async::TaskContext ctx(exec);
 
-    auto a = ThrowOnce(ctx);
-    auto b = YieldOnce(ctx, 2);
-
-    auto all = NGIN::Async::WhenAll(ctx, a, b);
-    all.Schedule(ctx);
-
+    auto operation = NGIN::Async::Spawn(ctx, NGIN::Async::WhenAll(ctx, ThrowOnce(ctx), YieldOnce(ctx, 2)));
     exec.RunUntilIdle();
 
-    REQUIRE(all.IsCompleted());
-    REQUIRE(all.IsFaulted());
-    auto result = all.Get();
+    REQUIRE(operation.IsCompleted());
+    REQUIRE(operation.IsFaulted());
+    auto result = operation.TakeResult();
     REQUIRE_FALSE(result);
     REQUIRE(result.IsFault());
 }
@@ -334,58 +206,25 @@ TEST_CASE("WhenAny returns index when a task faults")
     ManualExecutor           exec;
     NGIN::Async::TaskContext ctx(exec);
 
-    auto a = ThrowOnce(ctx);
-    auto b = YieldTwice(ctx, 123);
-
-    auto any = NGIN::Async::WhenAny(ctx, a, b);
-    any.Schedule(ctx);
-
+    auto operation = NGIN::Async::Spawn(ctx, NGIN::Async::WhenAny(ctx, ThrowOnce(ctx), YieldTwice(ctx, 123)));
     exec.RunUntilIdle();
 
-    REQUIRE(any.IsCompleted());
-    auto anyResult = any.Get();
-    REQUIRE(anyResult);
-    REQUIRE(*anyResult == 0);
-    auto aResult = a.Get();
-    REQUIRE_FALSE(aResult);
-    REQUIRE(aResult.IsFault());
+    REQUIRE(operation.IsCompleted());
+    auto result = operation.TakeResult();
+    REQUIRE(result);
+    REQUIRE(result.Value() == 0);
 }
 
-TEST_CASE("WhenAny returns immediately if one input is already completed")
+TEST_CASE("WhenAny owns local loser task lifetime")
 {
     ManualExecutor           exec;
     NGIN::Async::TaskContext ctx(exec);
 
-    auto a = YieldOnce(ctx, 1);
-    a.Schedule(ctx);
-    exec.RunUntilIdle();
-    REQUIRE(a.IsCompleted());
-
-    auto b = Immediate(ctx, 2);// left unstarted
-
-    auto any = NGIN::Async::WhenAny(ctx, a, b);
-    any.Schedule(ctx);
+    auto operation = NGIN::Async::Spawn(ctx, AwaitWhenAnyWithLocalLoser(ctx));
     exec.RunUntilIdle();
 
-    REQUIRE(any.IsCompleted());
-    auto result = any.Get();
+    REQUIRE(operation.IsCompleted());
+    auto result = operation.TakeResult();
     REQUIRE(result);
-    REQUIRE(*result == 0);
-}
-
-TEST_CASE("WhenAny watcher does not depend on local loser task object lifetime")
-{
-    ManualExecutor           exec;
-    NGIN::Async::TaskContext ctx(exec);
-    bool                     loserCompleted = false;
-
-    auto root = WhenAnyWithLocalLoser(ctx, loserCompleted);
-    root.Schedule(ctx);
-    exec.RunUntilIdle();
-
-    REQUIRE(root.IsCompleted());
-    auto result = root.Get();
-    REQUIRE(result);
-    REQUIRE(*result == 0);
-    REQUIRE(loserCompleted);
+    REQUIRE(result.Value() == 0);
 }

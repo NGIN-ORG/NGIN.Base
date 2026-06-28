@@ -69,17 +69,17 @@ TEST_CASE("TaskContext WithLinkedCancellationToken cancels when parent token can
     auto                     childCtx = parentCtx.WithLinkedCancellationToken(childSource.GetToken());
 
     auto task = DelayForever(childCtx);
-    task.Schedule(childCtx);
+    auto op   = NGIN::Async::Spawn(childCtx, std::move(task));
 
     exec.RunUntilIdle();
-    REQUIRE_FALSE(task.IsCompleted());
+    REQUIRE_FALSE(op.IsCompleted());
 
     parentSource.Cancel();
     exec.RunUntilIdle();
 
-    REQUIRE(task.IsCompleted());
-    REQUIRE(task.IsCanceled());
-    auto result = task.Get();
+    REQUIRE(op.IsCompleted());
+    REQUIRE(op.IsCanceled());
+    auto result = op.TakeResult();
     REQUIRE_FALSE(result);
     REQUIRE(result.IsCanceled());
 }
@@ -96,17 +96,17 @@ TEST_CASE("TaskContext WithLinkedCancellationToken supports chaining without los
     auto                     ctx2 = ctx1.WithLinkedCancellationToken(extra2.GetToken());
 
     auto task = DelayForever(ctx2);
-    task.Schedule(ctx2);
+    auto op   = NGIN::Async::Spawn(ctx2, std::move(task));
 
     exec.RunUntilIdle();
-    REQUIRE_FALSE(task.IsCompleted());
+    REQUIRE_FALSE(op.IsCompleted());
 
     rootSource.Cancel();
     exec.RunUntilIdle();
 
-    REQUIRE(task.IsCompleted());
-    REQUIRE(task.IsCanceled());
-    auto result = task.Get();
+    REQUIRE(op.IsCompleted());
+    REQUIRE(op.IsCanceled());
+    auto result = op.TakeResult();
     REQUIRE_FALSE(result);
     REQUIRE(result.IsCanceled());
 }

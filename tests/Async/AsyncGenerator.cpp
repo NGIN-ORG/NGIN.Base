@@ -90,12 +90,12 @@ TEST_CASE("AsyncGenerator yields values via Next(TaskContext)")
 
     auto gen  = ProduceValues(ctx);
     auto task = SumAll(ctx, gen);
-    task.Schedule(ctx);
+    auto op   = NGIN::Async::Spawn(ctx, std::move(task));
 
     scheduler.RunUntilIdle();
 
-    REQUIRE(task.IsCompleted());
-    auto result = task.Get();
+    REQUIRE(op.IsCompleted());
+    auto result = op.TakeResult();
     REQUIRE(result);
     REQUIRE(*result == 6);
 }
@@ -108,14 +108,14 @@ TEST_CASE("AsyncGenerator propagates exceptions from producer")
 
     auto gen  = YieldThenThrow(ctx);
     auto task = SumAll(ctx, gen);
-    task.Schedule(ctx);
+    auto op   = NGIN::Async::Spawn(ctx, std::move(task));
 
     scheduler.RunUntilIdle();
 
-    REQUIRE(task.IsCompleted());
-    auto result = task.Get();
+    REQUIRE(op.IsCompleted());
+    auto result = op.TakeResult();
     REQUIRE_FALSE(result);
-    REQUIRE(task.IsFaulted());
+    REQUIRE(result.IsFault());
 }
 #endif
 
@@ -127,17 +127,17 @@ TEST_CASE("AsyncGenerator Next observes TaskContext cancellation")
 
     auto gen  = YieldOnceThenNever(ctx);
     auto task = ConsumeThenCancel(ctx, gen);
-    task.Schedule(ctx);
+    auto op   = NGIN::Async::Spawn(ctx, std::move(task));
 
     scheduler.RunUntilIdle();
-    REQUIRE_FALSE(task.IsCompleted());
+    REQUIRE_FALSE(op.IsCompleted());
 
     source.Cancel();
     scheduler.RunUntilIdle();
 
-    REQUIRE(task.IsCompleted());
-    REQUIRE(task.IsCanceled());
-    auto result = task.Get();
+    REQUIRE(op.IsCompleted());
+    REQUIRE(op.IsCanceled());
+    auto result = op.TakeResult();
     REQUIRE_FALSE(result);
     REQUIRE(result.IsCanceled());
 }
@@ -151,11 +151,11 @@ TEST_CASE("AsyncGenerator faults concurrent Next consumers")
     auto first  = ReadOne(ctx, gen);
     auto second = ReadOne(ctx, gen);
 
-    first.Schedule(ctx);
-    second.Schedule(ctx);
+    auto firstOp  = NGIN::Async::Spawn(ctx, std::move(first));
+    auto secondOp = NGIN::Async::Spawn(ctx, std::move(second));
     scheduler.RunUntilIdle();
 
-    REQUIRE(first.IsCompleted());
-    REQUIRE(second.IsCompleted());
-    REQUIRE((first.IsFaulted() || second.IsFaulted()));
+    REQUIRE(firstOp.IsCompleted());
+    REQUIRE(secondOp.IsCompleted());
+    REQUIRE((firstOp.IsFaulted() || secondOp.IsFaulted()));
 }

@@ -7,6 +7,7 @@
 #include <NGIN/Execution/ThreadPoolScheduler.hpp>
 #include <atomic>
 #include <coroutine>
+#include <cstdlib>
 #include <iostream>
 #include <thread>
 #include <vector>
@@ -101,26 +102,20 @@ int main()
             auto taskYieldMany = [](NGIN::Async::TaskContext& ctx, std::atomic<int>& completed) -> NGIN::Async::Task<void> {
                 for (int i = 0; i < yieldsPerYieldMany; ++i)
                 {
-                    auto yieldResult = co_await ctx.YieldNow();
-                    if (!yieldResult)
-                    {
-                        co_await NGIN::Async::DomainFailure(yieldResult.Error());
-                        co_return;
-                    }
+                    co_await ctx.YieldNow();
                 }
                 completed.fetch_add(1, std::memory_order_release);
                 completed.notify_one();
                 co_return;
             };
 
-            std::vector<NGIN::Async::Task<void>> tasks;
-            tasks.reserve(numYieldManyTasks);
+            std::vector<NGIN::Async::Operation<void>> operations;
+            operations.reserve(numYieldManyTasks);
 
             benchCtx.start();
             for (int i = 0; i < numYieldManyTasks; ++i)
             {
-                tasks.emplace_back(taskYieldMany(taskCtx, completed));
-                tasks.back().Schedule(taskCtx);
+                operations.emplace_back(NGIN::Async::Spawn(taskCtx, taskYieldMany(taskCtx, completed)));
             }
 
             auto value = completed.load(std::memory_order_acquire);
@@ -382,25 +377,19 @@ int main()
             NGIN::Async::TaskContext taskCtx(scheduler);
 
             auto taskYield = [](NGIN::Async::TaskContext& ctx, std::atomic<int>& completed) -> NGIN::Async::Task<void> {
-                auto yieldResult = co_await ctx.YieldNow();
-                if (!yieldResult)
-                {
-                    co_await NGIN::Async::DomainFailure(yieldResult.Error());
-                    co_return;
-                }
+                co_await ctx.YieldNow();
                 completed.fetch_add(1, std::memory_order_release);
                 completed.notify_one();
                 co_return;
             };
 
-            std::vector<NGIN::Async::Task<void>> tasks;
-            tasks.reserve(numCoroutines);
+            std::vector<NGIN::Async::Operation<void>> operations;
+            operations.reserve(numCoroutines);
 
             benchCtx.start();
             for (int i = 0; i < numCoroutines; ++i)
             {
-                tasks.emplace_back(taskYield(taskCtx, completed));
-                tasks.back().Schedule(taskCtx);
+                operations.emplace_back(NGIN::Async::Spawn(taskCtx, taskYield(taskCtx, completed)));
             }
 
             auto value = completed.load(std::memory_order_acquire);
@@ -422,26 +411,20 @@ int main()
             auto taskYieldMany = [](NGIN::Async::TaskContext& ctx, std::atomic<int>& completed) -> NGIN::Async::Task<void> {
                 for (int i = 0; i < yieldsPerYieldMany; ++i)
                 {
-                    auto yieldResult = co_await ctx.YieldNow();
-                    if (!yieldResult)
-                    {
-                        co_await NGIN::Async::DomainFailure(yieldResult.Error());
-                        co_return;
-                    }
+                    co_await ctx.YieldNow();
                 }
                 completed.fetch_add(1, std::memory_order_release);
                 completed.notify_one();
                 co_return;
             };
 
-            std::vector<NGIN::Async::Task<void>> tasks;
-            tasks.reserve(numYieldManyTasks);
+            std::vector<NGIN::Async::Operation<void>> operations;
+            operations.reserve(numYieldManyTasks);
 
             benchCtx.start();
             for (int i = 0; i < numYieldManyTasks; ++i)
             {
-                tasks.emplace_back(taskYieldMany(taskCtx, completed));
-                tasks.back().Schedule(taskCtx);
+                operations.emplace_back(NGIN::Async::Spawn(taskCtx, taskYieldMany(taskCtx, completed)));
             }
 
             auto value = completed.load(std::memory_order_acquire);
@@ -460,21 +443,27 @@ int main()
             NGIN::Async::TaskContext             taskCtx(scheduler, cancelSource.GetToken());
             std::atomic<int>                     completed {0};
 
-            auto delayCanceled = [](NGIN::Async::TaskContext& ctx, std::atomic<int>& completed) -> NGIN::Async::Task<void> {
+            auto delayCanceled = [](NGIN::Async::TaskContext& ctx) -> NGIN::Async::Task<void> {
                 co_await ctx.Delay(NGIN::Units::Milliseconds(100.0));
+                co_return;
+            };
+
+            auto observeCanceled = [](NGIN::Async::TaskContext& ctx, std::atomic<int>& completed, auto delayCanceled)
+                    -> NGIN::Async::Task<void> {
+                auto operation = NGIN::Async::Spawn(ctx, delayCanceled(ctx));
+                static_cast<void>(co_await operation);
                 completed.fetch_add(1, std::memory_order_release);
                 completed.notify_one();
                 co_return;
             };
 
-            std::vector<NGIN::Async::Task<void>> tasks;
-            tasks.reserve(numCoroutines);
+            std::vector<NGIN::Async::Operation<void>> operations;
+            operations.reserve(numCoroutines);
 
             benchCtx.start();
             for (int i = 0; i < numCoroutines; ++i)
             {
-                tasks.emplace_back(delayCanceled(taskCtx, completed));
-                tasks.back().Schedule(taskCtx);
+                operations.emplace_back(NGIN::Async::Spawn(taskCtx, observeCanceled(taskCtx, completed, delayCanceled)));
             }
 
             cancelSource.Cancel();
@@ -495,39 +484,24 @@ int main()
             std::atomic<int>                     completed {0};
 
             auto leaf = [](NGIN::Async::TaskContext& ctx) -> NGIN::Async::Task<void> {
-                auto yieldResult = co_await ctx.YieldNow();
-                if (!yieldResult)
-                {
-                    co_await NGIN::Async::DomainFailure(yieldResult.Error());
-                    co_return;
-                }
+                co_await ctx.YieldNow();
                 co_return;
             };
 
             auto coordinator = [](NGIN::Async::TaskContext& ctx, std::atomic<int>& completed, auto leaf) -> NGIN::Async::Task<void> {
-                auto a = leaf(ctx);
-                auto b = leaf(ctx);
-                a.Schedule(ctx);
-                b.Schedule(ctx);
-                auto allResult = co_await NGIN::Async::WhenAll(ctx, a, b);
-                if (!allResult)
-                {
-                    co_await NGIN::Async::DomainFailure(allResult.Error());
-                    co_return;
-                }
+                co_await NGIN::Async::WhenAll(ctx, leaf(ctx), leaf(ctx));
                 completed.fetch_add(1, std::memory_order_release);
                 completed.notify_one();
                 co_return;
             };
 
-            std::vector<NGIN::Async::Task<void>> tasks;
-            tasks.reserve(numCoroutines);
+            std::vector<NGIN::Async::Operation<void>> operations;
+            operations.reserve(numCoroutines);
 
             benchCtx.start();
             for (int i = 0; i < numCoroutines; ++i)
             {
-                tasks.emplace_back(coordinator(taskCtx, completed, leaf));
-                tasks.back().Schedule(taskCtx);
+                operations.emplace_back(NGIN::Async::Spawn(taskCtx, coordinator(taskCtx, completed, leaf)));
             }
 
             auto value = completed.load(std::memory_order_acquire);
@@ -570,24 +544,18 @@ int main()
             NGIN::Async::TaskContext              taskCtx(scheduler);
 
             auto taskYield = [](NGIN::Async::TaskContext& ctx, std::atomic<int>& completed) -> NGIN::Async::Task<void> {
-                auto yieldResult = co_await ctx.YieldNow();
-                if (!yieldResult)
-                {
-                    co_await NGIN::Async::DomainFailure(yieldResult.Error());
-                    co_return;
-                }
+                co_await ctx.YieldNow();
                 completed.fetch_add(1, std::memory_order_relaxed);
                 co_return;
             };
 
-            std::vector<NGIN::Async::Task<void>> tasks;
-            tasks.reserve(numCoroutines);
+            std::vector<NGIN::Async::Operation<void>> operations;
+            operations.reserve(numCoroutines);
 
             benchCtx.start();
             for (int i = 0; i < numCoroutines; ++i)
             {
-                tasks.emplace_back(taskYield(taskCtx, completed));
-                tasks.back().Schedule(taskCtx);
+                operations.emplace_back(NGIN::Async::Spawn(taskCtx, taskYield(taskCtx, completed)));
             }
             while (completed.load(std::memory_order_relaxed) < numCoroutines)
             {
@@ -605,25 +573,19 @@ int main()
             auto taskYieldMany = [](NGIN::Async::TaskContext& ctx, std::atomic<int>& completed) -> NGIN::Async::Task<void> {
                 for (int i = 0; i < yieldsPerYieldMany; ++i)
                 {
-                    auto yieldResult = co_await ctx.YieldNow();
-                    if (!yieldResult)
-                    {
-                        co_await NGIN::Async::DomainFailure(yieldResult.Error());
-                        co_return;
-                    }
+                    co_await ctx.YieldNow();
                 }
                 completed.fetch_add(1, std::memory_order_relaxed);
                 co_return;
             };
 
-            std::vector<NGIN::Async::Task<void>> tasks;
-            tasks.reserve(numYieldManyTasks);
+            std::vector<NGIN::Async::Operation<void>> operations;
+            operations.reserve(numYieldManyTasks);
 
             benchCtx.start();
             for (int i = 0; i < numYieldManyTasks; ++i)
             {
-                tasks.emplace_back(taskYieldMany(taskCtx, completed));
-                tasks.back().Schedule(taskCtx);
+                operations.emplace_back(NGIN::Async::Spawn(taskCtx, taskYieldMany(taskCtx, completed)));
             }
             while (completed.load(std::memory_order_relaxed) < numYieldManyTasks)
             {
@@ -639,20 +601,26 @@ int main()
             NGIN::Async::TaskContext              taskCtx(scheduler, cancelSource.GetToken());
             std::atomic<int>                      completed {0};
 
-            auto delayCanceled = [](NGIN::Async::TaskContext& ctx, std::atomic<int>& completed) -> NGIN::Async::Task<void> {
+            auto delayCanceled = [](NGIN::Async::TaskContext& ctx) -> NGIN::Async::Task<void> {
                 co_await ctx.Delay(NGIN::Units::Milliseconds(100.0));
+                co_return;
+            };
+
+            auto observeCanceled = [](NGIN::Async::TaskContext& ctx, std::atomic<int>& completed, auto delayCanceled)
+                    -> NGIN::Async::Task<void> {
+                auto operation = NGIN::Async::Spawn(ctx, delayCanceled(ctx));
+                static_cast<void>(co_await operation);
                 completed.fetch_add(1, std::memory_order_relaxed);
                 co_return;
             };
 
-            std::vector<NGIN::Async::Task<void>> tasks;
-            tasks.reserve(numCoroutines);
+            std::vector<NGIN::Async::Operation<void>> operations;
+            operations.reserve(numCoroutines);
 
             benchCtx.start();
             for (int i = 0; i < numCoroutines; ++i)
             {
-                tasks.emplace_back(delayCanceled(taskCtx, completed));
-                tasks.back().Schedule(taskCtx);
+                operations.emplace_back(NGIN::Async::Spawn(taskCtx, observeCanceled(taskCtx, completed, delayCanceled)));
             }
 
             cancelSource.Cancel();
@@ -670,38 +638,23 @@ int main()
             std::atomic<int>                      completed {0};
 
             auto leaf = [](NGIN::Async::TaskContext& ctx) -> NGIN::Async::Task<void> {
-                auto yieldResult = co_await ctx.YieldNow();
-                if (!yieldResult)
-                {
-                    co_await NGIN::Async::DomainFailure(yieldResult.Error());
-                    co_return;
-                }
+                co_await ctx.YieldNow();
                 co_return;
             };
 
             auto coordinator = [](NGIN::Async::TaskContext& ctx, std::atomic<int>& completed, auto leaf) -> NGIN::Async::Task<void> {
-                auto a = leaf(ctx);
-                auto b = leaf(ctx);
-                a.Schedule(ctx);
-                b.Schedule(ctx);
-                auto allResult = co_await NGIN::Async::WhenAll(ctx, a, b);
-                if (!allResult)
-                {
-                    co_await NGIN::Async::DomainFailure(allResult.Error());
-                    co_return;
-                }
+                co_await NGIN::Async::WhenAll(ctx, leaf(ctx), leaf(ctx));
                 completed.fetch_add(1, std::memory_order_relaxed);
                 co_return;
             };
 
-            std::vector<NGIN::Async::Task<void>> tasks;
-            tasks.reserve(numCoroutines);
+            std::vector<NGIN::Async::Operation<void>> operations;
+            operations.reserve(numCoroutines);
 
             benchCtx.start();
             for (int i = 0; i < numCoroutines; ++i)
             {
-                tasks.emplace_back(coordinator(taskCtx, completed, leaf));
-                tasks.back().Schedule(taskCtx);
+                operations.emplace_back(NGIN::Async::Spawn(taskCtx, coordinator(taskCtx, completed, leaf)));
             }
 
             while (completed.load(std::memory_order_relaxed) < numCoroutines)
@@ -729,9 +682,17 @@ int main()
     }
 
     // Run all benchmarks and print results
-    Benchmark::defaultConfig.iterations       = 100;
-    Benchmark::defaultConfig.warmupIterations = 5;
-    auto results                              = Benchmark::RunAll<Milliseconds>();
+    if (std::getenv("NGIN_BENCH_SMOKE") != nullptr)
+    {
+        Benchmark::defaultConfig.iterations       = 1;
+        Benchmark::defaultConfig.warmupIterations = 0;
+    }
+    else
+    {
+        Benchmark::defaultConfig.iterations       = 100;
+        Benchmark::defaultConfig.warmupIterations = 5;
+    }
+    auto results = Benchmark::RunAll<Milliseconds>();
     Benchmark::PrintSummaryTable(std::cout, results);
     return 0;
 }

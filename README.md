@@ -84,11 +84,10 @@ int main()
     NGIN::Execution::CooperativeScheduler scheduler;
     NGIN::Async::TaskContext ctx(scheduler);
 
-    auto task = Compute(ctx);
-    task.Schedule(ctx);
+    auto operation = NGIN::Async::Spawn(ctx, Compute(ctx));
     scheduler.RunUntilIdle();
 
-    auto result = task.Get();
+    auto result = operation.TakeResult();
     if (!result)
     {
         return 1;
@@ -100,9 +99,9 @@ int main()
 
 What to notice:
 
-- tasks are cold until you start or schedule them
+- tasks are cold until you pass them to `Spawn`, `Detach`, or `SyncWait`
 - inside a coroutine, write normal success-path code
-- at the root, inspect the finished task with `Get()`
+- at the root, inspect the finished operation with `TakeResult()`
 
 ## Main Subsystems
 
