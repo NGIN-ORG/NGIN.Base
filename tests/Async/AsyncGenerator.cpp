@@ -39,6 +39,22 @@ namespace
         }
     }
 
+    NGIN::Async::AsyncGenerator<int> SuspendsBeforeYield(NGIN::Async::TaskContext&)
+    {
+        co_await std::suspend_always {};
+        co_yield 1;
+    }
+
+    NGIN::Async::Task<int> ReadOne(NGIN::Async::TaskContext& ctx, NGIN::Async::AsyncGenerator<int>& gen)
+    {
+        auto next = co_await gen.Next(ctx);
+        if (next)
+        {
+            co_return *next;
+        }
+        co_return 0;
+    }
+
     NGIN::Async::Task<int> SumAll(NGIN::Async::TaskContext& ctx, NGIN::Async::AsyncGenerator<int>& gen)
     {
         int sum = 0;
@@ -124,4 +140,22 @@ TEST_CASE("AsyncGenerator Next observes TaskContext cancellation")
     auto result = task.Get();
     REQUIRE_FALSE(result);
     REQUIRE(result.IsCanceled());
+}
+
+TEST_CASE("AsyncGenerator faults concurrent Next consumers")
+{
+    NGIN::Execution::CooperativeScheduler scheduler;
+    NGIN::Async::TaskContext              ctx(scheduler);
+
+    auto gen    = SuspendsBeforeYield(ctx);
+    auto first  = ReadOne(ctx, gen);
+    auto second = ReadOne(ctx, gen);
+
+    first.Schedule(ctx);
+    second.Schedule(ctx);
+    scheduler.RunUntilIdle();
+
+    REQUIRE(first.IsCompleted());
+    REQUIRE(second.IsCompleted());
+    REQUIRE((first.IsFaulted() || second.IsFaulted()));
 }

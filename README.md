@@ -85,7 +85,7 @@ int main()
     NGIN::Async::TaskContext ctx(scheduler);
 
     auto task = Compute(ctx);
-    task.Start(ctx);
+    task.Schedule(ctx);
     scheduler.RunUntilIdle();
 
     auto result = task.Get();

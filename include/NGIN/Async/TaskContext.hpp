@@ -36,8 +36,8 @@ namespace NGIN::Async
 
         struct YieldAwaiter final
         {
-            NGIN::Execution::ExecutorRef exec {};
-            CancellationToken            cancellation {};
+            NGIN::Execution::ExecutorRef     exec {};
+            CancellationToken                cancellation {};
             mutable CancellationRegistration cancellationRegistration {};
 
             bool await_ready() const noexcept
@@ -57,7 +57,7 @@ namespace NGIN::Async
 
                 if (!exec.IsValid())
                 {
-                    awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidState));
+                    awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidTaskUsage));
                     awaiting.promise().MarkFinishedAndResume(awaiting);
                     return std::noop_coroutine();
                 }
@@ -104,23 +104,20 @@ namespace NGIN::Async
             NGIN::Time::TimePoint            until;
 
             DelayAwaiter(NGIN::Execution::ExecutorRef executor, CancellationToken token, const TUnit& dur)
-                : exec(executor)
-                , cancellation(std::move(token))
-                , duration(dur)
-                , until([&] {
-                    const auto now = NGIN::Time::MonotonicClock::Now();
-                    const auto ns  = NGIN::Units::UnitCast<NGIN::Units::Nanoseconds>(dur).GetValue();
-                    if (ns <= 0.0)
-                    {
-                        return now;
-                    }
-                    auto add = static_cast<NGIN::UInt64>(ns);
-                    if (static_cast<double>(add) < ns)
-                    {
-                        ++add;
-                    }
-                    return NGIN::Time::TimePoint::FromNanoseconds(now.ToNanoseconds() + add);
-                }())
+                : exec(executor), cancellation(std::move(token)), duration(dur), until([&] {
+                      const auto now = NGIN::Time::MonotonicClock::Now();
+                      const auto ns  = NGIN::Units::UnitCast<NGIN::Units::Nanoseconds>(dur).GetValue();
+                      if (ns <= 0.0)
+                      {
+                          return now;
+                      }
+                      auto add = static_cast<NGIN::UInt64>(ns);
+                      if (static_cast<double>(add) < ns)
+                      {
+                          ++add;
+                      }
+                      return NGIN::Time::TimePoint::FromNanoseconds(now.ToNanoseconds() + add);
+                  }())
             {
             }
 
@@ -143,7 +140,7 @@ namespace NGIN::Async
 
                 if (!exec.IsValid())
                 {
-                    awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidState));
+                    awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidTaskUsage));
                     awaiting.promise().MarkFinishedAndResume(awaiting);
                     return std::noop_coroutine();
                 }
@@ -184,15 +181,13 @@ namespace NGIN::Async
 
     public:
         explicit TaskContext(NGIN::Execution::ExecutorRef executor, CancellationToken cancellation = {}) noexcept
-            : m_executor(executor)
-            , m_cancellation(std::move(cancellation))
+            : m_executor(executor), m_cancellation(std::move(cancellation))
         {
         }
 
         template<typename TScheduler>
         explicit TaskContext(TScheduler& scheduler, CancellationToken cancellation = {}) noexcept
-            : m_executor(NGIN::Execution::ExecutorRef::From(scheduler))
-            , m_cancellation(std::move(cancellation))
+            : m_executor(NGIN::Execution::ExecutorRef::From(scheduler)), m_cancellation(std::move(cancellation))
         {
         }
 
@@ -249,9 +244,9 @@ namespace NGIN::Async
                     std::shared_ptr<void> current {};
                 };
 
-                auto chain = std::make_shared<OwnerChain>();
-                chain->previous = m_cancellationOwner;
-                chain->current  = linked;
+                auto chain          = std::make_shared<OwnerChain>();
+                chain->previous     = m_cancellationOwner;
+                chain->current      = linked;
                 m_cancellationOwner = std::move(chain);
             }
             else

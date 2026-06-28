@@ -36,8 +36,8 @@ namespace NGIN::IO::detail
         explicit IoUringNativeFileBackend(const FileSystemDriver::Options& options)
         {
             io_uring_params params {};
-            const auto entryCount = options.queueDepthHint == 0 ? 64u : options.queueDepthHint;
-            m_ringFd              = IoUringSetup(entryCount, &params);
+            const auto      entryCount = options.queueDepthHint == 0 ? 64u : options.queueDepthHint;
+            m_ringFd                   = IoUringSetup(entryCount, &params);
             if (m_ringFd < 0)
             {
                 return;
@@ -50,11 +50,11 @@ namespace NGIN::IO::detail
             m_cqRing = ::mmap(nullptr, cqRingSize, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE, m_ringFd, IORING_OFF_CQ_RING);
             m_sqes   = static_cast<io_uring_sqe*>(
                     ::mmap(nullptr,
-                           params.sq_entries * sizeof(io_uring_sqe),
-                           PROT_READ | PROT_WRITE,
-                           MAP_SHARED | MAP_POPULATE,
-                           m_ringFd,
-                           IORING_OFF_SQES));
+                             params.sq_entries * sizeof(io_uring_sqe),
+                             PROT_READ | PROT_WRITE,
+                             MAP_SHARED | MAP_POPULATE,
+                             m_ringFd,
+                             IORING_OFF_SQES));
 
             if (m_sqRing == MAP_FAILED || m_cqRing == MAP_FAILED || m_sqes == MAP_FAILED)
             {
@@ -62,19 +62,19 @@ namespace NGIN::IO::detail
                 return;
             }
 
-            m_sqMask        = reinterpret_cast<unsigned*>(static_cast<char*>(m_sqRing) + params.sq_off.ring_mask);
-            m_sqHead        = reinterpret_cast<unsigned*>(static_cast<char*>(m_sqRing) + params.sq_off.head);
-            m_sqTail        = reinterpret_cast<unsigned*>(static_cast<char*>(m_sqRing) + params.sq_off.tail);
-            m_sqArray       = reinterpret_cast<unsigned*>(static_cast<char*>(m_sqRing) + params.sq_off.array);
-            m_cqMask        = reinterpret_cast<unsigned*>(static_cast<char*>(m_cqRing) + params.cq_off.ring_mask);
-            m_cqHead        = reinterpret_cast<unsigned*>(static_cast<char*>(m_cqRing) + params.cq_off.head);
-            m_cqTail        = reinterpret_cast<unsigned*>(static_cast<char*>(m_cqRing) + params.cq_off.tail);
-            m_cqes          = reinterpret_cast<io_uring_cqe*>(static_cast<char*>(m_cqRing) + params.cq_off.cqes);
-            m_sqEntryCount  = params.sq_entries;
-            m_sqRingSize    = sqRingSize;
-            m_cqRingSize    = cqRingSize;
-            m_initialized   = true;
-            m_worker        = std::thread([this]() noexcept { Run(); });
+            m_sqMask       = reinterpret_cast<unsigned*>(static_cast<char*>(m_sqRing) + params.sq_off.ring_mask);
+            m_sqHead       = reinterpret_cast<unsigned*>(static_cast<char*>(m_sqRing) + params.sq_off.head);
+            m_sqTail       = reinterpret_cast<unsigned*>(static_cast<char*>(m_sqRing) + params.sq_off.tail);
+            m_sqArray      = reinterpret_cast<unsigned*>(static_cast<char*>(m_sqRing) + params.sq_off.array);
+            m_cqMask       = reinterpret_cast<unsigned*>(static_cast<char*>(m_cqRing) + params.cq_off.ring_mask);
+            m_cqHead       = reinterpret_cast<unsigned*>(static_cast<char*>(m_cqRing) + params.cq_off.head);
+            m_cqTail       = reinterpret_cast<unsigned*>(static_cast<char*>(m_cqRing) + params.cq_off.tail);
+            m_cqes         = reinterpret_cast<io_uring_cqe*>(static_cast<char*>(m_cqRing) + params.cq_off.cqes);
+            m_sqEntryCount = params.sq_entries;
+            m_sqRingSize   = sqRingSize;
+            m_cqRingSize   = cqRingSize;
+            m_initialized  = true;
+            m_worker       = std::thread([this]() noexcept { Run(); });
         }
 
         ~IoUringNativeFileBackend() override
@@ -150,7 +150,7 @@ namespace NGIN::IO::detail
                     request.userData,
                     NativeFileCompletion {
                             .status = NativeFileCompletion::Status::Fault,
-                            .fault = NGIN::Async::MakeAsyncFault(code, native),
+                            .fault  = NGIN::Async::MakeAsyncFault(code, native),
                     });
         }
 
@@ -222,14 +222,14 @@ namespace NGIN::IO::detail
             {
                 if (IoUringEnter(m_ringFd, m_submittedSinceEnter, 0, 0) < 0)
                 {
-                    const int native = errno;
+                    const int native      = errno;
                     m_submittedSinceEnter = 0;
                     std::lock_guard<std::mutex> lock(m_mutex);
                     while (!m_pending.empty())
                     {
                         auto* request = m_pending.front();
                         m_pending.pop_front();
-                        CompleteFault(*request, NGIN::Async::AsyncFaultCode::SchedulerFailure, native);
+                        CompleteFault(*request, NGIN::Async::AsyncFaultCode::SchedulerDispatchFailed, native);
                         delete request;
                     }
                 }
@@ -239,11 +239,11 @@ namespace NGIN::IO::detail
 
         void DrainCompletions() noexcept
         {
-            unsigned cqHead = *m_cqHead;
+            unsigned       cqHead = *m_cqHead;
             const unsigned cqTail = *m_cqTail;
             while (cqHead != cqTail)
             {
-                auto& cqe = m_cqes[cqHead & *m_cqMask];
+                auto& cqe     = m_cqes[cqHead & *m_cqMask];
                 auto* request = reinterpret_cast<NativeFileRequest*>(static_cast<std::uintptr_t>(cqe.user_data));
                 if (request != nullptr)
                 {
@@ -292,29 +292,29 @@ namespace NGIN::IO::detail
             }
         }
 
-        int                     m_ringFd {-1};
-        void*                   m_sqRing {nullptr};
-        void*                   m_cqRing {nullptr};
-        io_uring_sqe*           m_sqes {nullptr};
-        unsigned*               m_sqHead {nullptr};
-        unsigned*               m_sqTail {nullptr};
-        unsigned*               m_sqMask {nullptr};
-        unsigned*               m_sqArray {nullptr};
-        unsigned*               m_cqHead {nullptr};
-        unsigned*               m_cqTail {nullptr};
-        unsigned*               m_cqMask {nullptr};
-        io_uring_cqe*           m_cqes {nullptr};
-        unsigned                m_sqEntryCount {0};
-        std::size_t             m_sqRingSize {0};
-        std::size_t             m_cqRingSize {0};
-        bool                    m_initialized {false};
-        bool                    m_stopping {false};
-        unsigned                m_inFlight {0};
-        unsigned                m_submittedSinceEnter {0};
-        std::mutex              m_mutex {};
-        std::condition_variable m_cv {};
+        int                            m_ringFd {-1};
+        void*                          m_sqRing {nullptr};
+        void*                          m_cqRing {nullptr};
+        io_uring_sqe*                  m_sqes {nullptr};
+        unsigned*                      m_sqHead {nullptr};
+        unsigned*                      m_sqTail {nullptr};
+        unsigned*                      m_sqMask {nullptr};
+        unsigned*                      m_sqArray {nullptr};
+        unsigned*                      m_cqHead {nullptr};
+        unsigned*                      m_cqTail {nullptr};
+        unsigned*                      m_cqMask {nullptr};
+        io_uring_cqe*                  m_cqes {nullptr};
+        unsigned                       m_sqEntryCount {0};
+        std::size_t                    m_sqRingSize {0};
+        std::size_t                    m_cqRingSize {0};
+        bool                           m_initialized {false};
+        bool                           m_stopping {false};
+        unsigned                       m_inFlight {0};
+        unsigned                       m_submittedSinceEnter {0};
+        std::mutex                     m_mutex {};
+        std::condition_variable        m_cv {};
         std::deque<NativeFileRequest*> m_pending {};
-        std::thread             m_worker {};
+        std::thread                    m_worker {};
     };
 
     std::unique_ptr<NativeFileBackend> CreateNativeFileBackend(const FileSystemDriver::Options& options)

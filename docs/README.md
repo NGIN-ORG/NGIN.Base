@@ -98,7 +98,7 @@ actually need.
 
 These are for contributors or readers who want implementation direction and roadmap context:
 
-- [AsyncPlan.md](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/AsyncPlan.md)
+- [AsyncHardeningPlan.md](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/AsyncHardeningPlan.md)
 - [FileSystemPlan.md](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/FileSystemPlan.md)
 - [CryptoPlan.md](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/CryptoPlan.md)
 - [CryptoPlatformAndInteropPlan.md](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/CryptoPlatformAndInteropPlan.md)

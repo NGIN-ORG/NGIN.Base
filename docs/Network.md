@@ -128,7 +128,7 @@ auto task = [&]() -> NGIN::Async::Task<void, NGIN::Net::NetError>
     co_return;
 }();
 
-task.Start(ctx);
+task.Schedule(ctx);
 while (!task.IsCompleted())
 {
     driver->PollOnce();
@@ -217,7 +217,7 @@ Use `Task<T, NetError>`.
 
 At the root of the program or in tests:
 
-- `TaskOutcome<T, NetError>::IsDomainError()` means a networking-domain failure
+- `TaskResult<T, NetError>::IsDomainError()` means a networking-domain failure
 - `IsCanceled()` means cancellation
 - `IsFault()` means async/runtime failure
 

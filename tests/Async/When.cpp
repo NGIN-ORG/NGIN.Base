@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <coroutine>
 #include <exception>
 #include <stdexcept>
 #include <vector>
@@ -74,10 +75,27 @@ namespace
         co_return value;
     }
 
-    NGIN::Async::Task<void> SuspendForever(NGIN::Async::TaskContext& ctx)
+    struct ManualPostAwaiter final
     {
-        co_await ctx.YieldNow();
-        co_await std::suspend_always {};
+        ManualExecutor& exec;
+
+        [[nodiscard]] bool await_ready() const noexcept
+        {
+            return false;
+        }
+
+        void await_suspend(std::coroutine_handle<> awaiting) const noexcept
+        {
+            exec.Execute(NGIN::Execution::WorkItem(awaiting));
+        }
+
+        void await_resume() const noexcept {}
+    };
+
+    NGIN::Async::Task<void> IgnoreCancellationForTwoPosts(NGIN::Async::TaskContext&, ManualExecutor& exec)
+    {
+        co_await ManualPostAwaiter {exec};
+        co_await ManualPostAwaiter {exec};
         co_return;
     }
 
@@ -130,13 +148,28 @@ namespace
 #else
         co_await ctx.YieldNow();
         co_return NGIN::Async::Completion<int, NGIN::Async::NoError>::Faulted(
-                NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::Unknown));
+                NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::UnknownRuntimeFailure));
 #endif
     }
 
     NGIN::Async::Task<int> Immediate(NGIN::Async::TaskContext&, int value)
     {
         co_return value;
+    }
+
+    NGIN::Async::Task<int> MarkAfterTwoYields(NGIN::Async::TaskContext& ctx, bool& completed)
+    {
+        co_await ctx.YieldNow();
+        co_await ctx.YieldNow();
+        completed = true;
+        co_return 9;
+    }
+
+    NGIN::Async::Task<NGIN::UIntSize> WhenAnyWithLocalLoser(NGIN::Async::TaskContext& ctx, bool& loserCompleted)
+    {
+        auto fast = YieldOnce(ctx, 1);
+        auto slow = MarkAfterTwoYields(ctx, loserCompleted);
+        co_return co_await NGIN::Async::WhenAny(ctx, fast, slow);
     }
 }// namespace
 
@@ -166,8 +199,8 @@ TEST_CASE("WhenAll can be co_awaited without calling Start() on the WhenAll task
     NGIN::Async::TaskContext ctx(exec);
 
     auto root = [](NGIN::Async::TaskContext& ctx) -> NGIN::Async::Task<std::tuple<int, int>> {
-        auto a         = YieldOnce(ctx, 1);
-        auto b         = YieldOnce(ctx, 2);
+        auto a = YieldOnce(ctx, 1);
+        auto b = YieldOnce(ctx, 2);
         co_return co_await NGIN::Async::WhenAll(ctx, a, b);
     }(ctx);
 
@@ -253,13 +286,15 @@ TEST_CASE("WhenAll wakes and returns canceled even if children do not observe ca
     NGIN::Async::CancellationSource source;
     NGIN::Async::TaskContext        ctx(exec, source.GetToken());
 
-    auto a = SuspendForever(ctx);
-    auto b = SuspendForever(ctx);
+    auto a = IgnoreCancellationForTwoPosts(ctx, exec);
+    auto b = IgnoreCancellationForTwoPosts(ctx, exec);
 
     auto all = NGIN::Async::WhenAll(ctx, a, b);
     all.Schedule(ctx);
 
-    exec.RunUntilIdle();
+    REQUIRE(exec.RunOne());
+    REQUIRE(exec.RunOne());
+    REQUIRE(exec.RunOne());
     REQUIRE_FALSE(all.IsCompleted());
 
     source.Cancel();
@@ -267,6 +302,8 @@ TEST_CASE("WhenAll wakes and returns canceled even if children do not observe ca
 
     REQUIRE(all.IsCompleted());
     REQUIRE(all.IsCanceled());
+    REQUIRE(a.IsCompleted());
+    REQUIRE(b.IsCompleted());
     auto result = all.Get();
     REQUIRE_FALSE(result);
     REQUIRE(result.IsCanceled());
@@ -334,4 +371,21 @@ TEST_CASE("WhenAny returns immediately if one input is already completed")
     auto result = any.Get();
     REQUIRE(result);
     REQUIRE(*result == 0);
+}
+
+TEST_CASE("WhenAny watcher does not depend on local loser task object lifetime")
+{
+    ManualExecutor           exec;
+    NGIN::Async::TaskContext ctx(exec);
+    bool                     loserCompleted = false;
+
+    auto root = WhenAnyWithLocalLoser(ctx, loserCompleted);
+    root.Schedule(ctx);
+    exec.RunUntilIdle();
+
+    REQUIRE(root.IsCompleted());
+    auto result = root.Get();
+    REQUIRE(result);
+    REQUIRE(*result == 0);
+    REQUIRE(loserCompleted);
 }

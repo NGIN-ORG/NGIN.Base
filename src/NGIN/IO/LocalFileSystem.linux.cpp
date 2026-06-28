@@ -31,13 +31,9 @@ namespace NGIN::IO
         {
         public:
             NativePosixFileAwaiter(detail::NativeFileBackend& backend,
-                                   NGIN::Async::TaskContext& ctx,
-                                   detail::NativeFileRequest request) noexcept
-                : m_backend(backend)
-                , m_resumeExecutor(ctx.GetExecutor())
-                , m_cancellation(ctx.GetCancellationToken())
-                , m_request(std::move(request))
-                , m_state(std::make_shared<State>())
+                                   NGIN::Async::TaskContext&  ctx,
+                                   detail::NativeFileRequest  request) noexcept
+                : m_backend(backend), m_resumeExecutor(ctx.GetExecutor()), m_cancellation(ctx.GetCancellationToken()), m_request(std::move(request)), m_state(std::make_shared<State>())
             {
             }
 
@@ -79,7 +75,7 @@ namespace NGIN::IO
                 if (!m_backend.Submit(m_request))
                 {
                     m_state->completion.status = NativePosixFileCompletion::Status::Fault;
-                    m_state->completion.fault  = NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::SchedulerFailure);
+                    m_state->completion.fault  = NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::SchedulerDispatchFailed);
                     m_state->Resume();
                 }
             }
@@ -120,8 +116,8 @@ namespace NGIN::IO
         };
 
         [[nodiscard]] auto SubmitNativePosixFile(detail::NativeFileBackend& backend,
-                                                 NGIN::Async::TaskContext& ctx,
-                                                 detail::NativeFileRequest request) noexcept
+                                                 NGIN::Async::TaskContext&  ctx,
+                                                 detail::NativeFileRequest  request) noexcept
         {
             return NativePosixFileAwaiter(backend, ctx, std::move(request));
         }
@@ -136,11 +132,11 @@ namespace NGIN::IO
                         *backend,
                         ctx,
                         detail::NativeFileRequest {
-                                .kind = detail::NativeFileOperationKind::Read,
-                                .handleValue = static_cast<std::uintptr_t>(state->fd),
+                                .kind             = detail::NativeFileOperationKind::Read,
+                                .handleValue      = static_cast<std::uintptr_t>(state->fd),
                                 .useCurrentOffset = true,
-                                .buffer = destination.data(),
-                                .size = static_cast<UInt32>(destination.size()),
+                                .buffer           = destination.data(),
+                                .size             = static_cast<UInt32>(destination.size()),
                         });
                 if (completion.status == NativePosixFileCompletion::Status::Canceled)
                 {
@@ -189,11 +185,11 @@ namespace NGIN::IO
                         *backend,
                         ctx,
                         detail::NativeFileRequest {
-                                .kind = detail::NativeFileOperationKind::Write,
-                                .handleValue = static_cast<std::uintptr_t>(state->fd),
+                                .kind             = detail::NativeFileOperationKind::Write,
+                                .handleValue      = static_cast<std::uintptr_t>(state->fd),
                                 .useCurrentOffset = true,
-                                .buffer = const_cast<NGIN::Byte*>(source.data()),
-                                .size = static_cast<UInt32>(source.size()),
+                                .buffer           = const_cast<NGIN::Byte*>(source.data()),
+                                .size             = static_cast<UInt32>(source.size()),
                         });
                 if (completion.status == NativePosixFileCompletion::Status::Canceled)
                 {
@@ -233,9 +229,9 @@ namespace NGIN::IO
         }
 
         AsyncTask<UIntSize> LocalAsyncFileReadAt(const std::shared_ptr<void>& rawState,
-                                                 NGIN::Async::TaskContext&  ctx,
-                                                 UInt64                     offset,
-                                                 std::span<NGIN::Byte>      destination)
+                                                 NGIN::Async::TaskContext&    ctx,
+                                                 UInt64                       offset,
+                                                 std::span<NGIN::Byte>        destination)
         {
             auto state = std::static_pointer_cast<LocalAsyncFileState>(rawState);
             if (auto* backend = detail::GetNativeFileBackend(*state->driver); backend != nullptr)
@@ -244,11 +240,11 @@ namespace NGIN::IO
                         *backend,
                         ctx,
                         detail::NativeFileRequest {
-                                .kind = detail::NativeFileOperationKind::Read,
+                                .kind        = detail::NativeFileOperationKind::Read,
                                 .handleValue = static_cast<std::uintptr_t>(state->fd),
-                                .offset = offset,
-                                .buffer = destination.data(),
-                                .size = static_cast<UInt32>(destination.size()),
+                                .offset      = offset,
+                                .buffer      = destination.data(),
+                                .size        = static_cast<UInt32>(destination.size()),
                         });
                 if (completion.status == NativePosixFileCompletion::Status::Canceled)
                 {
@@ -288,9 +284,9 @@ namespace NGIN::IO
         }
 
         AsyncTask<UIntSize> LocalAsyncFileWriteAt(const std::shared_ptr<void>& rawState,
-                                                  NGIN::Async::TaskContext&  ctx,
-                                                  UInt64                     offset,
-                                                  std::span<const NGIN::Byte> source)
+                                                  NGIN::Async::TaskContext&    ctx,
+                                                  UInt64                       offset,
+                                                  std::span<const NGIN::Byte>  source)
         {
             auto state = std::static_pointer_cast<LocalAsyncFileState>(rawState);
             if (auto* backend = detail::GetNativeFileBackend(*state->driver); backend != nullptr)
@@ -299,11 +295,11 @@ namespace NGIN::IO
                         *backend,
                         ctx,
                         detail::NativeFileRequest {
-                                .kind = detail::NativeFileOperationKind::Write,
+                                .kind        = detail::NativeFileOperationKind::Write,
                                 .handleValue = static_cast<std::uintptr_t>(state->fd),
-                                .offset = offset,
-                                .buffer = const_cast<NGIN::Byte*>(source.data()),
-                                .size = static_cast<UInt32>(source.size()),
+                                .offset      = offset,
+                                .buffer      = const_cast<NGIN::Byte*>(source.data()),
+                                .size        = static_cast<UInt32>(source.size()),
                         });
                 if (completion.status == NativePosixFileCompletion::Status::Canceled)
                 {
@@ -351,7 +347,7 @@ namespace NGIN::IO
                         *backend,
                         ctx,
                         detail::NativeFileRequest {
-                                .kind = detail::NativeFileOperationKind::Flush,
+                                .kind        = detail::NativeFileOperationKind::Flush,
                                 .handleValue = static_cast<std::uintptr_t>(state->fd),
                         });
                 if (completion.status == NativePosixFileCompletion::Status::Canceled)
@@ -414,7 +410,7 @@ namespace NGIN::IO
                         *backend,
                         ctx,
                         detail::NativeFileRequest {
-                                .kind = detail::NativeFileOperationKind::Close,
+                                .kind        = detail::NativeFileOperationKind::Close,
                                 .handleValue = static_cast<std::uintptr_t>(fdToClose),
                         });
                 if (completion.status == NativePosixFileCompletion::Status::Canceled)
@@ -469,20 +465,20 @@ namespace NGIN::IO
         }
 
         const AsyncFileHandle::Operations LocalAsyncFileOperations {
-                .read = &LocalAsyncFileRead,
-                .write = &LocalAsyncFileWrite,
-                .readAt = &LocalAsyncFileReadAt,
+                .read    = &LocalAsyncFileRead,
+                .write   = &LocalAsyncFileWrite,
+                .readAt  = &LocalAsyncFileReadAt,
                 .writeAt = &LocalAsyncFileWriteAt,
-                .flush = &LocalAsyncFileFlush,
-                .close = &LocalAsyncFileClose,
-                .isOpen = &LocalAsyncFileIsOpen,
+                .flush   = &LocalAsyncFileFlush,
+                .close   = &LocalAsyncFileClose,
+                .isOpen  = &LocalAsyncFileIsOpen,
         };
-    }
+    }// namespace
 
     [[nodiscard]] AsyncFileHandle detail::MakeAsyncPosixFileHandle(
             std::shared_ptr<FileSystemDriver> driver, OpenedAsyncPosixFile opened)
     {
-        auto state = std::make_shared<LocalAsyncFileState>();
+        auto state      = std::make_shared<LocalAsyncFileState>();
         state->driver   = std::move(driver);
         state->path     = std::move(opened.path);
         state->canRead  = opened.canRead;
@@ -515,6 +511,6 @@ namespace NGIN::IO
 
         co_return detail::MakeAsyncPosixFileHandle(m_asyncDriver, std::move(opened).TakeValue());
     }
-}
+}// namespace NGIN::IO
 
 #endif

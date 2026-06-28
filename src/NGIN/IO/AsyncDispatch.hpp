@@ -27,8 +27,8 @@ namespace NGIN::IO::detail
         [[nodiscard]] bool IsCanceled() const noexcept { return status == Status::Canceled; }
         [[nodiscard]] bool IsFault() const noexcept { return status == Status::Fault; }
 
-        Status                  status {Status::Fault};
-        std::optional<TResult>  result {};
+        Status                                 status {Status::Fault};
+        std::optional<TResult>                 result {};
         std::optional<NGIN::Async::AsyncFault> fault {};
     };
 
@@ -37,11 +37,7 @@ namespace NGIN::IO::detail
     {
     public:
         DriverDispatchAwaiter(FileSystemDriver& driver, NGIN::Async::TaskContext& ctx, TOperation operation) noexcept
-            : m_driver(driver)
-            , m_resumeExecutor(ctx.GetExecutor())
-            , m_cancellation(ctx.GetCancellationToken())
-            , m_operation(std::move(operation))
-            , m_state(std::make_shared<State>())
+            : m_driver(driver), m_resumeExecutor(ctx.GetExecutor()), m_cancellation(ctx.GetCancellationToken()), m_operation(std::move(operation)), m_state(std::make_shared<State>())
         {
         }
 
@@ -57,7 +53,7 @@ namespace NGIN::IO::detail
 
             if (!m_driver.HasBackend())
             {
-                CompleteWithFault(NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidState));
+                CompleteWithFault(NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidTaskUsage));
                 return;
             }
 
@@ -172,11 +168,11 @@ namespace NGIN::IO::detail
             m_state->CompleteFault(std::move(fault));
         }
 
-        FileSystemDriver&                  m_driver;
-        NGIN::Execution::ExecutorRef       m_resumeExecutor {};
-        NGIN::Async::CancellationToken     m_cancellation {};
-        TOperation                         m_operation;
-        std::shared_ptr<State>             m_state {};
+        FileSystemDriver&              m_driver;
+        NGIN::Execution::ExecutorRef   m_resumeExecutor {};
+        NGIN::Async::CancellationToken m_cancellation {};
+        TOperation                     m_operation;
+        std::shared_ptr<State>         m_state {};
     };
 
     template<typename TOperation>

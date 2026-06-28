@@ -29,8 +29,8 @@ namespace NGIN::Net::Transport
         }
 
         NGIN::Async::Task<ReceivedDatagram, NGIN::Net::NetError> ReceiveAsync(NGIN::Async::TaskContext&      ctx,
-                                                                               NGIN::Net::Buffer&             receiveBuffer,
-                                                                               NGIN::Async::CancellationToken token) override
+                                                                              NGIN::Net::Buffer&             receiveBuffer,
+                                                                              NGIN::Async::CancellationToken token) override
         {
             return ReceiveImpl(ctx, m_socket, m_driver, receiveBuffer, token);
         }
@@ -40,16 +40,16 @@ namespace NGIN::Net::Transport
 
     private:
         static NGIN::Async::Task<void, NGIN::Net::NetError> SendImpl(NGIN::Async::TaskContext&      ctx,
-                                                                      UdpSocket&                     socket,
-                                                                      NetworkDriver*                 driver,
-                                                                      NGIN::Net::Endpoint            remoteEndpoint,
-                                                                      NGIN::Net::ConstByteSpan       payload,
-                                                                      NGIN::Async::CancellationToken token)
+                                                                     UdpSocket&                     socket,
+                                                                     NetworkDriver*                 driver,
+                                                                     NGIN::Net::Endpoint            remoteEndpoint,
+                                                                     NGIN::Net::ConstByteSpan       payload,
+                                                                     NGIN::Async::CancellationToken token)
         {
             if (!driver)
             {
                 co_await NGIN::Async::Faulted(
-                        NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidState));
+                        NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidTaskUsage));
                 co_return;
             }
             static_cast<void>(co_await socket.SendToAsync(ctx, *driver, remoteEndpoint, payload, token));
@@ -57,20 +57,20 @@ namespace NGIN::Net::Transport
         }
 
         static NGIN::Async::Task<ReceivedDatagram, NGIN::Net::NetError> ReceiveImpl(NGIN::Async::TaskContext&      ctx,
-                                                                                     UdpSocket&                     socket,
-                                                                                     NetworkDriver*                 driver,
-                                                                                     NGIN::Net::Buffer&             receiveBuffer,
-                                                                                     NGIN::Async::CancellationToken token)
+                                                                                    UdpSocket&                     socket,
+                                                                                    NetworkDriver*                 driver,
+                                                                                    NGIN::Net::Buffer&             receiveBuffer,
+                                                                                    NGIN::Async::CancellationToken token)
         {
             if (!driver)
             {
                 co_return NGIN::Async::Completion<ReceivedDatagram, NGIN::Net::NetError>::Faulted(
-                        NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidState));
+                        NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidTaskUsage));
             }
             if (!receiveBuffer.data || receiveBuffer.capacity == 0)
             {
                 co_return NGIN::Async::Completion<ReceivedDatagram, NGIN::Net::NetError>::Faulted(
-                        NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidState));
+                        NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidTaskUsage));
             }
 
             auto result = co_await socket.ReceiveFromAsync(ctx,

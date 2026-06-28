@@ -21,15 +21,15 @@ namespace NGIN::Net::Transport
         }
 
         NGIN::Async::Task<NGIN::UInt32, NGIN::Net::NetError> ReadAsync(NGIN::Async::TaskContext&      ctx,
-                                                                        NGIN::Net::ByteSpan            destination,
-                                                                        NGIN::Async::CancellationToken token) override
+                                                                       NGIN::Net::ByteSpan            destination,
+                                                                       NGIN::Async::CancellationToken token) override
         {
             return ReadImpl(ctx, m_socket, m_driver, destination, token);
         }
 
         NGIN::Async::Task<NGIN::UInt32, NGIN::Net::NetError> WriteAsync(NGIN::Async::TaskContext&      ctx,
-                                                                         NGIN::Net::ConstByteSpan       source,
-                                                                         NGIN::Async::CancellationToken token) override
+                                                                        NGIN::Net::ConstByteSpan       source,
+                                                                        NGIN::Async::CancellationToken token) override
         {
             return WriteImpl(ctx, m_socket, m_driver, source, token);
         }
@@ -45,29 +45,29 @@ namespace NGIN::Net::Transport
 
     private:
         static NGIN::Async::Task<NGIN::UInt32, NGIN::Net::NetError> ReadImpl(NGIN::Async::TaskContext&      ctx,
-                                                                              TcpSocket&                     socket,
-                                                                              NetworkDriver*                 driver,
-                                                                              NGIN::Net::ByteSpan            destination,
-                                                                              NGIN::Async::CancellationToken token)
+                                                                             TcpSocket&                     socket,
+                                                                             NetworkDriver*                 driver,
+                                                                             NGIN::Net::ByteSpan            destination,
+                                                                             NGIN::Async::CancellationToken token)
         {
             if (!driver)
             {
                 co_return NGIN::Async::Completion<NGIN::UInt32, NGIN::Net::NetError>::Faulted(
-                        NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidState));
+                        NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidTaskUsage));
             }
             co_return co_await socket.ReceiveAsync(ctx, *driver, destination, token);
         }
 
         static NGIN::Async::Task<NGIN::UInt32, NGIN::Net::NetError> WriteImpl(NGIN::Async::TaskContext&      ctx,
-                                                                               TcpSocket&                     socket,
-                                                                               NetworkDriver*                 driver,
-                                                                               NGIN::Net::ConstByteSpan       source,
-                                                                               NGIN::Async::CancellationToken token)
+                                                                              TcpSocket&                     socket,
+                                                                              NetworkDriver*                 driver,
+                                                                              NGIN::Net::ConstByteSpan       source,
+                                                                              NGIN::Async::CancellationToken token)
         {
             if (!driver)
             {
                 co_return NGIN::Async::Completion<NGIN::UInt32, NGIN::Net::NetError>::Faulted(
-                        NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidState));
+                        NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidTaskUsage));
             }
             co_return co_await socket.SendAsync(ctx, *driver, source, token);
         }

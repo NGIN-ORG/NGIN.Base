@@ -6,6 +6,7 @@
 #include <NGIN/Utilities/Error.hpp>
 
 #include <exception>
+#include <string>
 #include <string_view>
 
 #ifndef NGIN_ASYNC_CAPTURE_EXCEPTIONS
@@ -39,27 +40,20 @@ namespace NGIN::Async
         RuntimeInvariantViolation,
         UnhandledException,
         UnknownRuntimeFailure,
-
-        // Compatibility aliases for existing call sites while v2 lands across the tree.
-        InvalidState                = InvalidTaskUsage,
-        InvalidArgument             = RuntimeInvariantViolation,
-        SchedulerFailure            = SchedulerDispatchFailed,
-        ContinuationDispatchFailure = ContinuationDispatchFailed,
-        Unknown                     = UnknownRuntimeFailure,
     };
 
     struct AsyncFault final
     {
-        AsyncFaultCode   code {AsyncFaultCode::None};
-        int              native {0};
-        std::string_view message {};
+        AsyncFaultCode code {AsyncFaultCode::None};
+        int            native {0};
+        std::string    message {};
 #if NGIN_ASYNC_CAPTURE_EXCEPTIONS
         std::exception_ptr capturedException {};
 #endif
 
         AsyncFault() noexcept = default;
 
-        explicit AsyncFault(AsyncFaultCode faultCode, int nativeCode = 0, std::string_view faultMessage = {}) noexcept
+        explicit AsyncFault(AsyncFaultCode faultCode, int nativeCode = 0, std::string_view faultMessage = {})
             : code(faultCode), native(nativeCode), message(faultMessage)
         {
         }
@@ -75,7 +69,7 @@ namespace NGIN::Async
         }
     };
 
-    [[nodiscard]] inline AsyncFault MakeAsyncFault(AsyncFaultCode code, int native = 0, std::string_view message = {}) noexcept
+    [[nodiscard]] inline AsyncFault MakeAsyncFault(AsyncFaultCode code, int native = 0, std::string_view message = {})
     {
         return AsyncFault {code, native, message};
     }

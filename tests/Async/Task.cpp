@@ -102,10 +102,23 @@ namespace
         co_return;
     }
 
+    NGIN::Async::Task<int> DelayIntForever(NGIN::Async::TaskContext& ctx)
+    {
+        co_await ctx.Delay(NGIN::Units::Seconds(60.0));
+        co_return 1;
+    }
+
     NGIN::Async::Task<int> AddAfterYield(NGIN::Async::TaskContext& ctx, int a, int b)
     {
         co_await ctx.YieldNow();
         co_return a + b;
+    }
+
+    NGIN::Async::Task<void> IncrementAfterYield(NGIN::Async::TaskContext& ctx, int& value)
+    {
+        co_await ctx.YieldNow();
+        ++value;
+        co_return;
     }
 
     NGIN::Async::Task<int> ThrowAfterYield(NGIN::Async::TaskContext& ctx)
@@ -116,7 +129,7 @@ namespace
 #else
         co_await ctx.YieldNow();
         co_return NGIN::Async::Completion<int, NGIN::Async::NoError>::Faulted(
-                NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::Unknown));
+                NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::UnknownRuntimeFailure));
 #endif
     }
 
@@ -144,6 +157,20 @@ namespace
         auto child = ThrowAfterYield(ctx);
         static_cast<void>(co_await child);
         co_return;
+    }
+
+    NGIN::Async::Task<int> ObserveCompletion(NGIN::Async::TaskContext&, NGIN::Async::Task<int>& child)
+    {
+        auto completion = co_await child.AsCompletion();
+        if (completion.IsFault())
+        {
+            co_return -1;
+        }
+        if (completion.Succeeded())
+        {
+            co_return completion.Value();
+        }
+        co_return -2;
     }
 
 #if NGIN_ASYNC_HAS_EXCEPTIONS
@@ -277,6 +304,75 @@ TEST_CASE("Task can be awaited without calling Start() on the child task")
     auto result = task.Get();
     REQUIRE(result);
     REQUIRE(*result == 3);
+}
+
+TEST_CASE("Task scheduled then destroyed before executor drain completes as detached root")
+{
+    NGIN::Execution::CooperativeScheduler scheduler;
+    NGIN::Async::TaskContext              ctx(scheduler);
+    int                                   value = 0;
+
+    {
+        auto task = IncrementAfterYield(ctx, value);
+        task.Schedule(ctx);
+    }
+
+    scheduler.RunUntilIdle();
+    REQUIRE(value == 1);
+}
+
+TEST_CASE("TaskResult keeps completion alive after task destruction")
+{
+    NGIN::Execution::CooperativeScheduler              scheduler;
+    NGIN::Async::TaskContext                           ctx(scheduler);
+    NGIN::Async::TaskResult<int, NGIN::Async::NoError> result;
+
+    {
+        auto task = AddAfterYield(ctx, 4, 9);
+        task.Schedule(ctx);
+        scheduler.RunUntilIdle();
+        result = task.Get();
+    }
+
+    REQUIRE(result);
+    REQUIRE(result.Value() == 13);
+}
+
+TEST_CASE("Task Get reports invalid usage instead of blocking unfinished tasks")
+{
+    NGIN::Execution::CooperativeScheduler scheduler;
+    NGIN::Async::TaskContext              ctx(scheduler);
+
+    auto task = AddAfterYield(ctx, 2, 3);
+    task.Schedule(ctx);
+
+    auto result = task.Get();
+    REQUIRE_FALSE(result);
+    REQUIRE(result.IsFault());
+
+    scheduler.RunUntilIdle();
+}
+
+TEST_CASE("Task rejects duplicate completion awaiters deterministically")
+{
+    ManualTimerExecutor             exec;
+    NGIN::Async::CancellationSource source;
+    NGIN::Async::TaskContext        ctx(exec, source.GetToken());
+
+    auto child  = DelayIntForever(ctx);
+    auto first  = ObserveCompletion(ctx, child);
+    auto second = ObserveCompletion(ctx, child);
+
+    first.Schedule(ctx);
+    second.Schedule(ctx);
+    exec.RunUntilIdle();
+
+    REQUIRE((first.IsFaulted() || second.IsFaulted()));
+
+    source.Cancel();
+    exec.RunUntilIdle();
+    REQUIRE(first.IsCompleted());
+    REQUIRE(second.IsCompleted());
 }
 
 #if NGIN_ASYNC_HAS_EXCEPTIONS

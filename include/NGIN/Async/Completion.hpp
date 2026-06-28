@@ -5,6 +5,7 @@
 
 #include <cassert>
 #include <coroutine>
+#include <memory>
 #include <optional>
 #include <type_traits>
 #include <utility>
@@ -396,9 +397,9 @@ namespace NGIN::Async
     class TaskResult
     {
     public:
-        constexpr TaskResult() noexcept = default;
+        TaskResult() noexcept = default;
 
-        constexpr explicit TaskResult(const Completion<T, E>* completion) noexcept
+        explicit TaskResult(std::shared_ptr<Completion<T, E>> completion) noexcept
             : m_completion(completion)
         {
         }
@@ -443,33 +444,62 @@ namespace NGIN::Async
             return Succeeded();
         }
 
-        [[nodiscard]] T& Value() const
+        [[nodiscard]] T& Value()
         {
             assert(m_completion != nullptr);
-            return const_cast<T&>(m_completion->Value());
+            return m_completion->Value();
         }
 
-        [[nodiscard]] T& operator*() const
+        [[nodiscard]] const T& Value() const
+        {
+            assert(m_completion != nullptr);
+            return m_completion->Value();
+        }
+
+        [[nodiscard]] T& operator*()
         {
             return Value();
         }
 
-        [[nodiscard]] T* operator->() const
+        [[nodiscard]] const T& operator*() const
         {
-            assert(m_completion != nullptr);
-            return const_cast<T*>(&m_completion->Value());
+            return Value();
         }
 
-        [[nodiscard]] E& DomainError() const
+        [[nodiscard]] T* operator->()
         {
             assert(m_completion != nullptr);
-            return const_cast<E&>(m_completion->DomainError());
+            return &m_completion->Value();
         }
 
-        [[nodiscard]] AsyncFault& Fault() const
+        [[nodiscard]] const T* operator->() const
         {
             assert(m_completion != nullptr);
-            return const_cast<AsyncFault&>(m_completion->Fault());
+            return &m_completion->Value();
+        }
+
+        [[nodiscard]] E& DomainError()
+        {
+            assert(m_completion != nullptr);
+            return m_completion->DomainError();
+        }
+
+        [[nodiscard]] const E& DomainError() const
+        {
+            assert(m_completion != nullptr);
+            return m_completion->DomainError();
+        }
+
+        [[nodiscard]] AsyncFault& Fault()
+        {
+            assert(m_completion != nullptr);
+            return m_completion->Fault();
+        }
+
+        [[nodiscard]] const AsyncFault& Fault() const
+        {
+            assert(m_completion != nullptr);
+            return m_completion->Fault();
         }
 
         [[nodiscard]] const Completion<T, E>& CompletionRef() const
@@ -479,16 +509,16 @@ namespace NGIN::Async
         }
 
     private:
-        const Completion<T, E>* m_completion {nullptr};
+        std::shared_ptr<Completion<T, E>> m_completion {};
     };
 
     template<typename E>
     class TaskResult<void, E>
     {
     public:
-        constexpr TaskResult() noexcept = default;
+        TaskResult() noexcept = default;
 
-        constexpr explicit TaskResult(const Completion<void, E>* completion) noexcept
+        explicit TaskResult(std::shared_ptr<Completion<void, E>> completion) noexcept
             : m_completion(completion)
         {
         }
@@ -528,16 +558,28 @@ namespace NGIN::Async
             return Succeeded();
         }
 
-        [[nodiscard]] E& DomainError() const
+        [[nodiscard]] E& DomainError()
         {
             assert(m_completion != nullptr);
-            return const_cast<E&>(m_completion->DomainError());
+            return m_completion->DomainError();
         }
 
-        [[nodiscard]] AsyncFault& Fault() const
+        [[nodiscard]] const E& DomainError() const
         {
             assert(m_completion != nullptr);
-            return const_cast<AsyncFault&>(m_completion->Fault());
+            return m_completion->DomainError();
+        }
+
+        [[nodiscard]] AsyncFault& Fault()
+        {
+            assert(m_completion != nullptr);
+            return m_completion->Fault();
+        }
+
+        [[nodiscard]] const AsyncFault& Fault() const
+        {
+            assert(m_completion != nullptr);
+            return m_completion->Fault();
         }
 
         [[nodiscard]] const Completion<void, E>& CompletionRef() const
@@ -547,9 +589,7 @@ namespace NGIN::Async
         }
 
     private:
-        const Completion<void, E>* m_completion {nullptr};
+        std::shared_ptr<Completion<void, E>> m_completion {};
     };
 
-    template<typename T, typename E>
-    using TaskOutcome = TaskResult<T, E>;
 }// namespace NGIN::Async

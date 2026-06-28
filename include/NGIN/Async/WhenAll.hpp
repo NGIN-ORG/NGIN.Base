@@ -8,6 +8,7 @@
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 #include <NGIN/Async/Cancellation.hpp>
 #include <NGIN/Async/Task.hpp>
@@ -20,16 +21,114 @@ namespace NGIN::Async
         template<typename E>
         struct SharedState final
         {
-            std::atomic<bool>            done {false};
-            std::atomic<NGIN::UIntSize>  remaining {0};
-            NGIN::Execution::ExecutorRef exec {};
-            std::coroutine_handle<>      awaiting {};
-            CancellationRegistration     cancellationRegistration {};
+            using IsFinishedFn = bool (*)(std::coroutine_handle<>) noexcept;
+            using DetachFn     = void (*)(std::coroutine_handle<>, std::coroutine_handle<>) noexcept;
+
+            std::atomic<bool>                    done {false};
+            std::atomic<NGIN::UIntSize>          remaining {0};
+            NGIN::Execution::ExecutorRef         exec {};
+            std::coroutine_handle<>              awaiting {};
+            CancellationRegistration             cancellationRegistration {};
+            std::vector<std::coroutine_handle<>> watchers {};
+            std::vector<std::coroutine_handle<>> childHandles {};
+            std::vector<IsFinishedFn>            childFinished {};
+            std::vector<DetachFn>                childDetach {};
 
             TaskStatus                status {TaskStatus::Pending};
             std::optional<E>          domainError {};
             std::optional<AsyncFault> fault {};
         };
+
+        template<typename TTask>
+        [[nodiscard]] inline bool IsTaskFinished(std::coroutine_handle<> handle) noexcept
+        {
+            if (!handle)
+            {
+                return true;
+            }
+
+            using HandleType = typename std::remove_reference_t<TTask>::handle_type;
+            auto typed       = HandleType::from_address(handle.address());
+            return typed.promise().m_finished.load(std::memory_order_acquire);
+        }
+
+        template<typename TTask>
+        inline void DetachTaskContinuation(std::coroutine_handle<> childHandle, std::coroutine_handle<> watcher) noexcept
+        {
+            if (!childHandle || !watcher)
+            {
+                return;
+            }
+
+            using HandleType = typename std::remove_reference_t<TTask>::handle_type;
+            auto  typed      = HandleType::from_address(childHandle.address());
+            auto& promise    = typed.promise();
+            if (!promise.m_finished.load(std::memory_order_acquire) &&
+                promise.m_continuation.address() == watcher.address())
+            {
+                promise.m_continuation      = {};
+                promise.m_completionHandler = nullptr;
+#if NGIN_ASYNC_CAPTURE_EXCEPTIONS
+                promise.m_setChildException = nullptr;
+#endif
+            }
+        }
+
+        template<typename E>
+        [[nodiscard]] inline bool IsChildFinished(const SharedState<E>& state, NGIN::UIntSize index) noexcept
+        {
+            return index < state.childHandles.size() && state.childFinished[index] &&
+                   state.childFinished[index](state.childHandles[index]);
+        }
+
+        template<typename E>
+        inline void ResumeWatcherIfSuspended(const SharedState<E>& state, NGIN::UIntSize index) noexcept
+        {
+            if (index >= state.watchers.size() || !state.watchers[index])
+            {
+                return;
+            }
+
+            if (index < state.childHandles.size() && index < state.childDetach.size() && state.childDetach[index])
+            {
+                state.childDetach[index](state.childHandles[index], state.watchers[index]);
+            }
+
+            if (!IsChildFinished(state, index))
+            {
+                state.exec.Execute(state.watchers[index]);
+            }
+        }
+
+        template<typename E>
+        inline void ResumeAwaiting(const SharedState<E>& state) noexcept
+        {
+            if (state.awaiting)
+            {
+                state.exec.Execute(state.awaiting);
+            }
+        }
+
+        template<typename E>
+        inline void ResumeOtherWatchers(const SharedState<E>& state, NGIN::UIntSize currentIndex) noexcept
+        {
+            for (NGIN::UIntSize index = 0; index < state.watchers.size(); ++index)
+            {
+                if (index != currentIndex)
+                {
+                    ResumeWatcherIfSuspended(state, index);
+                }
+            }
+        }
+
+        template<typename E>
+        inline void ResumeAllWatchers(const SharedState<E>& state) noexcept
+        {
+            for (NGIN::UIntSize index = 0; index < state.watchers.size(); ++index)
+            {
+                ResumeWatcherIfSuspended(state, index);
+            }
+        }
 
         template<typename E>
         [[nodiscard]] inline bool CancelWhenAll(void* context) noexcept
@@ -42,6 +141,7 @@ namespace NGIN::Async
             }
 
             state->status = TaskStatus::Canceled;
+            ResumeAllWatchers(*state);
             return true;
         }
 
@@ -90,12 +190,22 @@ namespace NGIN::Async
         };
 
         template<typename E, typename TTask>
-        [[nodiscard]] inline Detached WatchTask(std::weak_ptr<SharedState<E>> weakState, TTask& task, NGIN::UIntSize)
+        [[nodiscard]] inline Detached WatchTask(std::weak_ptr<SharedState<E>> weakState, TTask& task, NGIN::UIntSize index)
         {
-            auto outcome = co_await task.AsCompletion();
+            auto outcome = co_await NGIN::Async::detail::AwaitTaskHandleCompletion(task);
 
             if (auto state = weakState.lock())
             {
+                if (index < state->watchers.size())
+                {
+                    state->watchers[index] = {};
+                }
+
+                if (state->done.load(std::memory_order_acquire))
+                {
+                    co_return;
+                }
+
                 if (!outcome.Succeeded())
                 {
                     bool expected = false;
@@ -116,10 +226,8 @@ namespace NGIN::Async
                             state->fault  = outcome.Fault();
                         }
 
-                        if (state->awaiting)
-                        {
-                            state->exec.Execute(state->awaiting);
-                        }
+                        ResumeOtherWatchers(*state, index);
+                        ResumeAwaiting(*state);
                     }
                     co_return;
                 }
@@ -131,10 +239,7 @@ namespace NGIN::Async
                     if (state->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
                     {
                         state->status = TaskStatus::Succeeded;
-                        if (state->awaiting)
-                        {
-                            state->exec.Execute(state->awaiting);
-                        }
+                        ResumeAwaiting(*state);
                     }
                 }
             }
@@ -157,8 +262,6 @@ namespace NGIN::Async
 
             bool await_suspend(std::coroutine_handle<> awaiting) const
             {
-                std::apply([&](auto&... task) { (task.Schedule(ctx), ...); }, tasks);
-
                 if (ctx.IsCancellationRequested())
                 {
                     return false;
@@ -172,19 +275,33 @@ namespace NGIN::Async
                 state->exec     = ctx.GetExecutor();
                 state->awaiting = awaiting;
                 state->remaining.store(static_cast<NGIN::UIntSize>(sizeof...(TTasks)), std::memory_order_release);
-
-                ctx.GetCancellationToken().Register(
-                        state->cancellationRegistration, state->exec, awaiting, &CancelWhenAll<E>, state.get());
+                state->watchers.resize(sizeof...(TTasks));
+                state->childHandles.resize(sizeof...(TTasks));
+                state->childFinished.resize(sizeof...(TTasks));
+                state->childDetach.resize(sizeof...(TTasks));
 
                 std::weak_ptr<SharedState<E>> weakState = state;
                 auto&                         exec      = state->exec;
                 [&]<std::size_t... Indices>(std::index_sequence<Indices...>) {
                     (([&] {
-                         auto watch = WatchTask<E>(weakState, std::get<Indices>(tasks), static_cast<NGIN::UIntSize>(Indices));
-                         exec.Execute(std::coroutine_handle<>::from_address(watch.handle.address()));
+                         auto watch               = WatchTask<E>(weakState, std::get<Indices>(tasks), static_cast<NGIN::UIntSize>(Indices));
+                         state->watchers[Indices] = std::coroutine_handle<>::from_address(watch.handle.address());
+                         state->childHandles[Indices] =
+                                 std::coroutine_handle<>::from_address(std::get<Indices>(tasks).Handle().address());
+                         state->childFinished[Indices] = &IsTaskFinished<decltype(std::get<Indices>(tasks))>;
+                         state->childDetach[Indices]   = &DetachTaskContinuation<decltype(std::get<Indices>(tasks))>;
                      }()),
                      ...);
                 }(std::make_index_sequence<sizeof...(TTasks)> {});
+
+                [&]<std::size_t... Indices>(std::index_sequence<Indices...>) {
+                    ((exec.Execute(state->watchers[Indices])), ...);
+                }(std::make_index_sequence<sizeof...(TTasks)> {});
+
+                ctx.GetCancellationToken().Register(
+                        state->cancellationRegistration, state->exec, awaiting, &CancelWhenAll<E>, state.get());
+
+                std::apply([&](auto&... task) { (task.Schedule(ctx), ...); }, tasks);
 
                 return true;
             }

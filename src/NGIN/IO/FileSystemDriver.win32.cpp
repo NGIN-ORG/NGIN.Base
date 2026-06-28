@@ -129,13 +129,13 @@ namespace NGIN::IO::detail
 
         bool SubmitOverlapped(NativeFileRequest request) noexcept
         {
-            auto* op = new OverlappedRequest {};
+            auto* op    = new OverlappedRequest {};
             op->request = std::move(request);
 
             const auto handle = reinterpret_cast<HANDLE>(op->request.handleValue);
             if (!AssociateHandle(handle))
             {
-                CompleteFault(op->request, NGIN::Async::AsyncFaultCode::SchedulerFailure, static_cast<int>(::GetLastError()));
+                CompleteFault(op->request, NGIN::Async::AsyncFaultCode::SchedulerDispatchFailed, static_cast<int>(::GetLastError()));
                 delete op;
                 return false;
             }
@@ -147,7 +147,7 @@ namespace NGIN::IO::detail
             }
 
             DWORD ignored = 0;
-            BOOL ok = FALSE;
+            BOOL  ok      = FALSE;
             if (op->request.kind == NativeFileOperationKind::Read)
             {
                 ok = ::ReadFile(handle, op->request.buffer, op->request.size, &ignored, &op->overlapped);
@@ -176,11 +176,11 @@ namespace NGIN::IO::detail
 
         bool SubmitControl(NativeFileRequest request) noexcept
         {
-            auto* control = new ControlRequest {};
+            auto* control    = new ControlRequest {};
             control->request = std::move(request);
             if (!::PostQueuedCompletionStatus(m_completionPort, 0, kControlKey, reinterpret_cast<LPOVERLAPPED>(control)))
             {
-                CompleteFault(control->request, NGIN::Async::AsyncFaultCode::SchedulerFailure, static_cast<int>(::GetLastError()));
+                CompleteFault(control->request, NGIN::Async::AsyncFaultCode::SchedulerDispatchFailed, static_cast<int>(::GetLastError()));
                 delete control;
                 return false;
             }
@@ -197,7 +197,7 @@ namespace NGIN::IO::detail
                     request.userData,
                     NativeFileCompletion {
                             .status = NativeFileCompletion::Status::Fault,
-                            .fault = NGIN::Async::MakeAsyncFault(code, native),
+                            .fault  = NGIN::Async::MakeAsyncFault(code, native),
                     });
         }
 
@@ -205,10 +205,10 @@ namespace NGIN::IO::detail
         {
             while (!m_stopping)
             {
-                DWORD       bytes      = 0;
-                ULONG_PTR   key        = 0;
+                DWORD        bytes      = 0;
+                ULONG_PTR    key        = 0;
                 LPOVERLAPPED overlapped = nullptr;
-                const BOOL  ok         = ::GetQueuedCompletionStatus(m_completionPort, &bytes, &key, &overlapped, INFINITE);
+                const BOOL   ok         = ::GetQueuedCompletionStatus(m_completionPort, &bytes, &key, &overlapped, INFINITE);
 
                 if (key == kStopKey)
                 {
@@ -217,7 +217,7 @@ namespace NGIN::IO::detail
 
                 if (key == kControlKey && overlapped != nullptr)
                 {
-                    auto* control = reinterpret_cast<ControlRequest*>(overlapped);
+                    auto*                control = reinterpret_cast<ControlRequest*>(overlapped);
                     NativeFileCompletion completion;
                     completion.status = NativeFileCompletion::Status::Completed;
 
@@ -230,8 +230,7 @@ namespace NGIN::IO::detail
                                 completion.systemCode = static_cast<int>(::GetLastError());
                             }
                             break;
-                        case NativeFileOperationKind::Close:
-                        {
+                        case NativeFileOperationKind::Close: {
                             const auto handle = reinterpret_cast<HANDLE>(control->request.handleValue);
                             ForgetHandle(handle);
                             if (!::CloseHandle(handle))
@@ -255,7 +254,7 @@ namespace NGIN::IO::detail
 
                 if (overlapped != nullptr)
                 {
-                    auto* op = reinterpret_cast<OverlappedRequest*>(overlapped);
+                    auto*                op = reinterpret_cast<OverlappedRequest*>(overlapped);
                     NativeFileCompletion completion;
                     completion.status = NativeFileCompletion::Status::Completed;
                     if (!ok)
@@ -276,11 +275,11 @@ namespace NGIN::IO::detail
             }
         }
 
-        HANDLE      m_completionPort {nullptr};
-        bool        m_initialized {false};
-        bool        m_stopping {false};
-        std::thread m_worker {};
-        std::mutex  m_associatedHandlesMutex {};
+        HANDLE                     m_completionPort {nullptr};
+        bool                       m_initialized {false};
+        bool                       m_stopping {false};
+        std::thread                m_worker {};
+        std::mutex                 m_associatedHandlesMutex {};
         std::unordered_set<HANDLE> m_associatedHandles {};
     };
 

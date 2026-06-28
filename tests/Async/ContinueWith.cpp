@@ -10,6 +10,7 @@
 #include <NGIN/Execution/InlineScheduler.hpp>
 #include <NGIN/Execution/WorkItem.hpp>
 #include <NGIN/Time/TimePoint.hpp>
+#include <NGIN/Units.hpp>
 
 namespace
 {
@@ -61,7 +62,7 @@ namespace
         co_return 0;
 #else
         co_return NGIN::Async::Completion<int, NGIN::Async::NoError>::Faulted(
-                NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::Unknown));
+                NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::UnknownRuntimeFailure));
 #endif
     }
 
@@ -77,7 +78,7 @@ namespace
         co_return;
 #else
         co_await NGIN::Async::Faulted(
-                NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::Unknown));
+                NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::UnknownRuntimeFailure));
         co_return;
 #endif
     }
@@ -87,9 +88,9 @@ namespace
         co_return;
     }
 
-    NGIN::Async::Task<int> SuspendForever(NGIN::Async::TaskContext&)
+    NGIN::Async::Task<int> DelayedParent(NGIN::Async::TaskContext& ctx)
     {
-        co_await std::suspend_always {};
+        co_await ctx.Delay(NGIN::Units::Seconds(60.0));
         co_return 42;
     }
 
@@ -118,7 +119,7 @@ namespace
     NGIN::Async::Task<int> MultiplyAfterYield(NGIN::Async::TaskContext& ctx, int value, int factor)
     {
         co_await ctx.YieldNow();
-        co_return value * factor;
+        co_return value* factor;
     }
 
     NGIN::Async::Task<int> ContinueWithSuccess(NGIN::Async::TaskContext& ctx)
@@ -168,7 +169,7 @@ TEST_CASE("Task::ContinueWith is woken by cancellation even if parent never comp
     NGIN::Async::CancellationSource source;
     NGIN::Async::TaskContext        ctx(exec, source.GetToken());
 
-    auto parent = SuspendForever(ctx);
+    auto parent = DelayedParent(ctx);
     parent.Schedule(ctx);
 
     auto task = AwaitCancellation(ctx, parent);

@@ -106,7 +106,7 @@ namespace NGIN::Async
             std::optional<E>             domainError {};
             std::optional<AsyncFault>    fault {};
 #if NGIN_ASYNC_CAPTURE_EXCEPTIONS
-            std::exception_ptr           exception {};
+            std::exception_ptr exception {};
 #endif
             bool completed {false};
             bool canceled {false};
@@ -190,6 +190,7 @@ namespace NGIN::Async
             void unhandled_exception() noexcept
             {
 #if NGIN_ASYNC_HAS_EXCEPTIONS
+                NGIN::Sync::LockGuard guard(lock);
                 fault = MakeAsyncFault(AsyncFaultCode::UnhandledException);
 #if NGIN_ASYNC_CAPTURE_EXCEPTIONS
                 exception = std::current_exception();
@@ -238,7 +239,7 @@ namespace NGIN::Async
 
             std::coroutine_handle<> WakeConsumer() noexcept
             {
-                std::coroutine_handle<> toResume {};
+                std::coroutine_handle<>      toResume {};
                 NGIN::Execution::ExecutorRef executor {};
                 {
                     NGIN::Sync::LockGuard guard(lock);
@@ -293,9 +294,9 @@ namespace NGIN::Async
 
         struct AdvanceAwaiter final
         {
-            AsyncGenerator&                 generator;
-            TaskContext&                    context;
-            CancellationRegistration        cancellationRegistration {};
+            AsyncGenerator&          generator;
+            TaskContext&             context;
+            CancellationRegistration cancellationRegistration {};
 
             bool await_ready() const noexcept
             {
@@ -309,7 +310,7 @@ namespace NGIN::Async
                     return true;
                 }
 
-                auto& promise = generator.m_handle.promise();
+                auto&                 promise = generator.m_handle.promise();
                 NGIN::Sync::LockGuard guard(promise.lock);
                 return promise.current.has_value() || promise.domainError.has_value() || promise.fault.has_value() ||
                        promise.canceled || promise.completed;
@@ -329,6 +330,8 @@ namespace NGIN::Async
 
                 auto& promise = generator.m_handle.promise();
 
+                std::coroutine_handle<>      concurrentConsumer {};
+                NGIN::Execution::ExecutorRef concurrentExecutor {};
                 {
                     NGIN::Sync::LockGuard guard(promise.lock);
                     if (promise.current.has_value() || promise.domainError.has_value() || promise.fault.has_value() ||
@@ -337,8 +340,18 @@ namespace NGIN::Async
                         return awaiting;
                     }
 
-                    assert(!promise.consumer && "AsyncGenerator::Next does not support concurrent consumers");
-                    promise.consumer = awaiting;
+                    if (promise.consumer)
+                    {
+                        promise.fault      = MakeAsyncFault(AsyncFaultCode::InvalidContinuationState);
+                        promise.completed  = true;
+                        concurrentConsumer = promise.consumer;
+                        concurrentExecutor = promise.exec;
+                        promise.consumer   = {};
+                    }
+                    else
+                    {
+                        promise.consumer = awaiting;
+                    }
 
                     if (!promise.exec.IsValid())
                     {
@@ -347,11 +360,24 @@ namespace NGIN::Async
 
                     if (!promise.exec.IsValid())
                     {
-                        promise.fault = MakeAsyncFault(AsyncFaultCode::InvalidState);
+                        promise.fault     = MakeAsyncFault(AsyncFaultCode::InvalidTaskUsage);
                         promise.completed = true;
-                        promise.consumer = {};
+                        promise.consumer  = {};
                         return awaiting;
                     }
+                }
+
+                if (concurrentConsumer)
+                {
+                    if (concurrentExecutor.IsValid())
+                    {
+                        concurrentExecutor.Execute(concurrentConsumer);
+                    }
+                    else
+                    {
+                        concurrentConsumer.resume();
+                    }
+                    return awaiting;
                 }
 
                 context.GetCancellationToken().Register(
@@ -365,13 +391,13 @@ namespace NGIN::Async
                                 return false;
                             }
 
-                            std::coroutine_handle<> toResume {};
+                            std::coroutine_handle<>      toResume {};
                             NGIN::Execution::ExecutorRef executor {};
                             {
                                 NGIN::Sync::LockGuard guard(promise->lock);
-                                toResume = promise->consumer;
+                                toResume          = promise->consumer;
                                 promise->consumer = {};
-                                executor = promise->exec;
+                                executor          = promise->exec;
                             }
 
                             if (toResume)
@@ -411,7 +437,7 @@ namespace NGIN::Async
                 co_return GeneratorNext<T>::End();
             }
 
-            auto& promise = m_handle.promise();
+            auto&                 promise = m_handle.promise();
             NGIN::Sync::LockGuard guard(promise.lock);
 
             if (promise.fault.has_value())

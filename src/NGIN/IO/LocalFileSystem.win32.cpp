@@ -1550,7 +1550,7 @@ namespace NGIN::IO
                 if (!m_backend.Submit(m_request))
                 {
                     m_state->completion.status = NativeWindowsFileCompletion::Status::Fault;
-                    m_state->completion.fault  = NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::SchedulerFailure);
+                    m_state->completion.fault  = NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::SchedulerDispatchFailed);
                     m_state->Resume();
                 }
             }

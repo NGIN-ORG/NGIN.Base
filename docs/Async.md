@@ -100,8 +100,10 @@ What to notice:
 
 - `Compute()` creates a cold task
 - `Schedule(ctx)` schedules the root task
+- if a scheduled root task object is destroyed before completion, the operation
+  is detached and the coroutine frame is cleaned up when it finishes
 - inside the coroutine, write ordinary success-path code
-- at the edge of the program, call `Get()` and inspect the task result
+- at the edge of the program, call `Get()` and inspect the owning task result
 
 ## Normal Style
 
@@ -110,7 +112,8 @@ This is the recommended style for most code:
 - inside coroutines:
   - `co_await` child tasks directly
 - at the root of the program or in tests:
-  - inspect `TaskResult<T, E>` from `Get()`
+  - after the scheduler has made progress, inspect `TaskResult<T, E>` from
+    `Get()`
 - when you need explicit terminal observation without propagation:
   - use `AsCompletion()`
 - when you want exception-based consumption:
@@ -121,6 +124,11 @@ This is the recommended style for most code:
   - handle it separately from domain errors
 
 In normal code, do not use `Get()` as ordinary control flow inside other coroutines.
+`Get()` does not drive an executor and does not block for unfinished tasks; call
+`Wait()` deliberately if you need a blocking bridge.
+Tasks are single-consumer operations while they are running. A second concurrent
+awaiter is treated as invalid continuation state instead of replacing the first
+awaiter.
 
 ## Common Workflows
 
@@ -311,7 +319,9 @@ The main async type.
 - cold by default
 - move-only
 - started explicitly at the root
+- safe to destroy after scheduling; incomplete scheduled roots become detached
 - normally consumed through `co_await`
+- single-consumer while running
 
 ### `TaskContext`
 
@@ -330,7 +340,9 @@ It also provides:
 
 ### `TaskResult<T, E>`
 
-The terminal result view returned by `Get()`.
+The terminal result returned by `Get()` after completion. It owns shared
+completion storage, so the result remains valid after the originating `Task`
+object is moved or destroyed.
 
 Use it at:
 
@@ -358,8 +370,11 @@ Advance it with:
 
 ## Common Mistakes
 
-- Forgetting to `Schedule(ctx)` or `Start(ctx)` on a root task.
+- Forgetting to `Schedule(ctx)` on a root task.
+- Calling `Get()` before the task is complete and expecting it to drive the
+  scheduler.
 - Using `Get()` inside normal coroutine control flow instead of `co_await`.
+- Awaiting the same running task from multiple coroutines.
 - Mixing incompatible error types across composed tasks.
 - Treating cancellation like a domain error.
 - Using faults for normal operation failures that should be represented by `E`.
@@ -367,7 +382,7 @@ Advance it with:
 
 ## Reference Notes
 
-- `TaskResult<T, E>` is mainly for root boundaries and tests.
+- `TaskResult<T, E>` is mainly for root boundaries and tests and keeps the terminal completion alive.
+- `Wait()` is the explicit blocking primitive; `Get()` is result inspection.
 - `Completion<T, E>` is the explicit terminal-state type.
-- `TaskOutcome<T, E>` remains only as a compatibility alias; prefer `TaskResult<T, E>` in new code.
 - Exact `E` matching matters for ordinary automatic propagation in the current model.
