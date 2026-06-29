@@ -1055,6 +1055,11 @@ namespace NGIN::Text
             return std::same_as<CharT, char> && std::same_as<Traits, std::char_traits<char>>;
         }
 
+        [[nodiscard]] static constexpr bool CanUseRawCharOperations() noexcept
+        {
+            return std::same_as<Traits, std::char_traits<CharT>>;
+        }
+
         [[nodiscard]] static view_type MakeBoundedView(const CharT* data, size_type count, const char* operation)
         {
             if (count == 0)
@@ -1094,20 +1099,44 @@ namespace NGIN::Text
 
         static void CopyChars(CharT* destination, const CharT* source, size_type count)
         {
-            if (count != 0)
+            if (count == 0 || destination == source)
+                return;
+
+            if constexpr (CanUseRawCharOperations())
+                std::memcpy(static_cast<void*>(destination), static_cast<const void*>(source), count * sizeof(CharT));
+            else
                 traits_type::copy(destination, source, count);
         }
 
         static void MoveChars(CharT* destination, const CharT* source, size_type count)
         {
-            if (count != 0)
+            if (count == 0 || destination == source)
+                return;
+
+            if constexpr (CanUseRawCharOperations())
+                std::memmove(static_cast<void*>(destination), static_cast<const void*>(source), count * sizeof(CharT));
+            else
                 traits_type::move(destination, source, count);
         }
 
         static void FillChars(CharT* destination, size_type count, CharT value)
         {
-            for (size_type index = 0; index < count; ++index)
-                traits_type::assign(destination[index], value);
+            if (count == 0)
+                return;
+
+            if constexpr (CanUseRawCharOperations() && sizeof(CharT) == 1)
+            {
+                std::memset(static_cast<void*>(destination), static_cast<unsigned char>(value), count);
+            }
+            else if constexpr (CanUseRawCharOperations())
+            {
+                std::fill_n(destination, count, value);
+            }
+            else
+            {
+                for (size_type index = 0; index < count; ++index)
+                    traits_type::assign(destination[index], value);
+            }
         }
 
         [[nodiscard]] static size_type LastNeedleStart(size_type haystackSize, size_type needleSize, size_type pos) noexcept

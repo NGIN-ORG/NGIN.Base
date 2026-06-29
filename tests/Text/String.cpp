@@ -239,6 +239,38 @@ namespace
             return 0;
         }
     };
+
+    struct InstrumentedTraits : std::char_traits<char>
+    {
+        inline static std::size_t copyCount {0};
+        inline static std::size_t moveCount {0};
+        inline static std::size_t assignCount {0};
+
+        static void Reset() noexcept
+        {
+            copyCount   = 0;
+            moveCount   = 0;
+            assignCount = 0;
+        }
+
+        static char* copy(char* destination, const char* source, std::size_t count) noexcept
+        {
+            copyCount += count;
+            return std::char_traits<char>::copy(destination, source, count);
+        }
+
+        static char* move(char* destination, const char* source, std::size_t count) noexcept
+        {
+            moveCount += count;
+            return std::char_traits<char>::move(destination, source, count);
+        }
+
+        static void assign(char& destination, const char& source) noexcept
+        {
+            assignCount += 1;
+            std::char_traits<char>::assign(destination, source);
+        }
+    };
 }// namespace
 
 namespace NGIN::Memory
@@ -300,10 +332,11 @@ TEST_CASE("String default construction", "[Text][String]")
 
 TEST_CASE("String aliases keep heap metadata overlapped with SBO storage", "[Text][String]")
 {
-    CHECK(sizeof(NGIN::Text::String) <= 56U);
-    CHECK(sizeof(NGIN::Text::UTF8String) <= 56U);
-    CHECK(sizeof(NGIN::Text::WString) <= 56U);
-    CHECK(sizeof(NGIN::Text::UTF16String) <= 56U);
+    CHECK(sizeof(NGIN::Text::String) <= 40U);
+    CHECK(sizeof(NGIN::Text::UTF8String) <= 40U);
+    CHECK(sizeof(NGIN::Text::WString) <= 40U);
+    CHECK(sizeof(NGIN::Text::UTF16String) <= 40U);
+    CHECK(sizeof(NGIN::Text::UTF32String) <= 40U);
     CHECK(sizeof(NGIN::Text::AnsiString) <= 24U);
     CHECK(sizeof(NGIN::Text::AsciiString) <= 24U);
 }
@@ -1083,6 +1116,32 @@ TEST_CASE("String supports traits-aware comparisons", "[Text][String]")
     CHECK(value.FindFirstOf("xyzl") == 2U);
     CHECK(value.FindFirstNotOf("he") == 2U);
     CHECK(value.FindLastNotOf("lo") == 1U);
+}
+
+TEST_CASE("String raw memory fast paths do not bypass custom traits", "[Text][String]")
+{
+    using InstrumentedString = NGIN::Text::BasicString<char,
+                                                       16,
+                                                       NGIN::Memory::SystemAllocator,
+                                                       NGIN::Text::DefaultGrowthPolicy,
+                                                       InstrumentedTraits>;
+
+    InstrumentedTraits::Reset();
+    InstrumentedString value("abcdef");
+    CHECK(value.View() == InstrumentedString::view_type {"abcdef", 6});
+    CHECK(InstrumentedTraits::copyCount > 0U);
+
+    InstrumentedTraits::Reset();
+    value.Append(3, 'x');
+    CHECK(value.View() == InstrumentedString::view_type {"abcdefxxx", 9});
+    CHECK(InstrumentedTraits::assignCount == 3U);
+
+    std::string        large(80, 'q');
+    InstrumentedString heapValue(large.c_str());
+    InstrumentedTraits::Reset();
+    heapValue.Assign(heapValue.Data() + 1, 40);
+    CHECK(heapValue.Size() == 40U);
+    CHECK(InstrumentedTraits::moveCount == 40U);
 }
 
 TEST_CASE("String relational operators are routed through Compare", "[Text][String]")

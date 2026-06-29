@@ -3,12 +3,18 @@
 #include <iostream>
 #include <random>
 #include <string>
+#include <string_view>
 #include <vector>
 
 using NGIN::Benchmark;
 using NGIN::BenchmarkContext;
 using NGIN::Text::String;
 using NGIN::Units::Milliseconds;
+
+using StringSBO24 = NGIN::Text::BasicString<char, 24, NGIN::Memory::SystemAllocator, NGIN::Text::DefaultGrowthPolicy>;
+using StringSBO32 = NGIN::Text::BasicString<char, 32, NGIN::Memory::SystemAllocator, NGIN::Text::DefaultGrowthPolicy>;
+using StringSBO48 = NGIN::Text::BasicString<char, 48, NGIN::Memory::SystemAllocator, NGIN::Text::DefaultGrowthPolicy>;
+using StringSBO56 = NGIN::Text::BasicString<char, 56, NGIN::Memory::SystemAllocator, NGIN::Text::DefaultGrowthPolicy>;
 
 // Helper to generate random strings
 template<typename StrType>
@@ -38,6 +44,74 @@ std::vector<StrType> make_string_vector(std::initializer_list<std::string> value
     return result;
 }
 
+template<typename StrType>
+void register_sbo_candidate_benchmarks(std::string_view label, size_t count)
+{
+    const std::string prefix(label);
+    const std::string fit30(30, 'm');
+    const std::string fit44(44, 'n');
+
+    Benchmark::Register([count](BenchmarkContext& ctx) {
+        ctx.start();
+        for (size_t i = 0; i < count; ++i)
+        {
+            StrType s("shortstr");
+            ctx.doNotOptimize(s);
+        }
+        ctx.stop();
+    },
+                        prefix + " short construction");
+
+    Benchmark::Register([count](BenchmarkContext& ctx) {
+        std::vector<StrType> src(count, StrType("shortstr"));
+        ctx.start();
+        for (size_t i = 0; i < count; ++i)
+        {
+            StrType s = src[i];
+            ctx.doNotOptimize(s);
+        }
+        ctx.stop();
+    },
+                        prefix + " short copy");
+
+    Benchmark::Register([count, fit30](BenchmarkContext& ctx) {
+        ctx.start();
+        for (size_t i = 0; i < count; ++i)
+        {
+            StrType s(fit30.c_str());
+            ctx.doNotOptimize(s);
+        }
+        ctx.stop();
+    },
+                        prefix + " len30 construction");
+
+    Benchmark::Register([count, fit44](BenchmarkContext& ctx) {
+        ctx.start();
+        for (size_t i = 0; i < count; ++i)
+        {
+            StrType s(fit44.c_str());
+            ctx.doNotOptimize(s);
+        }
+        ctx.stop();
+    },
+                        prefix + " len44 construction");
+
+    Benchmark::Register([count](BenchmarkContext& ctx) {
+        ctx.start();
+        for (size_t i = 0; i < count; ++i)
+        {
+            StrType s;
+            s.Append("abcdefghij");
+            s.Append("klmnopqrst");
+            s.Append("uvwxyz0123");
+            s.Append("456789ABCD");
+            ctx.doNotOptimize(s);
+        }
+        ctx.stop();
+    },
+                        prefix + " append to 40");
+}
+
 int main()
 {
     constexpr size_t N        = 10000;
@@ -48,7 +122,16 @@ int main()
               << ", NGIN::Text::String=" << sizeof(String)
               << ", NGIN::Text::AnsiString=" << sizeof(NGIN::Text::AnsiString)
               << ", NGIN::Text::WString=" << sizeof(NGIN::Text::WString)
-              << ", NGIN::Text::UTF16String=" << sizeof(NGIN::Text::UTF16String) << '\n';
+              << ", NGIN::Text::UTF16String=" << sizeof(NGIN::Text::UTF16String)
+              << ", SBO24=" << sizeof(StringSBO24)
+              << ", SBO32=" << sizeof(StringSBO32)
+              << ", SBO48=" << sizeof(StringSBO48)
+              << ", SBO56=" << sizeof(StringSBO56) << '\n';
+
+    register_sbo_candidate_benchmarks<StringSBO24>("NGIN::String SBO24", N);
+    register_sbo_candidate_benchmarks<StringSBO32>("NGIN::String SBO32", N);
+    register_sbo_candidate_benchmarks<StringSBO48>("NGIN::String SBO48", N);
+    register_sbo_candidate_benchmarks<StringSBO56>("NGIN::String SBO56", N);
 
     // --- Construction Benchmarks ---
     Benchmark::Register([](BenchmarkContext& ctx) {
