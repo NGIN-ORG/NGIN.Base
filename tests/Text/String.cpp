@@ -6,9 +6,12 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cctype>
+#include <cstdint>
 #include <cstring>
+#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 
 using NGIN::Text::String;
 
@@ -102,6 +105,98 @@ namespace
         int Id() const noexcept { return id; }
     };
 
+    struct TaggedAllocationLog
+    {
+        std::size_t allocationCount {0};
+        std::size_t deallocationCount {0};
+        std::size_t mismatchedDeallocationCount {0};
+    };
+
+    struct StrictSwapAllocator
+    {
+        struct Header
+        {
+            int         ownerId {0};
+            std::size_t totalBytes {0};
+            std::size_t alignment {0};
+        };
+
+        NGIN::Memory::SystemAllocator inner {};
+        TaggedAllocationLog*          log {nullptr};
+        int                           id {0};
+
+        StrictSwapAllocator() = default;
+        StrictSwapAllocator(TaggedAllocationLog& stats, int value) : log(&stats), id(value) {}
+
+        void* Allocate(std::size_t bytes, std::size_t align) noexcept
+        {
+            const std::size_t actualAlign = align > alignof(Header) ? align : alignof(Header);
+            const std::size_t totalBytes  = sizeof(Header) + bytes;
+            void* const       raw         = inner.Allocate(totalBytes, actualAlign);
+            if (raw == nullptr)
+                return nullptr;
+
+            auto* const header = static_cast<Header*>(raw);
+            header->ownerId    = id;
+            header->totalBytes = totalBytes;
+            header->alignment  = actualAlign;
+            if (log != nullptr)
+                log->allocationCount += 1;
+
+            return static_cast<void*>(header + 1);
+        }
+
+        void Deallocate(void* ptr, std::size_t, std::size_t) noexcept
+        {
+            if (ptr == nullptr)
+                return;
+
+            auto* const header = static_cast<Header*>(ptr) - 1;
+            if (log != nullptr)
+            {
+                log->deallocationCount += 1;
+                if (header->ownerId != id)
+                    log->mismatchedDeallocationCount += 1;
+            }
+
+            inner.Deallocate(static_cast<void*>(header), header->totalBytes, header->alignment);
+        }
+
+        int Id() const noexcept { return id; }
+    };
+
+    struct ThrowingSwapAllocator
+    {
+        NGIN::Memory::SystemAllocator inner {};
+        int                           id {0};
+        bool                          throwOnSwap {false};
+
+        ThrowingSwapAllocator() = default;
+        ThrowingSwapAllocator(int value, bool shouldThrow = false) : id(value), throwOnSwap(shouldThrow) {}
+
+        void* Allocate(std::size_t bytes, std::size_t align) noexcept
+        {
+            return inner.Allocate(bytes, align);
+        }
+
+        void Deallocate(void* ptr, std::size_t bytes, std::size_t align) noexcept
+        {
+            inner.Deallocate(ptr, bytes, align);
+        }
+
+        int Id() const noexcept { return id; }
+
+        friend void swap(ThrowingSwapAllocator& left, ThrowingSwapAllocator& right)
+        {
+            if (left.throwOnSwap || right.throwOnSwap)
+                throw std::runtime_error("allocator swap failed");
+
+            using std::swap;
+            swap(left.id, right.id);
+            swap(left.throwOnSwap, right.throwOnSwap);
+        }
+    };
+
     struct TrackingRef
     {
         NGIN::Memory::Tracking<NGIN::Memory::SystemAllocator>* tracker {nullptr};
@@ -174,6 +269,24 @@ namespace NGIN::Memory
         static constexpr bool PropagateOnSwap           = false;
         static constexpr bool IsAlwaysEqual             = false;
     };
+
+    template<>
+    struct AllocatorPropagationTraits<StrictSwapAllocator>
+    {
+        static constexpr bool PropagateOnCopyAssignment = false;
+        static constexpr bool PropagateOnMoveAssignment = false;
+        static constexpr bool PropagateOnSwap           = false;
+        static constexpr bool IsAlwaysEqual             = false;
+    };
+
+    template<>
+    struct AllocatorPropagationTraits<ThrowingSwapAllocator>
+    {
+        static constexpr bool PropagateOnCopyAssignment = false;
+        static constexpr bool PropagateOnMoveAssignment = false;
+        static constexpr bool PropagateOnSwap           = true;
+        static constexpr bool IsAlwaysEqual             = false;
+    };
 }// namespace NGIN::Memory
 
 TEST_CASE("String default construction", "[Text][String]")
@@ -183,6 +296,16 @@ TEST_CASE("String default construction", "[Text][String]")
     CHECK(value.Empty());
     CHECK(CStrEqual(value.CStr(), ""));
     CHECK(value.View().empty());
+}
+
+TEST_CASE("String aliases keep heap metadata overlapped with SBO storage", "[Text][String]")
+{
+    CHECK(sizeof(NGIN::Text::String) <= 56U);
+    CHECK(sizeof(NGIN::Text::UTF8String) <= 56U);
+    CHECK(sizeof(NGIN::Text::WString) <= 56U);
+    CHECK(sizeof(NGIN::Text::UTF16String) <= 56U);
+    CHECK(sizeof(NGIN::Text::AnsiString) <= 24U);
+    CHECK(sizeof(NGIN::Text::AsciiString) <= 24U);
 }
 
 TEST_CASE("String handles null pointer construction", "[Text][String]")
@@ -539,7 +662,8 @@ TEST_CASE("String search APIs cover forward and reverse semantics", "[Text][Stri
         CHECK(value.Find("ana", 2) == 3U);
         CHECK(value.Find("xyz") == String::npos);
         CHECK(value.Find(String::view_type {}) == 0U);
-        CHECK(value.Find(String::view_type {}, value.Size() + 4) == value.Size());
+        CHECK(value.Find(String::view_type {}, value.Size()) == value.Size());
+        CHECK(value.Find(String::view_type {}, value.Size() + 4) == String::npos);
 
         CHECK(value.RFind('b') == 6U);
         CHECK(value.RFind("ana") == 3U);
@@ -576,6 +700,17 @@ TEST_CASE("String search APIs cover forward and reverse semantics", "[Text][Stri
         CHECK(padded.FindLastNotOf(String::view_type {}) == padded.Size() - 1);
         CHECK(padded.FindLastNotOf(" alpha") == String::npos);
     }
+}
+
+TEST_CASE("String Find empty needle follows string_view position semantics", "[Text][String]")
+{
+    String value("abc");
+
+    CHECK(value.Find(String::view_type {}, 0) == 0U);
+    CHECK(value.Find(String::view_type {}, 2) == 2U);
+    CHECK(value.Find(String::view_type {}, value.Size()) == value.Size());
+    CHECK(value.Find(String::view_type {}, value.Size() + 1) == String::npos);
+    CHECK(value.RFind(String::view_type {}, value.Size() + 1) == value.Size());
 }
 
 TEST_CASE("String search supports heap-backed strings", "[Text][String]")
@@ -842,6 +977,45 @@ TEST_CASE("String swap respects allocator propagation traits", "[Text][String]")
     }
 }
 
+TEST_CASE("String non-propagating swap deallocates with destination allocators", "[Text][String]")
+{
+    using StrictStr = NGIN::Text::BasicString<char, 16, StrictSwapAllocator>;
+
+    TaggedAllocationLog log {};
+    {
+        std::string leftValue(80, 'L');
+        std::string rightValue(72, 'R');
+        StrictStr   left(leftValue.c_str(), StrictSwapAllocator {log, 1});
+        StrictStr   right(rightValue.c_str(), StrictSwapAllocator {log, 2});
+
+        left.Swap(right);
+
+        CHECK(left.View() == std::string_view(rightValue));
+        CHECK(right.View() == std::string_view(leftValue));
+        CHECK(left.GetAllocator().Id() == 1);
+        CHECK(right.GetAllocator().Id() == 2);
+    }
+
+    CHECK(log.allocationCount == log.deallocationCount);
+    CHECK(log.mismatchedDeallocationCount == 0U);
+}
+
+TEST_CASE("String propagating swap preserves state when allocator swap throws", "[Text][String]")
+{
+    using ThrowStr = NGIN::Text::BasicString<char, 16, ThrowingSwapAllocator>;
+
+    std::string leftValue(80, 'A');
+    std::string rightValue(72, 'B');
+    ThrowStr    left(leftValue.c_str(), ThrowingSwapAllocator {1, true});
+    ThrowStr    right(rightValue.c_str(), ThrowingSwapAllocator {2, false});
+
+    CHECK_THROWS_AS(left.Swap(right), std::runtime_error);
+    CHECK(left.View() == std::string_view(leftValue));
+    CHECK(right.View() == std::string_view(rightValue));
+    CHECK(left.GetAllocator().Id() == 1);
+    CHECK(right.GetAllocator().Id() == 2);
+}
+
 TEST_CASE("String View and At provide bounded access", "[Text][String]")
 {
     String value("hello");
@@ -953,7 +1127,7 @@ TEST_CASE("String exposes forward and reverse iterators across storage modes", "
 {
     SECTION("small")
     {
-        String value("abc");
+        String      value("abc");
         std::string forward;
         for (char ch: value)
             forward.push_back(ch);
@@ -999,4 +1173,97 @@ TEST_CASE("String reverse two-byte search is bounds-safe at the tail", "[Text][S
 
     String single("a");
     CHECK(single.RFind("ab") == String::npos);
+}
+
+TEST_CASE("String deterministic mutations match std::string", "[Text][String]")
+{
+    using SmallStr = NGIN::Text::BasicString<char, 16>;
+
+    SmallStr      actual("seed");
+    std::string   expected("seed");
+    std::uint32_t state = 0xC0FFEEu;
+
+    auto next = [&state]() {
+        state = state * 1664525u + 1013904223u;
+        return state;
+    };
+
+    auto toStringFind = [](std::size_t value) {
+        return value == std::string::npos ? SmallStr::npos : static_cast<SmallStr::size_type>(value);
+    };
+
+    auto assertMatches = [&]() {
+        CHECK(actual.Size() == expected.size());
+        CHECK(actual.View() == std::string_view(expected.data(), expected.size()));
+        REQUIRE(actual.Data() != nullptr);
+        CHECK(actual.Data()[actual.Size()] == '\0');
+
+        const std::string_view needles[] = {
+                std::string_view {},
+                std::string_view {"a", 1},
+                std::string_view {"bc", 2},
+                std::string_view {"xyz", 3},
+        };
+        const std::size_t positions[] = {
+                0,
+                expected.size() / 2,
+                expected.size(),
+                expected.size() + 3,
+        };
+
+        for (std::string_view needle: needles)
+        {
+            for (std::size_t pos: positions)
+            {
+                CHECK(actual.Find(SmallStr::view_type {needle.data(), needle.size()}, pos) ==
+                      toStringFind(expected.find(needle, pos)));
+            }
+        }
+    };
+
+    assertMatches();
+    for (std::size_t step = 0; step < 160; ++step)
+    {
+        switch (next() % 4U)
+        {
+            case 0: {
+                const std::size_t count = next() % 12U;
+                const char        ch    = static_cast<char>('a' + (next() % 26U));
+                actual.Append(count, ch);
+                expected.append(count, ch);
+                break;
+            }
+            case 1: {
+                const std::size_t pos   = next() % (expected.size() + 1U);
+                const std::size_t count = next() % 8U;
+                const char        ch    = static_cast<char>('a' + (next() % 26U));
+                actual.Insert(pos, count, ch);
+                expected.insert(pos, count, ch);
+                break;
+            }
+            case 2: {
+                if (expected.empty())
+                    break;
+
+                const std::size_t pos   = next() % expected.size();
+                const std::size_t count = next() % (expected.size() - pos + 5U);
+                actual.Erase(pos, count);
+                expected.erase(pos, count);
+                break;
+            }
+            default: {
+                const std::size_t pos        = next() % (expected.size() + 1U);
+                const std::size_t eraseCount = pos == expected.size() ? 0U : next() % (expected.size() - pos + 4U);
+                const std::size_t fillCount  = next() % 14U;
+                const char        ch         = static_cast<char>('a' + (next() % 26U));
+                const std::string replacement(fillCount, ch);
+
+                actual.Replace(pos, eraseCount, SmallStr::view_type {replacement.data(), replacement.size()});
+                expected.replace(pos, eraseCount, replacement);
+                break;
+            }
+        }
+
+        assertMatches();
+    }
 }
