@@ -71,6 +71,7 @@ namespace NGIN::Text
     class BasicString
     {
         static_assert(std::is_trivial_v<CharT>, "BasicString requires a trivial character type.");
+        static_assert(std::is_unsigned_v<UIntSize>, "BasicString requires an unsigned size_type for high-bit tagging.");
         static_assert(SBOBytes >= sizeof(CharT), "SBOBytes must be large enough for a terminator.");
         static_assert(std::same_as<typename Traits::char_type, CharT>,
                       "Traits::char_type must match CharT.");
@@ -100,6 +101,9 @@ namespace NGIN::Text
         static constexpr size_type npos = static_cast<size_type>(view_type::npos);
 
     private:
+        static constexpr size_type HeapFlag = size_type {1} << (std::numeric_limits<size_type>::digits - 1);
+        static constexpr size_type SizeMask = ~HeapFlag;
+
         static constexpr size_type ComputeSboChars() noexcept
         {
             const size_type totalChars = SBOBytes / sizeof(CharT);
@@ -112,30 +116,32 @@ namespace NGIN::Text
 
         static_assert(sizeof(SmallStorage) <= SBOBytes,
                       "SBOBytes is too small for the requested small buffer.");
+        static_assert(sbo_chars <= SizeMask,
+                      "SBO capacity must fit in the packed size field.");
 
     public:
         BasicString() noexcept(std::is_nothrow_default_constructible_v<Alloc>)
             : m_allocator()
         {
-            ResetToEmptySmall();
+            BecomeEmptySmallAfterHeapReleased();
         }
 
         explicit BasicString(const Alloc& alloc) noexcept
             : m_allocator(alloc)
         {
-            ResetToEmptySmall();
+            BecomeEmptySmallAfterHeapReleased();
         }
 
         explicit BasicString(Alloc&& alloc) noexcept(std::is_nothrow_move_constructible_v<Alloc>)
             : m_allocator(std::move(alloc))
         {
-            ResetToEmptySmall();
+            BecomeEmptySmallAfterHeapReleased();
         }
 
         BasicString(const CharT* cstr, const Alloc& alloc = Alloc())
             : m_allocator(alloc)
         {
-            ResetToEmptySmall();
+            BecomeEmptySmallAfterHeapReleased();
             if (cstr != nullptr)
                 InitFromView(view_type {cstr, static_cast<size_type>(traits_type::length(cstr))});
         }
@@ -143,35 +149,35 @@ namespace NGIN::Text
         BasicString(const CharT* data, size_type count, const Alloc& alloc = Alloc())
             : m_allocator(alloc)
         {
-            ResetToEmptySmall();
+            BecomeEmptySmallAfterHeapReleased();
             InitFromView(MakeBoundedView(data, count, "BasicString constructor"));
         }
 
         BasicString(view_type sv, const Alloc& alloc = Alloc())
             : m_allocator(alloc)
         {
-            ResetToEmptySmall();
+            BecomeEmptySmallAfterHeapReleased();
             InitFromView(sv);
         }
 
         BasicString(size_type count, CharT ch, const Alloc& alloc = Alloc())
             : m_allocator(alloc)
         {
-            ResetToEmptySmall();
+            BecomeEmptySmallAfterHeapReleased();
             InitFilled(count, ch);
         }
 
         BasicString(const ThisType& other)
             : m_allocator(other.m_allocator)
         {
-            ResetToEmptySmall();
+            BecomeEmptySmallAfterHeapReleased();
             CopyConstructFrom(other);
         }
 
         BasicString(ThisType&& other) noexcept(std::is_nothrow_move_constructible_v<Alloc>)
             : m_allocator(std::move(other.m_allocator))
         {
-            ResetToEmptySmall();
+            BecomeEmptySmallAfterHeapReleased();
             MoveConstructFrom(std::move(other));
         }
 
@@ -604,10 +610,8 @@ namespace NGIN::Text
                 ThisType newThis(other.View(), m_allocator);
                 ThisType newOther(View(), other.m_allocator);
 
-                DestroyHeapIfAny();
-                other.DestroyHeapIfAny();
-                ResetToEmptySmall();
-                other.ResetToEmptySmall();
+                DestroyAndBecomeEmptySmall();
+                other.DestroyAndBecomeEmptySmall();
                 SwapValueState(newThis);
                 other.SwapValueState(newOther);
             }
@@ -1041,8 +1045,6 @@ namespace NGIN::Text
 
     private:
         static constexpr size_type SmallCharSetLinearThreshold = 4;
-        static constexpr size_type HeapFlag                    = size_type {1} << (std::numeric_limits<size_type>::digits - 1);
-        static constexpr size_type SizeMask                    = ~HeapFlag;
 
         [[nodiscard]] static constexpr size_type MaxCapacity() noexcept
         {
@@ -1055,7 +1057,7 @@ namespace NGIN::Text
             return std::same_as<CharT, char> && std::same_as<Traits, std::char_traits<char>>;
         }
 
-        [[nodiscard]] static constexpr bool CanUseRawCharOperations() noexcept
+        [[nodiscard]] static constexpr bool UsesStandardCharTraits() noexcept
         {
             return std::same_as<Traits, std::char_traits<CharT>>;
         }
@@ -1102,7 +1104,7 @@ namespace NGIN::Text
             if (count == 0 || destination == source)
                 return;
 
-            if constexpr (CanUseRawCharOperations())
+            if constexpr (UsesStandardCharTraits())
                 std::memcpy(static_cast<void*>(destination), static_cast<const void*>(source), count * sizeof(CharT));
             else
                 traits_type::copy(destination, source, count);
@@ -1113,7 +1115,7 @@ namespace NGIN::Text
             if (count == 0 || destination == source)
                 return;
 
-            if constexpr (CanUseRawCharOperations())
+            if constexpr (UsesStandardCharTraits())
                 std::memmove(static_cast<void*>(destination), static_cast<const void*>(source), count * sizeof(CharT));
             else
                 traits_type::move(destination, source, count);
@@ -1124,11 +1126,11 @@ namespace NGIN::Text
             if (count == 0)
                 return;
 
-            if constexpr (CanUseRawCharOperations() && sizeof(CharT) == 1)
+            if constexpr (UsesStandardCharTraits() && sizeof(CharT) == 1)
             {
                 std::memset(static_cast<void*>(destination), static_cast<unsigned char>(value), count);
             }
-            else if constexpr (CanUseRawCharOperations())
+            else if constexpr (UsesStandardCharTraits())
             {
                 std::fill_n(destination, count, value);
             }
@@ -1321,13 +1323,21 @@ namespace NGIN::Text
                 DeallocateWith(m_allocator, HeapData(), HeapCapacity());
         }
 
-        void ResetToEmptySmall() noexcept
+        // Storage alternatives are trivially destructible; switching the active union member only requires
+        // placement construction after heap ownership has been released or transferred.
+        void BecomeEmptySmallAfterHeapReleased() noexcept
         {
             if (!IsSmall())
                 std::construct_at(std::addressof(m_storage.small));
 
             m_sizeAndFlags = 0;
             SetSmallSize(0);
+        }
+
+        void DestroyAndBecomeEmptySmall() noexcept
+        {
+            DestroyHeapIfAny();
+            BecomeEmptySmallAfterHeapReleased();
         }
 
         void SwapValueState(ThisType& other) noexcept
@@ -1376,8 +1386,7 @@ namespace NGIN::Text
 
         void CommitSmall(const CharT* source, size_type count)
         {
-            DestroyHeapIfAny();
-            ResetToEmptySmall();
+            DestroyAndBecomeEmptySmall();
             CopyChars(SmallData(), source, count);
             SetSmallSize(count);
         }
@@ -1439,13 +1448,13 @@ namespace NGIN::Text
             {
                 CopyChars(SmallData(), other.SmallData(), other.RawSize() + 1);
                 SetSmallSize(other.RawSize());
-                other.ResetToEmptySmall();
+                other.BecomeEmptySmallAfterHeapReleased();
                 return;
             }
 
             std::construct_at(std::addressof(m_storage.heap), other.m_storage.heap);
             m_sizeAndFlags = other.RawSize() | HeapFlag;
-            other.ResetToEmptySmall();
+            other.BecomeEmptySmallAfterHeapReleased();
         }
 
         void CopyAssignFrom(const ThisType& other)
@@ -1455,15 +1464,13 @@ namespace NGIN::Text
                 if constexpr (std::is_nothrow_copy_assignable_v<Alloc>)
                 {
                     ThisType temp(other);
-                    DestroyHeapIfAny();
+                    DestroyAndBecomeEmptySmall();
                     m_allocator = other.m_allocator;
-                    ResetToEmptySmall();
                     SwapValueState(temp);
                 }
                 else
                 {
-                    DestroyHeapIfAny();
-                    ResetToEmptySmall();
+                    DestroyAndBecomeEmptySmall();
                     m_allocator = other.m_allocator;
                     CopyConstructFrom(other);
                 }
@@ -1486,23 +1493,20 @@ namespace NGIN::Text
                 if constexpr (std::is_nothrow_move_assignable_v<Alloc>)
                 {
                     ThisType temp(std::move(other));
-                    DestroyHeapIfAny();
+                    DestroyAndBecomeEmptySmall();
                     m_allocator = std::move(temp.m_allocator);
-                    ResetToEmptySmall();
                     SwapValueState(temp);
                 }
                 else
                 {
-                    DestroyHeapIfAny();
-                    ResetToEmptySmall();
+                    DestroyAndBecomeEmptySmall();
                     m_allocator = std::move(other.m_allocator);
                     MoveConstructFrom(std::move(other));
                 }
             }
             else if constexpr (propagation::IsAlwaysEqual)
             {
-                DestroyHeapIfAny();
-                ResetToEmptySmall();
+                DestroyAndBecomeEmptySmall();
                 SwapValueState(other);
             }
             else

@@ -15,6 +15,14 @@
 
 using NGIN::Text::String;
 
+static_assert(sizeof(NGIN::Text::String) <= 40);
+static_assert(sizeof(NGIN::Text::UTF8String) <= 40);
+static_assert(sizeof(NGIN::Text::WString) <= 40);
+static_assert(sizeof(NGIN::Text::UTF16String) <= 40);
+static_assert(sizeof(NGIN::Text::UTF32String) <= 40);
+static_assert(sizeof(NGIN::Text::AnsiString) <= 24);
+static_assert(sizeof(NGIN::Text::AsciiString) <= 24);
+
 namespace
 {
     bool CStrEqual(const char* left, const char* right)
@@ -22,6 +30,16 @@ namespace
         if (left == nullptr || right == nullptr)
             return left == right;
         return std::strcmp(left, right) == 0;
+    }
+
+    template<class TString>
+    void CheckStringState(const TString& value, std::string_view expected)
+    {
+        CHECK(value.Size() == expected.size());
+        CHECK(value.View() == typename TString::view_type {expected.data(), expected.size()});
+        REQUIRE(value.Data() != nullptr);
+        CHECK(value.Capacity() >= value.Size());
+        CHECK(value.CStr()[value.Size()] == '\0');
     }
 
     struct SwapAllocator
@@ -945,6 +963,60 @@ TEST_CASE("String append handles overlapping views", "[Text][String]")
     }
 }
 
+TEST_CASE("String packed storage handles representation transitions", "[Text][String]")
+{
+    using SmallStr = NGIN::Text::BasicString<char, 16>;
+
+    SECTION("small to heap through append")
+    {
+        SmallStr value("small");
+        value.Append("0123456789abcdef");
+        CheckStringState(value, "small0123456789abcdef");
+    }
+
+    SECTION("heap to small through assign")
+    {
+        SmallStr value(std::string(80, 'h').c_str());
+        value.Assign("tiny");
+        CheckStringState(value, "tiny");
+        CHECK(value.Capacity() == 15U);
+    }
+
+    SECTION("heap to small through shrink")
+    {
+        SmallStr value(std::string(80, 's').c_str());
+        value.Resize(8);
+        value.ShrinkToFit();
+        CheckStringState(value, "ssssssss");
+        CHECK(value.Capacity() == 15U);
+    }
+
+    SECTION("heap-backed empty remains valid")
+    {
+        SmallStr value("seed");
+        value.ReserveExact(80);
+        value.Clear();
+        CheckStringState(value, "");
+        CHECK(value.Capacity() == 80U);
+    }
+
+    SECTION("self append crosses into heap")
+    {
+        SmallStr value("abcdefghi");
+        value.Append(value.View());
+        CheckStringState(value, "abcdefghiabcdefghi");
+    }
+
+    SECTION("self replace can shrink heap to small")
+    {
+        SmallStr   value("abcdefghijklmnopqrstuvwxyz");
+        const auto view = value.View();
+        value.Replace(0, value.Size(), view.substr(3, 10));
+        CheckStringState(value, "defghijklm");
+        CHECK(value.Capacity() == 15U);
+    }
+}
+
 TEST_CASE("String shrink-to-fit can release heap storage back to SBO", "[Text][String]")
 {
     using Tracked  = NGIN::Memory::Tracking<NGIN::Memory::SystemAllocator>;
@@ -1010,27 +1082,112 @@ TEST_CASE("String swap respects allocator propagation traits", "[Text][String]")
     }
 }
 
+TEST_CASE("String swap covers small and heap representation pairs", "[Text][String]")
+{
+    using SmallStr = NGIN::Text::BasicString<char, 16>;
+
+    SECTION("small swaps with heap")
+    {
+        SmallStr small("tiny");
+        SmallStr heap(std::string(80, 'H').c_str());
+
+        small.Swap(heap);
+
+        CheckStringState(small, std::string(80, 'H'));
+        CheckStringState(heap, "tiny");
+    }
+
+    SECTION("heap swaps with small")
+    {
+        SmallStr heap(std::string(72, 'Q').c_str());
+        SmallStr small("abc");
+
+        heap.Swap(small);
+
+        CheckStringState(heap, "abc");
+        CheckStringState(small, std::string(72, 'Q'));
+    }
+
+    SECTION("empty small swaps with heap")
+    {
+        SmallStr small;
+        SmallStr heap(std::string(64, 'E').c_str());
+
+        small.Swap(heap);
+
+        CheckStringState(small, std::string(64, 'E'));
+        CheckStringState(heap, "");
+    }
+
+    SECTION("full small swaps with heap")
+    {
+        SmallStr small("123456789012345");
+        SmallStr heap(std::string(64, 'F').c_str());
+
+        small.Swap(heap);
+
+        CheckStringState(small, std::string(64, 'F'));
+        CheckStringState(heap, "123456789012345");
+    }
+
+    SECTION("heap-backed empty swaps with small")
+    {
+        SmallStr heap(std::string(64, 'Z').c_str());
+        heap.Clear();
+        SmallStr small("abc");
+
+        heap.Swap(small);
+
+        CheckStringState(heap, "abc");
+        CheckStringState(small, "");
+        CHECK(small.Capacity() >= 64U);
+    }
+}
+
 TEST_CASE("String non-propagating swap deallocates with destination allocators", "[Text][String]")
 {
     using StrictStr = NGIN::Text::BasicString<char, 16, StrictSwapAllocator>;
 
-    TaggedAllocationLog log {};
+    SECTION("heap strings")
     {
-        std::string leftValue(80, 'L');
-        std::string rightValue(72, 'R');
-        StrictStr   left(leftValue.c_str(), StrictSwapAllocator {log, 1});
-        StrictStr   right(rightValue.c_str(), StrictSwapAllocator {log, 2});
+        TaggedAllocationLog log {};
+        {
+            std::string leftValue(80, 'L');
+            std::string rightValue(72, 'R');
+            StrictStr   left(leftValue.c_str(), StrictSwapAllocator {log, 1});
+            StrictStr   right(rightValue.c_str(), StrictSwapAllocator {log, 2});
 
-        left.Swap(right);
+            left.Swap(right);
 
-        CHECK(left.View() == std::string_view(rightValue));
-        CHECK(right.View() == std::string_view(leftValue));
-        CHECK(left.GetAllocator().Id() == 1);
-        CHECK(right.GetAllocator().Id() == 2);
+            CHECK(left.View() == std::string_view(rightValue));
+            CHECK(right.View() == std::string_view(leftValue));
+            CHECK(left.GetAllocator().Id() == 1);
+            CHECK(right.GetAllocator().Id() == 2);
+        }
+
+        CHECK(log.allocationCount == log.deallocationCount);
+        CHECK(log.mismatchedDeallocationCount == 0U);
     }
 
-    CHECK(log.allocationCount == log.deallocationCount);
-    CHECK(log.mismatchedDeallocationCount == 0U);
+    SECTION("small and heap strings")
+    {
+        TaggedAllocationLog log {};
+        {
+            std::string heapValue(72, 'H');
+            StrictStr   small("tiny", StrictSwapAllocator {log, 1});
+            StrictStr   heap(heapValue.c_str(), StrictSwapAllocator {log, 2});
+
+            small.Swap(heap);
+
+            CheckStringState(small, heapValue);
+            CheckStringState(heap, "tiny");
+            CHECK(small.GetAllocator().Id() == 1);
+            CHECK(heap.GetAllocator().Id() == 2);
+        }
+
+        CHECK(log.allocationCount == log.deallocationCount);
+        CHECK(log.mismatchedDeallocationCount == 0U);
+    }
 }
 
 TEST_CASE("String propagating swap preserves state when allocator swap throws", "[Text][String]")
