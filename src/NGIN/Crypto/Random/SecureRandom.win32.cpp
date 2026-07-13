@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <limits>
 
+#include <windows.h>
 #include <bcrypt.h>
 
 namespace NGIN::Crypto::Random

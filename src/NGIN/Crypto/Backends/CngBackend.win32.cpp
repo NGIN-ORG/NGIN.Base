@@ -3,6 +3,7 @@
 #include <NGIN/Crypto/Memory/ZeroMemory.hpp>
 #include <NGIN/Crypto/Random/SecureRandom.hpp>
 
+#include <windows.h>
 #include <bcrypt.h>
 
 #include <limits>

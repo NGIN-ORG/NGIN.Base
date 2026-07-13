@@ -73,7 +73,7 @@ namespace NGIN::Crypto::Tokens
         bool                                    requireExpiration {true};
         bool                                    validateExpiration {true};
         bool                                    validateNotBefore {true};
-        std::initializer_list<std::string_view> requiredClaims {};
+        std::initializer_list<std::string_view> requiredClaims;
         JwtParseOptions                         parseOptions {};
     };
 

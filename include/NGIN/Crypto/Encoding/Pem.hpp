@@ -22,7 +22,7 @@ namespace NGIN::Crypto::Encoding
     struct PemParseOptions
     {
         /// @brief Optional allowlist of accepted PEM labels. An empty list accepts any syntactically valid label.
-        std::initializer_list<std::string_view> allowedLabels {};
+        std::initializer_list<std::string_view> allowedLabels;
 
         /// @brief Maximum decoded bytes per PEM block.
         NGIN::UIntSize maxDecodedBytes {1u << 20};
