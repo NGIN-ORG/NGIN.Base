@@ -58,7 +58,7 @@ int main()
     Benchmark::Register([&](BenchmarkContext& ctx) {
         ctx.start();
         auto doc = parser.parse(smallPadded);
-        ctx.doNotOptimize(doc.Error());
+        ctx.doNotOptimize(doc.error());
         ctx.stop();
     },
                         "simdjson small document");
@@ -66,7 +66,7 @@ int main()
     Benchmark::Register([&](BenchmarkContext& ctx) {
         ctx.start();
         auto doc = parser.parse(mediumPadded);
-        ctx.doNotOptimize(doc.Error());
+        ctx.doNotOptimize(doc.error());
         ctx.stop();
     },
                         "simdjson medium document");

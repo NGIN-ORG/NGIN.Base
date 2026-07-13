@@ -395,7 +395,7 @@ namespace NGIN::Containers
 
         [[nodiscard]] auto ShardIndex(const std::size_t hash) const noexcept -> size_type
         {
-            if constexpr (detail::IsPowerOfTwo(ShardCount))
+            if constexpr (detail::IsPowerOfTwoShardCount(ShardCount))
             {
                 return hash & (ShardCount - 1);
             }

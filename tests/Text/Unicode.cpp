@@ -34,7 +34,7 @@ TEST_CASE("Unicode decode primitives report detailed failures", "[Text][Unicode]
     const auto utf8 = DecodeUtf8(std::string_view("\xF0\x9F\x98\x80", 4));
     REQUIRE(utf8.error == EncodingError::None);
     CHECK(utf8.unitsConsumed == 4U);
-    CHECK(utf8.codePoint == U'😀');
+    CHECK(utf8.codePoint == U'\U0001F600');
 
     const auto truncated = DecodeUtf8(std::string_view("\xE2\x82", 2));
     CHECK(truncated.error == EncodingError::UnexpectedEnd);
@@ -45,7 +45,7 @@ TEST_CASE("Unicode decode primitives report detailed failures", "[Text][Unicode]
     const std::u16string surrogateUnits {static_cast<char16_t>(0xD834), static_cast<char16_t>(0xDD1E)};
     const auto           surrogate = DecodeUtf16(std::u16string_view {surrogateUnits.data(), surrogateUnits.size()});
     REQUIRE(surrogate.error == EncodingError::None);
-    CHECK(surrogate.codePoint == U'𝄞');
+    CHECK(surrogate.codePoint == U'\U0001D11E');
 
     const std::u16string unpairedUnits {static_cast<char16_t>(0xD834), u'A'};
     const auto           unpaired = DecodeUtf16(std::u16string_view {unpairedUnits.data(), unpairedUnits.size()});
@@ -110,8 +110,8 @@ TEST_CASE("Unicode UTF-8 view iterates code points and tracks strict errors", "[
 
     REQUIRE(codePoints.size() == 3U);
     CHECK(codePoints[0] == U'A');
-    CHECK(codePoints[1] == U'😀');
-    CHECK(codePoints[2] == U'å');
+    CHECK(codePoints[1] == U'\U0001F600');
+    CHECK(codePoints[2] == U'\u00E5');
     CHECK_FALSE(valid.HasError());
 
     Utf8View strictInvalid(std::string_view("\xE2\x82", 2), ErrorPolicy::Strict);

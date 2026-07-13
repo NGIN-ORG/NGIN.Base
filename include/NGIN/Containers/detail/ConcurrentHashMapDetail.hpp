@@ -320,7 +320,7 @@ namespace NGIN::Containers::detail
         Bucket*     buckets {nullptr};
     };
 
-    [[nodiscard]] constexpr auto IsPowerOfTwo(const std::size_t value) noexcept -> bool
+    [[nodiscard]] constexpr auto IsPowerOfTwoShardCount(const std::size_t value) noexcept -> bool
     {
         return value != 0 && (value & (value - 1)) == 0;
     }

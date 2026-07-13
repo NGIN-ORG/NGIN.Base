@@ -1656,7 +1656,11 @@ namespace NGIN::Text
 
         size_type                   m_sizeAndFlags {0};
         Storage                     m_storage {};
+#if defined(_MSC_VER)
+        [[msvc::no_unique_address]] Alloc m_allocator {};
+#else
         [[no_unique_address]] Alloc m_allocator {};
+#endif
     };
 
     template<class CharT, UIntSize SBOBytes, class Alloc, class Growth, class Traits>
