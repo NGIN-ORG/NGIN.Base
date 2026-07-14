@@ -5,7 +5,7 @@
 
 #if defined(_MSC_VER)
 #include <intrin.h>
-#elif defined(__has_include)
+#elif (defined(__x86_64__) || defined(__i386)) && defined(__has_include)
 #if __has_include(<immintrin.h>)
 #include <immintrin.h>
 #endif

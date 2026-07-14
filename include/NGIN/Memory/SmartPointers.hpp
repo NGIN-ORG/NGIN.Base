@@ -38,11 +38,12 @@ namespace NGIN::Memory
             std::size_t                 totalBytes {0};
             std::size_t                 allocAlignment {alignof(std::max_align_t)};
             T*                          objectPtr {nullptr};
+            void*                       destroyObjectPtr {nullptr};
             DestroyObjectFn             destroyObjectFn {nullptr};
 
             SharedControl() = default;
-            SharedControl(Alloc a, void* b, std::size_t bytes, std::size_t aln, T* obj, DestroyObjectFn destroyFn) noexcept
-                : alloc(std::move(a)), base(b), totalBytes(bytes), allocAlignment(aln), objectPtr(obj), destroyObjectFn(destroyFn) {}
+            SharedControl(Alloc a, void* b, std::size_t bytes, std::size_t aln, T* obj, void* destroyPtr, DestroyObjectFn destroyFn) noexcept
+                : alloc(std::move(a)), base(b), totalBytes(bytes), allocAlignment(aln), objectPtr(obj), destroyObjectPtr(destroyPtr), destroyObjectFn(destroyFn) {}
 
             void DestroyObject() noexcept(std::is_nothrow_destructible_v<T>)
             {
@@ -50,7 +51,7 @@ namespace NGIN::Memory
                 {
                     if (destroyObjectFn)
                     {
-                        destroyObjectFn(static_cast<void*>(objectPtr));
+                        destroyObjectFn(destroyObjectPtr ? destroyObjectPtr : static_cast<void*>(objectPtr));
                     }
                     else
                     {
@@ -73,6 +74,7 @@ namespace NGIN::Memory
                     totalBytes = 0;
                     allocAlignment = alignof(std::max_align_t);
                     objectPtr = nullptr;
+                    destroyObjectPtr = nullptr;
                     destroyObjectFn = nullptr;
 
                     allocCopy.Deallocate(basePtr, bytes, alignment);
@@ -430,6 +432,7 @@ namespace NGIN::Memory
             total,
             alignment,
             nullptr,
+            nullptr,
             +[](void* ptr) noexcept {
                 static_cast<T*>(ptr)->~T();
             });
@@ -451,6 +454,7 @@ namespace NGIN::Memory
         T* objPtr = std::construct_at(static_cast<T*>(objVoid), std::forward<Args>(args)...);
 
         ctrl->objectPtr = objPtr;
+        ctrl->destroyObjectPtr = objPtr;
         ctrl->strong.store(1, std::memory_order_relaxed);
         ctrl->weak.store(1, std::memory_order_relaxed);// control’s self-weak
 
@@ -485,6 +489,7 @@ namespace NGIN::Memory
             total,
             alignment,
             nullptr,
+            nullptr,
             +[](void* ptr) noexcept {
                 static_cast<TDerived*>(ptr)->~TDerived();
             });
@@ -502,6 +507,7 @@ namespace NGIN::Memory
         TDerived* derivedPtr = std::construct_at(static_cast<TDerived*>(objVoid), std::forward<Args>(args)...);
 
         ctrl->objectPtr = static_cast<TBase*>(derivedPtr);
+        ctrl->destroyObjectPtr = derivedPtr;
         ctrl->strong.store(1, std::memory_order_relaxed);
         ctrl->weak.store(1, std::memory_order_relaxed);
 

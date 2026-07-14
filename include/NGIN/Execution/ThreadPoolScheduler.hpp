@@ -37,6 +37,7 @@ namespace NGIN::Execution
                 threadCount = 1;
             }
             m_workers.resize(threadCount);
+            m_threads.reserve(threadCount);
 
             for (size_t i = 0; i < threadCount; ++i)
             {
