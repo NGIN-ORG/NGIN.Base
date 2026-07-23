@@ -3,6 +3,9 @@
 #include <NGIN/Text/String.hpp>
 #include <NGIN/Defines.hpp>
 #include <NGIN/Primitives.hpp>
+#include <NGIN/Serialization/Core/SourceSpan.hpp>
+
+#include <optional>
 
 namespace NGIN::Serialization
 {
@@ -24,6 +27,11 @@ namespace NGIN::Serialization
         HandlerRejected,
         OutOfMemory,
         MismatchedTag,
+        InvalidEncoding,
+        DuplicateName,
+        LimitExceeded,
+        UnsupportedConstruct,
+        InvalidDocumentStructure,
     };
 
     /// @brief Byte offset and optional line/column position for parse errors.
@@ -44,6 +52,11 @@ namespace NGIN::Serialization
     {
         ParseErrorCode code {ParseErrorCode::None};
         ParseLocation  location {};
+        SourceSpan     span {};
+        std::optional<SourceSpan> related {};
+        UInt64         consumerContext {0};
         String         message {};
     };
+
+    using ParseDiagnostic = ParseError;
 }// namespace NGIN::Serialization

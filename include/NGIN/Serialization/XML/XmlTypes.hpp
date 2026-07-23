@@ -1,129 +1,366 @@
 #pragma once
 
-#include <NGIN/Containers/HashMap.hpp>
-#include <NGIN/Containers/Vector.hpp>
 #include <NGIN/Defines.hpp>
-#include <NGIN/Memory/AllocatorRef.hpp>
-#include <NGIN/Memory/LinearAllocator.hpp>
 #include <NGIN/Primitives.hpp>
+#include <NGIN/Serialization/Core/SourceSpan.hpp>
 
-#include <cstring>
-#include <functional>
+#include <iterator>
+#include <memory>
+#include <optional>
+#include <span>
 #include <string_view>
 
-namespace NGIN::Serialization
+namespace NGIN::Serialization::XML
 {
-    struct XmlElement;
-
-    using XmlArena     = NGIN::Memory::LinearAllocator<>;
-    using XmlAllocator = NGIN::Memory::AllocatorRef<XmlArena>;
-
-    /// @brief XML attribute name/value pair.
-    struct XmlAttribute
+    namespace detail
     {
-        std::string_view name {};
-        std::string_view value {};
+        struct DocumentState;
+        struct DocumentAccess;
+        struct SyntaxState;
+    }
+
+    struct NodeId
+    {
+        UInt32 value {static_cast<UInt32>(-1)};
+
+        [[nodiscard]] constexpr bool IsValid() const noexcept
+        {
+            return value != static_cast<UInt32>(-1);
+        }
+
+        [[nodiscard]] friend constexpr bool operator==(NodeId, NodeId) noexcept = default;
     };
 
-    /// @brief XML node (element or text/CDATA).
-    struct XmlNode
+    enum class NodeKind : UInt8
     {
+        Element,
+        Text,
+        CData,
+        Comment,
+        ProcessingInstruction,
+    };
+
+    class ElementView;
+    class AttributeView;
+
+    class NGIN_BASE_API NodeView
+    {
+    public:
         enum class Type : UInt8
         {
             Element,
             Text,
             CData,
+            Comment,
+            ProcessingInstruction,
         };
 
-        static XmlNode MakeElement(XmlElement* element) noexcept
-        {
-            XmlNode node;
-            node.type    = Type::Element;
-            node.element = element;
-            node.text    = {};
-            return node;
-        }
+        NodeView() noexcept = default;
 
-        static XmlNode MakeText(std::string_view text) noexcept
-        {
-            XmlNode node;
-            node.type    = Type::Text;
-            node.element = nullptr;
-            node.text    = text;
-            return node;
-        }
+        Type               type {Type::Text};
+        const ElementView* element {nullptr};
+        std::string_view   text {};
 
-        static XmlNode MakeCData(std::string_view text) noexcept
-        {
-            XmlNode node;
-            node.type    = Type::CData;
-            node.element = nullptr;
-            node.text    = text;
-            return node;
-        }
-
-        Type             type {Type::Text};
-        XmlElement*      element {nullptr};
-        std::string_view text {};
-    };
-
-    /// @brief XML element with attributes and child nodes.
-    struct XmlElement
-    {
-        explicit XmlElement(XmlAllocator allocator)
-            : attributes(0, allocator), children(0, allocator), m_allocator(allocator)
-        {
-        }
-
-        std::string_view                                     name {};
-        NGIN::Containers::Vector<XmlAttribute, XmlAllocator> attributes;
-        NGIN::Containers::Vector<XmlNode, XmlAllocator>      children;
-
-        [[nodiscard]] const XmlAttribute* FindAttribute(std::string_view key) const noexcept;
-        bool                             BuildAttributeIndex() noexcept;
+        [[nodiscard]] bool                            IsValid() const noexcept;
+        [[nodiscard]] NodeKind                        Kind() const noexcept;
+        [[nodiscard]] SourceSpan                      Span() const noexcept;
+        [[nodiscard]] std::string_view                Name() const noexcept;
+        [[nodiscard]] std::optional<ElementView>      TryElement() const noexcept;
+        [[nodiscard]] const ElementView*              ElementPtr() const noexcept;
+        [[nodiscard]] std::optional<std::string_view> TryText() const noexcept;
 
     private:
-        using AttributeIndex = NGIN::Containers::FlatHashMap<std::string_view,
-                                                            UIntSize,
-                                                            std::hash<std::string_view>,
-                                                            std::equal_to<std::string_view>,
-                                                            XmlAllocator>;
+        friend class ElementView;
+        friend class Document;
+        friend class BorrowedDocument;
+        friend class ChildRange;
 
-        XmlAllocator   m_allocator;
-        AttributeIndex* m_index {nullptr};
+        NodeView(const detail::DocumentState* state, NodeId id) noexcept;
+
+        const detail::DocumentState* m_state {nullptr};
+        NodeId                       m_id {};
     };
 
-    /// @brief XML document owning an arena for parsed nodes.
-    class NGIN_BASE_API XmlDocument
+    class NGIN_BASE_API AttributeView
     {
     public:
-        explicit XmlDocument(UIntSize arenaBytes);
+        AttributeView() noexcept = default;
 
-        XmlDocument(XmlDocument&&) noexcept            = default;
-        XmlDocument& operator=(XmlDocument&&) noexcept = default;
-        XmlDocument(const XmlDocument&)                = delete;
-        XmlDocument& operator=(const XmlDocument&)     = delete;
+        std::string_view name {};
+        std::string_view value {};
 
-        [[nodiscard]] XmlElement*       Root() noexcept { return m_root; }
-        [[nodiscard]] const XmlElement* Root() const noexcept { return m_root; }
-
-        [[nodiscard]] XmlAllocator Allocator() noexcept { return XmlAllocator {m_arena}; }
-        [[nodiscard]] XmlArena&    Arena() noexcept { return m_arena; }
-
-        void SetRoot(XmlElement* root) noexcept { m_root = root; }
-        void AdoptInput(NGIN::Containers::Vector<NGIN::Byte>&& input) noexcept { m_inputStorage = std::move(input); }
-        [[nodiscard]] std::string_view InternString(std::string_view value) noexcept;
+        [[nodiscard]] bool             IsValid() const noexcept;
+        [[nodiscard]] std::string_view Name() const noexcept;
+        [[nodiscard]] std::string_view Value() const noexcept;
+        [[nodiscard]] SourceSpan       Span() const noexcept;
+        [[nodiscard]] SourceSpan       NameSpan() const noexcept;
+        [[nodiscard]] SourceSpan       ValueSpan() const noexcept;
 
     private:
-        using InternMap = NGIN::Containers::FlatHashMap<std::string_view,
-                                                        std::string_view,
-                                                        std::hash<std::string_view>,
-                                                        std::equal_to<std::string_view>,
-                                                        XmlAllocator>;
+        friend class ElementView;
+        friend class AttributeRange;
 
-        XmlArena                             m_arena;
-        XmlElement*                          m_root {nullptr};
-        NGIN::Containers::Vector<NGIN::Byte> m_inputStorage {};
-        InternMap*                           m_interner {nullptr};
+        AttributeView(const detail::DocumentState* state, UIntSize index) noexcept;
+
+        const detail::DocumentState* m_state {nullptr};
+        UIntSize                     m_index {0};
     };
-}// namespace NGIN::Serialization
+
+    class NGIN_BASE_API AttributeRange
+    {
+    public:
+        constexpr AttributeRange() noexcept = default;
+
+        class Iterator
+        {
+        public:
+            using iterator_category = std::forward_iterator_tag;
+            using value_type        = AttributeView;
+            using difference_type   = std::ptrdiff_t;
+
+            [[nodiscard]] AttributeView operator*() const noexcept;
+            Iterator&                   operator++() noexcept;
+            [[nodiscard]] friend bool operator==(const Iterator&, const Iterator&) noexcept = default;
+
+        private:
+            friend class AttributeRange;
+            constexpr Iterator(const detail::DocumentState* state, UIntSize index) noexcept
+                : m_state(state), m_index(index)
+            {
+            }
+            const detail::DocumentState* m_state {nullptr};
+            UIntSize                     m_index {0};
+        };
+
+        [[nodiscard]] UIntSize      Size() const noexcept { return m_count; }
+        [[nodiscard]] bool          Empty() const noexcept { return m_count == 0; }
+        [[nodiscard]] AttributeView operator[](UIntSize index) const noexcept;
+        [[nodiscard]] Iterator      begin() const noexcept { return Iterator {m_state, m_begin}; }
+        [[nodiscard]] Iterator      end() const noexcept { return Iterator {m_state, m_begin + m_count}; }
+
+    private:
+        friend class ElementView;
+        constexpr AttributeRange(const detail::DocumentState* state, UIntSize begin, UIntSize count) noexcept
+            : m_state(state), m_begin(begin), m_count(count)
+        {
+        }
+        const detail::DocumentState* m_state {nullptr};
+        UIntSize                     m_begin {0};
+        UIntSize                     m_count {0};
+    };
+
+    class NGIN_BASE_API ChildRange
+    {
+    public:
+        constexpr ChildRange() noexcept = default;
+
+        class Iterator
+        {
+        public:
+            using iterator_category = std::forward_iterator_tag;
+            using value_type        = NodeView;
+            using difference_type   = std::ptrdiff_t;
+
+            [[nodiscard]] NodeView operator*() const noexcept;
+            Iterator&              operator++() noexcept;
+            [[nodiscard]] friend bool operator==(const Iterator&, const Iterator&) noexcept = default;
+
+        private:
+            friend class ChildRange;
+            constexpr Iterator(const detail::DocumentState* state, UIntSize index) noexcept
+                : m_state(state), m_index(index)
+            {
+            }
+            const detail::DocumentState* m_state {nullptr};
+            UIntSize                     m_index {0};
+        };
+
+        [[nodiscard]] UIntSize Size() const noexcept { return m_count; }
+        [[nodiscard]] bool     Empty() const noexcept { return m_count == 0; }
+        [[nodiscard]] NodeView operator[](UIntSize index) const noexcept;
+        [[nodiscard]] Iterator begin() const noexcept { return Iterator {m_state, m_begin}; }
+        [[nodiscard]] Iterator end() const noexcept { return Iterator {m_state, m_begin + m_count}; }
+
+    private:
+        friend class ElementView;
+        constexpr ChildRange(const detail::DocumentState* state, UIntSize begin, UIntSize count) noexcept
+            : m_state(state), m_begin(begin), m_count(count)
+        {
+        }
+        const detail::DocumentState* m_state {nullptr};
+        UIntSize                     m_begin {0};
+        UIntSize                     m_count {0};
+    };
+
+    class NGIN_BASE_API FilteredChildRange
+    {
+    public:
+        class Iterator
+        {
+        public:
+            using iterator_category = std::forward_iterator_tag;
+            using value_type        = ElementView;
+            using difference_type   = std::ptrdiff_t;
+
+            [[nodiscard]] ElementView operator*() const noexcept;
+            Iterator&                 operator++() noexcept;
+            [[nodiscard]] friend bool operator==(const Iterator&, const Iterator&) noexcept = default;
+
+        private:
+            friend class FilteredChildRange;
+            Iterator(const detail::DocumentState* state,
+                     UIntSize index,
+                     UIntSize end,
+                     std::string_view name) noexcept;
+            void Seek() noexcept;
+
+            const detail::DocumentState* m_state {nullptr};
+            UIntSize                     m_index {0};
+            UIntSize                     m_end {0};
+            std::string_view              m_name {};
+        };
+
+        [[nodiscard]] Iterator begin() const noexcept { return Iterator {m_state, m_begin, m_end, m_name}; }
+        [[nodiscard]] Iterator end() const noexcept { return Iterator {m_state, m_end, m_end, m_name}; }
+
+    private:
+        friend class ElementView;
+        constexpr FilteredChildRange(const detail::DocumentState* state,
+                                     UIntSize begin,
+                                     UIntSize end,
+                                     std::string_view name) noexcept
+            : m_state(state), m_begin(begin), m_end(end), m_name(name)
+        {
+        }
+        const detail::DocumentState* m_state {nullptr};
+        UIntSize                     m_begin {0};
+        UIntSize                     m_end {0};
+        std::string_view              m_name {};
+    };
+
+    class NGIN_BASE_API ElementView
+    {
+    public:
+        ElementView() noexcept = default;
+
+        std::string_view name {};
+        AttributeRange  attributes {};
+        ChildRange      children {};
+
+        [[nodiscard]] bool                         IsValid() const noexcept;
+        [[nodiscard]] std::string_view             Name() const noexcept;
+        [[nodiscard]] SourceSpan                   Span() const noexcept;
+        [[nodiscard]] AttributeRange               Attributes() const noexcept;
+        [[nodiscard]] std::optional<AttributeView> Attribute(std::string_view attributeName) const noexcept;
+        [[nodiscard]] ChildRange                   Children() const noexcept;
+        [[nodiscard]] FilteredChildRange            Children(std::string_view elementName) const noexcept;
+        [[nodiscard]] std::optional<ElementView>   FirstChild(std::string_view elementName) const noexcept;
+        [[nodiscard]] const ElementView*            FirstChildPtr(std::string_view elementName) const noexcept;
+        [[nodiscard]] std::optional<std::string_view> FirstText() const noexcept;
+
+    private:
+        friend class NodeView;
+        friend class Document;
+        friend class BorrowedDocument;
+        friend class FilteredChildRange;
+        friend struct detail::DocumentState;
+
+        ElementView(const detail::DocumentState* state, UIntSize index) noexcept;
+
+        const detail::DocumentState* m_state {nullptr};
+        UIntSize                     m_index {0};
+    };
+
+    class NGIN_BASE_API Document
+    {
+    public:
+        Document() noexcept;
+        ~Document();
+        Document(Document&&) noexcept;
+        Document& operator=(Document&&) noexcept;
+        Document(const Document&)            = delete;
+        Document& operator=(const Document&) = delete;
+
+        [[nodiscard]] bool             IsValid() const noexcept;
+        [[nodiscard]] ElementView      Root() const noexcept;
+        [[nodiscard]] const ElementView* RootPtr() const noexcept;
+        [[nodiscard]] std::string_view SourceText() const noexcept;
+        [[nodiscard]] UIntSize         MemoryUsed() const noexcept;
+        [[nodiscard]] UIntSize         MemoryCommitted() const noexcept;
+        [[nodiscard]] UIntSize         NodeCount() const noexcept;
+        [[nodiscard]] UIntSize         ElementCount() const noexcept;
+        [[nodiscard]] UIntSize         AttributeCount() const noexcept;
+
+    private:
+        friend class Parser;
+        friend class Builder;
+        friend struct detail::DocumentAccess;
+        explicit Document(std::unique_ptr<detail::DocumentState> state) noexcept;
+        std::unique_ptr<detail::DocumentState> m_state;
+    };
+
+    class NGIN_BASE_API BorrowedDocument
+    {
+    public:
+        BorrowedDocument() noexcept;
+        ~BorrowedDocument();
+        BorrowedDocument(BorrowedDocument&&) noexcept;
+        BorrowedDocument& operator=(BorrowedDocument&&) noexcept;
+        BorrowedDocument(const BorrowedDocument&)            = delete;
+        BorrowedDocument& operator=(const BorrowedDocument&) = delete;
+
+        [[nodiscard]] bool             IsValid() const noexcept;
+        [[nodiscard]] ElementView      Root() const noexcept;
+        [[nodiscard]] const ElementView* RootPtr() const noexcept;
+        [[nodiscard]] std::string_view SourceText() const noexcept;
+        [[nodiscard]] UIntSize         MemoryUsed() const noexcept;
+        [[nodiscard]] UIntSize         MemoryCommitted() const noexcept;
+        [[nodiscard]] UIntSize         NodeCount() const noexcept;
+        [[nodiscard]] UIntSize         ElementCount() const noexcept;
+        [[nodiscard]] UIntSize         AttributeCount() const noexcept;
+
+    private:
+        friend class Parser;
+        friend struct detail::DocumentAccess;
+        explicit BorrowedDocument(std::unique_ptr<detail::DocumentState> state) noexcept;
+        std::unique_ptr<detail::DocumentState> m_state;
+    };
+
+    enum class SyntaxKind : UInt8
+    {
+        XmlDeclaration,
+        StartTag,
+        EndTag,
+        Text,
+        CData,
+        Comment,
+        ProcessingInstruction,
+        Doctype,
+    };
+
+    struct SyntaxToken
+    {
+        SyntaxKind kind {SyntaxKind::Text};
+        SourceSpan span {};
+    };
+
+    class NGIN_BASE_API SyntaxDocument
+    {
+    public:
+        SyntaxDocument() noexcept;
+        ~SyntaxDocument();
+        SyntaxDocument(SyntaxDocument&&) noexcept;
+        SyntaxDocument& operator=(SyntaxDocument&&) noexcept;
+        SyntaxDocument(const SyntaxDocument&)            = delete;
+        SyntaxDocument& operator=(const SyntaxDocument&) = delete;
+
+        [[nodiscard]] bool                         IsValid() const noexcept;
+        [[nodiscard]] std::string_view             SourceText() const noexcept;
+        [[nodiscard]] std::span<const SyntaxToken> Tokens() const noexcept;
+
+    private:
+        friend class Parser;
+        explicit SyntaxDocument(std::unique_ptr<detail::SyntaxState> state) noexcept;
+        std::unique_ptr<detail::SyntaxState> m_state;
+    };
+}// namespace NGIN::Serialization::XML

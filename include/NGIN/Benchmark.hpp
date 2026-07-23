@@ -7,8 +7,8 @@
 #include <cmath>
 #include <exception>
 #include <limits>
-#include <mutex>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -68,7 +68,8 @@ namespace NGIN
             asm volatile("" : : "g"(value) : "memory");
 #elif defined(_MSC_VER)
             _ReadWriteBarrier();
-            (void) value;
+            (void) *reinterpret_cast<const volatile char*>(std::addressof(value));
+            _ReadWriteBarrier();
 #else
             volatile char dummy = *reinterpret_cast<char const volatile*>(&value);
             (void) dummy;
@@ -97,10 +98,10 @@ namespace NGIN
     /// \brief  Configuration parameters for a benchmark run.
     struct BenchmarkConfig
     {
-        Int32 iterations        = 1000;
-        Int32 warmupIterations  = 100;
-        bool accountForOverhead = false;
-        bool keepRawTimings     = false;
+        Int32 iterations         = 1000;
+        Int32 warmupIterations   = 100;
+        bool  accountForOverhead = false;
+        bool  keepRawTimings     = false;
     };
 
     template<typename DesiredUnit>
@@ -108,7 +109,7 @@ namespace NGIN
     struct BenchmarkResult
     {
         std::string name              = "Unknown Benchmark";
-        Int32 numIterations           = 0;
+        Int32       numIterations     = 0;
         DesiredUnit averageTime       = DesiredUnit(0.0);
         DesiredUnit minTime           = DesiredUnit(0.0);
         DesiredUnit maxTime           = DesiredUnit(0.0);
@@ -167,7 +168,7 @@ namespace NGIN
         static F64 EstimateTimerOverhead(Int32 iterations = 1'000'000)
         {
             Timer overheadTimer;
-            F64 sum = 0.0;
+            F64   sum = 0.0;
             for (Int32 i = 0; i < iterations; ++i)
             {
                 overheadTimer.Reset();
@@ -211,11 +212,11 @@ namespace NGIN
             }
 
             // Welford’s one‐pass for mean & variance
-            F64 mean    = 0.0;
-            F64 M2      = 0.0;
+            F64   mean  = 0.0;
+            F64   M2    = 0.0;
             Int32 count = 0;
-            F64 minT    = std::numeric_limits<F64>::infinity();
-            F64 maxT    = -std::numeric_limits<F64>::infinity();
+            F64   minT  = std::numeric_limits<F64>::infinity();
+            F64   maxT  = -std::numeric_limits<F64>::infinity();
 
             for (Int32 i = 0; i < config.iterations; ++i)
             {
@@ -289,7 +290,7 @@ namespace NGIN
             requires std::is_invocable_r_v<void, F, BenchmarkContext&>
         static void Register(F func, std::string_view benchmarkName)
         {
-            auto ptr = std::make_unique<Benchmark>(std::move(func), benchmarkName);
+            auto                        ptr = std::make_unique<Benchmark>(std::move(func), benchmarkName);
             std::lock_guard<std::mutex> lock(GetRegistryMutex());
             GetRegistry().push_back(std::move(ptr));
         }
@@ -299,14 +300,14 @@ namespace NGIN
             requires std::is_invocable_r_v<void, F, BenchmarkContext&>
         static void Register(const BenchmarkConfig& cfg, F func, std::string_view benchmarkName)
         {
-            auto ptr = std::make_unique<Benchmark>(cfg, std::move(func), benchmarkName);
+            auto                        ptr = std::make_unique<Benchmark>(cfg, std::move(func), benchmarkName);
             std::lock_guard<std::mutex> lock(GetRegistryMutex());
             GetRegistry().push_back(std::move(ptr));
         }
 
     private:
-        BenchmarkConfig config;
-        std::string name;
+        BenchmarkConfig                              config;
+        std::string                                  name;
         Utilities::Callable<void(BenchmarkContext&)> m_callable;
 
         /// \brief  Invoke m_callable once without timing.
@@ -357,21 +358,17 @@ namespace NGIN
         static std::vector<BenchmarkResult<DesiredUnit>> RunAll()
         {
             std::vector<BenchmarkResult<DesiredUnit>> results;
-            std::lock_guard<std::mutex> lock(GetRegistryMutex());
+            std::lock_guard<std::mutex>               lock(GetRegistryMutex());
 
             for (auto const& uptr: GetRegistry())
             {
-                // Temporarily override with defaultConfig
-                BenchmarkConfig orig = uptr->config;
-                uptr->config         = defaultConfig;
                 results.push_back(uptr->Run<DesiredUnit>());
-                uptr->config = orig;
             }
             return results;
         }
         template<typename DesiredUnit>
             requires Units::QuantityOf<TIME, DesiredUnit>
-        static void PrintSummaryTable(std::ostream& os,
+        static void PrintSummaryTable(std::ostream&                                    os,
                                       const std::vector<BenchmarkResult<DesiredUnit>>& results)
         {
             if (results.empty())

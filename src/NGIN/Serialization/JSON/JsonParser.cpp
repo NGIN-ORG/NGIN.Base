@@ -1,105 +1,167 @@
 #include <NGIN/Serialization/JSON/JsonParser.hpp>
 
-#include <NGIN/Containers/Vector.hpp>
+#include "JsonDocumentInternal.hpp"
+
 #include <NGIN/SIMD/Scan.hpp>
+#include <NGIN/Serialization/Core/InputCursor.hpp>
 #include <NGIN/Text/Unicode/Utf8.hpp>
 
-#include <cctype>
+#include <algorithm>
 #include <charconv>
+#include <cmath>
+#include <concepts>
 #include <cstring>
-#include <functional>
+#include <limits>
 #include <new>
+#include <vector>
 
-namespace NGIN::Serialization
+namespace NGIN::Serialization::JSON
 {
     namespace
     {
-        static constexpr UIntSize kPrecomputeMinBytes = 32 * 1024;
-
-        [[nodiscard]] bool ShouldPrecomputeContainers(const JsonParseOptions& options, UIntSize inputSize) noexcept
+        struct ParsedString
         {
-            return options.precomputeContainerSizes && inputSize >= kPrecomputeMinBytes;
-        }
-        struct JsonParseContext
-        {
-            InputCursor                               cursor;
-            JsonParseOptions                          options;
-            JsonArena*                                arena {nullptr};
-            char*                                     mutableBase {nullptr};
-            UIntSize                                  depth {0};
-            const NGIN::Containers::Vector<UIntSize>* containerCounts {nullptr};
-            UIntSize                                  containerIndex {0};
-            JsonDocument*                             document {nullptr};
+            detail::StringRef value {};
+            SourceSpan        span {};
         };
 
-        [[nodiscard]] ParseError MakeError(const JsonParseContext& ctx, ParseErrorCode code, const char* message)
+        struct ParseContext
         {
-            ParseError err;
-            err.code     = code;
-            err.location = ctx.cursor.Location();
-            err.message  = message;
-            return err;
-        }
+            InputCursor            cursor;
+            ParseOptions           options;
+            detail::DocumentState* state {nullptr};
+            char*                  mutableBase {nullptr};
+            ParseScratch*          scratch {nullptr};
+            UIntSize               depth {0};
+            UIntSize               decodedBytes {0};
+        };
 
-        [[nodiscard]] bool IsDigit(char c) noexcept
+        [[nodiscard]] SourceLocation Locate(std::string_view source, SourceId sourceId, UIntSize offset) noexcept
         {
-            return c >= '0' && c <= '9';
-        }
-
-        [[nodiscard]] bool IsHexDigit(char c) noexcept
-        {
-            return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
-        }
-
-        [[nodiscard]] UIntSize NextContainerCount(JsonParseContext& ctx) noexcept
-        {
-            if (!ctx.containerCounts)
-                return 0;
-            if (ctx.containerIndex >= ctx.containerCounts->Size())
-                return 0;
-            return (*ctx.containerCounts)[ctx.containerIndex++];
-        }
-
-        [[nodiscard]] UInt32 HexValue(char c) noexcept
-        {
-            if (c >= '0' && c <= '9')
-                return static_cast<UInt32>(c - '0');
-            if (c >= 'a' && c <= 'f')
-                return static_cast<UInt32>(c - 'a' + 10);
-            return static_cast<UInt32>(c - 'A' + 10);
-        }
-
-        bool DecodeHex4(const char* digits, UInt32& out) noexcept
-        {
-            out = 0;
-            for (int i = 0; i < 4; ++i)
+            SourceLocation location {
+                    .source = sourceId,
+                    .offset = offset,
+                    .line   = 1,
+                    .column = 1,
+            };
+            bool           previousWasCarriageReturn = false;
+            const UIntSize end                       = (std::min) (offset, source.size());
+            for (UIntSize index = 0; index < end; ++index)
             {
-                const char c = digits[i];
-                if (!IsHexDigit(c))
+                const char value = source[index];
+                if (value == '\r')
+                {
+                    ++location.line;
+                    location.column           = 1;
+                    previousWasCarriageReturn = true;
+                }
+                else if (value == '\n')
+                {
+                    if (!previousWasCarriageReturn)
+                        ++location.line;
+                    location.column           = 1;
+                    previousWasCarriageReturn = false;
+                }
+                else
+                {
+                    ++location.column;
+                    previousWasCarriageReturn = false;
+                }
+            }
+            return location;
+        }
+
+        [[nodiscard]] ParseDiagnostic MakeErrorAt(const ParseContext& ctx,
+                                                  ParseErrorCode      code,
+                                                  const char*         message,
+                                                  UIntSize            begin,
+                                                  UIntSize            end)
+        {
+            const auto      location = Locate(ctx.state->source, ctx.state->sourceId, begin);
+            ParseDiagnostic error;
+            error.code     = code;
+            error.location = ParseLocation {
+                    .offset = location.offset,
+                    .line   = location.line,
+                    .column = location.column,
+            };
+            error.span = SourceSpan {
+                    .source = ctx.state->sourceId,
+                    .begin  = begin,
+                    .end    = (std::max) (begin, end),
+            };
+            error.message = message;
+            return error;
+        }
+
+        [[nodiscard]] ParseDiagnostic MakeError(const ParseContext& ctx,
+                                                ParseErrorCode      code,
+                                                const char*         message)
+        {
+            return MakeErrorAt(ctx, code, message, ctx.cursor.Offset(), ctx.cursor.Offset());
+        }
+
+        template<class T>
+        [[nodiscard]] NGIN::Utilities::Expected<T, ParseDiagnostic>
+        Failure(ParseDiagnostic error)
+        {
+            return NGIN::Utilities::Unexpected<ParseDiagnostic>(std::move(error));
+        }
+
+        [[nodiscard]] bool IsDigit(char value) noexcept
+        {
+            return value >= '0' && value <= '9';
+        }
+
+        [[nodiscard]] bool IsHexDigit(char value) noexcept
+        {
+            return (value >= '0' && value <= '9') ||
+                   (value >= 'a' && value <= 'f') ||
+                   (value >= 'A' && value <= 'F');
+        }
+
+        [[nodiscard]] UInt32 HexValue(char value) noexcept
+        {
+            if (value >= '0' && value <= '9')
+                return static_cast<UInt32>(value - '0');
+            if (value >= 'a' && value <= 'f')
+                return static_cast<UInt32>(value - 'a' + 10);
+            return static_cast<UInt32>(value - 'A' + 10);
+        }
+
+        [[nodiscard]] bool DecodeHex4(const char* digits, UInt32& result) noexcept
+        {
+            result = 0;
+            for (UIntSize index = 0; index < 4; ++index)
+            {
+                if (!IsHexDigit(digits[index]))
                     return false;
-                out = static_cast<UInt32>((out << 4) | HexValue(c));
+                result = static_cast<UInt32>((result << 4U) | HexValue(digits[index]));
             }
             return true;
         }
 
-        NGIN::Utilities::Expected<void, ParseError> SkipComment(JsonParseContext& ctx)
+        [[nodiscard]] NGIN::Utilities::Expected<void, ParseDiagnostic>
+        SkipComment(ParseContext& ctx)
         {
+            const UIntSize start = ctx.cursor.Offset();
             if (ctx.cursor.Peek() != '/')
                 return {};
-            const char next = ctx.cursor.Peek(1);
-            if (next == '/')
+
+            if (ctx.cursor.Peek(1) == '/')
             {
                 ctx.cursor.Advance(2);
                 while (!ctx.cursor.IsEof())
                 {
-                    const char c = ctx.cursor.Peek();
-                    if (c == '\n' || c == '\r')
+                    const char value = ctx.cursor.Peek();
+                    if (value == '\r' || value == '\n')
                         break;
                     ctx.cursor.Advance();
                 }
                 return {};
             }
-            if (next == '*')
+
+            if (ctx.cursor.Peek(1) == '*')
             {
                 ctx.cursor.Advance(2);
                 while (!ctx.cursor.IsEof())
@@ -111,169 +173,178 @@ namespace NGIN::Serialization
                     }
                     ctx.cursor.Advance();
                 }
-                return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                        MakeError(ctx, ParseErrorCode::UnexpectedEnd, "Unterminated comment")));
+                return Failure<void>(MakeErrorAt(ctx,
+                                                 ParseErrorCode::UnexpectedEnd,
+                                                 "Unterminated block comment",
+                                                 start,
+                                                 ctx.cursor.Offset()));
             }
-            return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                    MakeError(ctx, ParseErrorCode::InvalidToken, "Invalid comment token")));
+
+            return Failure<void>(MakeErrorAt(ctx,
+                                             ParseErrorCode::InvalidToken,
+                                             "Invalid comment token",
+                                             start,
+                                             ctx.cursor.Offset() + 1));
         }
 
-        NGIN::Utilities::Expected<void, ParseError> SkipWhitespaceAndComments(JsonParseContext& ctx)
+        [[nodiscard]] NGIN::Utilities::Expected<void, ParseDiagnostic>
+        SkipTrivia(ParseContext& ctx)
         {
             while (true)
             {
                 ctx.cursor.SkipWhitespace();
-                if (!ctx.options.allowComments)
-                    return {};
                 if (ctx.cursor.Peek() != '/')
                     return {};
-                auto commentResult = SkipComment(ctx);
-                if (!commentResult.HasValue())
-                    return commentResult;
+                if (ctx.options.comments == CommentPolicy::Reject)
+                {
+                    return Failure<void>(MakeErrorAt(ctx,
+                                                     ParseErrorCode::InvalidToken,
+                                                     "JSON comments are disabled",
+                                                     ctx.cursor.Offset(),
+                                                     ctx.cursor.Offset() + 1));
+                }
+                auto comment = SkipComment(ctx);
+                if (!comment)
+                    return comment;
             }
         }
 
-        NGIN::Utilities::Expected<std::string_view, ParseError> ParseString(JsonParseContext& ctx)
+        [[nodiscard]] NGIN::Utilities::Expected<ParsedString, ParseDiagnostic>
+        ParseString(ParseContext& ctx)
         {
+            const UIntSize tokenStart = ctx.cursor.Offset();
             if (ctx.cursor.Peek() != '"')
-            {
-                return NGIN::Utilities::Expected<std::string_view, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                        MakeError(ctx, ParseErrorCode::InvalidToken, "Expected string")));
-            }
+                return Failure<ParsedString>(MakeError(ctx, ParseErrorCode::InvalidToken, "Expected JSON string"));
 
             ctx.cursor.Advance();
             const char* start      = ctx.cursor.CurrentPtr();
             const char* scan       = start;
             bool        hasEscapes = false;
 
-            if (!ctx.options.trackLocation)
+            while (scan && scan < ctx.cursor.EndPtr())
             {
-                while (scan < ctx.cursor.EndPtr())
+                const std::size_t remaining = static_cast<std::size_t>(ctx.cursor.EndPtr() - scan);
+                const std::size_t offset    = NGIN::SIMD::FindAnyByte(scan, remaining, '"', '\\');
+                const char*       next      = scan + offset;
+
+                for (const char* current = scan; current < next; ++current)
                 {
-                    const std::size_t remaining = static_cast<std::size_t>(ctx.cursor.EndPtr() - scan);
-                    const std::size_t offset    = NGIN::SIMD::FindAnyByte(scan, remaining, '"', '\\');
-                    const char*       next      = scan + offset;
-                    for (const char* p = scan; p < next; ++p)
+                    if (static_cast<unsigned char>(*current) < 0x20U)
                     {
-                        if (static_cast<unsigned char>(*p) < 0x20)
-                        {
-                            return NGIN::Utilities::Expected<std::string_view, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                                    MakeError(ctx, ParseErrorCode::InvalidToken, "Control character in string")));
-                        }
+                        const UIntSize errorOffset = tokenStart + 1 + static_cast<UIntSize>(current - start);
+                        return Failure<ParsedString>(MakeErrorAt(ctx,
+                                                                 ParseErrorCode::InvalidToken,
+                                                                 "Control character in JSON string",
+                                                                 errorOffset,
+                                                                 errorOffset + 1));
                     }
-                    if (next >= ctx.cursor.EndPtr())
-                    {
-                        return NGIN::Utilities::Expected<std::string_view, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                                MakeError(ctx, ParseErrorCode::UnexpectedEnd, "Unterminated string")));
-                    }
-                    const char c = *next;
-                    if (c == '"')
-                    {
-                        scan = next;
-                        break;
-                    }
-                    hasEscapes = true;
-                    scan       = next + 1;
-                    if (scan >= ctx.cursor.EndPtr())
-                    {
-                        return NGIN::Utilities::Expected<std::string_view, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                                MakeError(ctx, ParseErrorCode::UnexpectedEnd, "Unterminated escape")));
-                    }
-                    if (*scan == 'u')
-                    {
-                        if ((scan + 4) >= ctx.cursor.EndPtr())
-                        {
-                            return NGIN::Utilities::Expected<std::string_view, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                                    MakeError(ctx, ParseErrorCode::UnexpectedEnd, "Truncated unicode escape")));
-                        }
-                        scan += 4;
-                    }
-                    ++scan;
                 }
-            }
-            else
-            {
-                while (scan < ctx.cursor.EndPtr())
+
+                if (next >= ctx.cursor.EndPtr())
                 {
-                    const char c = *scan;
-                    if (c == '"')
-                        break;
-                    if (static_cast<unsigned char>(c) < 0x20)
-                    {
-                        return NGIN::Utilities::Expected<std::string_view, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                                MakeError(ctx, ParseErrorCode::InvalidToken, "Control character in string")));
-                    }
-                    if (c == '\\')
-                    {
-                        hasEscapes = true;
-                        ++scan;
-                        if (scan >= ctx.cursor.EndPtr())
-                        {
-                            return NGIN::Utilities::Expected<std::string_view, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                                    MakeError(ctx, ParseErrorCode::UnexpectedEnd, "Unterminated escape")));
-                        }
-                        if (*scan == 'u')
-                        {
-                            if ((scan + 4) >= ctx.cursor.EndPtr())
-                            {
-                                return NGIN::Utilities::Expected<std::string_view, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                                        MakeError(ctx, ParseErrorCode::UnexpectedEnd, "Truncated unicode escape")));
-                            }
-                            scan += 4;
-                        }
-                    }
-                    ++scan;
+                    return Failure<ParsedString>(MakeErrorAt(ctx,
+                                                             ParseErrorCode::UnexpectedEnd,
+                                                             "Unterminated JSON string",
+                                                             tokenStart,
+                                                             ctx.state->source.size()));
                 }
+
+                if (*next == '"')
+                {
+                    scan = next;
+                    break;
+                }
+
+                hasEscapes = true;
+                scan       = next + 1;
+                if (scan >= ctx.cursor.EndPtr())
+                {
+                    return Failure<ParsedString>(MakeErrorAt(ctx,
+                                                             ParseErrorCode::UnexpectedEnd,
+                                                             "Unterminated JSON escape",
+                                                             static_cast<UIntSize>(next - ctx.state->source.data()),
+                                                             ctx.state->source.size()));
+                }
+                ++scan;
             }
 
-            if (scan >= ctx.cursor.EndPtr())
+            if (!scan || scan >= ctx.cursor.EndPtr())
             {
-                return NGIN::Utilities::Expected<std::string_view, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                        MakeError(ctx, ParseErrorCode::UnexpectedEnd, "Unterminated string")));
+                return Failure<ParsedString>(MakeErrorAt(ctx,
+                                                         ParseErrorCode::UnexpectedEnd,
+                                                         "Unterminated JSON string",
+                                                         tokenStart,
+                                                         ctx.state->source.size()));
             }
 
             const UIntSize rawLength = static_cast<UIntSize>(scan - start);
+            ctx.cursor.Advance(rawLength + 1);
+            const SourceSpan span {
+                    .source = ctx.state->sourceId,
+                    .begin  = tokenStart,
+                    .end    = ctx.cursor.Offset(),
+            };
+
             if (!hasEscapes)
             {
-                ctx.cursor.Advance(rawLength + 1);
-                return NGIN::Utilities::Expected<std::string_view, ParseError>(std::string_view {start, rawLength});
+                return ParsedString {
+                        .value = detail::StringRef {start, rawLength},
+                        .span  = span,
+                };
+            }
+
+            if (ctx.decodedBytes > ctx.state->limits.maxDecodedStringBytes ||
+                rawLength > ctx.state->limits.maxDecodedStringBytes - ctx.decodedBytes)
+            {
+                return Failure<ParsedString>(MakeErrorAt(ctx,
+                                                         ParseErrorCode::LimitExceeded,
+                                                         "Decoded JSON string limit exceeded",
+                                                         tokenStart,
+                                                         span.end));
             }
 
             char* output = nullptr;
-            if (ctx.options.inSitu && ctx.mutableBase)
-            {
-                output = const_cast<char*>(start);
-            }
+            if (ctx.mutableBase)
+                output = ctx.mutableBase + tokenStart + 1;
+            else if (ctx.scratch)
+                output = ctx.scratch->TryAllocate(rawLength);
             else
+                output = static_cast<char*>(ctx.state->arena.Allocate(rawLength, alignof(char)));
+
+            if (!output)
             {
-                void* memory = ctx.arena->Allocate(rawLength, alignof(char));
-                if (!memory)
-                {
-                    return NGIN::Utilities::Expected<std::string_view, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                            MakeError(ctx, ParseErrorCode::OutOfMemory, "String allocation failed")));
-                }
-                output = static_cast<char*>(memory);
+                return Failure<ParsedString>(MakeErrorAt(ctx,
+                                                         ParseErrorCode::OutOfMemory,
+                                                         "JSON string allocation failed",
+                                                         tokenStart,
+                                                         span.end));
             }
 
             const char* read  = start;
-            char*       write = output;
             const char* end   = start + rawLength;
+            char*       write = output;
 
             while (read < end)
             {
-                char c = *read++;
-                if (c != '\\')
+                const char value = *read++;
+                if (value != '\\')
                 {
-                    *write++ = c;
+                    *write++ = value;
                     continue;
                 }
+
+                const UIntSize escapeOffset =
+                        tokenStart + 1 + static_cast<UIntSize>((read - 1) - start);
                 if (read >= end)
                 {
-                    return NGIN::Utilities::Expected<std::string_view, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                            MakeError(ctx, ParseErrorCode::InvalidStringEscape, "Invalid escape")));
+                    return Failure<ParsedString>(MakeErrorAt(ctx,
+                                                             ParseErrorCode::InvalidStringEscape,
+                                                             "Truncated JSON escape",
+                                                             escapeOffset,
+                                                             escapeOffset + 1));
                 }
-                const char esc = *read++;
-                switch (esc)
+
+                switch (*read++)
                 {
                     case '"':
                         *write++ = '"';
@@ -300,1294 +371,721 @@ namespace NGIN::Serialization
                         *write++ = '\t';
                         break;
                     case 'u': {
-                        if ((read + 3) >= end)
+                        if (static_cast<UIntSize>(end - read) < 4)
                         {
-                            return NGIN::Utilities::Expected<std::string_view, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                                    MakeError(ctx, ParseErrorCode::InvalidUnicodeEscape, "Truncated unicode escape")));
+                            return Failure<ParsedString>(MakeErrorAt(ctx,
+                                                                     ParseErrorCode::InvalidUnicodeEscape,
+                                                                     "Truncated JSON Unicode escape",
+                                                                     escapeOffset,
+                                                                     span.end));
                         }
-                        UInt32 codepoint = 0;
-                        if (!DecodeHex4(read, codepoint))
+
+                        UInt32 codePoint = 0;
+                        if (!DecodeHex4(read, codePoint))
                         {
-                            return NGIN::Utilities::Expected<std::string_view, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                                    MakeError(ctx, ParseErrorCode::InvalidUnicodeEscape, "Invalid unicode escape")));
+                            return Failure<ParsedString>(MakeErrorAt(ctx,
+                                                                     ParseErrorCode::InvalidUnicodeEscape,
+                                                                     "Invalid JSON Unicode escape",
+                                                                     escapeOffset,
+                                                                     escapeOffset + 6));
                         }
                         read += 4;
-                        if (codepoint >= 0xD800 && codepoint <= 0xDBFF)
+
+                        if (codePoint >= 0xD800U && codePoint <= 0xDBFFU)
                         {
-                            if ((read + 6) <= end && read[0] == '\\' && read[1] == 'u')
+                            if (static_cast<UIntSize>(end - read) < 6 || read[0] != '\\' || read[1] != 'u')
                             {
-                                UInt32 low = 0;
-                                if (!DecodeHex4(read + 2, low))
-                                {
-                                    return NGIN::Utilities::Expected<std::string_view, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                                            MakeError(ctx, ParseErrorCode::InvalidUnicodeEscape, "Invalid surrogate escape")));
-                                }
-                                if (low < 0xDC00 || low > 0xDFFF)
-                                {
-                                    return NGIN::Utilities::Expected<std::string_view, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                                            MakeError(ctx, ParseErrorCode::InvalidUnicodeEscape, "Invalid surrogate pair")));
-                                }
-                                read += 6;
-                                codepoint = 0x10000 + ((codepoint - 0xD800) << 10) + (low - 0xDC00);
+                                return Failure<ParsedString>(MakeErrorAt(ctx,
+                                                                         ParseErrorCode::InvalidUnicodeEscape,
+                                                                         "Missing low surrogate",
+                                                                         escapeOffset,
+                                                                         escapeOffset + 6));
                             }
-                            else
+
+                            UInt32 low = 0;
+                            if (!DecodeHex4(read + 2, low) || low < 0xDC00U || low > 0xDFFFU)
                             {
-                                return NGIN::Utilities::Expected<std::string_view, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                                        MakeError(ctx, ParseErrorCode::InvalidUnicodeEscape, "Missing low surrogate")));
+                                return Failure<ParsedString>(MakeErrorAt(ctx,
+                                                                         ParseErrorCode::InvalidUnicodeEscape,
+                                                                         "Invalid low surrogate",
+                                                                         escapeOffset + 6,
+                                                                         escapeOffset + 12));
                             }
+                            read += 6;
+                            codePoint = 0x10000U + ((codePoint - 0xD800U) << 10U) + (low - 0xDC00U);
                         }
-                        write += NGIN::Text::Unicode::EncodeUtf8(static_cast<NGIN::Text::Unicode::CodePoint>(codepoint), write);
+                        else if (codePoint >= 0xDC00U && codePoint <= 0xDFFFU)
+                        {
+                            return Failure<ParsedString>(MakeErrorAt(ctx,
+                                                                     ParseErrorCode::InvalidUnicodeEscape,
+                                                                     "Unexpected low surrogate",
+                                                                     escapeOffset,
+                                                                     escapeOffset + 6));
+                        }
+
+                        write += NGIN::Text::Unicode::EncodeUtf8(
+                                static_cast<NGIN::Text::Unicode::CodePoint>(codePoint),
+                                write);
                         break;
                     }
                     default:
-                        return NGIN::Utilities::Expected<std::string_view, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                                MakeError(ctx, ParseErrorCode::InvalidStringEscape, "Invalid escape")));
+                        return Failure<ParsedString>(MakeErrorAt(ctx,
+                                                                 ParseErrorCode::InvalidStringEscape,
+                                                                 "Invalid JSON string escape",
+                                                                 escapeOffset,
+                                                                 escapeOffset + 2));
                 }
             }
 
-            ctx.cursor.Advance(rawLength + 1);
-            return NGIN::Utilities::Expected<std::string_view, ParseError>(std::string_view {output, static_cast<UIntSize>(write - output)});
+            const UIntSize decodedLength = static_cast<UIntSize>(write - output);
+            ctx.decodedBytes += decodedLength;
+            return ParsedString {
+                    .value = detail::StringRef {output, decodedLength},
+                    .span  = span,
+            };
         }
 
-        NGIN::Utilities::Expected<void, ParseError> SkipString(JsonParseContext& ctx)
+        [[nodiscard]] NGIN::Utilities::Expected<NodeId, ParseDiagnostic>
+        AddNode(ParseContext& ctx, detail::NodeRecord node)
         {
-            if (ctx.cursor.Peek() != '"')
+            if (ctx.state->nodes.size() >= ctx.state->limits.maxNodes ||
+                ctx.state->nodes.size() >= static_cast<UIntSize>((std::numeric_limits<UInt32>::max)()))
             {
-                return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                        MakeError(ctx, ParseErrorCode::InvalidToken, "Expected string")));
+                return Failure<NodeId>(MakeErrorAt(ctx,
+                                                   ParseErrorCode::LimitExceeded,
+                                                   "JSON node limit exceeded",
+                                                   node.span.begin,
+                                                   node.span.end));
             }
 
+            try
+            {
+                const NodeId id {static_cast<UInt32>(ctx.state->nodes.size())};
+                ctx.state->nodes.push_back(node);
+                if (!ctx.state->WithinMemoryLimit())
+                {
+                    ctx.state->nodes.pop_back();
+                    return Failure<NodeId>(MakeErrorAt(ctx,
+                                                       ParseErrorCode::LimitExceeded,
+                                                       "JSON memory limit exceeded",
+                                                       node.span.begin,
+                                                       node.span.end));
+                }
+                return id;
+            } catch (const std::bad_alloc&)
+            {
+                return Failure<NodeId>(MakeErrorAt(ctx,
+                                                   ParseErrorCode::OutOfMemory,
+                                                   "JSON node allocation failed",
+                                                   node.span.begin,
+                                                   node.span.end));
+            }
+        }
+
+        [[nodiscard]] NGIN::Utilities::Expected<NodeId, ParseDiagnostic>
+        ParseValue(ParseContext& ctx);
+
+        [[nodiscard]] NGIN::Utilities::Expected<NodeId, ParseDiagnostic>
+        ParseArray(ParseContext& ctx)
+        {
+            const UIntSize start = ctx.cursor.Offset();
+            if (ctx.depth >= ctx.state->limits.maxDepth)
+                return Failure<NodeId>(MakeError(ctx, ParseErrorCode::DepthExceeded, "JSON depth limit exceeded"));
+
+            ++ctx.depth;
             ctx.cursor.Advance();
-            const char* start = ctx.cursor.CurrentPtr();
-            const char* scan  = start;
+            auto trivia = SkipTrivia(ctx);
+            if (!trivia)
+                return Failure<NodeId>(std::move(trivia.Error()));
 
-            while (scan < ctx.cursor.EndPtr())
+            std::vector<NodeId> values;
+            if (ctx.cursor.Peek() == ']')
             {
-                const char c = *scan;
-                if (c == '"')
-                    break;
-                if (static_cast<unsigned char>(c) < 0x20)
-                {
-                    return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                            MakeError(ctx, ParseErrorCode::InvalidToken, "Control character in string")));
-                }
-                if (c == '\\')
-                {
-                    ++scan;
-                    if (scan >= ctx.cursor.EndPtr())
-                    {
-                        return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                                MakeError(ctx, ParseErrorCode::UnexpectedEnd, "Unterminated escape")));
-                    }
-                    if (*scan == 'u')
-                    {
-                        if ((scan + 4) >= ctx.cursor.EndPtr())
-                        {
-                            return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                                    MakeError(ctx, ParseErrorCode::UnexpectedEnd, "Truncated unicode escape")));
-                        }
-                        scan += 4;
-                    }
-                }
-                ++scan;
-            }
-
-            if (scan >= ctx.cursor.EndPtr())
-            {
-                return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                        MakeError(ctx, ParseErrorCode::UnexpectedEnd, "Unterminated string")));
-            }
-
-            ctx.cursor.Advance(static_cast<UIntSize>(scan - start + 1));
-            return {};
-        }
-
-        NGIN::Utilities::Expected<F64, ParseError> ParseNumber(JsonParseContext& ctx)
-        {
-            const char* start = ctx.cursor.CurrentPtr();
-            const char* p     = start;
-
-            bool   negative = false;
-            bool   hasFrac  = false;
-            bool   hasExp   = false;
-            bool   overflow = false;
-            UInt64 intValue = 0;
-            UInt32 digits   = 0;
-
-            if (*p == '-')
-            {
-                negative = true;
-                ++p;
-            }
-            if (p >= ctx.cursor.EndPtr())
-            {
-                return NGIN::Utilities::Expected<F64, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                        MakeError(ctx, ParseErrorCode::UnexpectedEnd, "Unexpected end in number")));
-            }
-            if (*p == '0')
-            {
-                digits = 1;
-                ++p;
+                ctx.cursor.Advance();
             }
             else
             {
-                if (!IsDigit(*p))
+                while (true)
                 {
-                    return NGIN::Utilities::Expected<F64, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                            MakeError(ctx, ParseErrorCode::InvalidNumber, "Invalid number")));
-                }
-                while (p < ctx.cursor.EndPtr() && IsDigit(*p))
-                {
-                    if (digits < 19)
+                    auto value = ParseValue(ctx);
+                    if (!value)
+                        return value;
+                    try
                     {
-                        const UInt64 digitValue =
-                                static_cast<UInt64>(static_cast<unsigned char>(*p)) - static_cast<UInt64>('0');
-                        intValue = intValue * 10ULL + digitValue;
+                        values.push_back(value.Value());
+                    } catch (const std::bad_alloc&)
+                    {
+                        return Failure<NodeId>(MakeError(ctx, ParseErrorCode::OutOfMemory, "JSON array allocation failed"));
+                    }
+
+                    auto postValue = SkipTrivia(ctx);
+                    if (!postValue)
+                        return Failure<NodeId>(std::move(postValue.Error()));
+
+                    if (ctx.cursor.Peek() == ']')
+                    {
+                        ctx.cursor.Advance();
+                        break;
+                    }
+
+                    if (ctx.cursor.Peek() != ',')
+                    {
+                        return Failure<NodeId>(MakeError(ctx,
+                                                         ParseErrorCode::UnexpectedCharacter,
+                                                         "Expected ',' or ']' in JSON array"));
+                    }
+
+                    ctx.cursor.Advance();
+                    auto postComma = SkipTrivia(ctx);
+                    if (!postComma)
+                        return Failure<NodeId>(std::move(postComma.Error()));
+
+                    if (ctx.cursor.Peek() == ']')
+                    {
+                        if (ctx.options.trailingCommas == TrailingCommaPolicy::Reject)
+                        {
+                            return Failure<NodeId>(MakeError(ctx,
+                                                             ParseErrorCode::InvalidToken,
+                                                             "Trailing comma in JSON array"));
+                        }
+                        ctx.cursor.Advance();
+                        break;
+                    }
+                }
+            }
+
+            --ctx.depth;
+            if (ctx.state->elements.size() > ctx.state->limits.maxMembers ||
+                values.size() > ctx.state->limits.maxMembers - ctx.state->elements.size())
+            {
+                return Failure<NodeId>(MakeErrorAt(ctx,
+                                                   ParseErrorCode::LimitExceeded,
+                                                   "JSON array element limit exceeded",
+                                                   start,
+                                                   ctx.cursor.Offset()));
+            }
+
+            const UIntSize begin = ctx.state->elements.size();
+            try
+            {
+                ctx.state->elements.insert(ctx.state->elements.end(), values.begin(), values.end());
+            } catch (const std::bad_alloc&)
+            {
+                return Failure<NodeId>(MakeErrorAt(ctx,
+                                                   ParseErrorCode::OutOfMemory,
+                                                   "JSON array storage allocation failed",
+                                                   start,
+                                                   ctx.cursor.Offset()));
+            }
+
+            detail::NodeRecord node;
+            node.kind               = ValueKind::Array;
+            node.span               = SourceSpan {ctx.state->sourceId, start, ctx.cursor.Offset()};
+            node.payload.rangeValue = detail::NodeRange {begin, values.size()};
+            return AddNode(ctx, node);
+        }
+
+        [[nodiscard]] NGIN::Utilities::Expected<NodeId, ParseDiagnostic>
+        ParseObject(ParseContext& ctx)
+        {
+            const UIntSize start = ctx.cursor.Offset();
+            if (ctx.depth >= ctx.state->limits.maxDepth)
+                return Failure<NodeId>(MakeError(ctx, ParseErrorCode::DepthExceeded, "JSON depth limit exceeded"));
+
+            ++ctx.depth;
+            ctx.cursor.Advance();
+            auto trivia = SkipTrivia(ctx);
+            if (!trivia)
+                return Failure<NodeId>(std::move(trivia.Error()));
+
+            std::vector<detail::MemberRecord> members;
+            if (ctx.cursor.Peek() == '}')
+            {
+                ctx.cursor.Advance();
+            }
+            else
+            {
+                while (true)
+                {
+                    auto key = ParseString(ctx);
+                    if (!key)
+                        return Failure<NodeId>(std::move(key.Error()));
+
+                    auto postKey = SkipTrivia(ctx);
+                    if (!postKey)
+                        return Failure<NodeId>(std::move(postKey.Error()));
+                    if (ctx.cursor.Peek() != ':')
+                        return Failure<NodeId>(MakeError(ctx, ParseErrorCode::UnexpectedCharacter, "Expected ':' after JSON key"));
+                    ctx.cursor.Advance();
+
+                    auto postColon = SkipTrivia(ctx);
+                    if (!postColon)
+                        return Failure<NodeId>(std::move(postColon.Error()));
+
+                    auto value = ParseValue(ctx);
+                    if (!value)
+                        return value;
+
+                    detail::MemberRecord member {
+                            .key   = key.Value().value,
+                            .value = value.Value(),
+                            .span  = SourceSpan {
+                                    .source = ctx.state->sourceId,
+                                    .begin  = key.Value().span.begin,
+                                    .end    = ctx.state->Node(value.Value())->span.end,
+                            },
+                    };
+
+                    auto duplicate = members.end();
+                    for (auto iterator = members.begin(); iterator != members.end(); ++iterator)
+                    {
+                        if (iterator->key.View() == member.key.View())
+                        {
+                            duplicate = iterator;
+                            break;
+                        }
+                    }
+
+                    if (duplicate != members.end())
+                    {
+                        switch (ctx.options.duplicateKeys)
+                        {
+                            case DuplicateKeyPolicy::Reject: {
+                                auto error    = MakeErrorAt(ctx,
+                                                            ParseErrorCode::DuplicateName,
+                                                            "Duplicate JSON object key",
+                                                            key.Value().span.begin,
+                                                            key.Value().span.end);
+                                error.related = duplicate->span;
+                                return Failure<NodeId>(std::move(error));
+                            }
+                            case DuplicateKeyPolicy::KeepFirst:
+                                break;
+                            case DuplicateKeyPolicy::KeepLast:
+                                *duplicate = member;
+                                break;
+                            case DuplicateKeyPolicy::Preserve:
+                                try
+                                {
+                                    members.push_back(member);
+                                } catch (const std::bad_alloc&)
+                                {
+                                    return Failure<NodeId>(MakeError(ctx,
+                                                                     ParseErrorCode::OutOfMemory,
+                                                                     "JSON object allocation failed"));
+                                }
+                                break;
+                        }
                     }
                     else
                     {
-                        overflow = true;
+                        try
+                        {
+                            members.push_back(member);
+                        } catch (const std::bad_alloc&)
+                        {
+                            return Failure<NodeId>(MakeError(ctx,
+                                                             ParseErrorCode::OutOfMemory,
+                                                             "JSON object allocation failed"));
+                        }
                     }
-                    ++digits;
-                    ++p;
+
+                    auto postValue = SkipTrivia(ctx);
+                    if (!postValue)
+                        return Failure<NodeId>(std::move(postValue.Error()));
+
+                    if (ctx.cursor.Peek() == '}')
+                    {
+                        ctx.cursor.Advance();
+                        break;
+                    }
+
+                    if (ctx.cursor.Peek() != ',')
+                    {
+                        return Failure<NodeId>(MakeError(ctx,
+                                                         ParseErrorCode::UnexpectedCharacter,
+                                                         "Expected ',' or '}' in JSON object"));
+                    }
+
+                    ctx.cursor.Advance();
+                    auto postComma = SkipTrivia(ctx);
+                    if (!postComma)
+                        return Failure<NodeId>(std::move(postComma.Error()));
+
+                    if (ctx.cursor.Peek() == '}')
+                    {
+                        if (ctx.options.trailingCommas == TrailingCommaPolicy::Reject)
+                        {
+                            return Failure<NodeId>(MakeError(ctx,
+                                                             ParseErrorCode::InvalidToken,
+                                                             "Trailing comma in JSON object"));
+                        }
+                        ctx.cursor.Advance();
+                        break;
+                    }
                 }
             }
 
-            if (p < ctx.cursor.EndPtr() && *p == '.')
+            --ctx.depth;
+            if (ctx.state->members.size() > ctx.state->limits.maxMembers ||
+                members.size() > ctx.state->limits.maxMembers - ctx.state->members.size())
             {
-                hasFrac = true;
-                ++p;
-                if (p >= ctx.cursor.EndPtr() || !IsDigit(*p))
-                {
-                    return NGIN::Utilities::Expected<F64, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                            MakeError(ctx, ParseErrorCode::InvalidNumber, "Invalid fraction")));
-                }
-                while (p < ctx.cursor.EndPtr() && IsDigit(*p))
-                    ++p;
+                return Failure<NodeId>(MakeErrorAt(ctx,
+                                                   ParseErrorCode::LimitExceeded,
+                                                   "JSON object member limit exceeded",
+                                                   start,
+                                                   ctx.cursor.Offset()));
             }
 
-            if (p < ctx.cursor.EndPtr() && (*p == 'e' || *p == 'E'))
+            const UIntSize begin = ctx.state->members.size();
+            try
             {
-                hasExp = true;
-                ++p;
-                if (p < ctx.cursor.EndPtr() && (*p == '+' || *p == '-'))
-                    ++p;
-                if (p >= ctx.cursor.EndPtr() || !IsDigit(*p))
-                {
-                    return NGIN::Utilities::Expected<F64, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                            MakeError(ctx, ParseErrorCode::InvalidNumber, "Invalid exponent")));
-                }
-                while (p < ctx.cursor.EndPtr() && IsDigit(*p))
-                    ++p;
+                ctx.state->members.insert(ctx.state->members.end(), members.begin(), members.end());
+            } catch (const std::bad_alloc&)
+            {
+                return Failure<NodeId>(MakeErrorAt(ctx,
+                                                   ParseErrorCode::OutOfMemory,
+                                                   "JSON object storage allocation failed",
+                                                   start,
+                                                   ctx.cursor.Offset()));
             }
 
-            const auto len = static_cast<std::size_t>(p - start);
-            if (!hasFrac && !hasExp && digits > 0 && !overflow)
-            {
-                static constexpr UInt64 maxExact = 9007199254740991ULL;// 2^53 - 1
-                if (intValue <= maxExact)
-                {
-                    const F64 value = negative ? -static_cast<F64>(intValue) : static_cast<F64>(intValue);
-                    ctx.cursor.Advance(static_cast<UIntSize>(len));
-                    return NGIN::Utilities::Expected<F64, ParseError>(value);
-                }
-            }
-            F64        value  = 0.0;
-            const auto result = std::from_chars(start, start + len, value, std::chars_format::general);
-            if (result.ec != std::errc {})
-            {
-                return NGIN::Utilities::Expected<F64, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                        MakeError(ctx, ParseErrorCode::InvalidNumber, "Invalid number")));
-            }
-            ctx.cursor.Advance(static_cast<UIntSize>(len));
-            return NGIN::Utilities::Expected<F64, ParseError>(value);
+            detail::NodeRecord node;
+            node.kind               = ValueKind::Object;
+            node.span               = SourceSpan {ctx.state->sourceId, start, ctx.cursor.Offset()};
+            node.payload.rangeValue = detail::NodeRange {begin, members.size()};
+            return AddNode(ctx, node);
         }
 
-        NGIN::Utilities::Expected<void, ParseError> SkipNumber(JsonParseContext& ctx)
+        [[nodiscard]] NGIN::Utilities::Expected<NodeId, ParseDiagnostic>
+        ParseNumber(ParseContext& ctx)
         {
-            const char* start = ctx.cursor.CurrentPtr();
-            const char* p     = start;
+            const UIntSize startOffset = ctx.cursor.Offset();
+            const char*    start       = ctx.cursor.CurrentPtr();
+            const char*    current     = start;
+            const char*    end         = ctx.cursor.EndPtr();
 
-            if (*p == '-')
-                ++p;
-            if (p >= ctx.cursor.EndPtr())
+            if (*current == '-')
+                ++current;
+            if (current >= end)
+                return Failure<NodeId>(MakeError(ctx, ParseErrorCode::UnexpectedEnd, "Truncated JSON number"));
+
+            if (*current == '0')
             {
-                return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                        MakeError(ctx, ParseErrorCode::UnexpectedEnd, "Unexpected end in number")));
-            }
-            if (*p == '0')
-            {
-                ++p;
+                ++current;
+                if (current < end && IsDigit(*current))
+                {
+                    return Failure<NodeId>(MakeErrorAt(ctx,
+                                                       ParseErrorCode::InvalidNumber,
+                                                       "Leading zero in JSON number",
+                                                       startOffset,
+                                                       startOffset + static_cast<UIntSize>(current - start) + 1));
+                }
             }
             else
             {
-                if (!IsDigit(*p))
-                {
-                    return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                            MakeError(ctx, ParseErrorCode::InvalidNumber, "Invalid number")));
-                }
-                while (p < ctx.cursor.EndPtr() && IsDigit(*p))
-                    ++p;
+                if (!IsDigit(*current))
+                    return Failure<NodeId>(MakeError(ctx, ParseErrorCode::InvalidNumber, "Invalid JSON number"));
+                while (current < end && IsDigit(*current))
+                    ++current;
             }
 
-            if (p < ctx.cursor.EndPtr() && *p == '.')
+            bool isFloating = false;
+            if (current < end && *current == '.')
             {
-                ++p;
-                if (p >= ctx.cursor.EndPtr() || !IsDigit(*p))
-                {
-                    return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                            MakeError(ctx, ParseErrorCode::InvalidNumber, "Invalid fraction")));
-                }
-                while (p < ctx.cursor.EndPtr() && IsDigit(*p))
-                    ++p;
+                isFloating = true;
+                ++current;
+                if (current >= end || !IsDigit(*current))
+                    return Failure<NodeId>(MakeError(ctx, ParseErrorCode::InvalidNumber, "Invalid JSON fraction"));
+                while (current < end && IsDigit(*current))
+                    ++current;
             }
 
-            if (p < ctx.cursor.EndPtr() && (*p == 'e' || *p == 'E'))
+            if (current < end && (*current == 'e' || *current == 'E'))
             {
-                ++p;
-                if (p < ctx.cursor.EndPtr() && (*p == '+' || *p == '-'))
-                    ++p;
-                if (p >= ctx.cursor.EndPtr() || !IsDigit(*p))
-                {
-                    return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                            MakeError(ctx, ParseErrorCode::InvalidNumber, "Invalid exponent")));
-                }
-                while (p < ctx.cursor.EndPtr() && IsDigit(*p))
-                    ++p;
+                isFloating = true;
+                ++current;
+                if (current < end && (*current == '+' || *current == '-'))
+                    ++current;
+                if (current >= end || !IsDigit(*current))
+                    return Failure<NodeId>(MakeError(ctx, ParseErrorCode::InvalidNumber, "Invalid JSON exponent"));
+                while (current < end && IsDigit(*current))
+                    ++current;
             }
 
-            ctx.cursor.Advance(static_cast<UIntSize>(p - start));
-            return {};
+            const UIntSize length = static_cast<UIntSize>(current - start);
+            ctx.cursor.Advance(length);
+
+            detail::NodeRecord node;
+            node.span = SourceSpan {ctx.state->sourceId, startOffset, ctx.cursor.Offset()};
+
+            if (isFloating)
+            {
+                F64        value  = 0.0;
+                const auto result = std::from_chars(start, current, value, std::chars_format::general);
+                if (result.ec != std::errc {} || result.ptr != current || !std::isfinite(value))
+                {
+                    return Failure<NodeId>(MakeErrorAt(ctx,
+                                                       ParseErrorCode::InvalidNumber,
+                                                       "JSON floating-point value is out of range",
+                                                       startOffset,
+                                                       ctx.cursor.Offset()));
+                }
+                node.kind                = ValueKind::Double;
+                node.payload.doubleValue = value;
+                return AddNode(ctx, node);
+            }
+
+            if (*start == '-')
+            {
+                Int64      value  = 0;
+                const auto result = std::from_chars(start, current, value);
+                if (result.ec != std::errc {} || result.ptr != current)
+                {
+                    return Failure<NodeId>(MakeErrorAt(ctx,
+                                                       ParseErrorCode::InvalidNumber,
+                                                       "JSON signed integer is out of range",
+                                                       startOffset,
+                                                       ctx.cursor.Offset()));
+                }
+                node.kind                = ValueKind::Int64;
+                node.payload.signedValue = value;
+                return AddNode(ctx, node);
+            }
+
+            UInt64     value  = 0;
+            const auto result = std::from_chars(start, current, value);
+            if (result.ec != std::errc {} || result.ptr != current)
+            {
+                return Failure<NodeId>(MakeErrorAt(ctx,
+                                                   ParseErrorCode::InvalidNumber,
+                                                   "JSON unsigned integer is out of range",
+                                                   startOffset,
+                                                   ctx.cursor.Offset()));
+            }
+
+            if (value <= static_cast<UInt64>((std::numeric_limits<Int64>::max)()))
+            {
+                node.kind                = ValueKind::Int64;
+                node.payload.signedValue = static_cast<Int64>(value);
+            }
+            else
+            {
+                node.kind                  = ValueKind::UInt64;
+                node.payload.unsignedValue = value;
+            }
+            return AddNode(ctx, node);
         }
 
-        NGIN::Utilities::Expected<void, ParseError> CountValue(JsonParseContext&                   ctx,
-                                                               NGIN::Containers::Vector<UIntSize>& containerCounts);
-
-        NGIN::Utilities::Expected<void, ParseError> CountArray(JsonParseContext&                   ctx,
-                                                               NGIN::Containers::Vector<UIntSize>& containerCounts)
+        [[nodiscard]] bool MatchLiteral(ParseContext& ctx, std::string_view literal) noexcept
         {
-            if (ctx.depth >= ctx.options.maxDepth)
-            {
-                return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                        MakeError(ctx, ParseErrorCode::DepthExceeded, "Array nesting too deep")));
-            }
-            ++ctx.depth;
-
-            ctx.cursor.Advance();
-            auto skipResult = SkipWhitespaceAndComments(ctx);
-            if (!skipResult.HasValue())
-                return skipResult;
-
-            const UIntSize countIndex = containerCounts.Size();
-            containerCounts.PushBack(0);
-            UIntSize count = 0;
-            if (ctx.cursor.Peek() == ']')
-            {
-                ctx.cursor.Advance();
-                containerCounts[countIndex] = 0;
-                --ctx.depth;
-                return {};
-            }
-
-            while (true)
-            {
-                auto valueResult = CountValue(ctx, containerCounts);
-                if (!valueResult.HasValue())
-                    return valueResult;
-                ++count;
-
-                auto postResult = SkipWhitespaceAndComments(ctx);
-                if (!postResult.HasValue())
-                    return postResult;
-
-                const char next = ctx.cursor.Peek();
-                if (next == ',')
-                {
-                    ctx.cursor.Advance();
-                    auto commaResult = SkipWhitespaceAndComments(ctx);
-                    if (!commaResult.HasValue())
-                        return commaResult;
-                    if (ctx.cursor.Peek() == ']' && !ctx.options.allowTrailingCommas)
-                    {
-                        return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                                MakeError(ctx, ParseErrorCode::InvalidToken, "Trailing comma in array")));
-                    }
-                    continue;
-                }
-                if (next == ']')
-                {
-                    ctx.cursor.Advance();
-                    break;
-                }
-                return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                        MakeError(ctx, ParseErrorCode::UnexpectedCharacter, "Expected ',' or ']'")));
-            }
-
-            containerCounts[countIndex] = count;
-            --ctx.depth;
-            return {};
+            if (ctx.cursor.Remaining().size() < literal.size())
+                return false;
+            if (ctx.cursor.Remaining().substr(0, literal.size()) != literal)
+                return false;
+            ctx.cursor.Advance(literal.size());
+            return true;
         }
 
-        NGIN::Utilities::Expected<void, ParseError> CountObject(JsonParseContext&                   ctx,
-                                                                NGIN::Containers::Vector<UIntSize>& containerCounts)
+        [[nodiscard]] NGIN::Utilities::Expected<NodeId, ParseDiagnostic>
+        ParseValue(ParseContext& ctx)
         {
-            if (ctx.depth >= ctx.options.maxDepth)
+            auto trivia = SkipTrivia(ctx);
+            if (!trivia)
+                return Failure<NodeId>(std::move(trivia.Error()));
+
+            const UIntSize start = ctx.cursor.Offset();
+            const char     token = ctx.cursor.Peek();
+
+            if (token == '{')
+                return ParseObject(ctx);
+            if (token == '[')
+                return ParseArray(ctx);
+            if (token == '"')
             {
-                return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                        MakeError(ctx, ParseErrorCode::DepthExceeded, "Object nesting too deep")));
+                auto string = ParseString(ctx);
+                if (!string)
+                    return Failure<NodeId>(std::move(string.Error()));
+                detail::NodeRecord node;
+                node.kind                = ValueKind::String;
+                node.span                = string.Value().span;
+                node.payload.stringValue = string.Value().value;
+                return AddNode(ctx, node);
             }
-            ++ctx.depth;
+            if (token == '-' || IsDigit(token))
+                return ParseNumber(ctx);
 
-            ctx.cursor.Advance();
-            auto skipResult = SkipWhitespaceAndComments(ctx);
-            if (!skipResult.HasValue())
-                return skipResult;
-
-            const UIntSize countIndex = containerCounts.Size();
-            containerCounts.PushBack(0);
-            UIntSize count = 0;
-            if (ctx.cursor.Peek() == '}')
+            detail::NodeRecord node;
+            node.span.source = ctx.state->sourceId;
+            node.span.begin  = start;
+            if (token == 'n' && MatchLiteral(ctx, "null"))
             {
-                ctx.cursor.Advance();
-                containerCounts[countIndex] = 0;
-                --ctx.depth;
-                return {};
+                node.kind     = ValueKind::Null;
+                node.span.end = ctx.cursor.Offset();
+                return AddNode(ctx, node);
             }
-
-            while (true)
+            if (token == 't' && MatchLiteral(ctx, "true"))
             {
-                auto keyResult = SkipString(ctx);
-                if (!keyResult.HasValue())
-                    return keyResult;
-
-                auto colonResult = SkipWhitespaceAndComments(ctx);
-                if (!colonResult.HasValue())
-                    return colonResult;
-                if (ctx.cursor.Peek() != ':')
-                {
-                    return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                            MakeError(ctx, ParseErrorCode::UnexpectedCharacter, "Expected ':'")));
-                }
-                ctx.cursor.Advance();
-
-                auto valueSkip = SkipWhitespaceAndComments(ctx);
-                if (!valueSkip.HasValue())
-                    return valueSkip;
-
-                auto valueResult = CountValue(ctx, containerCounts);
-                if (!valueResult.HasValue())
-                    return valueResult;
-                ++count;
-
-                auto postResult = SkipWhitespaceAndComments(ctx);
-                if (!postResult.HasValue())
-                    return postResult;
-
-                const char next = ctx.cursor.Peek();
-                if (next == ',')
-                {
-                    ctx.cursor.Advance();
-                    auto commaResult = SkipWhitespaceAndComments(ctx);
-                    if (!commaResult.HasValue())
-                        return commaResult;
-                    if (ctx.cursor.Peek() == '}' && !ctx.options.allowTrailingCommas)
-                    {
-                        return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                                MakeError(ctx, ParseErrorCode::InvalidToken, "Trailing comma in object")));
-                    }
-                    continue;
-                }
-                if (next == '}')
-                {
-                    ctx.cursor.Advance();
-                    break;
-                }
-                return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                        MakeError(ctx, ParseErrorCode::UnexpectedCharacter, "Expected ',' or '}'")));
+                node.kind              = ValueKind::Bool;
+                node.payload.boolValue = true;
+                node.span.end          = ctx.cursor.Offset();
+                return AddNode(ctx, node);
+            }
+            if (token == 'f' && MatchLiteral(ctx, "false"))
+            {
+                node.kind              = ValueKind::Bool;
+                node.payload.boolValue = false;
+                node.span.end          = ctx.cursor.Offset();
+                return AddNode(ctx, node);
             }
 
-            containerCounts[countIndex] = count;
-            --ctx.depth;
-            return {};
+            return Failure<NodeId>(MakeErrorAt(ctx,
+                                               ctx.cursor.IsEof()
+                                                       ? ParseErrorCode::UnexpectedEnd
+                                                       : ParseErrorCode::UnexpectedCharacter,
+                                               ctx.cursor.IsEof()
+                                                       ? "Expected JSON value"
+                                                       : "Unexpected JSON token",
+                                               start,
+                                               (std::min) (start + 1, ctx.state->source.size())));
         }
 
-        NGIN::Utilities::Expected<void, ParseError> CountValue(JsonParseContext&                   ctx,
-                                                               NGIN::Containers::Vector<UIntSize>& containerCounts)
+        template<class DocumentType>
+        [[nodiscard]] NGIN::Utilities::Expected<DocumentType, ParseDiagnostic>
+        ParseState(std::unique_ptr<detail::DocumentState> state,
+                   const ParseOptions&                    options,
+                   char*                                  mutableBase = nullptr,
+                   ParseScratch*                          scratch     = nullptr)
         {
-            auto skipResult = SkipWhitespaceAndComments(ctx);
-            if (!skipResult.HasValue())
-                return skipResult;
-
-            const char c = ctx.cursor.Peek();
-            if (c == 'n')
+            if (state->source.size() > state->limits.maxInputBytes)
             {
-                if (ctx.cursor.Peek(1) == 'u' && ctx.cursor.Peek(2) == 'l' && ctx.cursor.Peek(3) == 'l')
-                {
-                    ctx.cursor.Advance(4);
-                    return {};
-                }
-                return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                        MakeError(ctx, ParseErrorCode::InvalidToken, "Invalid literal")));
-            }
-            if (c == 't')
-            {
-                if (ctx.cursor.Peek(1) == 'r' && ctx.cursor.Peek(2) == 'u' && ctx.cursor.Peek(3) == 'e')
-                {
-                    ctx.cursor.Advance(4);
-                    return {};
-                }
-                return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                        MakeError(ctx, ParseErrorCode::InvalidToken, "Invalid literal")));
-            }
-            if (c == 'f')
-            {
-                if (ctx.cursor.Peek(1) == 'a' && ctx.cursor.Peek(2) == 'l' && ctx.cursor.Peek(3) == 's' && ctx.cursor.Peek(4) == 'e')
-                {
-                    ctx.cursor.Advance(5);
-                    return {};
-                }
-                return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                        MakeError(ctx, ParseErrorCode::InvalidToken, "Invalid literal")));
-            }
-            if (c == '"')
-            {
-                return SkipString(ctx);
-            }
-            if (c == '{')
-                return CountObject(ctx, containerCounts);
-            if (c == '[')
-                return CountArray(ctx, containerCounts);
-            if (c == '-' || IsDigit(c))
-            {
-                return SkipNumber(ctx);
-            }
-            return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                    MakeError(ctx, ParseErrorCode::UnexpectedCharacter, "Unexpected token")));
-        }
-
-        NGIN::Utilities::Expected<JsonValue, ParseError> ParseValue(JsonParseContext& ctx, JsonAllocator allocator);
-
-        NGIN::Utilities::Expected<JsonValue, ParseError> ParseArray(JsonParseContext& ctx, JsonAllocator allocator)
-        {
-            if (ctx.depth >= ctx.options.maxDepth)
-            {
-                return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                        MakeError(ctx, ParseErrorCode::DepthExceeded, "Array nesting too deep")));
-            }
-            ++ctx.depth;
-
-            ctx.cursor.Advance();
-            auto skipResult = SkipWhitespaceAndComments(ctx);
-            if (!skipResult.HasValue())
-                return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(skipResult).TakeError()));
-
-            void* memory = ctx.arena->Allocate(sizeof(JsonArray), alignof(JsonArray));
-            if (!memory)
-            {
-                return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                        MakeError(ctx, ParseErrorCode::OutOfMemory, "Array allocation failed")));
-            }
-            auto*          array        = new (memory) JsonArray(allocator);
-            const UIntSize reserveCount = NextContainerCount(ctx);
-            if (reserveCount > 0)
-                array->values.Reserve(reserveCount);
-
-            if (ctx.cursor.Peek() == ']')
-            {
-                ctx.cursor.Advance();
-                --ctx.depth;
-                return NGIN::Utilities::Expected<JsonValue, ParseError>(JsonValue::MakeArray(array));
+                ParseContext context {
+                        .cursor  = InputCursor(state->source),
+                        .options = options,
+                        .state   = state.get(),
+                };
+                return Failure<DocumentType>(MakeErrorAt(context,
+                                                         ParseErrorCode::LimitExceeded,
+                                                         "JSON input byte limit exceeded",
+                                                         0,
+                                                         state->source.size()));
             }
 
-            while (true)
+            if (options.utf8 == Utf8Policy::Validate &&
+                !NGIN::Text::Unicode::IsValidUtf8(state->source))
             {
-                auto valueResult = ParseValue(ctx, allocator);
-                if (!valueResult.HasValue())
-                    return valueResult;
-                array->values.PushBack(std::move(valueResult).TakeValue());
-
-                auto postResult = SkipWhitespaceAndComments(ctx);
-                if (!postResult.HasValue())
-                    return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(postResult.Error())));
-
-                const char next = ctx.cursor.Peek();
-                if (next == ',')
-                {
-                    ctx.cursor.Advance();
-                    auto commaResult = SkipWhitespaceAndComments(ctx);
-                    if (!commaResult.HasValue())
-                        return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(commaResult.Error())));
-                    if (ctx.cursor.Peek() == ']' && !ctx.options.allowTrailingCommas)
-                    {
-                        return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                                MakeError(ctx, ParseErrorCode::InvalidToken, "Trailing comma in array")));
-                    }
-                    continue;
-                }
-                if (next == ']')
-                {
-                    ctx.cursor.Advance();
-                    break;
-                }
-                return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                        MakeError(ctx, ParseErrorCode::UnexpectedCharacter, "Expected ',' or ']'")));
+                ParseContext context {
+                        .cursor  = InputCursor(state->source),
+                        .options = options,
+                        .state   = state.get(),
+                };
+                return Failure<DocumentType>(MakeErrorAt(context,
+                                                         ParseErrorCode::InvalidEncoding,
+                                                         "JSON input is not valid UTF-8",
+                                                         0,
+                                                         state->source.size()));
             }
 
-            --ctx.depth;
-            return NGIN::Utilities::Expected<JsonValue, ParseError>(JsonValue::MakeArray(array));
-        }
+            ParseContext context {
+                    .cursor      = InputCursor(state->source),
+                    .options     = options,
+                    .state       = state.get(),
+                    .mutableBase = mutableBase,
+                    .scratch     = scratch,
+            };
 
-        NGIN::Utilities::Expected<JsonValue, ParseError> ParseObject(JsonParseContext& ctx, JsonAllocator allocator)
-        {
-            if (ctx.depth >= ctx.options.maxDepth)
+            auto root = ParseValue(context);
+            if (!root)
+                return Failure<DocumentType>(std::move(root.Error()));
+            state->root = root.Value();
+
+            auto trivia = SkipTrivia(context);
+            if (!trivia)
+                return Failure<DocumentType>(std::move(trivia.Error()));
+            if (!context.cursor.IsEof())
             {
-                return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                        MakeError(ctx, ParseErrorCode::DepthExceeded, "Object nesting too deep")));
-            }
-            ++ctx.depth;
-
-            ctx.cursor.Advance();
-            auto skipResult = SkipWhitespaceAndComments(ctx);
-            if (!skipResult.HasValue())
-                return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(skipResult).TakeError()));
-
-            void* memory = ctx.arena->Allocate(sizeof(JsonObject), alignof(JsonObject));
-            if (!memory)
-            {
-                return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                        MakeError(ctx, ParseErrorCode::OutOfMemory, "Object allocation failed")));
-            }
-            auto*          object       = new (memory) JsonObject(allocator);
-            const UIntSize reserveCount = NextContainerCount(ctx);
-            if (reserveCount > 0)
-                object->members.Reserve(reserveCount);
-
-            if (ctx.cursor.Peek() == '}')
-            {
-                ctx.cursor.Advance();
-                --ctx.depth;
-                return NGIN::Utilities::Expected<JsonValue, ParseError>(JsonValue::MakeObject(object));
+                return Failure<DocumentType>(MakeError(context,
+                                                       ParseErrorCode::TrailingCharacters,
+                                                       "Trailing characters after JSON value"));
             }
 
-            while (true)
+            state->FinalizeViews();
+            if (!state->WithinMemoryLimit())
             {
-                auto keyResult = ParseString(ctx);
-                if (!keyResult.HasValue())
-                    return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(keyResult).TakeError()));
-                std::string_view key = keyResult.Value();
-                if (ctx.options.internKeys && ctx.document)
-                {
-                    const std::string_view interned = ctx.document->InternString(key);
-                    if (!interned.data() && !key.empty())
-                    {
-                        return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                                MakeError(ctx, ParseErrorCode::OutOfMemory, "Key interning failed")));
-                    }
-                    key = interned;
-                }
-
-                auto colonResult = SkipWhitespaceAndComments(ctx);
-                if (!colonResult.HasValue())
-                    return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(colonResult.Error())));
-                if (ctx.cursor.Peek() != ':')
-                {
-                    return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                            MakeError(ctx, ParseErrorCode::UnexpectedCharacter, "Expected ':'")));
-                }
-                ctx.cursor.Advance();
-
-                auto valueSkip = SkipWhitespaceAndComments(ctx);
-                if (!valueSkip.HasValue())
-                    return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(valueSkip.Error())));
-
-                auto valueResult = ParseValue(ctx, allocator);
-                if (!valueResult.HasValue())
-                    return valueResult;
-
-                object->members.PushBack(JsonMember {key, std::move(valueResult).TakeValue()});
-
-                auto postResult = SkipWhitespaceAndComments(ctx);
-                if (!postResult.HasValue())
-                    return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(postResult.Error())));
-
-                const char next = ctx.cursor.Peek();
-                if (next == ',')
-                {
-                    ctx.cursor.Advance();
-                    auto commaResult = SkipWhitespaceAndComments(ctx);
-                    if (!commaResult.HasValue())
-                        return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(commaResult.Error())));
-                    if (ctx.cursor.Peek() == '}' && !ctx.options.allowTrailingCommas)
-                    {
-                        return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                                MakeError(ctx, ParseErrorCode::InvalidToken, "Trailing comma in object")));
-                    }
-                    continue;
-                }
-                if (next == '}')
-                {
-                    ctx.cursor.Advance();
-                    break;
-                }
-                return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                        MakeError(ctx, ParseErrorCode::UnexpectedCharacter, "Expected ',' or '}'")));
+                return Failure<DocumentType>(MakeErrorAt(context,
+                                                         ParseErrorCode::LimitExceeded,
+                                                         "JSON total memory limit exceeded",
+                                                         0,
+                                                         state->source.size()));
             }
-
-            --ctx.depth;
-            return NGIN::Utilities::Expected<JsonValue, ParseError>(JsonValue::MakeObject(object));
-        }
-
-        NGIN::Utilities::Expected<JsonValue, ParseError> ParseValue(JsonParseContext& ctx, JsonAllocator allocator)
-        {
-            auto skipResult = SkipWhitespaceAndComments(ctx);
-            if (!skipResult.HasValue())
-                return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(skipResult).TakeError()));
-
-            const char c = ctx.cursor.Peek();
-            if (c == 'n')
-            {
-                if (ctx.cursor.Peek(1) == 'u' && ctx.cursor.Peek(2) == 'l' && ctx.cursor.Peek(3) == 'l')
-                {
-                    ctx.cursor.Advance(4);
-                    return NGIN::Utilities::Expected<JsonValue, ParseError>(JsonValue::MakeNull());
-                }
-                return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                        MakeError(ctx, ParseErrorCode::InvalidToken, "Invalid literal")));
-            }
-            if (c == 't')
-            {
-                if (ctx.cursor.Peek(1) == 'r' && ctx.cursor.Peek(2) == 'u' && ctx.cursor.Peek(3) == 'e')
-                {
-                    ctx.cursor.Advance(4);
-                    return NGIN::Utilities::Expected<JsonValue, ParseError>(JsonValue::MakeBool(true));
-                }
-                return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                        MakeError(ctx, ParseErrorCode::InvalidToken, "Invalid literal")));
-            }
-            if (c == 'f')
-            {
-                if (ctx.cursor.Peek(1) == 'a' && ctx.cursor.Peek(2) == 'l' && ctx.cursor.Peek(3) == 's' && ctx.cursor.Peek(4) == 'e')
-                {
-                    ctx.cursor.Advance(5);
-                    return NGIN::Utilities::Expected<JsonValue, ParseError>(JsonValue::MakeBool(false));
-                }
-                return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                        MakeError(ctx, ParseErrorCode::InvalidToken, "Invalid literal")));
-            }
-            if (c == '"')
-            {
-                return ParseString(ctx).Transform([](const std::string_view value) { return JsonValue::MakeString(value); });
-            }
-            if (c == '{')
-                return ParseObject(ctx, allocator);
-            if (c == '[')
-                return ParseArray(ctx, allocator);
-            if (c == '-' || IsDigit(c))
-            {
-                return ParseNumber(ctx).Transform([](const F64 value) { return JsonValue::MakeNumber(value); });
-            }
-            return NGIN::Utilities::Expected<JsonValue, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                    MakeError(ctx, ParseErrorCode::UnexpectedCharacter, "Unexpected token")));
-        }
-
-        NGIN::Utilities::Expected<void, ParseError> ParseValueEvents(JsonParseContext& ctx, JsonReader& reader);
-
-        NGIN::Utilities::Expected<void, ParseError> ParseArrayEvents(JsonParseContext& ctx, JsonReader& reader)
-        {
-            if (ctx.depth >= ctx.options.maxDepth)
-            {
-                return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                        MakeError(ctx, ParseErrorCode::DepthExceeded, "Array nesting too deep")));
-            }
-            ++ctx.depth;
-
-            ctx.cursor.Advance();
-            auto skipResult = SkipWhitespaceAndComments(ctx);
-            if (!skipResult.HasValue())
-                return skipResult;
-
-            if (!reader.OnStartArray())
-            {
-                return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                        MakeError(ctx, ParseErrorCode::HandlerRejected, "Handler rejected array")));
-            }
-
-            if (ctx.cursor.Peek() == ']')
-            {
-                ctx.cursor.Advance();
-                --ctx.depth;
-                if (!reader.OnEndArray())
-                {
-                    return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                            MakeError(ctx, ParseErrorCode::HandlerRejected, "Handler rejected array")));
-                }
-                return {};
-            }
-
-            while (true)
-            {
-                auto valueResult = ParseValueEvents(ctx, reader);
-                if (!valueResult.HasValue())
-                    return valueResult;
-
-                auto postResult = SkipWhitespaceAndComments(ctx);
-                if (!postResult.HasValue())
-                    return postResult;
-
-                const char next = ctx.cursor.Peek();
-                if (next == ',')
-                {
-                    ctx.cursor.Advance();
-                    auto commaResult = SkipWhitespaceAndComments(ctx);
-                    if (!commaResult.HasValue())
-                        return commaResult;
-                    if (ctx.cursor.Peek() == ']' && !ctx.options.allowTrailingCommas)
-                    {
-                        return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                                MakeError(ctx, ParseErrorCode::InvalidToken, "Trailing comma in array")));
-                    }
-                    continue;
-                }
-                if (next == ']')
-                {
-                    ctx.cursor.Advance();
-                    break;
-                }
-                return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                        MakeError(ctx, ParseErrorCode::UnexpectedCharacter, "Expected ',' or ']'")));
-            }
-
-            --ctx.depth;
-            if (!reader.OnEndArray())
-            {
-                return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                        MakeError(ctx, ParseErrorCode::HandlerRejected, "Handler rejected array")));
-            }
-            return {};
-        }
-
-        NGIN::Utilities::Expected<void, ParseError> ParseObjectEvents(JsonParseContext& ctx, JsonReader& reader)
-        {
-            if (ctx.depth >= ctx.options.maxDepth)
-            {
-                return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                        MakeError(ctx, ParseErrorCode::DepthExceeded, "Object nesting too deep")));
-            }
-            ++ctx.depth;
-
-            ctx.cursor.Advance();
-            auto skipResult = SkipWhitespaceAndComments(ctx);
-            if (!skipResult.HasValue())
-                return skipResult;
-
-            if (!reader.OnStartObject())
-            {
-                return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                        MakeError(ctx, ParseErrorCode::HandlerRejected, "Handler rejected object")));
-            }
-
-            if (ctx.cursor.Peek() == '}')
-            {
-                ctx.cursor.Advance();
-                --ctx.depth;
-                if (!reader.OnEndObject())
-                {
-                    return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                            MakeError(ctx, ParseErrorCode::HandlerRejected, "Handler rejected object")));
-                }
-                return {};
-            }
-
-            while (true)
-            {
-                auto keyResult = ParseString(ctx);
-                if (!keyResult.HasValue())
-                    return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(keyResult.Error())));
-                if (!reader.OnKey(keyResult.Value()))
-                {
-                    return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                            MakeError(ctx, ParseErrorCode::HandlerRejected, "Handler rejected key")));
-                }
-
-                auto colonResult = SkipWhitespaceAndComments(ctx);
-                if (!colonResult.HasValue())
-                    return colonResult;
-                if (ctx.cursor.Peek() != ':')
-                {
-                    return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                            MakeError(ctx, ParseErrorCode::UnexpectedCharacter, "Expected ':'")));
-                }
-                ctx.cursor.Advance();
-
-                auto valueSkip = SkipWhitespaceAndComments(ctx);
-                if (!valueSkip.HasValue())
-                    return valueSkip;
-
-                auto valueResult = ParseValueEvents(ctx, reader);
-                if (!valueResult.HasValue())
-                    return valueResult;
-
-                auto postResult = SkipWhitespaceAndComments(ctx);
-                if (!postResult.HasValue())
-                    return postResult;
-
-                const char next = ctx.cursor.Peek();
-                if (next == ',')
-                {
-                    ctx.cursor.Advance();
-                    auto commaResult = SkipWhitespaceAndComments(ctx);
-                    if (!commaResult.HasValue())
-                        return commaResult;
-                    if (ctx.cursor.Peek() == '}' && !ctx.options.allowTrailingCommas)
-                    {
-                        return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                                MakeError(ctx, ParseErrorCode::InvalidToken, "Trailing comma in object")));
-                    }
-                    continue;
-                }
-                if (next == '}')
-                {
-                    ctx.cursor.Advance();
-                    break;
-                }
-                return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                        MakeError(ctx, ParseErrorCode::UnexpectedCharacter, "Expected ',' or '}'")));
-            }
-
-            --ctx.depth;
-            if (!reader.OnEndObject())
-            {
-                return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                        MakeError(ctx, ParseErrorCode::HandlerRejected, "Handler rejected object")));
-            }
-            return {};
-        }
-
-        NGIN::Utilities::Expected<void, ParseError> ParseValueEvents(JsonParseContext& ctx, JsonReader& reader)
-        {
-            auto skipResult = SkipWhitespaceAndComments(ctx);
-            if (!skipResult.HasValue())
-                return skipResult;
-
-            const char c = ctx.cursor.Peek();
-            if (c == 'n')
-            {
-                if (ctx.cursor.Peek(1) == 'u' && ctx.cursor.Peek(2) == 'l' && ctx.cursor.Peek(3) == 'l')
-                {
-                    ctx.cursor.Advance(4);
-                    if (!reader.OnNull())
-                        return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                                MakeError(ctx, ParseErrorCode::HandlerRejected, "Handler rejected null")));
-                    return {};
-                }
-                return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                        MakeError(ctx, ParseErrorCode::InvalidToken, "Invalid literal")));
-            }
-            if (c == 't')
-            {
-                if (ctx.cursor.Peek(1) == 'r' && ctx.cursor.Peek(2) == 'u' && ctx.cursor.Peek(3) == 'e')
-                {
-                    ctx.cursor.Advance(4);
-                    if (!reader.OnBool(true))
-                        return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                                MakeError(ctx, ParseErrorCode::HandlerRejected, "Handler rejected bool")));
-                    return {};
-                }
-                return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                        MakeError(ctx, ParseErrorCode::InvalidToken, "Invalid literal")));
-            }
-            if (c == 'f')
-            {
-                if (ctx.cursor.Peek(1) == 'a' && ctx.cursor.Peek(2) == 'l' && ctx.cursor.Peek(3) == 's' && ctx.cursor.Peek(4) == 'e')
-                {
-                    ctx.cursor.Advance(5);
-                    if (!reader.OnBool(false))
-                        return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                                MakeError(ctx, ParseErrorCode::HandlerRejected, "Handler rejected bool")));
-                    return {};
-                }
-                return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                        MakeError(ctx, ParseErrorCode::InvalidToken, "Invalid literal")));
-            }
-            if (c == '"')
-            {
-                auto stringResult = ParseString(ctx);
-                if (!stringResult.HasValue())
-                    return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(stringResult.Error())));
-                if (!reader.OnString(stringResult.Value()))
-                    return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                            MakeError(ctx, ParseErrorCode::HandlerRejected, "Handler rejected string")));
-                return {};
-            }
-            if (c == '{')
-                return ParseObjectEvents(ctx, reader);
-            if (c == '[')
-                return ParseArrayEvents(ctx, reader);
-            if (c == '-' || IsDigit(c))
-            {
-                auto numberResult = ParseNumber(ctx);
-                if (!numberResult.HasValue())
-                    return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(numberResult.Error())));
-                if (!reader.OnNumber(numberResult.Value()))
-                    return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                            MakeError(ctx, ParseErrorCode::HandlerRejected, "Handler rejected number")));
-                return {};
-            }
-            return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                    MakeError(ctx, ParseErrorCode::UnexpectedCharacter, "Unexpected token")));
+            if constexpr (std::same_as<DocumentType, Document>)
+                return detail::DocumentAccess::MakeDocument(std::move(state));
+            else
+                return detail::DocumentAccess::MakeBorrowedDocument(std::move(state));
         }
     }// namespace
 
-    JsonDocument::JsonDocument(UIntSize arenaBytes)
-        : m_arena(arenaBytes)
+    NGIN::Utilities::Expected<Document, ParseDiagnostic>
+    Parser::Parse(OwnedTextBuffer       input,
+                  const ParseOptions&   options,
+                  const ParseLimits&    limits,
+                  const ParseResources& resources)
     {
-    }
-
-    JsonStringView JsonDocument::InternString(JsonStringView value) noexcept
-    {
-        if (value.empty())
-            return value;
-        if (!m_interner)
-        {
-            void* memory = m_arena.Allocate(sizeof(InternMap), alignof(InternMap));
-            if (!memory)
-                return {};
-            m_interner = new (memory) InternMap(0, std::hash<JsonStringView> {}, std::equal_to<JsonStringView> {}, Allocator());
-        }
-        if (m_interner->Contains(value))
-            return m_interner->GetRef(value);
-
-        void* memory = m_arena.Allocate(value.size(), alignof(char));
-        if (!memory)
-            return {};
-        std::memcpy(memory, value.data(), value.size());
-        JsonStringView stored(static_cast<const char*>(memory), value.size());
-        m_interner->Insert(stored, stored);
-        return stored;
-    }
-
-    JsonValue* JsonObject::Find(JsonStringView key) noexcept
-    {
-        if (m_index)
-        {
-            if (!m_index->Contains(key))
-                return nullptr;
-            const UIntSize index = m_index->GetRef(key);
-            if (index >= members.Size())
-                return nullptr;
-            return &members[index].value;
-        }
-        for (UIntSize i = 0; i < members.Size(); ++i)
-        {
-            if (members[i].name == key)
-                return &members[i].value;
-        }
-        return nullptr;
-    }
-
-    const JsonValue* JsonObject::Find(JsonStringView key) const noexcept
-    {
-        if (m_index)
-        {
-            if (!m_index->Contains(key))
-                return nullptr;
-            const UIntSize index = m_index->GetRef(key);
-            if (index >= members.Size())
-                return nullptr;
-            return &members[index].value;
-        }
-        for (UIntSize i = 0; i < members.Size(); ++i)
-        {
-            if (members[i].name == key)
-                return &members[i].value;
-        }
-        return nullptr;
-    }
-
-    bool JsonObject::Set(JsonStringView key, const JsonValue& value) noexcept
-    {
-        for (UIntSize i = 0; i < members.Size(); ++i)
-        {
-            if (members[i].name == key)
-            {
-                members[i].value = value;
-                if (m_index)
-                    m_index->Insert(key, i);
-                return true;
-            }
-        }
-        members.PushBack(JsonMember {key, value});
-        if (m_index)
-            m_index->Insert(key, members.Size() - 1);
-        return true;
-    }
-
-    bool JsonObject::BuildIndex() noexcept
-    {
-        if (m_index)
-            return true;
-
-        void* memory = m_allocator.Allocate(sizeof(IndexMap), alignof(IndexMap));
-        if (!memory)
-            return false;
-        m_index = new (memory) IndexMap(members.Size() * 2 + 1, std::hash<JsonStringView> {}, std::equal_to<JsonStringView> {}, m_allocator);
-        for (UIntSize i = 0; i < members.Size(); ++i)
-            m_index->Insert(members[i].name, i);
-        return true;
-    }
-
-    NGIN::Utilities::Expected<JsonDocument, ParseError>
-    JsonParser::Parse(std::span<const NGIN::Byte> input, const JsonParseOptions& options)
-    {
-        const UIntSize arenaBytes = options.arenaBytes != 0 ? options.arenaBytes : (input.size() * 2 + 4096);
-        JsonDocument   document(arenaBytes);
-
-        const bool                         doPrecompute = ShouldPrecomputeContainers(options, static_cast<UIntSize>(input.size()));
-        NGIN::Containers::Vector<UIntSize> containerCounts;
-        if (doPrecompute)
-        {
-            JsonParseContext countCtx {
-                    InputCursor(input, options.trackLocation),
-                    options,
-                    nullptr,
-                    nullptr,
-                    0,
-                    nullptr,
-                    0,
-                    nullptr,
-            };
-
-            auto countResult = CountValue(countCtx, containerCounts);
-            if (!countResult.HasValue())
-                return NGIN::Utilities::Expected<JsonDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(countResult.Error())));
-
-            auto tailResult = SkipWhitespaceAndComments(countCtx);
-            if (!tailResult.HasValue())
-                return NGIN::Utilities::Expected<JsonDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(tailResult.Error())));
-
-            if (!countCtx.cursor.IsEof())
-            {
-                return NGIN::Utilities::Expected<JsonDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                        MakeError(countCtx, ParseErrorCode::TrailingCharacters, "Trailing characters after JSON")));
-            }
-        }
-
-        JsonParseContext ctx {
-                InputCursor(input, options.trackLocation),
-                options,
-                &document.Arena(),
-                nullptr,
-                0,
-                doPrecompute ? &containerCounts : nullptr,
-                0,
-                &document,
-        };
-
         try
         {
-            auto valueResult = ParseValue(ctx, document.Allocator());
-            if (!valueResult.HasValue())
-                return NGIN::Utilities::Expected<JsonDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(valueResult.Error())));
-
-            document.Root() = std::move(valueResult.Value());
-
-            auto tailResult = SkipWhitespaceAndComments(ctx);
-            if (!tailResult.HasValue())
-                return NGIN::Utilities::Expected<JsonDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(tailResult.Error())));
+            auto state = std::make_unique<detail::DocumentState>(
+                    std::move(input), limits, resources);
+            return ParseState<Document>(std::move(state), options);
         } catch (const std::bad_alloc&)
         {
-            return NGIN::Utilities::Expected<JsonDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                    MakeError(ctx, ParseErrorCode::OutOfMemory, "Allocation failed")));
+            ParseDiagnostic error;
+            error.code    = ParseErrorCode::OutOfMemory;
+            error.message = "Failed to allocate JSON document";
+            return NGIN::Utilities::Unexpected<ParseDiagnostic>(std::move(error));
         }
-
-        if (!ctx.cursor.IsEof())
-        {
-            return NGIN::Utilities::Expected<JsonDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                    MakeError(ctx, ParseErrorCode::TrailingCharacters, "Trailing characters after JSON")));
-        }
-
-        return NGIN::Utilities::Expected<JsonDocument, ParseError>(std::move(document));
     }
 
-    NGIN::Utilities::Expected<JsonDocument, ParseError>
-    JsonParser::Parse(std::span<NGIN::Byte> input, const JsonParseOptions& options)
+    NGIN::Utilities::Expected<Document, ParseDiagnostic>
+    Parser::ParseInSitu(MutableTextBuffer     input,
+                        const ParseOptions&   options,
+                        const ParseLimits&    limits,
+                        const ParseResources& resources)
     {
-        JsonParseOptions inSituOptions = options;
-        inSituOptions.inSitu           = true;
-        const UIntSize arenaBytes      = inSituOptions.arenaBytes != 0 ? inSituOptions.arenaBytes : (input.size() * 2 + 4096);
-        JsonDocument   document(arenaBytes);
-
-        const bool                         doPrecompute = ShouldPrecomputeContainers(inSituOptions, static_cast<UIntSize>(input.size()));
-        NGIN::Containers::Vector<UIntSize> containerCounts;
-        if (doPrecompute)
-        {
-            JsonParseContext countCtx {
-                    InputCursor(std::span<const NGIN::Byte>(input.data(), input.size()), inSituOptions.trackLocation),
-                    inSituOptions,
-                    nullptr,
-                    nullptr,
-                    0,
-                    nullptr,
-                    0,
-                    nullptr,
-            };
-
-            auto countResult = CountValue(countCtx, containerCounts);
-            if (!countResult.HasValue())
-                return NGIN::Utilities::Expected<JsonDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(countResult.Error())));
-
-            auto tailResult = SkipWhitespaceAndComments(countCtx);
-            if (!tailResult.HasValue())
-                return NGIN::Utilities::Expected<JsonDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(tailResult.Error())));
-
-            if (!countCtx.cursor.IsEof())
-            {
-                return NGIN::Utilities::Expected<JsonDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                        MakeError(countCtx, ParseErrorCode::TrailingCharacters, "Trailing characters after JSON")));
-            }
-        }
-
-        JsonParseContext ctx {
-                InputCursor(std::span<const NGIN::Byte>(input.data(), input.size()), inSituOptions.trackLocation),
-                inSituOptions,
-                &document.Arena(),
-                reinterpret_cast<char*>(input.data()),
-                0,
-                doPrecompute ? &containerCounts : nullptr,
-                0,
-                &document,
-        };
-
         try
         {
-            auto valueResult = ParseValue(ctx, document.Allocator());
-            if (!valueResult.HasValue())
-                return NGIN::Utilities::Expected<JsonDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(valueResult.Error())));
-
-            document.Root() = std::move(valueResult.Value());
-
-            auto tailResult = SkipWhitespaceAndComments(ctx);
-            if (!tailResult.HasValue())
-                return NGIN::Utilities::Expected<JsonDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(tailResult.Error())));
+            auto owned = std::move(input).TakeOwned();
+            auto state = std::make_unique<detail::DocumentState>(
+                    std::move(owned), limits, resources);
+            char* mutableBase = state->ownedSource->Text().Data();
+            return ParseState<Document>(std::move(state), options, mutableBase);
         } catch (const std::bad_alloc&)
         {
-            return NGIN::Utilities::Expected<JsonDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                    MakeError(ctx, ParseErrorCode::OutOfMemory, "Allocation failed")));
+            ParseDiagnostic error;
+            error.code    = ParseErrorCode::OutOfMemory;
+            error.message = "Failed to allocate in-situ JSON document";
+            return NGIN::Utilities::Unexpected<ParseDiagnostic>(std::move(error));
         }
-
-        if (!ctx.cursor.IsEof())
-        {
-            return NGIN::Utilities::Expected<JsonDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                    MakeError(ctx, ParseErrorCode::TrailingCharacters, "Trailing characters after JSON")));
-        }
-
-        return NGIN::Utilities::Expected<JsonDocument, ParseError>(std::move(document));
     }
 
-    NGIN::Utilities::Expected<JsonDocument, ParseError>
-    JsonParser::Parse(std::string_view input, const JsonParseOptions& options)
+    NGIN::Utilities::Expected<BorrowedDocument, ParseDiagnostic>
+    Parser::ParseBorrowed(BorrowedTextView      input,
+                          ParseScratch&         scratch,
+                          const ParseOptions&   options,
+                          const ParseLimits&    limits,
+                          const ParseResources& resources)
     {
-        return Parse(std::span<const NGIN::Byte>(reinterpret_cast<const NGIN::Byte*>(input.data()), input.size()), options);
-    }
-
-    NGIN::Utilities::Expected<JsonDocument, ParseError>
-    JsonParser::Parse(NGIN::IO::IByteReader& reader, const JsonParseOptions& options)
-    {
-        NGIN::Containers::Vector<NGIN::Byte> buffer;
-        static constexpr UIntSize            chunkSize = 64 * 1024;
-        NGIN::Byte                           temp[chunkSize];
-        while (true)
+        scratch.Reset();
+        try
         {
-            auto readResult = reader.Read(std::span<NGIN::Byte>(temp, chunkSize));
-            if (!readResult.HasValue())
-            {
-                ParseError err;
-                err.code    = ParseErrorCode::InvalidToken;
-                err.message = "Failed to read from reader";
-                return NGIN::Utilities::Expected<JsonDocument, ParseError>(NGIN::Utilities::Unexpected<ParseError>(std::move(err)));
-            }
-            const UIntSize readBytes = readResult.Value();
-            if (readBytes == 0)
-                break;
-            for (UIntSize i = 0; i < readBytes; ++i)
-                buffer.PushBack(temp[i]);
-        }
-        auto result = options.inSitu
-                              ? Parse(std::span<NGIN::Byte>(buffer.data(), buffer.Size()), options)
-                              : Parse(std::span<const NGIN::Byte>(buffer.data(), buffer.Size()), options);
-        if (result.HasValue())
-            result.Value().AdoptInput(std::move(buffer));
-        return result;
-    }
-
-    NGIN::Utilities::Expected<void, ParseError>
-    JsonParser::Parse(JsonReader& reader, std::span<const NGIN::Byte> input, const JsonParseOptions& options)
-    {
-        const UIntSize arenaBytes = options.arenaBytes != 0 ? options.arenaBytes : (input.size() * 2 + 4096);
-        JsonArena      arena(arenaBytes);
-
-        JsonParseContext ctx {
-                InputCursor(input, options.trackLocation),
-                options,
-                &arena,
-                nullptr,
-                0,
-                nullptr,
-                0,
-                nullptr,
-        };
-
-        auto valueResult = ParseValueEvents(ctx, reader);
-        if (!valueResult.HasValue())
-            return valueResult;
-
-        auto tailResult = SkipWhitespaceAndComments(ctx);
-        if (!tailResult.HasValue())
-            return tailResult;
-
-        if (!ctx.cursor.IsEof())
+            scratch.Reserve(input.View().size());
+            auto state = std::make_unique<detail::DocumentState>(input, limits, resources);
+            return ParseState<BorrowedDocument>(std::move(state), options, nullptr, &scratch);
+        } catch (const std::bad_alloc&)
         {
-            return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                    MakeError(ctx, ParseErrorCode::TrailingCharacters, "Trailing characters after JSON")));
+            ParseDiagnostic error;
+            error.code    = ParseErrorCode::OutOfMemory;
+            error.message = "Failed to allocate borrowed JSON document";
+            return NGIN::Utilities::Unexpected<ParseDiagnostic>(std::move(error));
         }
-
-        return {};
     }
-
-    NGIN::Utilities::Expected<void, ParseError>
-    JsonParser::Parse(JsonReader& reader, std::span<NGIN::Byte> input, const JsonParseOptions& options)
-    {
-        JsonParseOptions inSituOptions = options;
-        inSituOptions.inSitu           = true;
-        const UIntSize arenaBytes      = inSituOptions.arenaBytes != 0 ? inSituOptions.arenaBytes : (input.size() * 2 + 4096);
-        JsonArena      arena(arenaBytes);
-
-        JsonParseContext ctx {
-                InputCursor(std::span<const NGIN::Byte>(input.data(), input.size()), inSituOptions.trackLocation),
-                inSituOptions,
-                &arena,
-                reinterpret_cast<char*>(input.data()),
-                0,
-                nullptr,
-                0,
-                nullptr,
-        };
-
-        auto valueResult = ParseValueEvents(ctx, reader);
-        if (!valueResult.HasValue())
-            return valueResult;
-
-        auto tailResult = SkipWhitespaceAndComments(ctx);
-        if (!tailResult.HasValue())
-            return tailResult;
-
-        if (!ctx.cursor.IsEof())
-        {
-            return NGIN::Utilities::Expected<void, ParseError>(NGIN::Utilities::Unexpected<ParseError>(
-                    MakeError(ctx, ParseErrorCode::TrailingCharacters, "Trailing characters after JSON")));
-        }
-
-        return {};
-    }
-
-}// namespace NGIN::Serialization
+}// namespace NGIN::Serialization::JSON

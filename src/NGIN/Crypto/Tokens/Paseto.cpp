@@ -76,47 +76,12 @@ namespace NGIN::Crypto::Tokens
             return ConstByteSpan {reinterpret_cast<const NGIN::Byte*>(text.data()), text.size()};
         }
 
-        [[nodiscard]] bool HasDuplicateMembers(const NGIN::Serialization::JsonValue& value) noexcept
+        [[nodiscard]] CryptoExpected<NGIN::Serialization::JSON::Document>
+        ParseJsonObject(std::string_view json)
         {
-            if (value.IsObject())
-            {
-                const auto& members = value.AsObject().members;
-                for (NGIN::UIntSize i = 0; i < members.Size(); ++i)
-                {
-                    for (NGIN::UIntSize j = i + 1; j < members.Size(); ++j)
-                    {
-                        if (members[i].name == members[j].name)
-                        {
-                            return true;
-                        }
-                    }
-                    if (HasDuplicateMembers(members[i].value))
-                    {
-                        return true;
-                    }
-                }
-                return false;
-            }
-
-            if (value.IsArray())
-            {
-                for (const auto& item: value.AsArray().values)
-                {
-                    if (HasDuplicateMembers(item))
-                    {
-                        return true;
-                    }
-                }
-            }
-
-            return false;
-        }
-
-        [[nodiscard]] CryptoExpected<NGIN::Serialization::JsonDocument> ParseJsonObject(std::string_view json)
-        {
-            auto document = NGIN::Serialization::JsonParser::Parse(json);
-            if (!document.HasValue() || !document.Value().Root().IsObject() ||
-                HasDuplicateMembers(document.Value().Root()))
+            auto document = NGIN::Serialization::JSON::Parser::Parse(
+                    NGIN::Serialization::OwnedTextBuffer {json});
+            if (!document.HasValue() || !document.Value().Root().IsObject())
             {
                 return ParseError();
             }
@@ -124,16 +89,20 @@ namespace NGIN::Crypto::Tokens
             return std::move(document.Value());
         }
 
-        [[nodiscard]] CryptoExpected<NGIN::Int64> JsonNumberToInt64(const NGIN::Serialization::JsonValue& value) noexcept
+        [[nodiscard]] CryptoExpected<NGIN::Int64>
+        JsonNumberToInt64(NGIN::Serialization::JSON::ValueView value) noexcept
         {
-            if (!value.IsNumber() || !std::isfinite(value.AsNumber()))
+            if (const auto integer = value.TryInt64())
+                return *integer;
+
+            const auto number = value.TryDouble();
+            if (!number || !std::isfinite(*number))
             {
                 return ParseError();
             }
 
-            const auto number = value.AsNumber();
-            const auto whole  = std::trunc(number);
-            if (number != whole || whole < static_cast<NGIN::F64>(std::numeric_limits<NGIN::Int64>::min()) ||
+            const auto whole = std::trunc(*number);
+            if (*number != whole || whole < static_cast<NGIN::F64>(std::numeric_limits<NGIN::Int64>::min()) ||
                 whole > static_cast<NGIN::F64>(std::numeric_limits<NGIN::Int64>::max()))
             {
                 return ParseError();
@@ -142,9 +111,11 @@ namespace NGIN::Crypto::Tokens
             return static_cast<NGIN::Int64>(whole);
         }
 
-        [[nodiscard]] bool HasClaim(const NGIN::Serialization::JsonObject& object, std::string_view claim) noexcept
+        [[nodiscard]] bool HasClaim(
+                NGIN::Serialization::JSON::ObjectView object,
+                std::string_view claim) noexcept
         {
-            return object.Find(claim) != nullptr;
+            return object.Find(claim).has_value();
         }
 
         [[nodiscard]] CryptoExpected<void> ValidateRequiredClaims(std::string_view payloadJson, PasetoValidationPolicy policy)
@@ -155,7 +126,7 @@ namespace NGIN::Crypto::Tokens
                 return document.Error();
             }
 
-            const auto& object = document.Value().Root().AsObject();
+            const auto object = *document.Value().Root().TryObject();
             for (std::string_view claim: policy.requiredClaims)
             {
                 if (!HasClaim(object, claim))
@@ -312,7 +283,7 @@ namespace NGIN::Crypto::Tokens
                 return document.Error();
             }
 
-            return document.Value().Root().AsObject().Find(name) != nullptr;
+            return document.Value().Root().TryObject()->Find(name).has_value();
         }
 
         [[nodiscard]] CryptoExpected<std::string> GetPasetoStringClaimInPayload(
@@ -325,13 +296,13 @@ namespace NGIN::Crypto::Tokens
                 return document.Error();
             }
 
-            const auto* value = document.Value().Root().AsObject().Find(name);
-            if (value == nullptr || !value->IsString())
+            const auto value = document.Value().Root().TryObject()->Find(name);
+            if (!value || !value->IsString())
             {
                 return InvalidArgument();
             }
 
-            return std::string {value->AsString()};
+            return std::string {*value->TryString()};
         }
 
         [[nodiscard]] CryptoExpected<NGIN::Int64> GetPasetoInt64ClaimInPayload(
@@ -344,8 +315,8 @@ namespace NGIN::Crypto::Tokens
                 return document.Error();
             }
 
-            const auto* value = document.Value().Root().AsObject().Find(name);
-            if (value == nullptr || !value->IsNumber())
+            const auto value = document.Value().Root().TryObject()->Find(name);
+            if (!value || !value->IsNumber())
             {
                 return InvalidArgument();
             }
@@ -363,13 +334,13 @@ namespace NGIN::Crypto::Tokens
                 return document.Error();
             }
 
-            const auto* value = document.Value().Root().AsObject().Find(name);
-            if (value == nullptr || !value->IsBool())
+            const auto value = document.Value().Root().TryObject()->Find(name);
+            if (!value || !value->IsBool())
             {
                 return InvalidArgument();
             }
 
-            return value->AsBool();
+            return *value->TryBool();
         }
     }// namespace
 

@@ -168,4 +168,32 @@ if(NGIN_BASE_BUILD_FUZZERS)
       PROPERTIES LABELS "Crypto.Fuzz"
     )
   endforeach()
+
+  set(NGIN_BASE_SERIALIZATION_FUZZERS
+    Serialization/Fuzz/JsonDomFuzzer.cpp
+    Serialization/Fuzz/JsonEventFuzzer.cpp
+    Serialization/Fuzz/XmlSemanticFuzzer.cpp
+    Serialization/Fuzz/XmlSyntaxFuzzer.cpp
+    Serialization/Fuzz/EscapeEntityFuzzer.cpp
+  )
+
+  foreach(fuzzer_src IN LISTS NGIN_BASE_SERIALIZATION_FUZZERS)
+    get_filename_component(fuzzer_name "${fuzzer_src}" NAME_WE)
+    add_executable("Serialization_${fuzzer_name}" "${CMAKE_CURRENT_SOURCE_DIR}/${fuzzer_src}")
+    target_link_libraries("Serialization_${fuzzer_name}" PRIVATE ngin_base_test_config NGIN::Serialization)
+    target_compile_options("Serialization_${fuzzer_name}" PRIVATE -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer)
+    target_link_options("Serialization_${fuzzer_name}" PRIVATE -fsanitize=fuzzer,address,undefined)
+    set_target_properties(
+      "Serialization_${fuzzer_name}"
+      PROPERTIES FOLDER "Fuzzers" LABELS "Serialization.Fuzz")
+    string(REGEX REPLACE "Fuzzer$" "" fuzzer_case "${fuzzer_name}")
+    add_test(
+      NAME "Base.Serialization.Fuzz.${fuzzer_case}.Startup"
+      COMMAND "Serialization_${fuzzer_name}" -runs=1
+    )
+    set_tests_properties(
+      "Base.Serialization.Fuzz.${fuzzer_case}.Startup"
+      PROPERTIES LABELS "Serialization.Fuzz"
+    )
+  endforeach()
 endif()

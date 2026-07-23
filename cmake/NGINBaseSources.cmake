@@ -57,10 +57,17 @@ set(NGIN_BASE_NET_SOURCES
 )
 
 set(NGIN_BASE_SERIALIZATION_SOURCES
+  ${NGIN_BASE_ROOT_DIR}/src/NGIN/Serialization/JSON/JsonBuilder.cpp
+  ${NGIN_BASE_ROOT_DIR}/src/NGIN/Serialization/JSON/JsonDocument.cpp
+  ${NGIN_BASE_ROOT_DIR}/src/NGIN/Serialization/JSON/JsonEventParser.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/Serialization/JSON/JsonParser.cpp
-  ${NGIN_BASE_ROOT_DIR}/src/NGIN/Serialization/JSON/JsonArchive.cpp
+  ${NGIN_BASE_ROOT_DIR}/src/NGIN/Serialization/JSON/JsonStreamWriter.cpp
+  ${NGIN_BASE_ROOT_DIR}/src/NGIN/Serialization/JSON/JsonWriter.cpp
+  ${NGIN_BASE_ROOT_DIR}/src/NGIN/Serialization/XML/XmlBuilder.cpp
+  ${NGIN_BASE_ROOT_DIR}/src/NGIN/Serialization/XML/XmlDocument.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/Serialization/XML/XmlParser.cpp
-  ${NGIN_BASE_ROOT_DIR}/src/NGIN/Serialization/XML/XmlArchive.cpp
+  ${NGIN_BASE_ROOT_DIR}/src/NGIN/Serialization/XML/XmlStreamWriter.cpp
+  ${NGIN_BASE_ROOT_DIR}/src/NGIN/Serialization/XML/XmlWriter.cpp
 )
 
 if(NGIN_BASE_CRYPTO_WITH_OPENSSL)

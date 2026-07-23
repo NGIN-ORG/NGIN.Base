@@ -46,52 +46,20 @@ namespace NGIN::Crypto::Tokens
             return output;
         }
 
-        [[nodiscard]] bool HasDuplicateMembers(const NGIN::Serialization::JsonValue& value) noexcept
+        [[nodiscard]] CryptoExpected<NGIN::Int64>
+        JsonNumberToInt64(NGIN::Serialization::JSON::ValueView value) noexcept
         {
-            if (value.IsObject())
-            {
-                const auto& members = value.AsObject().members;
-                for (NGIN::UIntSize i = 0; i < members.Size(); ++i)
-                {
-                    for (NGIN::UIntSize j = i + 1; j < members.Size(); ++j)
-                    {
-                        if (members[i].name == members[j].name)
-                        {
-                            return true;
-                        }
-                    }
-                    if (HasDuplicateMembers(members[i].value))
-                    {
-                        return true;
-                    }
-                }
-                return false;
-            }
+            if (const auto integer = value.TryInt64())
+                return *integer;
 
-            if (value.IsArray())
-            {
-                for (const auto& item: value.AsArray().values)
-                {
-                    if (HasDuplicateMembers(item))
-                    {
-                        return true;
-                    }
-                }
-            }
-
-            return false;
-        }
-
-        [[nodiscard]] CryptoExpected<NGIN::Int64> JsonNumberToInt64(const NGIN::Serialization::JsonValue& value) noexcept
-        {
-            if (!value.IsNumber() || !std::isfinite(value.AsNumber()))
+            const auto number = value.TryDouble();
+            if (!number || !std::isfinite(*number))
             {
                 return ParseError();
             }
 
-            const auto number = value.AsNumber();
-            const auto whole  = std::trunc(number);
-            if (number != whole || whole < static_cast<NGIN::F64>(std::numeric_limits<NGIN::Int64>::min()) ||
+            const auto whole = std::trunc(*number);
+            if (*number != whole || whole < static_cast<NGIN::F64>(std::numeric_limits<NGIN::Int64>::min()) ||
                 whole > static_cast<NGIN::F64>(std::numeric_limits<NGIN::Int64>::max()))
             {
                 return ParseError();
@@ -128,68 +96,70 @@ namespace NGIN::Crypto::Tokens
 
         [[nodiscard]] CryptoExpected<JwtAlgorithm> ParseHeaderAlgorithm(std::string_view headerJson)
         {
-            auto document = NGIN::Serialization::JsonParser::Parse(headerJson);
-            if (!document.HasValue() || !document.Value().Root().IsObject() || HasDuplicateMembers(document.Value().Root()))
+            auto document = NGIN::Serialization::JSON::Parser::Parse(
+                    NGIN::Serialization::OwnedTextBuffer {headerJson});
+            if (!document.HasValue() || !document.Value().Root().IsObject())
             {
                 return ParseError();
             }
 
-            const auto& object = document.Value().Root().AsObject();
-            const auto* alg    = object.Find("alg");
-            if (alg == nullptr || !alg->IsString())
+            const auto object = *document.Value().Root().TryObject();
+            const auto alg    = object.Find("alg");
+            if (!alg || !alg->IsString())
             {
                 return ParseError();
             }
 
-            return ParseAlgorithm(alg->AsString());
+            return ParseAlgorithm(*alg->TryString());
         }
 
         [[nodiscard]] CryptoExpected<JwtClaims> ParseClaims(std::string_view payloadJson)
         {
-            auto document = NGIN::Serialization::JsonParser::Parse(payloadJson);
-            if (!document.HasValue() || !document.Value().Root().IsObject() || HasDuplicateMembers(document.Value().Root()))
+            auto document = NGIN::Serialization::JSON::Parser::Parse(
+                    NGIN::Serialization::OwnedTextBuffer {payloadJson});
+            if (!document.HasValue() || !document.Value().Root().IsObject())
             {
                 return ParseError();
             }
 
-            const auto& object = document.Value().Root().AsObject();
-            JwtClaims   claims;
+            const auto object = *document.Value().Root().TryObject();
+            JwtClaims  claims;
 
-            if (const auto* value = object.Find("iss"); value != nullptr)
+            if (const auto value = object.Find("iss"))
             {
                 if (!value->IsString())
                 {
                     return ParseError();
                 }
-                claims.issuer    = std::string {value->AsString()};
+                claims.issuer    = std::string {*value->TryString()};
                 claims.hasIssuer = true;
             }
 
-            if (const auto* value = object.Find("sub"); value != nullptr)
+            if (const auto value = object.Find("sub"))
             {
                 if (!value->IsString())
                 {
                     return ParseError();
                 }
-                claims.subject    = std::string {value->AsString()};
+                claims.subject    = std::string {*value->TryString()};
                 claims.hasSubject = true;
             }
 
-            if (const auto* value = object.Find("aud"); value != nullptr)
+            if (const auto value = object.Find("aud"))
             {
                 if (value->IsString())
                 {
-                    claims.audiences.PushBack(std::string {value->AsString()});
+                    claims.audiences.PushBack(std::string {*value->TryString()});
                 }
                 else if (value->IsArray())
                 {
-                    for (const auto& item: value->AsArray().values)
+                    for (const auto item: *value->TryArray())
                     {
                         if (!item.IsString())
                         {
                             return ParseError();
                         }
-                        claims.audiences.PushBack(std::string {item.AsString()});
+                        claims.audiences.PushBack(std::string {*item.TryString()});
                     }
                 }
                 else
@@ -198,7 +168,7 @@ namespace NGIN::Crypto::Tokens
                 }
             }
 
-            if (const auto* value = object.Find("exp"); value != nullptr)
+            if (const auto value = object.Find("exp"))
             {
                 auto number = JsonNumberToInt64(*value);
                 if (!number.HasValue())
@@ -209,7 +179,7 @@ namespace NGIN::Crypto::Tokens
                 claims.hasExpirationTime = true;
             }
 
-            if (const auto* value = object.Find("nbf"); value != nullptr)
+            if (const auto value = object.Find("nbf"))
             {
                 auto number = JsonNumberToInt64(*value);
                 if (!number.HasValue())
@@ -220,7 +190,7 @@ namespace NGIN::Crypto::Tokens
                 claims.hasNotBefore = true;
             }
 
-            if (const auto* value = object.Find("iat"); value != nullptr)
+            if (const auto value = object.Find("iat"))
             {
                 auto number = JsonNumberToInt64(*value);
                 if (!number.HasValue())
@@ -263,10 +233,12 @@ namespace NGIN::Crypto::Tokens
             return false;
         }
 
-        [[nodiscard]] CryptoExpected<NGIN::Serialization::JsonDocument> ParsePayloadDocument(const JwtCompactToken& token)
+        [[nodiscard]] CryptoExpected<NGIN::Serialization::JSON::Document>
+        ParsePayloadDocument(const JwtCompactToken& token)
         {
-            auto document = NGIN::Serialization::JsonParser::Parse(token.payloadJson);
-            if (!document.HasValue() || !document.Value().Root().IsObject() || HasDuplicateMembers(document.Value().Root()))
+            auto document = NGIN::Serialization::JSON::Parser::Parse(
+                    NGIN::Serialization::OwnedTextBuffer {token.payloadJson});
+            if (!document.HasValue() || !document.Value().Root().IsObject())
             {
                 return ParseError();
             }
@@ -438,7 +410,7 @@ namespace NGIN::Crypto::Tokens
             return document.Error();
         }
 
-        return document.Value().Root().AsObject().Find(name) != nullptr;
+        return document.Value().Root().TryObject()->Find(name).has_value();
     }
 
     CryptoExpected<std::string> GetJwtStringClaim(const JwtCompactToken& token, std::string_view name)
@@ -449,13 +421,13 @@ namespace NGIN::Crypto::Tokens
             return document.Error();
         }
 
-        const auto* value = document.Value().Root().AsObject().Find(name);
-        if (value == nullptr || !value->IsString())
+        const auto value = document.Value().Root().TryObject()->Find(name);
+        if (!value || !value->IsString())
         {
             return InvalidArgument();
         }
 
-        return std::string {value->AsString()};
+        return std::string {*value->TryString()};
     }
 
     CryptoExpected<NGIN::Int64> GetJwtInt64Claim(const JwtCompactToken& token, std::string_view name)
@@ -466,8 +438,8 @@ namespace NGIN::Crypto::Tokens
             return document.Error();
         }
 
-        const auto* value = document.Value().Root().AsObject().Find(name);
-        if (value == nullptr || !value->IsNumber())
+        const auto value = document.Value().Root().TryObject()->Find(name);
+        if (!value || !value->IsNumber())
         {
             return InvalidArgument();
         }
@@ -483,13 +455,13 @@ namespace NGIN::Crypto::Tokens
             return document.Error();
         }
 
-        const auto* value = document.Value().Root().AsObject().Find(name);
-        if (value == nullptr || !value->IsBool())
+        const auto value = document.Value().Root().TryObject()->Find(name);
+        if (!value || !value->IsBool())
         {
             return InvalidArgument();
         }
 
-        return value->AsBool();
+        return *value->TryBool();
     }
 
     CryptoExpected<JwtCompactToken> ValidateJwt(

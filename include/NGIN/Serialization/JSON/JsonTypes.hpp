@@ -1,28 +1,54 @@
 #pragma once
 
-#include <NGIN/Containers/HashMap.hpp>
-#include <NGIN/Containers/Vector.hpp>
 #include <NGIN/Defines.hpp>
-#include <NGIN/Memory/AllocatorRef.hpp>
-#include <NGIN/Memory/LinearAllocator.hpp>
 #include <NGIN/Primitives.hpp>
+#include <NGIN/Serialization/Core/SourceSpan.hpp>
 
-#include <functional>
-#include <cstring>
+#include <iterator>
+#include <memory>
+#include <optional>
 #include <string_view>
 
-namespace NGIN::Serialization
+namespace NGIN::Serialization::JSON
 {
-    struct JsonArray;
-    struct JsonObject;
-
-    using JsonArena      = NGIN::Memory::LinearAllocator<>;
-    using JsonAllocator  = NGIN::Memory::AllocatorRef<JsonArena>;
-    using JsonStringView = std::string_view;
-
-    /// @brief JSON value node with pointer-based arrays/objects.
-    struct JsonValue
+    namespace detail
     {
+        struct DocumentState;
+        struct DocumentAccess;
+    }
+
+    struct NodeId
+    {
+        UInt32 value {static_cast<UInt32>(-1)};
+
+        [[nodiscard]] constexpr bool IsValid() const noexcept
+        {
+            return value != static_cast<UInt32>(-1);
+        }
+
+        [[nodiscard]] friend constexpr bool operator==(NodeId, NodeId) noexcept = default;
+    };
+
+    enum class ValueKind : UInt8
+    {
+        Null,
+        Bool,
+        Int64,
+        UInt64,
+        Double,
+        String,
+        Array,
+        Object,
+    };
+
+    class ArrayView;
+    class ObjectView;
+    class MemberView;
+
+    /// @brief Immutable, checked view of one JSON value.
+    class NGIN_BASE_API ValueView
+    {
+    public:
         enum class Type : UInt8
         {
             Null,
@@ -33,158 +59,248 @@ namespace NGIN::Serialization
             Object,
         };
 
-        constexpr JsonValue() noexcept
-            : m_type(Type::Null), m_bool(false)
-        {
-        }
+        constexpr ValueView() noexcept = default;
 
-        static JsonValue MakeNull() noexcept
-        {
-            return JsonValue {};
-        }
+        [[nodiscard]] bool      IsValid() const noexcept;
+        [[nodiscard]] ValueKind Kind() const noexcept;
+        [[nodiscard]] SourceSpan Span() const noexcept;
 
-        static JsonValue MakeBool(bool value) noexcept
-        {
-            JsonValue v;
-            v.m_type = Type::Bool;
-            v.m_bool = value;
-            return v;
-        }
+        [[nodiscard]] bool IsNull() const noexcept;
+        [[nodiscard]] bool IsBool() const noexcept;
+        [[nodiscard]] bool IsInt64() const noexcept;
+        [[nodiscard]] bool IsUInt64() const noexcept;
+        [[nodiscard]] bool IsDouble() const noexcept;
+        [[nodiscard]] bool IsNumber() const noexcept;
+        [[nodiscard]] bool IsString() const noexcept;
+        [[nodiscard]] bool IsArray() const noexcept;
+        [[nodiscard]] bool IsObject() const noexcept;
 
-        static JsonValue MakeNumber(F64 value) noexcept
-        {
-            JsonValue v;
-            v.m_type   = Type::Number;
-            v.m_number = value;
-            return v;
-        }
+        [[nodiscard]] std::optional<bool>             TryBool() const noexcept;
+        [[nodiscard]] std::optional<Int64>            TryInt64() const noexcept;
+        [[nodiscard]] std::optional<UInt64>           TryUInt64() const noexcept;
+        [[nodiscard]] std::optional<F64>              TryDouble() const noexcept;
+        [[nodiscard]] std::optional<std::string_view> TryString() const noexcept;
+        [[nodiscard]] std::optional<ArrayView>        TryArray() const noexcept;
+        [[nodiscard]] std::optional<ObjectView>       TryObject() const noexcept;
 
-        static JsonValue MakeString(JsonStringView value) noexcept
-        {
-            JsonValue v;
-            v.m_type   = Type::String;
-            v.m_string = value;
-            return v;
-        }
+        [[nodiscard]] Type             GetType() const noexcept;
+        [[nodiscard]] bool             AsBool() const noexcept;
+        [[nodiscard]] F64              AsNumber() const noexcept;
+        [[nodiscard]] std::string_view AsString() const noexcept;
+        [[nodiscard]] ArrayView        AsArray() const noexcept;
+        [[nodiscard]] ObjectView       AsObject() const noexcept;
 
-        static JsonValue MakeArray(JsonArray* value) noexcept
-        {
-            JsonValue v;
-            v.m_type  = Type::Array;
-            v.m_array = value;
-            return v;
-        }
-
-        static JsonValue MakeObject(JsonObject* value) noexcept
-        {
-            JsonValue v;
-            v.m_type   = Type::Object;
-            v.m_object = value;
-            return v;
-        }
-
-        [[nodiscard]] Type GetType() const noexcept { return m_type; }
-
-        [[nodiscard]] bool IsNull() const noexcept { return m_type == Type::Null; }
-        [[nodiscard]] bool IsBool() const noexcept { return m_type == Type::Bool; }
-        [[nodiscard]] bool IsNumber() const noexcept { return m_type == Type::Number; }
-        [[nodiscard]] bool IsString() const noexcept { return m_type == Type::String; }
-        [[nodiscard]] bool IsArray() const noexcept { return m_type == Type::Array; }
-        [[nodiscard]] bool IsObject() const noexcept { return m_type == Type::Object; }
-
-        [[nodiscard]] bool              AsBool() const noexcept { return m_bool; }
-        [[nodiscard]] F64               AsNumber() const noexcept { return m_number; }
-        [[nodiscard]] JsonStringView    AsString() const noexcept { return m_string; }
-        [[nodiscard]] JsonArray&        AsArray() noexcept { return *m_array; }
-        [[nodiscard]] const JsonArray&  AsArray() const noexcept { return *m_array; }
-        [[nodiscard]] JsonObject&       AsObject() noexcept { return *m_object; }
-        [[nodiscard]] const JsonObject& AsObject() const noexcept { return *m_object; }
+        [[nodiscard]] NodeId Id() const noexcept { return m_id; }
 
     private:
-        Type m_type {Type::Null};
-        union
-        {
-            bool           m_bool;
-            F64            m_number;
-            JsonStringView m_string;
-            JsonArray*     m_array;
-            JsonObject*    m_object;
-        };
-    };
+        friend class ArrayView;
+        friend class ObjectView;
+        friend class MemberView;
+        friend class Document;
+        friend class BorrowedDocument;
+        friend class Builder;
+        friend struct detail::DocumentState;
 
-    /// @brief Name/value member for JSON objects.
-    struct JsonMember
-    {
-        JsonStringView name {};
-        JsonValue      value {};
-    };
-
-    /// @brief JSON array container.
-    struct JsonArray
-    {
-        explicit JsonArray(JsonAllocator allocator)
-            : values(0, allocator)
+        constexpr ValueView(const detail::DocumentState* state, NodeId id) noexcept
+            : m_state(state), m_id(id)
         {
         }
 
-        NGIN::Containers::Vector<JsonValue, JsonAllocator> values;
+        const detail::DocumentState* m_state {nullptr};
+        NodeId                       m_id {};
     };
 
-    /// @brief JSON object container.
-    struct JsonObject
-    {
-        explicit JsonObject(JsonAllocator allocator)
-            : members(0, allocator), m_allocator(allocator)
-        {
-        }
-
-        [[nodiscard]] JsonValue*       Find(JsonStringView key) noexcept;
-        [[nodiscard]] const JsonValue* Find(JsonStringView key) const noexcept;
-        bool                           Set(JsonStringView key, const JsonValue& value) noexcept;
-        bool                           BuildIndex() noexcept;
-
-        NGIN::Containers::Vector<JsonMember, JsonAllocator> members;
-
-    private:
-        using IndexMap = NGIN::Containers::FlatHashMap<JsonStringView,
-                                                       UIntSize,
-                                                       std::hash<JsonStringView>,
-                                                       std::equal_to<JsonStringView>,
-                                                       JsonAllocator>;
-
-        JsonAllocator m_allocator;
-        IndexMap*     m_index {nullptr};
-    };
-
-    /// @brief JSON document owning an arena for parsed nodes.
-    class NGIN_BASE_API JsonDocument
+    /// @brief Immutable view of one JSON object member.
+    class NGIN_BASE_API MemberView
     {
     public:
-        explicit JsonDocument(UIntSize arenaBytes);
+        constexpr MemberView() noexcept = default;
 
-        JsonDocument(JsonDocument&&) noexcept            = default;
-        JsonDocument& operator=(JsonDocument&&) noexcept = default;
-        JsonDocument(const JsonDocument&)                = delete;
-        JsonDocument& operator=(const JsonDocument&)     = delete;
-
-        [[nodiscard]] JsonValue&       Root() noexcept { return m_root; }
-        [[nodiscard]] const JsonValue& Root() const noexcept { return m_root; }
-
-        [[nodiscard]] JsonAllocator Allocator() noexcept { return JsonAllocator {m_arena}; }
-        [[nodiscard]] JsonArena&    Arena() noexcept { return m_arena; }
-        void                        AdoptInput(NGIN::Containers::Vector<NGIN::Byte>&& input) noexcept { m_inputStorage = std::move(input); }
-        [[nodiscard]] JsonStringView InternString(JsonStringView value) noexcept;
+        [[nodiscard]] bool             IsValid() const noexcept;
+        [[nodiscard]] std::string_view Key() const noexcept;
+        [[nodiscard]] ValueView        Value() const noexcept;
+        [[nodiscard]] SourceSpan       Span() const noexcept;
 
     private:
-        using InternMap = NGIN::Containers::FlatHashMap<JsonStringView,
-                                                       JsonStringView,
-                                                       std::hash<JsonStringView>,
-                                                       std::equal_to<JsonStringView>,
-                                                       JsonAllocator>;
+        friend class ObjectView;
 
-        JsonArena                            m_arena;
-        JsonValue                            m_root {};
-        NGIN::Containers::Vector<NGIN::Byte> m_inputStorage {};
-        InternMap*                           m_interner {nullptr};
+        constexpr MemberView(const detail::DocumentState* state, UIntSize index) noexcept
+            : m_state(state), m_index(index)
+        {
+        }
+
+        const detail::DocumentState* m_state {nullptr};
+        UIntSize                     m_index {0};
     };
-}// namespace NGIN::Serialization
+
+    /// @brief Immutable contiguous view of a JSON array.
+    class NGIN_BASE_API ArrayView
+    {
+    public:
+        class Iterator
+        {
+        public:
+            using iterator_category = std::forward_iterator_tag;
+            using value_type        = ValueView;
+            using difference_type   = std::ptrdiff_t;
+
+            constexpr Iterator() noexcept = default;
+
+            [[nodiscard]] ValueView operator*() const noexcept;
+            Iterator&               operator++() noexcept;
+            Iterator                operator++(int) noexcept;
+            [[nodiscard]] friend bool operator==(const Iterator&, const Iterator&) noexcept = default;
+
+        private:
+            friend class ArrayView;
+
+            constexpr Iterator(const detail::DocumentState* state, UIntSize index) noexcept
+                : m_state(state), m_index(index)
+            {
+            }
+
+            const detail::DocumentState* m_state {nullptr};
+            UIntSize                     m_index {0};
+        };
+
+        constexpr ArrayView() noexcept = default;
+
+        [[nodiscard]] bool      IsValid() const noexcept;
+        [[nodiscard]] UIntSize  Size() const noexcept;
+        [[nodiscard]] bool      Empty() const noexcept { return Size() == 0; }
+        [[nodiscard]] ValueView operator[](UIntSize index) const noexcept;
+        [[nodiscard]] Iterator  begin() const noexcept;
+        [[nodiscard]] Iterator  end() const noexcept;
+        [[nodiscard]] SourceSpan Span() const noexcept;
+
+    private:
+        friend class ValueView;
+        friend class Builder;
+
+        constexpr ArrayView(const detail::DocumentState* state, UIntSize begin, UIntSize count, SourceSpan span) noexcept
+            : m_state(state), m_begin(begin), m_count(count), m_span(span)
+        {
+        }
+
+        const detail::DocumentState* m_state {nullptr};
+        UIntSize                     m_begin {0};
+        UIntSize                     m_count {0};
+        SourceSpan                   m_span {};
+    };
+
+    /// @brief Immutable contiguous view of a JSON object.
+    class NGIN_BASE_API ObjectView
+    {
+    public:
+        class Iterator
+        {
+        public:
+            using iterator_category = std::forward_iterator_tag;
+            using value_type        = MemberView;
+            using difference_type   = std::ptrdiff_t;
+
+            constexpr Iterator() noexcept = default;
+
+            [[nodiscard]] MemberView operator*() const noexcept;
+            Iterator&                operator++() noexcept;
+            Iterator                 operator++(int) noexcept;
+            [[nodiscard]] friend bool operator==(const Iterator&, const Iterator&) noexcept = default;
+
+        private:
+            friend class ObjectView;
+
+            constexpr Iterator(const detail::DocumentState* state, UIntSize index) noexcept
+                : m_state(state), m_index(index)
+            {
+            }
+
+            const detail::DocumentState* m_state {nullptr};
+            UIntSize                     m_index {0};
+        };
+
+        constexpr ObjectView() noexcept = default;
+
+        [[nodiscard]] bool                     IsValid() const noexcept;
+        [[nodiscard]] UIntSize                 Size() const noexcept;
+        [[nodiscard]] bool                     Empty() const noexcept { return Size() == 0; }
+        [[nodiscard]] MemberView               MemberAt(UIntSize index) const noexcept;
+        [[nodiscard]] std::optional<ValueView> Find(std::string_view key) const noexcept;
+        [[nodiscard]] const ValueView*         FindPtr(std::string_view key) const noexcept;
+        [[nodiscard]] Iterator                 begin() const noexcept;
+        [[nodiscard]] Iterator                 end() const noexcept;
+        [[nodiscard]] SourceSpan               Span() const noexcept;
+
+    private:
+        friend class ValueView;
+        friend class Builder;
+
+        constexpr ObjectView(const detail::DocumentState* state, UIntSize begin, UIntSize count, SourceSpan span) noexcept
+            : m_state(state), m_begin(begin), m_count(count), m_span(span)
+        {
+        }
+
+        const detail::DocumentState* m_state {nullptr};
+        UIntSize                     m_begin {0};
+        UIntSize                     m_count {0};
+        SourceSpan                   m_span {};
+    };
+
+    /// @brief Self-contained owning JSON document.
+    class NGIN_BASE_API Document
+    {
+    public:
+        Document() noexcept;
+        ~Document();
+
+        Document(Document&&) noexcept;
+        Document& operator=(Document&&) noexcept;
+        Document(const Document&)            = delete;
+        Document& operator=(const Document&) = delete;
+
+        [[nodiscard]] bool             IsValid() const noexcept;
+        [[nodiscard]] ValueView        Root() const noexcept;
+        [[nodiscard]] std::string_view SourceText() const noexcept;
+        [[nodiscard]] UIntSize         MemoryUsed() const noexcept;
+        [[nodiscard]] UIntSize         MemoryCommitted() const noexcept;
+        [[nodiscard]] UIntSize         NodeCount() const noexcept;
+        [[nodiscard]] UIntSize         MemberCount() const noexcept;
+
+    private:
+        friend class Parser;
+        friend class Builder;
+        friend struct detail::DocumentAccess;
+
+        explicit Document(std::unique_ptr<detail::DocumentState> state) noexcept;
+
+        std::unique_ptr<detail::DocumentState> m_state;
+    };
+
+    /// @brief Explicitly non-owning JSON document tied to a caller-owned source.
+    class NGIN_BASE_API BorrowedDocument
+    {
+    public:
+        BorrowedDocument() noexcept;
+        ~BorrowedDocument();
+
+        BorrowedDocument(BorrowedDocument&&) noexcept;
+        BorrowedDocument& operator=(BorrowedDocument&&) noexcept;
+        BorrowedDocument(const BorrowedDocument&)            = delete;
+        BorrowedDocument& operator=(const BorrowedDocument&) = delete;
+
+        [[nodiscard]] bool             IsValid() const noexcept;
+        [[nodiscard]] ValueView        Root() const noexcept;
+        [[nodiscard]] std::string_view SourceText() const noexcept;
+        [[nodiscard]] UIntSize         MemoryUsed() const noexcept;
+        [[nodiscard]] UIntSize         MemoryCommitted() const noexcept;
+        [[nodiscard]] UIntSize         NodeCount() const noexcept;
+        [[nodiscard]] UIntSize         MemberCount() const noexcept;
+
+    private:
+        friend class Parser;
+        friend struct detail::DocumentAccess;
+
+        explicit BorrowedDocument(std::unique_ptr<detail::DocumentState> state) noexcept;
+
+        std::unique_ptr<detail::DocumentState> m_state;
+    };
+}// namespace NGIN::Serialization::JSON

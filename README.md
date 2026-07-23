@@ -59,6 +59,7 @@ If you are new to the library, use this path:
 3. [IO Guide](docs/IO.md) if you need files, paths, or directory operations
 4. [Network Guide](docs/Network.md) if you need sockets or explicit async networking
 5. [Memory Guide](docs/Memory.md) if you need allocator-aware containers and memory utilities
+6. [Serialization Guide](include/NGIN/Serialization/README.md) for strict JSON/XML parsing and writing
 
 ## Smallest Useful Example
 
