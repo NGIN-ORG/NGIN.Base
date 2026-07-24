@@ -8,7 +8,7 @@ namespace NGIN::Serialization::XML
     {
         elementViews.clear();
         elementViews.reserve(elements.size());
-        for (UIntSize index = 0; index < elements.size(); ++index)
+        for (UInt32 index = 0; index < elements.size(); ++index)
             elementViews.push_back(ElementView {this, index});
     }
 
@@ -33,29 +33,30 @@ namespace NGIN::Serialization::XML
             element = &state->elementViews[node->element];
     }
 
-    AttributeView::AttributeView(const detail::DocumentState* state, UIntSize index) noexcept
+    AttributeView::AttributeView(const detail::DocumentState* state, UInt32 index) noexcept
         : m_state(state), m_index(index)
     {
         if (state && index < state->attributes.size())
         {
-            name = state->attributes[index].name.View();
+            name  = state->attributes[index].name.View();
             value = state->attributes[index].value.View();
         }
     }
 
-    ElementView::ElementView(const detail::DocumentState* state, UIntSize index) noexcept
+    ElementView::ElementView(const detail::DocumentState* state, UInt32 index) noexcept
         : m_state(state), m_index(index)
     {
         if (state && index < state->elements.size())
         {
             const auto& record = state->elements[index];
-            name = record.name.View();
-            attributes = AttributeRange {state, record.attributes.begin, record.attributes.count};
-            children = ChildRange {state, record.children.begin, record.children.count};
+            name               = record.name.View();
+            attributes         = AttributeRange {state, record.attributes.begin, record.attributes.count};
+            children           = ChildRange {state, record.children.begin, record.children.count};
         }
     }
 
-    bool NodeView::IsValid() const noexcept { return Resolve(m_state, m_id) != nullptr; }
+    bool NodeView::IsValid() const noexcept
+    { return Resolve(m_state, m_id) != nullptr; }
     NodeKind NodeView::Kind() const noexcept
     {
         const auto* node = Resolve(m_state, m_id);
@@ -79,23 +80,23 @@ namespace NGIN::Serialization::XML
     {
         const auto* node = Resolve(m_state, m_id);
         return node && node->kind == NodeKind::Element && node->element < m_state->elements.size()
-                     ? std::optional<ElementView> {ElementView {m_state, node->element}}
-                     : std::nullopt;
+                       ? std::optional<ElementView> {ElementView {m_state, node->element}}
+                       : std::nullopt;
     }
     const ElementView* NodeView::ElementPtr() const noexcept
     {
         const auto* node = Resolve(m_state, m_id);
         return node && node->kind == NodeKind::Element &&
-                       node->element < m_state->elementViews.size()
-                     ? &m_state->elementViews[node->element]
-                     : nullptr;
+                               node->element < m_state->elementViews.size()
+                       ? &m_state->elementViews[node->element]
+                       : nullptr;
     }
     std::optional<std::string_view> NodeView::TryText() const noexcept
     {
         const auto* node = Resolve(m_state, m_id);
         return node && node->kind != NodeKind::Element
-                     ? std::optional<std::string_view> {node->text.View()}
-                     : std::nullopt;
+                       ? std::optional<std::string_view> {node->text.View()}
+                       : std::nullopt;
     }
 
     bool AttributeView::IsValid() const noexcept
@@ -134,14 +135,16 @@ namespace NGIN::Serialization::XML
     }
     AttributeView AttributeRange::operator[](UIntSize index) const noexcept
     {
-        return index < m_count ? AttributeView {m_state, m_begin + index} : AttributeView {};
+        return index < m_count
+                       ? AttributeView {m_state, static_cast<UInt32>(m_begin + index)}
+                       : AttributeView {};
     }
 
     NodeView ChildRange::Iterator::operator*() const noexcept
     {
         return m_state && m_index < m_state->children.size()
-                     ? NodeView {m_state, m_state->children[m_index]}
-                     : NodeView {};
+                       ? NodeView {m_state, m_state->children[m_index]}
+                       : NodeView {};
     }
     ChildRange::Iterator& ChildRange::Iterator::operator++() noexcept
     {
@@ -151,14 +154,14 @@ namespace NGIN::Serialization::XML
     NodeView ChildRange::operator[](UIntSize index) const noexcept
     {
         return m_state && index < m_count && m_begin + index < m_state->children.size()
-                     ? NodeView {m_state, m_state->children[m_begin + index]}
-                     : NodeView {};
+                       ? NodeView {m_state, m_state->children[m_begin + index]}
+                       : NodeView {};
     }
 
     FilteredChildRange::Iterator::Iterator(const detail::DocumentState* state,
-                                           UIntSize index,
-                                           UIntSize end,
-                                           std::string_view name) noexcept
+                                           UInt32                       index,
+                                           UInt32                       end,
+                                           std::string_view             name) noexcept
         : m_state(state), m_index(index), m_end(end), m_name(name)
     {
         Seek();
@@ -191,9 +194,7 @@ namespace NGIN::Serialization::XML
     }
 
     bool ElementView::IsValid() const noexcept
-    {
-        return m_state && m_index < m_state->elements.size();
-    }
+    { return m_state && m_index < m_state->elements.size(); }
     std::string_view ElementView::Name() const noexcept
     {
         return IsValid() ? m_state->elements[m_index].name.View() : std::string_view {};
@@ -260,9 +261,9 @@ namespace NGIN::Serialization::XML
         return std::nullopt;
     }
 
-    Document::Document() noexcept = default;
-    Document::~Document() = default;
-    Document::Document(Document&&) noexcept = default;
+    Document::Document() noexcept                      = default;
+    Document::~Document()                              = default;
+    Document::Document(Document&&) noexcept            = default;
     Document& Document::operator=(Document&&) noexcept = default;
     Document::Document(std::unique_ptr<detail::DocumentState> state) noexcept
         : m_state(std::move(state))
@@ -282,22 +283,27 @@ namespace NGIN::Serialization::XML
     {
         const auto* root = IsValid() ? m_state->Node(m_state->root) : nullptr;
         return root && root->element < m_state->elementViews.size()
-                     ? &m_state->elementViews[root->element]
-                     : nullptr;
+                       ? &m_state->elementViews[root->element]
+                       : nullptr;
     }
     std::string_view Document::SourceText() const noexcept
     {
         return m_state ? m_state->source : std::string_view {};
     }
-    UIntSize Document::MemoryUsed() const noexcept { return m_state ? m_state->MemoryUsed() : 0; }
-    UIntSize Document::MemoryCommitted() const noexcept { return m_state ? m_state->MemoryCommitted() : 0; }
-    UIntSize Document::NodeCount() const noexcept { return m_state ? m_state->nodes.size() : 0; }
-    UIntSize Document::ElementCount() const noexcept { return m_state ? m_state->elements.size() : 0; }
-    UIntSize Document::AttributeCount() const noexcept { return m_state ? m_state->attributes.size() : 0; }
+    UIntSize Document::MemoryUsed() const noexcept
+    { return m_state ? m_state->MemoryUsed() : 0; }
+    UIntSize Document::MemoryCommitted() const noexcept
+    { return m_state ? m_state->MemoryCommitted() : 0; }
+    UIntSize Document::NodeCount() const noexcept
+    { return m_state ? m_state->nodes.size() : 0; }
+    UIntSize Document::ElementCount() const noexcept
+    { return m_state ? m_state->elements.size() : 0; }
+    UIntSize Document::AttributeCount() const noexcept
+    { return m_state ? m_state->attributes.size() : 0; }
 
-    BorrowedDocument::BorrowedDocument() noexcept = default;
-    BorrowedDocument::~BorrowedDocument() = default;
-    BorrowedDocument::BorrowedDocument(BorrowedDocument&&) noexcept = default;
+    BorrowedDocument::BorrowedDocument() noexcept                              = default;
+    BorrowedDocument::~BorrowedDocument()                                      = default;
+    BorrowedDocument::BorrowedDocument(BorrowedDocument&&) noexcept            = default;
     BorrowedDocument& BorrowedDocument::operator=(BorrowedDocument&&) noexcept = default;
     BorrowedDocument::BorrowedDocument(std::unique_ptr<detail::DocumentState> state) noexcept
         : m_state(std::move(state))
@@ -317,28 +323,34 @@ namespace NGIN::Serialization::XML
     {
         const auto* root = IsValid() ? m_state->Node(m_state->root) : nullptr;
         return root && root->element < m_state->elementViews.size()
-                     ? &m_state->elementViews[root->element]
-                     : nullptr;
+                       ? &m_state->elementViews[root->element]
+                       : nullptr;
     }
     std::string_view BorrowedDocument::SourceText() const noexcept
     {
         return m_state ? m_state->source : std::string_view {};
     }
-    UIntSize BorrowedDocument::MemoryUsed() const noexcept { return m_state ? m_state->MemoryUsed() : 0; }
-    UIntSize BorrowedDocument::MemoryCommitted() const noexcept { return m_state ? m_state->MemoryCommitted() : 0; }
-    UIntSize BorrowedDocument::NodeCount() const noexcept { return m_state ? m_state->nodes.size() : 0; }
-    UIntSize BorrowedDocument::ElementCount() const noexcept { return m_state ? m_state->elements.size() : 0; }
-    UIntSize BorrowedDocument::AttributeCount() const noexcept { return m_state ? m_state->attributes.size() : 0; }
+    UIntSize BorrowedDocument::MemoryUsed() const noexcept
+    { return m_state ? m_state->MemoryUsed() : 0; }
+    UIntSize BorrowedDocument::MemoryCommitted() const noexcept
+    { return m_state ? m_state->MemoryCommitted() : 0; }
+    UIntSize BorrowedDocument::NodeCount() const noexcept
+    { return m_state ? m_state->nodes.size() : 0; }
+    UIntSize BorrowedDocument::ElementCount() const noexcept
+    { return m_state ? m_state->elements.size() : 0; }
+    UIntSize BorrowedDocument::AttributeCount() const noexcept
+    { return m_state ? m_state->attributes.size() : 0; }
 
-    SyntaxDocument::SyntaxDocument() noexcept = default;
-    SyntaxDocument::~SyntaxDocument() = default;
-    SyntaxDocument::SyntaxDocument(SyntaxDocument&&) noexcept = default;
+    SyntaxDocument::SyntaxDocument() noexcept                            = default;
+    SyntaxDocument::~SyntaxDocument()                                    = default;
+    SyntaxDocument::SyntaxDocument(SyntaxDocument&&) noexcept            = default;
     SyntaxDocument& SyntaxDocument::operator=(SyntaxDocument&&) noexcept = default;
     SyntaxDocument::SyntaxDocument(std::unique_ptr<detail::SyntaxState> state) noexcept
         : m_state(std::move(state))
     {
     }
-    bool SyntaxDocument::IsValid() const noexcept { return m_state && m_state->valid; }
+    bool SyntaxDocument::IsValid() const noexcept
+    { return m_state && m_state->valid; }
     std::string_view SyntaxDocument::SourceText() const noexcept
     {
         return m_state ? m_state->source.View() : std::string_view {};

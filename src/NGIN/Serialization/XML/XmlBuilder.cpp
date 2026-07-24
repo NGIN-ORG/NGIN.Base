@@ -189,10 +189,16 @@ namespace NGIN::Serialization::XML
             return Failure<NodeId>(BuildErrorCode::InvalidName, "XML element name is invalid");
         if (!m_impl || !m_impl->state)
             return Failure<NodeId>(BuildErrorCode::AlreadyFinished, "XML builder has already been finished");
+        constexpr auto maxIndex = (std::numeric_limits<UInt32>::max)();
         if (m_impl->state->attributes.size() > m_impl->state->limits.maxMembers ||
             attributes.size() > m_impl->state->limits.maxMembers - m_impl->state->attributes.size() ||
             m_impl->state->children.size() > m_impl->state->limits.maxMembers ||
-            children.size() > m_impl->state->limits.maxMembers - m_impl->state->children.size())
+            children.size() > m_impl->state->limits.maxMembers - m_impl->state->children.size() ||
+            attributes.size() > maxIndex ||
+            children.size() > maxIndex ||
+            m_impl->state->attributes.size() > maxIndex - attributes.size() ||
+            m_impl->state->children.size() > maxIndex - children.size() ||
+            m_impl->state->elements.size() >= maxIndex)
             return Failure<NodeId>(BuildErrorCode::MemberLimitExceeded, "XML builder member limit exceeded");
 
         for (UIntSize left = 0; left < attributes.size(); ++left)
@@ -242,8 +248,14 @@ namespace NGIN::Serialization::XML
             }
             m_impl->state->elements.push_back(detail::ElementRecord {
                     .name       = elementName,
-                    .attributes = detail::Range {attributeBegin, attributes.size()},
-                    .children   = detail::Range {childBegin, children.size()},
+                    .attributes = detail::Range {
+                            static_cast<UInt32>(attributeBegin),
+                            static_cast<UInt32>(attributes.size()),
+                    },
+                    .children = detail::Range {
+                            static_cast<UInt32>(childBegin),
+                            static_cast<UInt32>(children.size()),
+                    },
             });
         } catch (const std::bad_alloc&)
         {
@@ -252,7 +264,10 @@ namespace NGIN::Serialization::XML
             return Failure<NodeId>(BuildErrorCode::OutOfMemory, "XML element allocation failed");
         }
 
-        auto result = m_impl->Add(detail::NodeRecord {.kind = NodeKind::Element, .element = elementIndex});
+        auto result = m_impl->Add(detail::NodeRecord {
+                .kind    = NodeKind::Element,
+                .element = static_cast<UInt32>(elementIndex),
+        });
         if (!result)
         {
             m_impl->state->elements.pop_back();

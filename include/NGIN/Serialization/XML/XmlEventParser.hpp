@@ -9,8 +9,13 @@ namespace NGIN::Serialization::XML
 {
     enum class EventKind : UInt8
     {
-        StartElement, Attribute, Text, CData, Comment,
-        ProcessingInstruction, EndElement,
+        StartElement,
+        Attribute,
+        Text,
+        CData,
+        Comment,
+        ProcessingInstruction,
+        EndElement,
     };
 
     struct Event
@@ -38,89 +43,44 @@ namespace NGIN::Serialization::XML
         { handler(event) } -> std::same_as<EventAction>;
     };
 
+    namespace detail
+    {
+        using EventCallback = EventAction (*)(void*, const Event&);
+
+        [[nodiscard]] NGIN_BASE_API NGIN::Utilities::Expected<void, ParseDiagnostic>
+                                    ParseEventsContiguous(BorrowedTextView    input,
+                                                          void*               handlerContext,
+                                                          EventCallback       callback,
+                                                          ParseScratch&       scratch,
+                                                          const ParseOptions& options,
+                                                          const ParseLimits&  limits);
+    }// namespace detail
+
     /// @brief Event delivery over one complete contiguous XML input.
+    ///
+    /// Views into the borrowed input follow the input lifetime. Views produced
+    /// by entity decoding or line-ending normalization are valid only for the
+    /// duration of the handler invocation and must be copied if retained.
     class EventParser
     {
     public:
         template<EventHandler Handler>
         [[nodiscard]] static NGIN::Utilities::Expected<void, ParseDiagnostic>
-        ParseContiguous(BorrowedTextView input,
-                        Handler& handler,
-                        ParseScratch& scratch,
+        ParseContiguous(BorrowedTextView    input,
+                        Handler&            handler,
+                        ParseScratch&       scratch,
                         const ParseOptions& options = {},
-                        const ParseLimits& limits = {})
+                        const ParseLimits&  limits  = {})
         {
-            auto parsed = ParseBorrowed(input, scratch, options, limits);
-            if (!parsed)
-                return NGIN::Utilities::Unexpected<ParseDiagnostic>(std::move(parsed.Error()));
-            return EmitElement(parsed.Value().Root(), handler);
-        }
-
-    private:
-        template<EventHandler Handler>
-        [[nodiscard]] static NGIN::Utilities::Expected<void, ParseDiagnostic>
-        Deliver(const Event& event, Handler& handler)
-        {
-            const EventAction action = handler(event);
-            if (action.continueParsing)
-                return {};
-            ParseDiagnostic diagnostic;
-            diagnostic.code = ParseErrorCode::HandlerRejected;
-            diagnostic.span = event.span;
-            diagnostic.location.offset = event.span.begin;
-            diagnostic.consumerContext = action.consumerContext;
-            diagnostic.message = "XML event handler stopped parsing";
-            return NGIN::Utilities::Unexpected<ParseDiagnostic>(std::move(diagnostic));
-        }
-
-        template<EventHandler Handler>
-        [[nodiscard]] static NGIN::Utilities::Expected<void, ParseDiagnostic>
-        EmitElement(ElementView element, Handler& handler)
-        {
-            Event event {.kind = EventKind::StartElement,
-                         .span = element.Span(),
-                         .name = element.Name()};
-            auto delivered = Deliver(event, handler);
-            if (!delivered)
-                return delivered;
-            for (const auto attribute: element.Attributes())
-            {
-                Event attributeEvent {.kind = EventKind::Attribute,
-                                      .span = attribute.Span(),
-                                      .name = attribute.Name(),
-                                      .value = attribute.Value()};
-                auto result = Deliver(attributeEvent, handler);
-                if (!result)
-                    return result;
-            }
-            for (const auto child: element.Children())
-            {
-                if (const auto nested = child.TryElement())
-                {
-                    auto result = EmitElement(*nested, handler);
-                    if (!result)
-                        return result;
-                    continue;
-                }
-                Event childEvent {.span = child.Span(),
-                                  .name = child.Name(),
-                                  .value = child.TryText().value_or(std::string_view {})};
-                switch (child.Kind())
-                {
-                    case NodeKind::Text: childEvent.kind = EventKind::Text; break;
-                    case NodeKind::CData: childEvent.kind = EventKind::CData; break;
-                    case NodeKind::Comment: childEvent.kind = EventKind::Comment; break;
-                    case NodeKind::ProcessingInstruction:
-                        childEvent.kind = EventKind::ProcessingInstruction;
-                        break;
-                    case NodeKind::Element: break;
-                }
-                auto result = Deliver(childEvent, handler);
-                if (!result)
-                    return result;
-            }
-            event.kind = EventKind::EndElement;
-            return Deliver(event, handler);
+            return detail::ParseEventsContiguous(
+                    input,
+                    &handler,
+                    [](void* context, const Event& event) -> EventAction {
+                        return (*static_cast<Handler*>(context))(event);
+                    },
+                    scratch,
+                    options,
+                    limits);
         }
     };
 }// namespace NGIN::Serialization::XML

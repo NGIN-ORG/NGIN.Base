@@ -230,6 +230,98 @@ TEST_CASE("XML contiguous event parser delivers decoded semantic events",
     CHECK(text == "A&B");
 }
 
+TEST_CASE("XML event parser preserves semantic order, trivia, source identity, and token spans",
+          "[serialization][xml][events]")
+{
+    constexpr std::string_view source =
+            R"(<root a="A&amp;B"><child/>text<![CDATA[x<y]]><!--note--><?pi body?></root>)";
+    constexpr SourceId      sourceId {17};
+    std::vector<XML::Event> events;
+    std::string             decodedAttribute;
+    auto                    handler = [&](const XML::Event& event) {
+        events.push_back(event);
+        if (event.kind == XML::EventKind::Attribute)
+            decodedAttribute.assign(event.value);
+        return XML::EventAction::Continue();
+    };
+
+    XML::ParseOptions options;
+    options.trivia = XML::TriviaPolicy::Preserve;
+    ParseScratch scratch;
+    auto         result = XML::EventParser::ParseContiguous(
+            BorrowedTextView {source, sourceId}, handler, scratch, options);
+
+    REQUIRE(result);
+    REQUIRE(events.size() == 9);
+    CHECK(events[0].kind == XML::EventKind::StartElement);
+    CHECK(events[0].name == "root");
+    CHECK(source.substr(events[0].span.begin, events[0].span.Length()) == "<root");
+    CHECK(events[1].kind == XML::EventKind::Attribute);
+    CHECK(events[1].name == "a");
+    CHECK(decodedAttribute == "A&B");
+    CHECK(source.substr(events[1].span.begin, events[1].span.Length()) == R"(a="A&amp;B")");
+    CHECK(events[2].kind == XML::EventKind::StartElement);
+    CHECK(events[2].name == "child");
+    CHECK(events[3].kind == XML::EventKind::EndElement);
+    CHECK(source.substr(events[3].span.begin, events[3].span.Length()) == "/>");
+    CHECK(events[4].kind == XML::EventKind::Text);
+    CHECK(events[4].value == "text");
+    CHECK(events[5].kind == XML::EventKind::CData);
+    CHECK(events[5].value == "x<y");
+    CHECK(events[6].kind == XML::EventKind::Comment);
+    CHECK(events[6].value == "note");
+    CHECK(events[7].kind == XML::EventKind::ProcessingInstruction);
+    CHECK(events[7].name == "pi");
+    CHECK(events[7].value == " body");
+    CHECK(events[8].kind == XML::EventKind::EndElement);
+    CHECK(source.substr(events[8].span.begin, events[8].span.Length()) == "</root>");
+    for (const auto& event: events)
+        CHECK(event.span.source == sourceId);
+}
+
+TEST_CASE("XML event parser reports duplicate attributes and resource limits",
+          "[serialization][xml][events][limits]")
+{
+    auto         handler = [](const XML::Event&) { return XML::EventAction::Continue(); };
+    ParseScratch scratch;
+
+    auto duplicate = XML::EventParser::ParseContiguous(
+            BorrowedTextView {R"(<root x="1" x="2"/>)"}, handler, scratch);
+    REQUIRE_FALSE(duplicate);
+    CHECK(duplicate.Error().code == ParseErrorCode::DuplicateName);
+    CHECK(duplicate.Error().related.has_value());
+
+    ParseLimits limits;
+    limits.maxDepth = 1;
+    auto depth      = XML::EventParser::ParseContiguous(
+            BorrowedTextView {"<root><child/></root>"}, handler, scratch, {}, limits);
+    REQUIRE_FALSE(depth);
+    CHECK(depth.Error().code == ParseErrorCode::DepthExceeded);
+
+    limits          = {};
+    limits.maxNodes = 1;
+    auto nodes      = XML::EventParser::ParseContiguous(
+            BorrowedTextView {"<root><child/></root>"}, handler, scratch, {}, limits);
+    REQUIRE_FALSE(nodes);
+    CHECK(nodes.Error().code == ParseErrorCode::LimitExceeded);
+}
+
+TEST_CASE("XML event parser preserves handler control flow",
+          "[serialization][xml][events]")
+{
+    ParseScratch scratch;
+    auto         stoppingHandler = [](const XML::Event&) {
+        return XML::EventAction::Stop(42);
+    };
+    auto stopped = XML::EventParser::ParseContiguous(
+            BorrowedTextView {"<root/>"}, stoppingHandler, scratch);
+    REQUIRE_FALSE(stopped);
+    CHECK(stopped.Error().code == ParseErrorCode::HandlerRejected);
+    CHECK(stopped.Error().consumerContext == 42);
+    CHECK(stopped.Error().span.begin == 0);
+    CHECK(stopped.Error().span.end == 5);
+}
+
 TEST_CASE("XML memory accounting includes finalized element views",
           "[serialization][xml][memory][limits]")
 {

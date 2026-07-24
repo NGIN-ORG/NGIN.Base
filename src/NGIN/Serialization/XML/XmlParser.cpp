@@ -11,7 +11,6 @@
 #include <concepts>
 #include <limits>
 #include <new>
-#include <string>
 #include <vector>
 
 namespace NGIN::Serialization::XML
@@ -23,6 +22,7 @@ namespace NGIN::Serialization::XML
             InputCursor               cursor;
             ParseOptions              options;
             detail::DocumentState*    state {nullptr};
+            ParseScratch*             scratch {nullptr};
             std::vector<SyntaxToken>* syntaxTokens {nullptr};
             UIntSize                  depth {0};
             UIntSize                  decodedBytes {0};
@@ -141,6 +141,14 @@ namespace NGIN::Serialization::XML
             UIntSize offset = 0;
             while (offset < value.size())
             {
+                const auto first = static_cast<unsigned char>(value[offset]);
+                if (first < 0x80)
+                {
+                    if (!IsXmlCharacter(first))
+                        return false;
+                    ++offset;
+                    continue;
+                }
                 const auto decoded = NGIN::Text::Unicode::DecodeUtf8(value, offset);
                 if (decoded.error != NGIN::Text::Unicode::EncodingError::None ||
                     !IsXmlCharacter(decoded.codePoint))
@@ -150,33 +158,134 @@ namespace NGIN::Serialization::XML
             return true;
         }
 
-        [[nodiscard]] bool AppendUtf8(std::string& output, UInt32 value)
+        enum class DecodeIssue : UInt8
+        {
+            None,
+            UnterminatedEntity,
+            EmptyNumericEntity,
+            InvalidNumericEntity,
+            UnknownEntity,
+        };
+
+        struct DecodeResult
+        {
+            UIntSize    size {0};
+            DecodeIssue issue {DecodeIssue::None};
+            UIntSize    errorBegin {0};
+            UIntSize    errorEnd {0};
+        };
+
+        void AppendByte(char* output, UIntSize& size, char value) noexcept
+        {
+            if (output)
+                output[size] = value;
+            ++size;
+        }
+
+        [[nodiscard]] bool AppendUtf8(char* output, UIntSize& size, UInt32 value) noexcept
         {
             if (!IsXmlCharacter(value))
                 return false;
             if (value <= 0x7f)
             {
-                output.push_back(static_cast<char>(value));
+                AppendByte(output, size, static_cast<char>(value));
             }
             else if (value <= 0x7ff)
             {
-                output.push_back(static_cast<char>(0xc0 | (value >> 6)));
-                output.push_back(static_cast<char>(0x80 | (value & 0x3f)));
+                AppendByte(output, size, static_cast<char>(0xc0 | (value >> 6)));
+                AppendByte(output, size, static_cast<char>(0x80 | (value & 0x3f)));
             }
             else if (value <= 0xffff)
             {
-                output.push_back(static_cast<char>(0xe0 | (value >> 12)));
-                output.push_back(static_cast<char>(0x80 | ((value >> 6) & 0x3f)));
-                output.push_back(static_cast<char>(0x80 | (value & 0x3f)));
+                AppendByte(output, size, static_cast<char>(0xe0 | (value >> 12)));
+                AppendByte(output, size, static_cast<char>(0x80 | ((value >> 6) & 0x3f)));
+                AppendByte(output, size, static_cast<char>(0x80 | (value & 0x3f)));
             }
             else
             {
-                output.push_back(static_cast<char>(0xf0 | (value >> 18)));
-                output.push_back(static_cast<char>(0x80 | ((value >> 12) & 0x3f)));
-                output.push_back(static_cast<char>(0x80 | ((value >> 6) & 0x3f)));
-                output.push_back(static_cast<char>(0x80 | (value & 0x3f)));
+                AppendByte(output, size, static_cast<char>(0xf0 | (value >> 18)));
+                AppendByte(output, size, static_cast<char>(0x80 | ((value >> 12) & 0x3f)));
+                AppendByte(output, size, static_cast<char>(0x80 | ((value >> 6) & 0x3f)));
+                AppendByte(output, size, static_cast<char>(0x80 | (value & 0x3f)));
             }
             return true;
+        }
+
+        [[nodiscard]] DecodeResult DecodeXmlText(std::string_view raw, char* output) noexcept
+        {
+            DecodeResult result;
+            for (UIntSize index = 0; index < raw.size();)
+            {
+                const char value = raw[index];
+                if (value == '\r')
+                {
+                    AppendByte(output, result.size, '\n');
+                    ++index;
+                    if (index < raw.size() && raw[index] == '\n')
+                        ++index;
+                    continue;
+                }
+                if (value != '&')
+                {
+                    AppendByte(output, result.size, value);
+                    ++index;
+                    continue;
+                }
+
+                const UIntSize entityBegin = index;
+                const UIntSize semicolon   = raw.find(';', index + 1);
+                if (semicolon == std::string_view::npos)
+                {
+                    result.issue      = DecodeIssue::UnterminatedEntity;
+                    result.errorBegin = entityBegin;
+                    result.errorEnd   = raw.size();
+                    return result;
+                }
+
+                const auto entity = raw.substr(index + 1, semicolon - index - 1);
+                if (entity == "amp")
+                    AppendByte(output, result.size, '&');
+                else if (entity == "lt")
+                    AppendByte(output, result.size, '<');
+                else if (entity == "gt")
+                    AppendByte(output, result.size, '>');
+                else if (entity == "apos")
+                    AppendByte(output, result.size, '\'');
+                else if (entity == "quot")
+                    AppendByte(output, result.size, '"');
+                else if (!entity.empty() && entity.front() == '#')
+                {
+                    UInt32     codePoint = 0;
+                    const bool hex       = entity.size() > 1 && (entity[1] == 'x' || entity[1] == 'X');
+                    const auto digits    = entity.substr(hex ? 2 : 1);
+                    if (digits.empty())
+                    {
+                        result.issue = DecodeIssue::EmptyNumericEntity;
+                    }
+                    else
+                    {
+                        const auto converted = std::from_chars(
+                                digits.data(), digits.data() + digits.size(), codePoint, hex ? 16 : 10);
+                        if (converted.ec != std::errc {} ||
+                            converted.ptr != digits.data() + digits.size() ||
+                            !AppendUtf8(output, result.size, codePoint))
+                            result.issue = DecodeIssue::InvalidNumericEntity;
+                    }
+                }
+                else
+                {
+                    result.issue = DecodeIssue::UnknownEntity;
+                }
+
+                if (result.issue != DecodeIssue::None)
+                {
+                    result.errorBegin = entityBegin;
+                    result.errorEnd   = semicolon + 1;
+                    return result;
+                }
+                index = semicolon + 1;
+            }
+            return result;
         }
 
         [[nodiscard]] NGIN::Utilities::Expected<detail::StringRef, ParseDiagnostic>
@@ -190,90 +299,9 @@ namespace NGIN::Serialization::XML
             if (!needsDecode)
                 return detail::StringRef {raw.data(), raw.size()};
 
-            std::string decoded;
-            try
-            {
-                decoded.reserve(raw.size());
-                for (UIntSize index = 0; index < raw.size();)
-                {
-                    const char value = raw[index];
-                    if (value == '\r')
-                    {
-                        decoded.push_back('\n');
-                        ++index;
-                        if (index < raw.size() && raw[index] == '\n')
-                            ++index;
-                        continue;
-                    }
-                    if (value != '&')
-                    {
-                        decoded.push_back(value);
-                        ++index;
-                        continue;
-                    }
-
-                    const UIntSize entityBegin = index;
-                    const UIntSize semicolon   = raw.find(';', index + 1);
-                    if (semicolon == std::string_view::npos)
-                    {
-                        return Failure<detail::StringRef>(
-                                MakeErrorAt(context,
-                                            ParseErrorCode::InvalidEntity,
-                                            "Unterminated XML entity reference",
-                                            sourceOffset + entityBegin,
-                                            sourceOffset + raw.size()));
-                    }
-                    const auto entity = raw.substr(index + 1, semicolon - index - 1);
-                    if (entity == "amp")
-                        decoded.push_back('&');
-                    else if (entity == "lt")
-                        decoded.push_back('<');
-                    else if (entity == "gt")
-                        decoded.push_back('>');
-                    else if (entity == "apos")
-                        decoded.push_back('\'');
-                    else if (entity == "quot")
-                        decoded.push_back('"');
-                    else if (!entity.empty() && entity.front() == '#')
-                    {
-                        UInt32     codePoint = 0;
-                        const bool hex       = entity.size() > 1 && (entity[1] == 'x' || entity[1] == 'X');
-                        const auto digits    = entity.substr(hex ? 2 : 1);
-                        if (digits.empty())
-                        {
-                            return Failure<detail::StringRef>(
-                                    MakeErrorAt(context,
-                                                ParseErrorCode::InvalidEntity,
-                                                "Empty XML numeric character reference",
-                                                sourceOffset + entityBegin,
-                                                sourceOffset + semicolon + 1));
-                        }
-                        const auto converted = std::from_chars(
-                                digits.data(), digits.data() + digits.size(), codePoint, hex ? 16 : 10);
-                        if (converted.ec != std::errc {} ||
-                            converted.ptr != digits.data() + digits.size() ||
-                            !AppendUtf8(decoded, codePoint))
-                        {
-                            return Failure<detail::StringRef>(
-                                    MakeErrorAt(context,
-                                                ParseErrorCode::InvalidEntity,
-                                                "Invalid XML numeric character reference",
-                                                sourceOffset + entityBegin,
-                                                sourceOffset + semicolon + 1));
-                        }
-                    }
-                    else
-                    {
-                        return Failure<detail::StringRef>(
-                                MakeErrorAt(context,
-                                            ParseErrorCode::InvalidEntity,
-                                            "Unknown XML entity reference",
-                                            sourceOffset + entityBegin,
-                                            sourceOffset + semicolon + 1));
-                    }
-                    index = semicolon + 1;
-                }
-            } catch (const std::bad_alloc&)
+            context.scratch->Reset();
+            char* temporary = context.scratch->TryAllocate(raw.size());
+            if (!temporary)
             {
                 return Failure<detail::StringRef>(
                         MakeErrorAt(context,
@@ -283,8 +311,37 @@ namespace NGIN::Serialization::XML
                                     sourceOffset + raw.size()));
             }
 
+            const auto decoded = DecodeXmlText(raw, temporary);
+            if (decoded.issue != DecodeIssue::None)
+            {
+                std::string_view message;
+                switch (decoded.issue)
+                {
+                    case DecodeIssue::UnterminatedEntity:
+                        message = "Unterminated XML entity reference";
+                        break;
+                    case DecodeIssue::EmptyNumericEntity:
+                        message = "Empty XML numeric character reference";
+                        break;
+                    case DecodeIssue::InvalidNumericEntity:
+                        message = "Invalid XML numeric character reference";
+                        break;
+                    case DecodeIssue::UnknownEntity:
+                        message = "Unknown XML entity reference";
+                        break;
+                    case DecodeIssue::None:
+                        break;
+                }
+                return Failure<detail::StringRef>(
+                        MakeErrorAt(context,
+                                    ParseErrorCode::InvalidEntity,
+                                    message,
+                                    sourceOffset + decoded.errorBegin,
+                                    sourceOffset + decoded.errorEnd));
+            }
+
             if (context.decodedBytes > context.state->limits.maxDecodedStringBytes ||
-                decoded.size() > context.state->limits.maxDecodedStringBytes - context.decodedBytes)
+                decoded.size > context.state->limits.maxDecodedStringBytes - context.decodedBytes)
             {
                 return Failure<detail::StringRef>(
                         MakeErrorAt(context,
@@ -293,8 +350,10 @@ namespace NGIN::Serialization::XML
                                     sourceOffset,
                                     sourceOffset + raw.size()));
             }
-            const auto copy = context.state->arena.CopyString(decoded);
-            if (!decoded.empty() && copy.data() == nullptr)
+
+            const auto copy = context.state->arena.CopyString(
+                    std::string_view {temporary, decoded.size});
+            if (decoded.size != 0 && copy.data() == nullptr)
             {
                 return Failure<detail::StringRef>(
                         MakeErrorAt(context,
@@ -303,7 +362,7 @@ namespace NGIN::Serialization::XML
                                     sourceOffset,
                                     sourceOffset + raw.size()));
             }
-            context.decodedBytes += decoded.size();
+            context.decodedBytes += decoded.size;
             return detail::StringRef {copy.data(), copy.size()};
         }
 
@@ -808,10 +867,16 @@ namespace NGIN::Serialization::XML
             }
 
             --context.depth;
+            constexpr auto maxIndex = (std::numeric_limits<UInt32>::max)();
             if (context.state->attributes.size() > context.state->limits.maxMembers ||
                 attributes.size() > context.state->limits.maxMembers - context.state->attributes.size() ||
                 context.state->children.size() > context.state->limits.maxMembers ||
-                children.size() > context.state->limits.maxMembers - context.state->children.size())
+                children.size() > context.state->limits.maxMembers - context.state->children.size() ||
+                attributes.size() > maxIndex ||
+                children.size() > maxIndex ||
+                context.state->attributes.size() > maxIndex - attributes.size() ||
+                context.state->children.size() > maxIndex - children.size() ||
+                context.state->elements.size() >= maxIndex)
                 return Failure<NodeId>(MakeErrorAt(context,
                                                    ParseErrorCode::LimitExceeded,
                                                    "XML member limit exceeded",
@@ -829,9 +894,15 @@ namespace NGIN::Serialization::XML
                         context.state->children.end(), children.begin(), children.end());
                 context.state->elements.push_back(detail::ElementRecord {
                         .name       = name.Value(),
-                        .attributes = detail::Range {attributeBegin, attributes.size()},
-                        .children   = detail::Range {childBegin, children.size()},
-                        .span       = SourceSpan {context.state->sourceId, start, context.cursor.Offset()},
+                        .attributes = detail::Range {
+                                static_cast<UInt32>(attributeBegin),
+                                static_cast<UInt32>(attributes.size()),
+                        },
+                        .children = detail::Range {
+                                static_cast<UInt32>(childBegin),
+                                static_cast<UInt32>(children.size()),
+                        },
+                        .span = SourceSpan {context.state->sourceId, start, context.cursor.Offset()},
                 });
             } catch (const std::bad_alloc&)
             {
@@ -851,7 +922,7 @@ namespace NGIN::Serialization::XML
                                                          start,
                                                          context.cursor.Offset(),
                                                  },
-                                                 .element = elementIndex,
+                                                 .element = static_cast<UInt32>(elementIndex),
                                          });
             if (!node)
             {
@@ -866,12 +937,14 @@ namespace NGIN::Serialization::XML
         [[nodiscard]] NGIN::Utilities::Expected<DocumentType, ParseDiagnostic>
         ParseState(std::unique_ptr<detail::DocumentState> state,
                    const ParseOptions&                    options,
+                   ParseScratch&                          scratch,
                    std::vector<SyntaxToken>*              syntaxTokens = nullptr)
         {
             ParseContext context {
                     .cursor       = InputCursor {state->source},
                     .options      = options,
                     .state        = state.get(),
+                    .scratch      = &scratch,
                     .syntaxTokens = syntaxTokens,
             };
             if (state->source.size() > state->limits.maxInputBytes)
@@ -993,10 +1066,12 @@ namespace NGIN::Serialization::XML
     {
         try
         {
+            ParseScratch scratch;
             return ParseState<Document>(
                     std::make_unique<detail::DocumentState>(
                             std::move(input), limits, resources),
-                    options);
+                    options,
+                    scratch);
         } catch (const std::bad_alloc&)
         {
             ParseDiagnostic error;
@@ -1017,7 +1092,9 @@ namespace NGIN::Serialization::XML
         try
         {
             return ParseState<BorrowedDocument>(
-                    std::make_unique<detail::DocumentState>(input, limits, resources), options);
+                    std::make_unique<detail::DocumentState>(input, limits, resources),
+                    options,
+                    scratch);
         } catch (const std::bad_alloc&)
         {
             ParseDiagnostic error;
@@ -1035,13 +1112,15 @@ namespace NGIN::Serialization::XML
     {
         try
         {
-            auto syntax    = std::make_unique<detail::SyntaxState>();
-            syntax->source = std::move(input);
-            auto state     = std::make_unique<detail::DocumentState>(
+            ParseScratch scratch;
+            auto         syntax = std::make_unique<detail::SyntaxState>();
+            syntax->source      = std::move(input);
+            auto state          = std::make_unique<detail::DocumentState>(
                     syntax->source.Borrow(), limits, resources);
             auto syntaxOptions   = options;
             syntaxOptions.trivia = TriviaPolicy::Preserve;
-            auto parsed          = ParseState<Document>(std::move(state), syntaxOptions, &syntax->tokens);
+            auto parsed          = ParseState<Document>(
+                    std::move(state), syntaxOptions, scratch, &syntax->tokens);
             if (!parsed)
                 return Failure<SyntaxDocument>(std::move(parsed.Error()));
             syntax->valid = true;

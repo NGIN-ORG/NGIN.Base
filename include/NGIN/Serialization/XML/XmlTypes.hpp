@@ -17,7 +17,7 @@ namespace NGIN::Serialization::XML
         struct DocumentState;
         struct DocumentAccess;
         struct SyntaxState;
-    }
+    }// namespace detail
 
     struct NodeId
     {
@@ -100,10 +100,10 @@ namespace NGIN::Serialization::XML
         friend class ElementView;
         friend class AttributeRange;
 
-        AttributeView(const detail::DocumentState* state, UIntSize index) noexcept;
+        AttributeView(const detail::DocumentState* state, UInt32 index) noexcept;
 
         const detail::DocumentState* m_state {nullptr};
-        UIntSize                     m_index {0};
+        UInt32                       m_index {0};
     };
 
     class NGIN_BASE_API AttributeRange
@@ -120,16 +120,16 @@ namespace NGIN::Serialization::XML
 
             [[nodiscard]] AttributeView operator*() const noexcept;
             Iterator&                   operator++() noexcept;
-            [[nodiscard]] friend bool operator==(const Iterator&, const Iterator&) noexcept = default;
+            [[nodiscard]] friend bool   operator==(const Iterator&, const Iterator&) noexcept = default;
 
         private:
             friend class AttributeRange;
-            constexpr Iterator(const detail::DocumentState* state, UIntSize index) noexcept
+            constexpr Iterator(const detail::DocumentState* state, UInt32 index) noexcept
                 : m_state(state), m_index(index)
             {
             }
             const detail::DocumentState* m_state {nullptr};
-            UIntSize                     m_index {0};
+            UInt32                       m_index {0};
         };
 
         [[nodiscard]] UIntSize      Size() const noexcept { return m_count; }
@@ -140,13 +140,13 @@ namespace NGIN::Serialization::XML
 
     private:
         friend class ElementView;
-        constexpr AttributeRange(const detail::DocumentState* state, UIntSize begin, UIntSize count) noexcept
+        constexpr AttributeRange(const detail::DocumentState* state, UInt32 begin, UInt32 count) noexcept
             : m_state(state), m_begin(begin), m_count(count)
         {
         }
         const detail::DocumentState* m_state {nullptr};
-        UIntSize                     m_begin {0};
-        UIntSize                     m_count {0};
+        UInt32                       m_begin {0};
+        UInt32                       m_count {0};
     };
 
     class NGIN_BASE_API ChildRange
@@ -161,18 +161,18 @@ namespace NGIN::Serialization::XML
             using value_type        = NodeView;
             using difference_type   = std::ptrdiff_t;
 
-            [[nodiscard]] NodeView operator*() const noexcept;
-            Iterator&              operator++() noexcept;
+            [[nodiscard]] NodeView    operator*() const noexcept;
+            Iterator&                 operator++() noexcept;
             [[nodiscard]] friend bool operator==(const Iterator&, const Iterator&) noexcept = default;
 
         private:
             friend class ChildRange;
-            constexpr Iterator(const detail::DocumentState* state, UIntSize index) noexcept
+            constexpr Iterator(const detail::DocumentState* state, UInt32 index) noexcept
                 : m_state(state), m_index(index)
             {
             }
             const detail::DocumentState* m_state {nullptr};
-            UIntSize                     m_index {0};
+            UInt32                       m_index {0};
         };
 
         [[nodiscard]] UIntSize Size() const noexcept { return m_count; }
@@ -183,13 +183,13 @@ namespace NGIN::Serialization::XML
 
     private:
         friend class ElementView;
-        constexpr ChildRange(const detail::DocumentState* state, UIntSize begin, UIntSize count) noexcept
+        constexpr ChildRange(const detail::DocumentState* state, UInt32 begin, UInt32 count) noexcept
             : m_state(state), m_begin(begin), m_count(count)
         {
         }
         const detail::DocumentState* m_state {nullptr};
-        UIntSize                     m_begin {0};
-        UIntSize                     m_count {0};
+        UInt32                       m_begin {0};
+        UInt32                       m_count {0};
     };
 
     class NGIN_BASE_API FilteredChildRange
@@ -209,15 +209,15 @@ namespace NGIN::Serialization::XML
         private:
             friend class FilteredChildRange;
             Iterator(const detail::DocumentState* state,
-                     UIntSize index,
-                     UIntSize end,
-                     std::string_view name) noexcept;
+                     UInt32                       index,
+                     UInt32                       end,
+                     std::string_view             name) noexcept;
             void Seek() noexcept;
 
             const detail::DocumentState* m_state {nullptr};
-            UIntSize                     m_index {0};
-            UIntSize                     m_end {0};
-            std::string_view              m_name {};
+            UInt32                       m_index {0};
+            UInt32                       m_end {0};
+            std::string_view             m_name {};
         };
 
         [[nodiscard]] Iterator begin() const noexcept { return Iterator {m_state, m_begin, m_end, m_name}; }
@@ -226,16 +226,16 @@ namespace NGIN::Serialization::XML
     private:
         friend class ElementView;
         constexpr FilteredChildRange(const detail::DocumentState* state,
-                                     UIntSize begin,
-                                     UIntSize end,
-                                     std::string_view name) noexcept
+                                     UInt32                       begin,
+                                     UInt32                       end,
+                                     std::string_view             name) noexcept
             : m_state(state), m_begin(begin), m_end(end), m_name(name)
         {
         }
         const detail::DocumentState* m_state {nullptr};
-        UIntSize                     m_begin {0};
-        UIntSize                     m_end {0};
-        std::string_view              m_name {};
+        UInt32                       m_begin {0};
+        UInt32                       m_end {0};
+        std::string_view             m_name {};
     };
 
     class NGIN_BASE_API ElementView
@@ -244,18 +244,18 @@ namespace NGIN::Serialization::XML
         ElementView() noexcept = default;
 
         std::string_view name {};
-        AttributeRange  attributes {};
-        ChildRange      children {};
+        AttributeRange   attributes {};
+        ChildRange       children {};
 
-        [[nodiscard]] bool                         IsValid() const noexcept;
-        [[nodiscard]] std::string_view             Name() const noexcept;
-        [[nodiscard]] SourceSpan                   Span() const noexcept;
-        [[nodiscard]] AttributeRange               Attributes() const noexcept;
-        [[nodiscard]] std::optional<AttributeView> Attribute(std::string_view attributeName) const noexcept;
-        [[nodiscard]] ChildRange                   Children() const noexcept;
-        [[nodiscard]] FilteredChildRange            Children(std::string_view elementName) const noexcept;
-        [[nodiscard]] std::optional<ElementView>   FirstChild(std::string_view elementName) const noexcept;
-        [[nodiscard]] const ElementView*            FirstChildPtr(std::string_view elementName) const noexcept;
+        [[nodiscard]] bool                            IsValid() const noexcept;
+        [[nodiscard]] std::string_view                Name() const noexcept;
+        [[nodiscard]] SourceSpan                      Span() const noexcept;
+        [[nodiscard]] AttributeRange                  Attributes() const noexcept;
+        [[nodiscard]] std::optional<AttributeView>    Attribute(std::string_view attributeName) const noexcept;
+        [[nodiscard]] ChildRange                      Children() const noexcept;
+        [[nodiscard]] FilteredChildRange              Children(std::string_view elementName) const noexcept;
+        [[nodiscard]] std::optional<ElementView>      FirstChild(std::string_view elementName) const noexcept;
+        [[nodiscard]] const ElementView*              FirstChildPtr(std::string_view elementName) const noexcept;
         [[nodiscard]] std::optional<std::string_view> FirstText() const noexcept;
 
     private:
@@ -265,10 +265,10 @@ namespace NGIN::Serialization::XML
         friend class FilteredChildRange;
         friend struct detail::DocumentState;
 
-        ElementView(const detail::DocumentState* state, UIntSize index) noexcept;
+        ElementView(const detail::DocumentState* state, UInt32 index) noexcept;
 
         const detail::DocumentState* m_state {nullptr};
-        UIntSize                     m_index {0};
+        UInt32                       m_index {0};
     };
 
     class NGIN_BASE_API Document
@@ -281,15 +281,15 @@ namespace NGIN::Serialization::XML
         Document(const Document&)            = delete;
         Document& operator=(const Document&) = delete;
 
-        [[nodiscard]] bool             IsValid() const noexcept;
-        [[nodiscard]] ElementView      Root() const noexcept;
+        [[nodiscard]] bool               IsValid() const noexcept;
+        [[nodiscard]] ElementView        Root() const noexcept;
         [[nodiscard]] const ElementView* RootPtr() const noexcept;
-        [[nodiscard]] std::string_view SourceText() const noexcept;
-        [[nodiscard]] UIntSize         MemoryUsed() const noexcept;
-        [[nodiscard]] UIntSize         MemoryCommitted() const noexcept;
-        [[nodiscard]] UIntSize         NodeCount() const noexcept;
-        [[nodiscard]] UIntSize         ElementCount() const noexcept;
-        [[nodiscard]] UIntSize         AttributeCount() const noexcept;
+        [[nodiscard]] std::string_view   SourceText() const noexcept;
+        [[nodiscard]] UIntSize           MemoryUsed() const noexcept;
+        [[nodiscard]] UIntSize           MemoryCommitted() const noexcept;
+        [[nodiscard]] UIntSize           NodeCount() const noexcept;
+        [[nodiscard]] UIntSize           ElementCount() const noexcept;
+        [[nodiscard]] UIntSize           AttributeCount() const noexcept;
 
     private:
         friend class Parser;
@@ -309,15 +309,15 @@ namespace NGIN::Serialization::XML
         BorrowedDocument(const BorrowedDocument&)            = delete;
         BorrowedDocument& operator=(const BorrowedDocument&) = delete;
 
-        [[nodiscard]] bool             IsValid() const noexcept;
-        [[nodiscard]] ElementView      Root() const noexcept;
+        [[nodiscard]] bool               IsValid() const noexcept;
+        [[nodiscard]] ElementView        Root() const noexcept;
         [[nodiscard]] const ElementView* RootPtr() const noexcept;
-        [[nodiscard]] std::string_view SourceText() const noexcept;
-        [[nodiscard]] UIntSize         MemoryUsed() const noexcept;
-        [[nodiscard]] UIntSize         MemoryCommitted() const noexcept;
-        [[nodiscard]] UIntSize         NodeCount() const noexcept;
-        [[nodiscard]] UIntSize         ElementCount() const noexcept;
-        [[nodiscard]] UIntSize         AttributeCount() const noexcept;
+        [[nodiscard]] std::string_view   SourceText() const noexcept;
+        [[nodiscard]] UIntSize           MemoryUsed() const noexcept;
+        [[nodiscard]] UIntSize           MemoryCommitted() const noexcept;
+        [[nodiscard]] UIntSize           NodeCount() const noexcept;
+        [[nodiscard]] UIntSize           ElementCount() const noexcept;
+        [[nodiscard]] UIntSize           AttributeCount() const noexcept;
 
     private:
         friend class Parser;

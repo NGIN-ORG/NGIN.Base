@@ -65,6 +65,7 @@ set(NGIN_BASE_SERIALIZATION_SOURCES
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/Serialization/JSON/JsonWriter.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/Serialization/XML/XmlBuilder.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/Serialization/XML/XmlDocument.cpp
+  ${NGIN_BASE_ROOT_DIR}/src/NGIN/Serialization/XML/XmlEventParser.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/Serialization/XML/XmlParser.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/Serialization/XML/XmlStreamWriter.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/Serialization/XML/XmlWriter.cpp

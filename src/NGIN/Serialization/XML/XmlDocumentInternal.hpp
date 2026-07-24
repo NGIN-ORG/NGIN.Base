@@ -22,15 +22,15 @@ namespace NGIN::Serialization::XML::detail
 
     struct Range
     {
-        UIntSize begin {0};
-        UIntSize count {0};
+        UInt32 begin {0};
+        UInt32 count {0};
     };
 
     struct NodeRecord
     {
         NodeKind   kind {NodeKind::Text};
         SourceSpan span {};
-        UIntSize   element {0};
+        UInt32     element {0};
         StringRef  name {};
         StringRef  text {};
     };

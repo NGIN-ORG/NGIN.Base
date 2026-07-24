@@ -91,13 +91,21 @@ contiguous input. Their names intentionally do not claim chunked input.
 
 Handlers are concepts rather than virtual interfaces and return
 `EventAction`. Borrowed unescaped values follow input lifetime; decoded values
-must not be retained beyond the parse call unless copied.
+are valid only for the current handler invocation and must be copied if
+retained.
 
 JSON events are emitted directly from the parser without constructing a DOM
 for `Reject`, `Preserve`, and `KeepFirst` duplicate-key policies. `KeepLast`
 requires object buffering to suppress a previously encountered value and
 therefore uses the semantic DOM path. Start-container, end-container, and key
 event spans cover their individual source tokens.
+
+XML events are also emitted directly without constructing a semantic document
+or the document's cached `ElementView` table. Start-element spans cover the
+opening `<name` token, attribute spans cover `name="value"`, and end-element
+spans cover either `/>` or `</name>`. Text values are entity-decoded and
+line-ending-normalized; comments and processing instructions inside elements
+are emitted only when `TriviaPolicy::Preserve` is selected.
 
 JSONL consumers should keep one `ParseScratch` per stream and call
 `JSON::ParseBorrowed` for each complete line.
