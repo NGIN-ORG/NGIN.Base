@@ -46,27 +46,13 @@ namespace NGIN::Serialization::XML
     class NGIN_BASE_API NodeView
     {
     public:
-        enum class Type : UInt8
-        {
-            Element,
-            Text,
-            CData,
-            Comment,
-            ProcessingInstruction,
-        };
-
         NodeView() noexcept = default;
-
-        Type               type {Type::Text};
-        const ElementView* element {nullptr};
-        std::string_view   text {};
 
         [[nodiscard]] bool                            IsValid() const noexcept;
         [[nodiscard]] NodeKind                        Kind() const noexcept;
         [[nodiscard]] SourceSpan                      Span() const noexcept;
         [[nodiscard]] std::string_view                Name() const noexcept;
         [[nodiscard]] std::optional<ElementView>      TryElement() const noexcept;
-        [[nodiscard]] const ElementView*              ElementPtr() const noexcept;
         [[nodiscard]] std::optional<std::string_view> TryText() const noexcept;
 
     private:
@@ -85,9 +71,6 @@ namespace NGIN::Serialization::XML
     {
     public:
         AttributeView() noexcept = default;
-
-        std::string_view name {};
-        std::string_view value {};
 
         [[nodiscard]] bool             IsValid() const noexcept;
         [[nodiscard]] std::string_view Name() const noexcept;
@@ -178,8 +161,17 @@ namespace NGIN::Serialization::XML
         [[nodiscard]] UIntSize Size() const noexcept { return m_count; }
         [[nodiscard]] bool     Empty() const noexcept { return m_count == 0; }
         [[nodiscard]] NodeView operator[](UIntSize index) const noexcept;
-        [[nodiscard]] Iterator begin() const noexcept { return Iterator {m_state, m_begin}; }
-        [[nodiscard]] Iterator end() const noexcept { return Iterator {m_state, m_begin + m_count}; }
+        [[nodiscard]] Iterator begin() const noexcept
+        {
+            return Iterator {
+                    m_state,
+                    m_count == 0 ? static_cast<UInt32>(-1) : m_begin,
+            };
+        }
+        [[nodiscard]] Iterator end() const noexcept
+        {
+            return Iterator {m_state, static_cast<UInt32>(-1)};
+        }
 
     private:
         friend class ElementView;
@@ -220,8 +212,19 @@ namespace NGIN::Serialization::XML
             std::string_view             m_name {};
         };
 
-        [[nodiscard]] Iterator begin() const noexcept { return Iterator {m_state, m_begin, m_end, m_name}; }
-        [[nodiscard]] Iterator end() const noexcept { return Iterator {m_state, m_end, m_end, m_name}; }
+        [[nodiscard]] UIntSize                   Size() const noexcept;
+        [[nodiscard]] bool                       Empty() const noexcept;
+        [[nodiscard]] std::optional<ElementView> First() const noexcept;
+        [[nodiscard]] Iterator                   begin() const noexcept { return Iterator {m_state, m_begin, m_end, m_name}; }
+        [[nodiscard]] Iterator                   end() const noexcept
+        {
+            return Iterator {
+                    m_state,
+                    static_cast<UInt32>(-1),
+                    static_cast<UInt32>(-1),
+                    m_name,
+            };
+        }
 
     private:
         friend class ElementView;
@@ -243,10 +246,6 @@ namespace NGIN::Serialization::XML
     public:
         ElementView() noexcept = default;
 
-        std::string_view name {};
-        AttributeRange   attributes {};
-        ChildRange       children {};
-
         [[nodiscard]] bool                            IsValid() const noexcept;
         [[nodiscard]] std::string_view                Name() const noexcept;
         [[nodiscard]] SourceSpan                      Span() const noexcept;
@@ -255,7 +254,6 @@ namespace NGIN::Serialization::XML
         [[nodiscard]] ChildRange                      Children() const noexcept;
         [[nodiscard]] FilteredChildRange              Children(std::string_view elementName) const noexcept;
         [[nodiscard]] std::optional<ElementView>      FirstChild(std::string_view elementName) const noexcept;
-        [[nodiscard]] const ElementView*              FirstChildPtr(std::string_view elementName) const noexcept;
         [[nodiscard]] std::optional<std::string_view> FirstText() const noexcept;
 
     private:
@@ -281,15 +279,16 @@ namespace NGIN::Serialization::XML
         Document(const Document&)            = delete;
         Document& operator=(const Document&) = delete;
 
-        [[nodiscard]] bool               IsValid() const noexcept;
-        [[nodiscard]] ElementView        Root() const noexcept;
-        [[nodiscard]] const ElementView* RootPtr() const noexcept;
-        [[nodiscard]] std::string_view   SourceText() const noexcept;
-        [[nodiscard]] UIntSize           MemoryUsed() const noexcept;
-        [[nodiscard]] UIntSize           MemoryCommitted() const noexcept;
-        [[nodiscard]] UIntSize           NodeCount() const noexcept;
-        [[nodiscard]] UIntSize           ElementCount() const noexcept;
-        [[nodiscard]] UIntSize           AttributeCount() const noexcept;
+        [[nodiscard]] bool             IsValid() const noexcept;
+        [[nodiscard]] ElementView      Root() const noexcept;
+        [[nodiscard]] std::string_view SourceText() const noexcept;
+        [[nodiscard]] UIntSize         MemoryUsed() const noexcept;
+        [[nodiscard]] UIntSize         MemoryCommitted() const noexcept;
+        [[nodiscard]] UIntSize         PeakMemoryCommitted() const noexcept;
+        [[nodiscard]] UIntSize         AllocationCount() const noexcept;
+        [[nodiscard]] UIntSize         NodeCount() const noexcept;
+        [[nodiscard]] UIntSize         ElementCount() const noexcept;
+        [[nodiscard]] UIntSize         AttributeCount() const noexcept;
 
     private:
         friend class Parser;
@@ -309,15 +308,16 @@ namespace NGIN::Serialization::XML
         BorrowedDocument(const BorrowedDocument&)            = delete;
         BorrowedDocument& operator=(const BorrowedDocument&) = delete;
 
-        [[nodiscard]] bool               IsValid() const noexcept;
-        [[nodiscard]] ElementView        Root() const noexcept;
-        [[nodiscard]] const ElementView* RootPtr() const noexcept;
-        [[nodiscard]] std::string_view   SourceText() const noexcept;
-        [[nodiscard]] UIntSize           MemoryUsed() const noexcept;
-        [[nodiscard]] UIntSize           MemoryCommitted() const noexcept;
-        [[nodiscard]] UIntSize           NodeCount() const noexcept;
-        [[nodiscard]] UIntSize           ElementCount() const noexcept;
-        [[nodiscard]] UIntSize           AttributeCount() const noexcept;
+        [[nodiscard]] bool             IsValid() const noexcept;
+        [[nodiscard]] ElementView      Root() const noexcept;
+        [[nodiscard]] std::string_view SourceText() const noexcept;
+        [[nodiscard]] UIntSize         MemoryUsed() const noexcept;
+        [[nodiscard]] UIntSize         MemoryCommitted() const noexcept;
+        [[nodiscard]] UIntSize         PeakMemoryCommitted() const noexcept;
+        [[nodiscard]] UIntSize         AllocationCount() const noexcept;
+        [[nodiscard]] UIntSize         NodeCount() const noexcept;
+        [[nodiscard]] UIntSize         ElementCount() const noexcept;
+        [[nodiscard]] UIntSize         AttributeCount() const noexcept;
 
     private:
         friend class Parser;

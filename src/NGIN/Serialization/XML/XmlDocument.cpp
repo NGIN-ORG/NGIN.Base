@@ -4,14 +4,6 @@
 
 namespace NGIN::Serialization::XML
 {
-    void detail::DocumentState::FinalizeViews()
-    {
-        elementViews.clear();
-        elementViews.reserve(elements.size());
-        for (UInt32 index = 0; index < elements.size(); ++index)
-            elementViews.push_back(ElementView {this, index});
-    }
-
     namespace
     {
         [[nodiscard]] const detail::NodeRecord*
@@ -19,40 +11,26 @@ namespace NGIN::Serialization::XML
         {
             return state ? state->Node(id) : nullptr;
         }
+
+        [[nodiscard]] UInt32 ElementIndex(const detail::NodeRecord& node) noexcept
+        {
+            return node.name.offsetOrId;
+        }
     }// namespace
 
     NodeView::NodeView(const detail::DocumentState* state, NodeId id) noexcept
         : m_state(state), m_id(id)
     {
-        const auto* node = Resolve(state, id);
-        if (!node)
-            return;
-        type = static_cast<Type>(node->kind);
-        text = node->text.View();
-        if (node->kind == NodeKind::Element && node->element < state->elementViews.size())
-            element = &state->elementViews[node->element];
     }
 
     AttributeView::AttributeView(const detail::DocumentState* state, UInt32 index) noexcept
         : m_state(state), m_index(index)
     {
-        if (state && index < state->attributes.size())
-        {
-            name  = state->attributes[index].name.View();
-            value = state->attributes[index].value.View();
-        }
     }
 
     ElementView::ElementView(const detail::DocumentState* state, UInt32 index) noexcept
         : m_state(state), m_index(index)
     {
-        if (state && index < state->elements.size())
-        {
-            const auto& record = state->elements[index];
-            name               = record.name.View();
-            attributes         = AttributeRange {state, record.attributes.begin, record.attributes.count};
-            children           = ChildRange {state, record.children.begin, record.children.count};
-        }
     }
 
     bool NodeView::IsValid() const noexcept
@@ -65,37 +43,31 @@ namespace NGIN::Serialization::XML
     SourceSpan NodeView::Span() const noexcept
     {
         const auto* node = Resolve(m_state, m_id);
-        return node ? node->span : SourceSpan {};
+        return node ? m_state->ExpandSpan(node->span) : SourceSpan {};
     }
     std::string_view NodeView::Name() const noexcept
     {
         const auto* node = Resolve(m_state, m_id);
         if (!node)
             return {};
-        if (node->kind == NodeKind::Element && node->element < m_state->elements.size())
-            return m_state->elements[node->element].name.View();
-        return node->name.View();
+        const auto elementIndex = ElementIndex(*node);
+        if (node->kind == NodeKind::Element && elementIndex < m_state->elements.size())
+            return m_state->Text(m_state->elements[elementIndex].name);
+        return m_state->Text(node->name);
     }
     std::optional<ElementView> NodeView::TryElement() const noexcept
     {
-        const auto* node = Resolve(m_state, m_id);
-        return node && node->kind == NodeKind::Element && node->element < m_state->elements.size()
-                       ? std::optional<ElementView> {ElementView {m_state, node->element}}
+        const auto* node         = Resolve(m_state, m_id);
+        const auto  elementIndex = node ? ElementIndex(*node) : 0;
+        return node && node->kind == NodeKind::Element && elementIndex < m_state->elements.size()
+                       ? std::optional<ElementView> {ElementView {m_state, elementIndex}}
                        : std::nullopt;
-    }
-    const ElementView* NodeView::ElementPtr() const noexcept
-    {
-        const auto* node = Resolve(m_state, m_id);
-        return node && node->kind == NodeKind::Element &&
-                               node->element < m_state->elementViews.size()
-                       ? &m_state->elementViews[node->element]
-                       : nullptr;
     }
     std::optional<std::string_view> NodeView::TryText() const noexcept
     {
         const auto* node = Resolve(m_state, m_id);
         return node && node->kind != NodeKind::Element
-                       ? std::optional<std::string_view> {node->text.View()}
+                       ? std::optional<std::string_view> {m_state->Text(node->text)}
                        : std::nullopt;
     }
 
@@ -105,23 +77,23 @@ namespace NGIN::Serialization::XML
     }
     std::string_view AttributeView::Name() const noexcept
     {
-        return IsValid() ? m_state->attributes[m_index].name.View() : std::string_view {};
+        return IsValid() ? m_state->Text(m_state->attributes[m_index].name) : std::string_view {};
     }
     std::string_view AttributeView::Value() const noexcept
     {
-        return IsValid() ? m_state->attributes[m_index].value.View() : std::string_view {};
+        return IsValid() ? m_state->Text(m_state->attributes[m_index].value) : std::string_view {};
     }
     SourceSpan AttributeView::Span() const noexcept
     {
-        return IsValid() ? m_state->attributes[m_index].span : SourceSpan {};
+        return IsValid() ? m_state->ExpandSpan(m_state->attributes[m_index].span) : SourceSpan {};
     }
     SourceSpan AttributeView::NameSpan() const noexcept
     {
-        return IsValid() ? m_state->attributes[m_index].nameSpan : SourceSpan {};
+        return IsValid() ? m_state->TextSpan(m_state->attributes[m_index].name) : SourceSpan {};
     }
     SourceSpan AttributeView::ValueSpan() const noexcept
     {
-        return IsValid() ? m_state->attributes[m_index].valueSpan : SourceSpan {};
+        return IsValid() ? m_state->ExpandSpan(m_state->attributes[m_index].valueSpan) : SourceSpan {};
     }
 
     AttributeView AttributeRange::Iterator::operator*() const noexcept
@@ -142,20 +114,27 @@ namespace NGIN::Serialization::XML
 
     NodeView ChildRange::Iterator::operator*() const noexcept
     {
-        return m_state && m_index < m_state->children.size()
-                       ? NodeView {m_state, m_state->children[m_index]}
-                       : NodeView {};
+        return NodeView {m_state, NodeId {m_index}};
     }
     ChildRange::Iterator& ChildRange::Iterator::operator++() noexcept
     {
-        ++m_index;
+        const auto* node = Resolve(m_state, NodeId {m_index});
+        m_index          = node ? node->nextSibling : static_cast<UInt32>(-1);
         return *this;
     }
     NodeView ChildRange::operator[](UIntSize index) const noexcept
     {
-        return m_state && index < m_count && m_begin + index < m_state->children.size()
-                       ? NodeView {m_state, m_state->children[m_begin + index]}
-                       : NodeView {};
+        if (!m_state || index >= m_count)
+            return {};
+        auto id = NodeId {m_begin};
+        while (index-- > 0)
+        {
+            const auto* node = Resolve(m_state, id);
+            if (!node)
+                return {};
+            id.value = node->nextSibling;
+        }
+        return NodeView {m_state, id};
     }
 
     FilteredChildRange::Iterator::Iterator(const detail::DocumentState* state,
@@ -168,40 +147,58 @@ namespace NGIN::Serialization::XML
     }
     void FilteredChildRange::Iterator::Seek() noexcept
     {
-        while (m_state && m_index < m_end && m_index < m_state->children.size())
+        while (m_state && m_index != static_cast<UInt32>(-1))
         {
-            const auto* node = m_state->Node(m_state->children[m_index]);
+            const auto* node         = m_state->Node(NodeId {m_index});
+            const auto  elementIndex = node ? ElementIndex(*node) : 0;
             if (node && node->kind == NodeKind::Element &&
-                node->element < m_state->elements.size() &&
-                (m_name.empty() || m_state->elements[node->element].name.View() == m_name))
+                elementIndex < m_state->elements.size() &&
+                (m_name.empty() || m_state->Text(m_state->elements[elementIndex].name) == m_name))
                 return;
-            ++m_index;
+            m_index = node ? node->nextSibling : static_cast<UInt32>(-1);
         }
-        m_index = m_end;
+        m_index = static_cast<UInt32>(-1);
     }
     ElementView FilteredChildRange::Iterator::operator*() const noexcept
     {
-        if (!m_state || m_index >= m_state->children.size())
-            return {};
-        const auto* node = m_state->Node(m_state->children[m_index]);
-        return node && node->kind == NodeKind::Element ? ElementView {m_state, node->element} : ElementView {};
+        const auto* node = m_state ? m_state->Node(NodeId {m_index}) : nullptr;
+        return node && node->kind == NodeKind::Element
+                       ? ElementView {m_state, ElementIndex(*node)}
+                       : ElementView {};
     }
     FilteredChildRange::Iterator& FilteredChildRange::Iterator::operator++() noexcept
     {
-        ++m_index;
+        const auto* node = m_state ? m_state->Node(NodeId {m_index}) : nullptr;
+        m_index          = node ? node->nextSibling : static_cast<UInt32>(-1);
         Seek();
         return *this;
+    }
+    UIntSize FilteredChildRange::Size() const noexcept
+    {
+        UIntSize count = 0;
+        for (auto iterator = begin(); iterator != end(); ++iterator)
+            ++count;
+        return count;
+    }
+    bool FilteredChildRange::Empty() const noexcept
+    {
+        return begin() == end();
+    }
+    std::optional<ElementView> FilteredChildRange::First() const noexcept
+    {
+        const auto first = begin();
+        return first != end() ? std::optional<ElementView> {*first} : std::nullopt;
     }
 
     bool ElementView::IsValid() const noexcept
     { return m_state && m_index < m_state->elements.size(); }
     std::string_view ElementView::Name() const noexcept
     {
-        return IsValid() ? m_state->elements[m_index].name.View() : std::string_view {};
+        return IsValid() ? m_state->Text(m_state->elements[m_index].name) : std::string_view {};
     }
     SourceSpan ElementView::Span() const noexcept
     {
-        return IsValid() ? m_state->elements[m_index].span : SourceSpan {};
+        return IsValid() ? m_state->ExpandSpan(m_state->elements[m_index].span) : SourceSpan {};
     }
     AttributeRange ElementView::Attributes() const noexcept
     {
@@ -224,14 +221,20 @@ namespace NGIN::Serialization::XML
         if (!IsValid())
             return ChildRange {nullptr, 0, 0};
         const auto range = m_state->elements[m_index].children;
-        return ChildRange {m_state, range.begin, range.count};
+        return ChildRange {m_state, range.first, range.count};
     }
     FilteredChildRange ElementView::Children(std::string_view elementName) const noexcept
     {
         if (!IsValid())
             return FilteredChildRange {nullptr, 0, 0, elementName};
         const auto range = m_state->elements[m_index].children;
-        return FilteredChildRange {m_state, range.begin, range.begin + range.count, elementName};
+        const auto begin = range.first;
+        return FilteredChildRange {
+                m_state,
+                begin,
+                static_cast<UInt32>(-1),
+                elementName,
+        };
     }
     std::optional<ElementView> ElementView::FirstChild(std::string_view elementName) const noexcept
     {
@@ -240,16 +243,6 @@ namespace NGIN::Serialization::XML
         if (first != range.end())
             return *first;
         return std::nullopt;
-    }
-    const ElementView* ElementView::FirstChildPtr(std::string_view elementName) const noexcept
-    {
-        for (const auto child: Children())
-        {
-            const auto* element = child.ElementPtr();
-            if (element && element->Name() == elementName)
-                return element;
-        }
-        return nullptr;
     }
     std::optional<std::string_view> ElementView::FirstText() const noexcept
     {
@@ -277,14 +270,7 @@ namespace NGIN::Serialization::XML
     ElementView Document::Root() const noexcept
     {
         const auto* root = IsValid() ? m_state->Node(m_state->root) : nullptr;
-        return root ? ElementView {m_state.get(), root->element} : ElementView {};
-    }
-    const ElementView* Document::RootPtr() const noexcept
-    {
-        const auto* root = IsValid() ? m_state->Node(m_state->root) : nullptr;
-        return root && root->element < m_state->elementViews.size()
-                       ? &m_state->elementViews[root->element]
-                       : nullptr;
+        return root ? ElementView {m_state.get(), ElementIndex(*root)} : ElementView {};
     }
     std::string_view Document::SourceText() const noexcept
     {
@@ -294,6 +280,10 @@ namespace NGIN::Serialization::XML
     { return m_state ? m_state->MemoryUsed() : 0; }
     UIntSize Document::MemoryCommitted() const noexcept
     { return m_state ? m_state->MemoryCommitted() : 0; }
+    UIntSize Document::PeakMemoryCommitted() const noexcept
+    { return m_state ? m_state->PeakMemoryCommitted() : 0; }
+    UIntSize Document::AllocationCount() const noexcept
+    { return m_state ? m_state->budget.AllocationCount() : 0; }
     UIntSize Document::NodeCount() const noexcept
     { return m_state ? m_state->nodes.size() : 0; }
     UIntSize Document::ElementCount() const noexcept
@@ -317,14 +307,7 @@ namespace NGIN::Serialization::XML
     ElementView BorrowedDocument::Root() const noexcept
     {
         const auto* root = IsValid() ? m_state->Node(m_state->root) : nullptr;
-        return root ? ElementView {m_state.get(), root->element} : ElementView {};
-    }
-    const ElementView* BorrowedDocument::RootPtr() const noexcept
-    {
-        const auto* root = IsValid() ? m_state->Node(m_state->root) : nullptr;
-        return root && root->element < m_state->elementViews.size()
-                       ? &m_state->elementViews[root->element]
-                       : nullptr;
+        return root ? ElementView {m_state.get(), ElementIndex(*root)} : ElementView {};
     }
     std::string_view BorrowedDocument::SourceText() const noexcept
     {
@@ -334,6 +317,10 @@ namespace NGIN::Serialization::XML
     { return m_state ? m_state->MemoryUsed() : 0; }
     UIntSize BorrowedDocument::MemoryCommitted() const noexcept
     { return m_state ? m_state->MemoryCommitted() : 0; }
+    UIntSize BorrowedDocument::PeakMemoryCommitted() const noexcept
+    { return m_state ? m_state->PeakMemoryCommitted() : 0; }
+    UIntSize BorrowedDocument::AllocationCount() const noexcept
+    { return m_state ? m_state->budget.AllocationCount() : 0; }
     UIntSize BorrowedDocument::NodeCount() const noexcept
     { return m_state ? m_state->nodes.size() : 0; }
     UIntSize BorrowedDocument::ElementCount() const noexcept

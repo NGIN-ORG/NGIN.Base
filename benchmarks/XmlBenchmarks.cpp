@@ -189,14 +189,15 @@ namespace
         using namespace NGIN;
         using namespace NGIN::Serialization;
 
-        std::cout << "\nNGIN XML document memory (bytes; arena allocations exclude source/vector allocations)\n";
+        std::cout << "\nNGIN XML document memory (bytes; tracked allocations cover DOM tables and arena)\n";
         std::cout << std::left << std::setw(20) << "Input"
                   << std::right << std::setw(12) << "Source"
                   << std::setw(12) << "Nodes"
                   << std::setw(14) << "Owned used"
                   << std::setw(14) << "Owned cap"
+                  << std::setw(14) << "Owned peak"
                   << std::setw(14) << "Borrow cap"
-                  << std::setw(14) << "Arena allocs"
+                  << std::setw(14) << "DOM allocs"
                   << '\n';
 
         for (const auto& input: cases)
@@ -226,8 +227,9 @@ namespace
                       << std::setw(12) << owned.Value().NodeCount()
                       << std::setw(14) << owned.Value().MemoryUsed()
                       << std::setw(14) << owned.Value().MemoryCommitted()
+                      << std::setw(14) << owned.Value().PeakMemoryCommitted()
                       << std::setw(14) << borrowed.Value().MemoryCommitted()
-                      << std::setw(14) << ownedAllocator.allocationCount
+                      << std::setw(14) << owned.Value().AllocationCount()
                       << '\n';
         }
     }
@@ -289,6 +291,17 @@ int main()
                 [inputPtr, &borrowedScratch](BenchmarkContext& context) {
                     auto result = XML::ParseBorrowed(
                             BorrowedTextView {inputPtr->source}, borrowedScratch);
+                    context.doNotOptimize(result.HasValue());
+                    if (result)
+                        context.doNotOptimize(result.Value().NodeCount());
+                });
+
+        RegisterBatched(
+                scales,
+                "XML/NGIN in-situ/" + input.name,
+                operations,
+                [inputPtr](BenchmarkContext& context) {
+                    auto result = XML::ParseInSitu(MutableTextBuffer {inputPtr->source});
                     context.doNotOptimize(result.HasValue());
                     if (result)
                         context.doNotOptimize(result.Value().NodeCount());

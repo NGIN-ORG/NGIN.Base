@@ -13,17 +13,19 @@ Every parse call states its lifetime model:
 - `JSON::Parse(OwnedTextBuffer)` and `XML::Parse(OwnedTextBuffer)` return
   self-contained, movable documents.
 - `ParseBorrowed(BorrowedTextView, ParseScratch&)` returns a
-  `BorrowedDocument`. Views are valid only while the input, scratch object, and
-  document remain alive, and until that scratch object is reset or reused.
-  `ParseScratch::Reset()` retains capacity.
-- `JSON::ParseInSitu(MutableTextBuffer)` explicitly permits string decoding in
-  the owned mutable source. It still returns a self-contained `Document`.
+  `BorrowedDocument`. Views are valid only while the input and document remain
+  alive. The scratch object is reusable workspace and is not retained by the
+  completed document; `ParseScratch::Reset()` retains capacity.
+- `JSON::ParseInSitu(MutableTextBuffer)` and
+  `XML::ParseInSitu(MutableTextBuffer)` explicitly permit string decoding in
+  the owned mutable source. They still return self-contained documents.
 - `XML::ParseSyntax(OwnedTextBuffer)` returns the lossless syntax document used
   by formatter-style tools.
 
 Passing a bare `std::string_view` is deliberately not an owning parse.
 
-Documents own compact indexed node/member/child tables. `ValueView`,
+Documents own compact indexed node/member tables. XML child traversal uses
+compact sibling IDs rather than a second child-pointer table. `ValueView`,
 `ElementView`, and range values are immutable handles into those tables.
 Moving a document does not invalidate existing views because the backing state
 itself is not relocated.
@@ -67,6 +69,13 @@ Semantic nodes carry source spans. `ElementView::Attribute`,
 `ElementView::Children(name)`, `FirstChild`, and `FirstText` provide
 allocation-free queries.
 
+`XML::ParseInSitu` compacts entity references and normalizes line endings
+directly into its owned mutable source. Semantic string views therefore point
+into that buffer without decoded-string allocations. Spans retain original
+input offsets, but `SourceText()` is mutated and is not a lossless copy of the
+authored XML. Use `XML::Parse` when exact source bytes must survive, and
+`ParseSyntax` for formatter/editor round trips.
+
 `ParseSyntax` validates with the same semantic rules while retaining the exact
 source and syntax tokens, including declarations, comments, CDATA, processing
 instructions, quote choices, whitespace, and line endings. Writing a
@@ -100,8 +109,8 @@ requires object buffering to suppress a previously encountered value and
 therefore uses the semantic DOM path. Start-container, end-container, and key
 event spans cover their individual source tokens.
 
-XML events are also emitted directly without constructing a semantic document
-or the document's cached `ElementView` table. Start-element spans cover the
+XML events are also emitted directly without constructing a semantic document.
+Start-element spans cover the
 opening `<name` token, attribute spans cover `name="value"`, and end-element
 spans cover either `/>` or `</name>`. Text values are entity-decoded and
 line-ending-normalized; comments and processing instructions inside elements
@@ -114,6 +123,11 @@ JSONL consumers should keep one `ParseScratch` per stream and call
 
 `JSON::Builder` and `XML::Builder` construct immutable semantic documents.
 `JSON::Writer` and `XML::Writer` serialize document views.
+
+An XML node has one parent. `XML::Builder` rejects duplicate child handles,
+reattaching an already-owned child, and finishing an attached node as the
+document root. This keeps the semantic tree compact and makes child iteration
+allocation-free.
 
 For directly authored output, use `JSON::StreamWriter` or
 `XML::StreamWriter` with the minimal `TextSink` adapter:

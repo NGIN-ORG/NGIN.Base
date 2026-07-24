@@ -24,6 +24,7 @@ namespace NGIN::Serialization::XML
             detail::DocumentState*    state {nullptr};
             ParseScratch*             scratch {nullptr};
             std::vector<SyntaxToken>* syntaxTokens {nullptr};
+            char*                     mutableBase {nullptr};
             UIntSize                  depth {0};
             UIntSize                  decodedBytes {0};
         };
@@ -64,6 +65,20 @@ namespace NGIN::Serialization::XML
                                message,
                                begin,
                                (std::min) (begin + 1, context.state->source.size()));
+        }
+
+        [[nodiscard]] ParseDiagnostic MakeAllocationError(ParseContext&    context,
+                                                          std::string_view message,
+                                                          UIntSize         begin,
+                                                          UIntSize         end)
+        {
+            return MakeErrorAt(context,
+                               context.state->budget.LimitExceeded()
+                                       ? ParseErrorCode::LimitExceeded
+                                       : ParseErrorCode::OutOfMemory,
+                               message,
+                               begin,
+                               end);
         }
 
         [[nodiscard]] bool StartsWith(const ParseContext& context, std::string_view value) noexcept
@@ -114,18 +129,17 @@ namespace NGIN::Serialization::XML
                    (value >= '0' && value <= '9');
         }
 
-        [[nodiscard]] NGIN::Utilities::Expected<detail::StringRef, ParseDiagnostic>
+        [[nodiscard]] NGIN::Utilities::Expected<detail::TextRef, ParseDiagnostic>
         ParseName(ParseContext& context)
         {
             const UIntSize begin = context.cursor.Offset();
             if (!IsNameStart(static_cast<unsigned char>(context.cursor.Peek())))
-                return Failure<detail::StringRef>(
+                return Failure<detail::TextRef>(
                         MakeError(context, ParseErrorCode::InvalidToken, "Expected an XML name"));
             context.cursor.Advance();
             while (IsNameContinue(static_cast<unsigned char>(context.cursor.Peek())))
                 context.cursor.Advance();
-            const auto value = context.state->source.substr(begin, context.cursor.Offset() - begin);
-            return detail::StringRef {value.data(), value.size()};
+            return context.state->SourceText(begin, context.cursor.Offset() - begin);
         }
 
         [[nodiscard]] bool IsXmlCharacter(UInt32 value) noexcept
@@ -136,7 +150,7 @@ namespace NGIN::Serialization::XML
                    (value >= 0x10000 && value <= 0x10ffff);
         }
 
-        [[nodiscard]] bool ContainsOnlyXmlCharacters(std::string_view value) noexcept
+        [[nodiscard]] bool IsValidXmlUtf8(std::string_view value) noexcept
         {
             UIntSize offset = 0;
             while (offset < value.size())
@@ -157,6 +171,7 @@ namespace NGIN::Serialization::XML
             }
             return true;
         }
+
 
         enum class DecodeIssue : UInt8
         {
@@ -288,7 +303,7 @@ namespace NGIN::Serialization::XML
             return result;
         }
 
-        [[nodiscard]] NGIN::Utilities::Expected<detail::StringRef, ParseDiagnostic>
+        [[nodiscard]] NGIN::Utilities::Expected<detail::TextRef, ParseDiagnostic>
         DecodeText(ParseContext&    context,
                    std::string_view raw,
                    UIntSize         sourceOffset,
@@ -297,18 +312,24 @@ namespace NGIN::Serialization::XML
             bool needsDecode = raw.find('&') != std::string_view::npos ||
                                raw.find('\r') != std::string_view::npos;
             if (!needsDecode)
-                return detail::StringRef {raw.data(), raw.size()};
+                return context.state->SourceText(sourceOffset, raw.size());
 
-            context.scratch->Reset();
-            char* temporary = context.scratch->TryAllocate(raw.size());
+            char* temporary = context.mutableBase
+                                      ? context.mutableBase + sourceOffset
+                                      : nullptr;
             if (!temporary)
             {
-                return Failure<detail::StringRef>(
-                        MakeErrorAt(context,
-                                    ParseErrorCode::OutOfMemory,
-                                    "XML entity decoding allocation failed",
-                                    sourceOffset,
-                                    sourceOffset + raw.size()));
+                context.scratch->Reset();
+                temporary = context.scratch->TryAllocate(raw.size());
+                if (!temporary)
+                {
+                    return Failure<detail::TextRef>(
+                            MakeErrorAt(context,
+                                        ParseErrorCode::OutOfMemory,
+                                        "XML entity decoding allocation failed",
+                                        sourceOffset,
+                                        sourceOffset + raw.size()));
+                }
             }
 
             const auto decoded = DecodeXmlText(raw, temporary);
@@ -332,7 +353,7 @@ namespace NGIN::Serialization::XML
                     case DecodeIssue::None:
                         break;
                 }
-                return Failure<detail::StringRef>(
+                return Failure<detail::TextRef>(
                         MakeErrorAt(context,
                                     ParseErrorCode::InvalidEntity,
                                     message,
@@ -343,7 +364,7 @@ namespace NGIN::Serialization::XML
             if (context.decodedBytes > context.state->limits.maxDecodedStringBytes ||
                 decoded.size > context.state->limits.maxDecodedStringBytes - context.decodedBytes)
             {
-                return Failure<detail::StringRef>(
+                return Failure<detail::TextRef>(
                         MakeErrorAt(context,
                                     ParseErrorCode::LimitExceeded,
                                     "Decoded XML text limit exceeded",
@@ -351,19 +372,35 @@ namespace NGIN::Serialization::XML
                                     sourceOffset + raw.size()));
             }
 
-            const auto copy = context.state->arena.CopyString(
-                    std::string_view {temporary, decoded.size});
+            if (context.mutableBase)
+            {
+                context.decodedBytes += decoded.size;
+                return context.state->SourceText(sourceOffset, decoded.size);
+            }
+
+            const auto copy = context.state->arena.CopyString(std::string_view {temporary, decoded.size});
             if (decoded.size != 0 && copy.data() == nullptr)
             {
-                return Failure<detail::StringRef>(
-                        MakeErrorAt(context,
-                                    ParseErrorCode::OutOfMemory,
-                                    attribute ? "XML attribute value allocation failed" : "XML text allocation failed",
-                                    sourceOffset,
-                                    sourceOffset + raw.size()));
+                return Failure<detail::TextRef>(
+                        MakeAllocationError(
+                                context,
+                                attribute ? "XML attribute value allocation failed" : "XML text allocation failed",
+                                sourceOffset,
+                                sourceOffset + raw.size()));
             }
             context.decodedBytes += decoded.size;
-            return detail::StringRef {copy.data(), copy.size()};
+            try
+            {
+                return context.state->StoreText(copy);
+            } catch (const std::bad_alloc&)
+            {
+                return Failure<detail::TextRef>(
+                        MakeAllocationError(
+                                context,
+                                attribute ? "XML attribute value allocation failed" : "XML text allocation failed",
+                                sourceOffset,
+                                sourceOffset + raw.size()));
+            }
         }
 
         [[nodiscard]] bool IsWhitespaceOnly(std::string_view value) noexcept
@@ -385,28 +422,55 @@ namespace NGIN::Serialization::XML
             {
                 const NodeId id {static_cast<UInt32>(context.state->nodes.size())};
                 context.state->nodes.push_back(node);
-                if (!context.state->WithinMemoryLimit())
-                {
-                    context.state->nodes.pop_back();
-                    return Failure<NodeId>(MakeErrorAt(context,
-                                                       ParseErrorCode::LimitExceeded,
-                                                       "XML memory limit exceeded",
-                                                       node.span.begin,
-                                                       node.span.end));
-                }
                 return id;
             } catch (const std::bad_alloc&)
             {
-                return Failure<NodeId>(MakeErrorAt(context,
-                                                   ParseErrorCode::OutOfMemory,
-                                                   "XML node allocation failed",
-                                                   node.span.begin,
-                                                   node.span.end));
+                return Failure<NodeId>(MakeAllocationError(context,
+                                                           "XML node allocation failed",
+                                                           node.span.begin,
+                                                           node.span.end));
             }
         }
 
         [[nodiscard]] NGIN::Utilities::Expected<void, ParseDiagnostic>
-        ParseComment(ParseContext& context, std::vector<NodeId>* children)
+        AddChild(ParseContext& context, UInt32 elementIndex, NodeId child)
+        {
+            constexpr auto maxIndex = (std::numeric_limits<UInt32>::max)();
+            if (elementIndex >= context.state->elements.size() ||
+                context.state->childCount >= context.state->limits.maxMembers ||
+                context.state->childCount >= maxIndex)
+            {
+                return Failure<void>(MakeErrorAt(context,
+                                                 ParseErrorCode::LimitExceeded,
+                                                 "XML member limit exceeded",
+                                                 context.cursor.Offset(),
+                                                 context.cursor.Offset()));
+            }
+
+            auto& element = context.state->elements[elementIndex];
+            if (element.children.count == 0)
+            {
+                element.children.first = child.value;
+            }
+            else
+            {
+                // span.end is unused until the closing tag and temporarily
+                // carries the last child ID while the sibling chain is built.
+                auto* previous = context.state->Node(NodeId {element.span.end});
+                if (!previous)
+                    return Failure<void>(MakeError(context,
+                                                   ParseErrorCode::InvalidDocumentStructure,
+                                                   "XML child chain is invalid"));
+                previous->nextSibling = child.value;
+            }
+            element.span.end = child.value;
+            ++element.children.count;
+            ++context.state->childCount;
+            return {};
+        }
+
+        [[nodiscard]] NGIN::Utilities::Expected<void, ParseDiagnostic>
+        ParseComment(ParseContext& context, std::optional<UInt32> parentElement)
         {
             const UIntSize start = context.cursor.Offset();
             context.cursor.Advance(4);
@@ -429,30 +493,34 @@ namespace NGIN::Serialization::XML
             context.cursor.Advance(close + 3);
             AddSyntax(context, SyntaxKind::Comment, start, context.cursor.Offset());
 
-            if (children && context.options.trivia == TriviaPolicy::Preserve)
+            if (parentElement && context.options.trivia == TriviaPolicy::Preserve)
             {
                 detail::NodeRecord node {
                         .kind = NodeKind::Comment,
-                        .span = SourceSpan {context.state->sourceId, start, context.cursor.Offset()},
-                        .text = detail::StringRef {text.data(), text.size()},
+                        .text = context.state->StoreText(text),
+                        .span = context.state->MakeSpan(start, context.cursor.Offset()),
                 };
                 auto id = AddNode(context, node);
                 if (!id)
                     return Failure<void>(std::move(id.Error()));
-                children->push_back(id.Value());
+                auto child = AddChild(context, *parentElement, id.Value());
+                if (!child)
+                    return child;
             }
             return {};
         }
 
         [[nodiscard]] NGIN::Utilities::Expected<void, ParseDiagnostic>
-        ParseProcessingInstruction(ParseContext& context, std::vector<NodeId>* children, bool declaration)
+        ParseProcessingInstruction(ParseContext&         context,
+                                   std::optional<UInt32> parentElement,
+                                   bool                  declaration)
         {
             const UIntSize start = context.cursor.Offset();
             context.cursor.Advance(2);
             auto target = ParseName(context);
             if (!target)
                 return Failure<void>(std::move(target.Error()));
-            const auto targetText = target.Value().View();
+            const auto targetText = context.state->Text(target.Value());
             const bool reservedXml =
                     targetText.size() == 3 &&
                     (targetText[0] == 'x' || targetText[0] == 'X') &&
@@ -490,21 +558,21 @@ namespace NGIN::Serialization::XML
                       start,
                       context.cursor.Offset());
 
-            if (children && context.options.trivia == TriviaPolicy::Preserve)
+            if (parentElement && context.options.trivia == TriviaPolicy::Preserve)
             {
                 detail::NodeRecord node {
                         .kind = NodeKind::ProcessingInstruction,
-                        .span = SourceSpan {context.state->sourceId, start, context.cursor.Offset()},
                         .name = target.Value(),
-                        .text = detail::StringRef {
-                                context.state->source.data() + bodyStart,
-                                body.size(),
-                        },
+                        .text = context.state->StoreText(
+                                context.state->source.substr(bodyStart, body.size())),
+                        .span = context.state->MakeSpan(start, context.cursor.Offset()),
                 };
                 auto id = AddNode(context, node);
                 if (!id)
                     return Failure<void>(std::move(id.Error()));
-                children->push_back(id.Value());
+                auto child = AddChild(context, *parentElement, id.Value());
+                if (!child)
+                    return child;
             }
             return {};
         }
@@ -576,8 +644,9 @@ namespace NGIN::Serialization::XML
                 return Failure<NodeId>(std::move(name.Error()));
             }
 
-            std::vector<detail::AttributeRecord> attributes;
-            bool                                 selfClosing = false;
+            constexpr auto maxIndex       = (std::numeric_limits<UInt32>::max)();
+            const UIntSize attributeBegin = context.state->attributes.size();
+            bool           selfClosing    = false;
             try
             {
                 while (true)
@@ -622,9 +691,12 @@ namespace NGIN::Serialization::XML
                         return Failure<NodeId>(std::move(attributeName.Error()));
                     }
                     const UIntSize attributeNameEnd = context.cursor.Offset();
-                    for (const auto& previous: attributes)
+                    for (UIntSize index = attributeBegin;
+                         index < context.state->attributes.size();
+                         ++index)
                     {
-                        if (previous.name.View() == attributeName.Value().View())
+                        const auto& previous = context.state->attributes[index];
+                        if (context.state->Text(previous.name) == context.state->Text(attributeName.Value()))
                         {
                             --context.depth;
                             auto error    = MakeErrorAt(context,
@@ -632,7 +704,7 @@ namespace NGIN::Serialization::XML
                                                         "Duplicate XML attribute",
                                                         attributeNameStart,
                                                         attributeNameEnd);
-                            error.related = previous.nameSpan;
+                            error.related = context.state->TextSpan(previous.name);
                             return Failure<NodeId>(std::move(error));
                         }
                     }
@@ -653,19 +725,21 @@ namespace NGIN::Serialization::XML
                                 MakeError(context, ParseErrorCode::InvalidToken, "XML attribute values must be quoted"));
                     }
                     context.cursor.Advance();
-                    const UIntSize valueStart = context.cursor.Offset();
-                    while (!context.cursor.IsEof() && context.cursor.Peek() != quote)
+                    const UIntSize valueStart     = context.cursor.Offset();
+                    const auto     remainingValue = context.cursor.Remaining();
+                    const UIntSize valueLength    = remainingValue.find(quote);
+                    const UIntSize lessThan       = remainingValue.find('<');
+                    if (lessThan != std::string_view::npos &&
+                        (valueLength == std::string_view::npos || lessThan < valueLength))
                     {
-                        if (context.cursor.Peek() == '<')
-                        {
-                            --context.depth;
-                            return Failure<NodeId>(
-                                    MakeError(context, ParseErrorCode::InvalidToken, "'<' is not allowed in XML attributes"));
-                        }
-                        context.cursor.Advance();
+                        context.cursor.Advance(lessThan);
+                        --context.depth;
+                        return Failure<NodeId>(
+                                MakeError(context, ParseErrorCode::InvalidToken, "'<' is not allowed in XML attributes"));
                     }
-                    if (context.cursor.IsEof())
+                    if (valueLength == std::string_view::npos)
                     {
+                        context.cursor.Advance(remainingValue.size());
                         --context.depth;
                         return Failure<NodeId>(MakeErrorAt(context,
                                                            ParseErrorCode::UnexpectedEnd,
@@ -673,6 +747,7 @@ namespace NGIN::Serialization::XML
                                                            valueStart,
                                                            context.state->source.size()));
                     }
+                    context.cursor.Advance(valueLength);
                     const UIntSize valueEnd = context.cursor.Offset();
                     const auto     rawValue = context.state->source.substr(valueStart, valueEnd - valueStart);
                     auto           value    = DecodeText(context, rawValue, valueStart, true);
@@ -682,254 +757,244 @@ namespace NGIN::Serialization::XML
                         return Failure<NodeId>(std::move(value.Error()));
                     }
                     context.cursor.Advance();
-                    attributes.push_back(detail::AttributeRecord {
+                    if (context.state->attributes.size() >= context.state->limits.maxMembers ||
+                        context.state->attributes.size() >= maxIndex)
+                    {
+                        --context.depth;
+                        return Failure<NodeId>(MakeErrorAt(context,
+                                                           ParseErrorCode::LimitExceeded,
+                                                           "XML member limit exceeded",
+                                                           attributeStart,
+                                                           context.cursor.Offset()));
+                    }
+                    context.state->attributes.push_back(detail::AttributeRecord {
                             .name      = attributeName.Value(),
                             .value     = value.Value(),
-                            .span      = SourceSpan {context.state->sourceId, attributeStart, context.cursor.Offset()},
-                            .nameSpan  = SourceSpan {context.state->sourceId, attributeNameStart, attributeNameEnd},
-                            .valueSpan = SourceSpan {context.state->sourceId, valueStart, valueEnd},
+                            .span      = context.state->MakeSpan(attributeStart, context.cursor.Offset()),
+                            .valueSpan = context.state->MakeSpan(valueStart, valueEnd),
                     });
                 }
             } catch (const std::bad_alloc&)
             {
                 --context.depth;
+                return Failure<NodeId>(MakeAllocationError(context,
+                                                           "XML attribute allocation failed",
+                                                           start,
+                                                           context.cursor.Offset()));
+            }
+
+            AddSyntax(context, SyntaxKind::StartTag, start, context.cursor.Offset());
+            if (context.state->elements.size() >= maxIndex)
+            {
+                --context.depth;
                 return Failure<NodeId>(MakeErrorAt(context,
-                                                   ParseErrorCode::OutOfMemory,
-                                                   "XML attribute allocation failed",
+                                                   ParseErrorCode::LimitExceeded,
+                                                   "XML element limit exceeded",
                                                    start,
                                                    context.cursor.Offset()));
             }
 
-            AddSyntax(context, SyntaxKind::StartTag, start, context.cursor.Offset());
-            std::vector<NodeId> children;
+            const auto elementIndex = static_cast<UInt32>(context.state->elements.size());
+            try
+            {
+                context.state->elements.push_back(detail::ElementRecord {
+                        .name       = name.Value(),
+                        .attributes = detail::TableRange {
+                                static_cast<UInt32>(attributeBegin),
+                                static_cast<UInt32>(
+                                        context.state->attributes.size() - attributeBegin),
+                        },
+                        .span = context.state->MakeSpan(start, context.cursor.Offset()),
+                });
+            } catch (const std::bad_alloc&)
+            {
+                --context.depth;
+                return Failure<NodeId>(MakeAllocationError(context,
+                                                           "XML element allocation failed",
+                                                           start,
+                                                           context.cursor.Offset()));
+            }
+
             if (!selfClosing)
             {
-                try
+                while (true)
                 {
-                    while (true)
+                    if (context.cursor.IsEof())
                     {
-                        if (context.cursor.IsEof())
+                        --context.depth;
+                        return Failure<NodeId>(MakeErrorAt(context,
+                                                           ParseErrorCode::UnexpectedEnd,
+                                                           "Unterminated XML element",
+                                                           start,
+                                                           context.state->source.size()));
+                    }
+                    if (StartsWith(context, "</"))
+                    {
+                        const UIntSize closeStart = context.cursor.Offset();
+                        context.cursor.Advance(2);
+                        auto closeName = ParseName(context);
+                        if (!closeName)
+                        {
+                            --context.depth;
+                            return Failure<NodeId>(std::move(closeName.Error()));
+                        }
+                        SkipWhitespace(context);
+                        if (context.cursor.Peek() != '>')
+                        {
+                            --context.depth;
+                            return Failure<NodeId>(MakeError(
+                                    context, ParseErrorCode::InvalidToken, "Expected '>' after XML end tag"));
+                        }
+                        context.cursor.Advance();
+                        if (context.state->Text(closeName.Value()) != context.state->Text(name.Value()))
+                        {
+                            --context.depth;
+                            return Failure<NodeId>(MakeErrorAt(context,
+                                                               ParseErrorCode::MismatchedTag,
+                                                               "XML end tag does not match start tag",
+                                                               closeStart,
+                                                               context.cursor.Offset()));
+                        }
+                        AddSyntax(context, SyntaxKind::EndTag, closeStart, context.cursor.Offset());
+                        break;
+                    }
+                    if (StartsWith(context, "<!--"))
+                    {
+                        auto result = ParseComment(context, elementIndex);
+                        if (!result)
+                        {
+                            --context.depth;
+                            return Failure<NodeId>(std::move(result.Error()));
+                        }
+                        continue;
+                    }
+                    if (StartsWith(context, "<![CDATA["))
+                    {
+                        const UIntSize cdataStart = context.cursor.Offset();
+                        context.cursor.Advance(9);
+                        const UIntSize close = context.cursor.Remaining().find("]]>");
+                        if (close == std::string_view::npos)
                         {
                             --context.depth;
                             return Failure<NodeId>(MakeErrorAt(context,
                                                                ParseErrorCode::UnexpectedEnd,
-                                                               "Unterminated XML element",
-                                                               start,
+                                                               "Unterminated XML CDATA section",
+                                                               cdataStart,
                                                                context.state->source.size()));
                         }
-                        if (StartsWith(context, "</"))
-                        {
-                            const UIntSize closeStart = context.cursor.Offset();
-                            context.cursor.Advance(2);
-                            auto closeName = ParseName(context);
-                            if (!closeName)
-                            {
-                                --context.depth;
-                                return Failure<NodeId>(std::move(closeName.Error()));
-                            }
-                            SkipWhitespace(context);
-                            if (context.cursor.Peek() != '>')
-                            {
-                                --context.depth;
-                                return Failure<NodeId>(MakeError(
-                                        context, ParseErrorCode::InvalidToken, "Expected '>' after XML end tag"));
-                            }
-                            context.cursor.Advance();
-                            if (closeName.Value().View() != name.Value().View())
-                            {
-                                --context.depth;
-                                return Failure<NodeId>(MakeErrorAt(context,
-                                                                   ParseErrorCode::MismatchedTag,
-                                                                   "XML end tag does not match start tag",
-                                                                   closeStart,
-                                                                   context.cursor.Offset()));
-                            }
-                            AddSyntax(context, SyntaxKind::EndTag, closeStart, context.cursor.Offset());
-                            break;
-                        }
-                        if (StartsWith(context, "<!--"))
-                        {
-                            auto result = ParseComment(context, &children);
-                            if (!result)
-                            {
-                                --context.depth;
-                                return Failure<NodeId>(std::move(result.Error()));
-                            }
-                            continue;
-                        }
-                        if (StartsWith(context, "<![CDATA["))
-                        {
-                            const UIntSize cdataStart = context.cursor.Offset();
-                            context.cursor.Advance(9);
-                            const UIntSize close = context.cursor.Remaining().find("]]>");
-                            if (close == std::string_view::npos)
-                            {
-                                --context.depth;
-                                return Failure<NodeId>(MakeErrorAt(context,
-                                                                   ParseErrorCode::UnexpectedEnd,
-                                                                   "Unterminated XML CDATA section",
-                                                                   cdataStart,
-                                                                   context.state->source.size()));
-                            }
-                            const auto text = context.cursor.Remaining().substr(0, close);
-                            context.cursor.Advance(close + 3);
-                            AddSyntax(context, SyntaxKind::CData, cdataStart, context.cursor.Offset());
-                            auto id = AddNode(context, detail::NodeRecord {
-                                                               .kind = NodeKind::CData,
-                                                               .span = SourceSpan {
-                                                                       context.state->sourceId,
-                                                                       cdataStart,
-                                                                       context.cursor.Offset(),
-                                                               },
-                                                               .text = detail::StringRef {text.data(), text.size()},
-                                                       });
-                            if (!id)
-                            {
-                                --context.depth;
-                                return Failure<NodeId>(std::move(id.Error()));
-                            }
-                            children.push_back(id.Value());
-                            continue;
-                        }
-                        if (StartsWith(context, "<?"))
-                        {
-                            auto result = ParseProcessingInstruction(context, &children, false);
-                            if (!result)
-                            {
-                                --context.depth;
-                                return Failure<NodeId>(std::move(result.Error()));
-                            }
-                            continue;
-                        }
-                        if (StartsWith(context, "<!"))
-                        {
-                            --context.depth;
-                            return Failure<NodeId>(MakeError(context,
-                                                             ParseErrorCode::UnsupportedConstruct,
-                                                             "Unsupported XML declaration inside element"));
-                        }
-                        if (context.cursor.Peek() == '<')
-                        {
-                            auto child = ParseElement(context);
-                            if (!child)
-                            {
-                                --context.depth;
-                                return Failure<NodeId>(std::move(child.Error()));
-                            }
-                            children.push_back(child.Value());
-                            continue;
-                        }
-
-                        const UIntSize textStart = context.cursor.Offset();
-                        while (!context.cursor.IsEof() && context.cursor.Peek() != '<')
-                            context.cursor.Advance();
-                        const UIntSize textEnd = context.cursor.Offset();
-                        const auto     rawText = context.state->source.substr(textStart, textEnd - textStart);
-                        if (rawText.find("]]>") != std::string_view::npos)
-                        {
-                            --context.depth;
-                            return Failure<NodeId>(MakeErrorAt(context,
-                                                               ParseErrorCode::InvalidToken,
-                                                               "']]>' is not allowed in XML character data",
-                                                               textStart,
-                                                               textEnd));
-                        }
-                        AddSyntax(context, SyntaxKind::Text, textStart, textEnd);
-                        if (context.options.trivia == TriviaPolicy::Discard && IsWhitespaceOnly(rawText))
-                            continue;
-                        auto text = DecodeText(context, rawText, textStart, false);
-                        if (!text)
-                        {
-                            --context.depth;
-                            return Failure<NodeId>(std::move(text.Error()));
-                        }
+                        const auto text = context.cursor.Remaining().substr(0, close);
+                        context.cursor.Advance(close + 3);
+                        AddSyntax(context, SyntaxKind::CData, cdataStart, context.cursor.Offset());
                         auto id = AddNode(context, detail::NodeRecord {
-                                                           .kind = NodeKind::Text,
-                                                           .span = SourceSpan {context.state->sourceId, textStart, textEnd},
-                                                           .text = text.Value(),
+                                                           .kind = NodeKind::CData,
+                                                           .text = context.state->StoreText(text),
+                                                           .span = context.state->MakeSpan(
+                                                                   cdataStart,
+                                                                   context.cursor.Offset()),
                                                    });
                         if (!id)
                         {
                             --context.depth;
                             return Failure<NodeId>(std::move(id.Error()));
                         }
-                        children.push_back(id.Value());
+                        auto child = AddChild(context, elementIndex, id.Value());
+                        if (!child)
+                        {
+                            --context.depth;
+                            return Failure<NodeId>(std::move(child.Error()));
+                        }
+                        continue;
                     }
-                } catch (const std::bad_alloc&)
-                {
-                    --context.depth;
-                    return Failure<NodeId>(MakeErrorAt(context,
-                                                       ParseErrorCode::OutOfMemory,
-                                                       "XML child allocation failed",
-                                                       start,
-                                                       context.cursor.Offset()));
+                    if (StartsWith(context, "<?"))
+                    {
+                        auto result = ParseProcessingInstruction(context, elementIndex, false);
+                        if (!result)
+                        {
+                            --context.depth;
+                            return Failure<NodeId>(std::move(result.Error()));
+                        }
+                        continue;
+                    }
+                    if (StartsWith(context, "<!"))
+                    {
+                        --context.depth;
+                        return Failure<NodeId>(MakeError(context,
+                                                         ParseErrorCode::UnsupportedConstruct,
+                                                         "Unsupported XML declaration inside element"));
+                    }
+                    if (context.cursor.Peek() == '<')
+                    {
+                        auto childNode = ParseElement(context);
+                        if (!childNode)
+                        {
+                            --context.depth;
+                            return Failure<NodeId>(std::move(childNode.Error()));
+                        }
+                        auto child = AddChild(context, elementIndex, childNode.Value());
+                        if (!child)
+                        {
+                            --context.depth;
+                            return Failure<NodeId>(std::move(child.Error()));
+                        }
+                        continue;
+                    }
+
+                    const UIntSize textStart  = context.cursor.Offset();
+                    const UIntSize textLength = context.cursor.Remaining().find('<');
+                    context.cursor.Advance(
+                            textLength == std::string_view::npos
+                                    ? context.cursor.Remaining().size()
+                                    : textLength);
+                    const UIntSize textEnd = context.cursor.Offset();
+                    const auto     rawText = context.state->source.substr(textStart, textEnd - textStart);
+                    if (rawText.find("]]>") != std::string_view::npos)
+                    {
+                        --context.depth;
+                        return Failure<NodeId>(MakeErrorAt(context,
+                                                           ParseErrorCode::InvalidToken,
+                                                           "']]>' is not allowed in XML character data",
+                                                           textStart,
+                                                           textEnd));
+                    }
+                    AddSyntax(context, SyntaxKind::Text, textStart, textEnd);
+                    if (context.options.trivia == TriviaPolicy::Discard && IsWhitespaceOnly(rawText))
+                        continue;
+                    auto text = DecodeText(context, rawText, textStart, false);
+                    if (!text)
+                    {
+                        --context.depth;
+                        return Failure<NodeId>(std::move(text.Error()));
+                    }
+                    auto id = AddNode(context, detail::NodeRecord {
+                                                       .kind = NodeKind::Text,
+                                                       .text = text.Value(),
+                                                       .span = context.state->MakeSpan(textStart, textEnd),
+                                               });
+                    if (!id)
+                    {
+                        --context.depth;
+                        return Failure<NodeId>(std::move(id.Error()));
+                    }
+                    auto child = AddChild(context, elementIndex, id.Value());
+                    if (!child)
+                    {
+                        --context.depth;
+                        return Failure<NodeId>(std::move(child.Error()));
+                    }
                 }
             }
 
             --context.depth;
-            constexpr auto maxIndex = (std::numeric_limits<UInt32>::max)();
-            if (context.state->attributes.size() > context.state->limits.maxMembers ||
-                attributes.size() > context.state->limits.maxMembers - context.state->attributes.size() ||
-                context.state->children.size() > context.state->limits.maxMembers ||
-                children.size() > context.state->limits.maxMembers - context.state->children.size() ||
-                attributes.size() > maxIndex ||
-                children.size() > maxIndex ||
-                context.state->attributes.size() > maxIndex - attributes.size() ||
-                context.state->children.size() > maxIndex - children.size() ||
-                context.state->elements.size() >= maxIndex)
-                return Failure<NodeId>(MakeErrorAt(context,
-                                                   ParseErrorCode::LimitExceeded,
-                                                   "XML member limit exceeded",
-                                                   start,
-                                                   context.cursor.Offset()));
-
-            const UIntSize attributeBegin = context.state->attributes.size();
-            const UIntSize childBegin     = context.state->children.size();
-            const UIntSize elementIndex   = context.state->elements.size();
-            try
-            {
-                context.state->attributes.insert(
-                        context.state->attributes.end(), attributes.begin(), attributes.end());
-                context.state->children.insert(
-                        context.state->children.end(), children.begin(), children.end());
-                context.state->elements.push_back(detail::ElementRecord {
-                        .name       = name.Value(),
-                        .attributes = detail::Range {
-                                static_cast<UInt32>(attributeBegin),
-                                static_cast<UInt32>(attributes.size()),
-                        },
-                        .children = detail::Range {
-                                static_cast<UInt32>(childBegin),
-                                static_cast<UInt32>(children.size()),
-                        },
-                        .span = SourceSpan {context.state->sourceId, start, context.cursor.Offset()},
-                });
-            } catch (const std::bad_alloc&)
-            {
-                context.state->attributes.resize(attributeBegin);
-                context.state->children.resize(childBegin);
-                return Failure<NodeId>(MakeErrorAt(context,
-                                                   ParseErrorCode::OutOfMemory,
-                                                   "XML element allocation failed",
-                                                   start,
-                                                   context.cursor.Offset()));
-            }
+            context.state->elements[elementIndex].span =
+                    context.state->MakeSpan(start, context.cursor.Offset());
 
             auto node = AddNode(context, detail::NodeRecord {
                                                  .kind = NodeKind::Element,
-                                                 .span = SourceSpan {
-                                                         context.state->sourceId,
-                                                         start,
-                                                         context.cursor.Offset(),
+                                                 .name = detail::TextRef {
+                                                         .offsetOrId = elementIndex,
                                                  },
-                                                 .element = static_cast<UInt32>(elementIndex),
+                                                 .span = context.state->MakeSpan(start, context.cursor.Offset()),
                                          });
-            if (!node)
-            {
-                context.state->elements.pop_back();
-                context.state->attributes.resize(attributeBegin);
-                context.state->children.resize(childBegin);
-            }
             return node;
         }
 
@@ -938,7 +1003,8 @@ namespace NGIN::Serialization::XML
         ParseState(std::unique_ptr<detail::DocumentState> state,
                    const ParseOptions&                    options,
                    ParseScratch&                          scratch,
-                   std::vector<SyntaxToken>*              syntaxTokens = nullptr)
+                   std::vector<SyntaxToken>*              syntaxTokens = nullptr,
+                   char*                                  mutableBase  = nullptr)
         {
             ParseContext context {
                     .cursor       = InputCursor {state->source},
@@ -946,6 +1012,7 @@ namespace NGIN::Serialization::XML
                     .state        = state.get(),
                     .scratch      = &scratch,
                     .syntaxTokens = syntaxTokens,
+                    .mutableBase  = mutableBase,
             };
             if (state->source.size() > state->limits.maxInputBytes)
                 return Failure<DocumentType>(MakeErrorAt(context,
@@ -953,16 +1020,16 @@ namespace NGIN::Serialization::XML
                                                          "XML input byte limit exceeded",
                                                          0,
                                                          state->source.size()));
-            if (!NGIN::Text::Unicode::IsValidUtf8(state->source))
+            if (state->source.size() >= detail::TextRef::DecodedBit)
                 return Failure<DocumentType>(MakeErrorAt(context,
-                                                         ParseErrorCode::InvalidEncoding,
-                                                         "XML input is not valid UTF-8",
+                                                         ParseErrorCode::LimitExceeded,
+                                                         "XML input exceeds the compact DOM address space",
                                                          0,
                                                          state->source.size()));
-            if (!ContainsOnlyXmlCharacters(state->source))
+            if (!IsValidXmlUtf8(state->source))
                 return Failure<DocumentType>(MakeErrorAt(context,
                                                          ParseErrorCode::InvalidEncoding,
-                                                         "XML input contains a character forbidden by XML 1.0",
+                                                         "XML input is not valid XML 1.0 UTF-8",
                                                          0,
                                                          state->source.size()));
 
@@ -970,7 +1037,7 @@ namespace NGIN::Serialization::XML
                 context.cursor.Advance(3);
             if (IsXmlDeclaration(context))
             {
-                auto declaration = ParseProcessingInstruction(context, nullptr, true);
+                auto declaration = ParseProcessingInstruction(context, std::nullopt, true);
                 if (!declaration)
                     return Failure<DocumentType>(std::move(declaration.Error()));
             }
@@ -981,13 +1048,13 @@ namespace NGIN::Serialization::XML
                 SkipWhitespace(context);
                 if (StartsWith(context, "<!--"))
                 {
-                    auto comment = ParseComment(context, nullptr);
+                    auto comment = ParseComment(context, std::nullopt);
                     if (!comment)
                         return Failure<DocumentType>(std::move(comment.Error()));
                 }
                 else if (StartsWith(context, "<?"))
                 {
-                    auto instruction = ParseProcessingInstruction(context, nullptr, false);
+                    auto instruction = ParseProcessingInstruction(context, std::nullopt, false);
                     if (!instruction)
                         return Failure<DocumentType>(std::move(instruction.Error()));
                 }
@@ -1021,13 +1088,13 @@ namespace NGIN::Serialization::XML
                 SkipWhitespace(context);
                 if (StartsWith(context, "<!--"))
                 {
-                    auto comment = ParseComment(context, nullptr);
+                    auto comment = ParseComment(context, std::nullopt);
                     if (!comment)
                         return Failure<DocumentType>(std::move(comment.Error()));
                 }
                 else if (StartsWith(context, "<?"))
                 {
-                    auto instruction = ParseProcessingInstruction(context, nullptr, false);
+                    auto instruction = ParseProcessingInstruction(context, std::nullopt, false);
                     if (!instruction)
                         return Failure<DocumentType>(std::move(instruction.Error()));
                 }
@@ -1042,7 +1109,6 @@ namespace NGIN::Serialization::XML
                                                        ParseErrorCode::InvalidDocumentStructure,
                                                        "Content is not allowed after the XML root element"));
 
-            state->FinalizeViews();
             if (!state->WithinMemoryLimit())
             {
                 return Failure<DocumentType>(MakeErrorAt(context,
@@ -1077,6 +1143,30 @@ namespace NGIN::Serialization::XML
             ParseDiagnostic error;
             error.code    = ParseErrorCode::OutOfMemory;
             error.message = "Failed to allocate XML document";
+            return NGIN::Utilities::Unexpected<ParseDiagnostic>(std::move(error));
+        }
+    }
+
+    NGIN::Utilities::Expected<Document, ParseDiagnostic>
+    Parser::ParseInSitu(MutableTextBuffer     input,
+                        const ParseOptions&   options,
+                        const ParseLimits&    limits,
+                        const ParseResources& resources)
+    {
+        try
+        {
+            ParseScratch scratch;
+            auto         owned = std::move(input).TakeOwned();
+            auto         state = std::make_unique<detail::DocumentState>(
+                    std::move(owned), limits, resources);
+            char* mutableBase = state->ownedSource->Text().Data();
+            return ParseState<Document>(
+                    std::move(state), options, scratch, nullptr, mutableBase);
+        } catch (const std::bad_alloc&)
+        {
+            ParseDiagnostic error;
+            error.code    = ParseErrorCode::OutOfMemory;
+            error.message = "Failed to allocate in-situ XML document";
             return NGIN::Utilities::Unexpected<ParseDiagnostic>(std::move(error));
         }
     }

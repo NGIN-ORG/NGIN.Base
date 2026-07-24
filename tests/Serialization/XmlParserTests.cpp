@@ -61,6 +61,27 @@ TEST_CASE("XML owning and borrowed documents make source lifetime explicit", "[s
     CHECK(borrowed.Value().SourceText().data() == source.data());
 }
 
+TEST_CASE("XML in-situ parsing decodes into the owned source buffer",
+          "[serialization][xml][ownership][in-situ]")
+{
+    auto parsed = XML::ParseInSitu(
+            MutableTextBuffer {R"(<root value="A &amp; B">line&#10;two&#x21;</root>)"});
+    REQUIRE(parsed);
+
+    const auto root  = parsed.Value().Root();
+    const auto value = root.Attribute("value");
+    REQUIRE(value);
+    CHECK(value->Value() == "A & B");
+    REQUIRE(root.FirstText());
+    CHECK(*root.FirstText() == "line\ntwo!");
+
+    const auto source = parsed.Value().SourceText();
+    CHECK(value->Value().data() >= source.data());
+    CHECK(value->Value().data() < source.data() + source.size());
+    CHECK(root.FirstText()->data() >= source.data());
+    CHECK(root.FirstText()->data() < source.data() + source.size());
+}
+
 TEST_CASE("XML parser enforces one root and matching tags", "[serialization][xml][well-formed]")
 {
     CHECK_FALSE(Parse(""));
@@ -179,6 +200,24 @@ TEST_CASE("XML builder rejects invalid profile characters", "[serialization][xml
     CHECK_FALSE(builder.Text(std::string_view {"\x01", 1}));
     CHECK_FALSE(builder.Comment("bad--comment"));
     CHECK_FALSE(builder.ProcessingInstruction("XmL", " forbidden"));
+}
+
+TEST_CASE("XML builder enforces single-parent child ownership",
+          "[serialization][xml][builder][ownership]")
+{
+    XML::Builder builder;
+    auto         child = builder.Element("child", {}, {});
+    REQUIRE(child);
+
+    const std::array duplicateChildren {child.Value(), child.Value()};
+    CHECK_FALSE(builder.Element("duplicate", {}, duplicateChildren));
+
+    const std::array children {child.Value()};
+    auto             firstParent = builder.Element("first", {}, children);
+    REQUIRE(firstParent);
+    CHECK_FALSE(builder.Element("second", {}, children));
+    CHECK_FALSE(builder.Finish(child.Value()));
+    CHECK(builder.Finish(firstParent.Value()));
 }
 
 TEST_CASE("XML stream writer validates structure and escapes profile content",
@@ -322,12 +361,15 @@ TEST_CASE("XML event parser preserves handler control flow",
     CHECK(stopped.Error().span.end == 5);
 }
 
-TEST_CASE("XML memory accounting includes finalized element views",
+TEST_CASE("XML memory accounting enforces retained DOM limits",
           "[serialization][xml][memory][limits]")
 {
     auto baseline = Parse("<root><item/><item/><nested><value/></nested></root>");
     REQUIRE(baseline);
     REQUIRE(baseline.Value().MemoryCommitted() > 0);
+    CHECK(baseline.Value().MemoryUsed() <= baseline.Value().MemoryCommitted());
+    CHECK(baseline.Value().PeakMemoryCommitted() >= baseline.Value().MemoryCommitted());
+    CHECK(baseline.Value().AllocationCount() > 0);
 
     ParseLimits limits;
     limits.maxTotalMemoryBytes = baseline.Value().MemoryCommitted() - 1;

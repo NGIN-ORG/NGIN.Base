@@ -20,17 +20,19 @@ namespace NGIN::Serialization
         explicit SegmentedArena(UIntSize maxCommittedBytes,
                                 UIntSize initialBlockBytes = 4096)
             : m_upstream(m_systemAllocator),
+              m_blocks(0, m_upstream),
               m_maxCommittedBytes(maxCommittedBytes),
-              m_nextBlockBytes((std::max)(initialBlockBytes, UIntSize {256}))
+              m_nextBlockBytes((std::max) (initialBlockBytes, UIntSize {256}))
         {
         }
 
         explicit SegmentedArena(NGIN::Memory::PolyAllocatorRef upstream,
-                                UIntSize maxCommittedBytes,
-                                UIntSize initialBlockBytes = 4096)
+                                UIntSize                       maxCommittedBytes,
+                                UIntSize                       initialBlockBytes = 4096)
             : m_upstream(upstream ? upstream : NGIN::Memory::PolyAllocatorRef {m_systemAllocator}),
+              m_blocks(0, m_upstream),
               m_maxCommittedBytes(maxCommittedBytes),
-              m_nextBlockBytes((std::max)(initialBlockBytes, UIntSize {256}))
+              m_nextBlockBytes((std::max) (initialBlockBytes, UIntSize {256}))
         {
         }
 
@@ -61,13 +63,13 @@ namespace NGIN::Serialization
             }
 
             const UIntSize required = size > (std::numeric_limits<UIntSize>::max)() - normalizedAlignment
-                                            ? (std::numeric_limits<UIntSize>::max)()
-                                            : size + normalizedAlignment;
+                                              ? (std::numeric_limits<UIntSize>::max)()
+                                              : size + normalizedAlignment;
             if (m_committedBytes > m_maxCommittedBytes)
                 return nullptr;
 
             const UIntSize remainingBytes = m_maxCommittedBytes - m_committedBytes;
-            UIntSize blockBytes = (std::max)(m_nextBlockBytes, required);
+            UIntSize       blockBytes     = (std::max) (m_nextBlockBytes, required);
             if (blockBytes > remainingBytes)
             {
                 blockBytes = required;
@@ -94,8 +96,8 @@ namespace NGIN::Serialization
 
             m_committedBytes += blockBytes;
             m_nextBlockBytes = blockBytes <= (std::numeric_limits<UIntSize>::max)() / 2
-                                     ? blockBytes * 2
-                                     : blockBytes;
+                                       ? blockBytes * 2
+                                       : blockBytes;
             return TryAllocate(m_blocks[m_blocks.Size() - 1], size, normalizedAlignment);
         }
 
@@ -141,17 +143,17 @@ namespace NGIN::Serialization
             if (aligned > block.capacity || size > block.capacity - aligned)
                 return nullptr;
             void* memory = block.data + aligned;
-            block.used = aligned + size;
+            block.used   = aligned + size;
             m_usedBytes += size;
             return memory;
         }
 
-        NGIN::Memory::SystemAllocator m_systemAllocator {};
-        NGIN::Memory::PolyAllocatorRef m_upstream {};
-        NGIN::Containers::Vector<Block> m_blocks {};
-        UIntSize m_maxCommittedBytes {0};
-        UIntSize m_nextBlockBytes {4096};
-        UIntSize m_committedBytes {0};
-        UIntSize m_usedBytes {0};
+        [[no_unique_address]] NGIN::Memory::SystemAllocator             m_systemAllocator {};
+        NGIN::Memory::PolyAllocatorRef                                  m_upstream {};
+        NGIN::Containers::Vector<Block, NGIN::Memory::PolyAllocatorRef> m_blocks;
+        UIntSize                                                        m_maxCommittedBytes {0};
+        UIntSize                                                        m_nextBlockBytes {4096};
+        UIntSize                                                        m_committedBytes {0};
+        UIntSize                                                        m_usedBytes {0};
     };
 }// namespace NGIN::Serialization
