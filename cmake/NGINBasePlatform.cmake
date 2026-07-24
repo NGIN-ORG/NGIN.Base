@@ -45,6 +45,69 @@ function(ngin_base_link_if_target target_name visibility)
   endif()
 endfunction()
 
+function(ngin_base_find_windows_library output_variable)
+  unset(_ngin_windows_library CACHE)
+  unset(_ngin_windows_library)
+  find_library(_ngin_windows_library NAMES ${ARGN})
+  if(_ngin_windows_library)
+    set(${output_variable} "${_ngin_windows_library}" PARENT_SCOPE)
+    unset(_ngin_windows_library CACHE)
+    return()
+  endif()
+
+  set(_ngin_windows_sdk_roots)
+  if(DEFINED ENV{WindowsSdkDir} AND NOT "$ENV{WindowsSdkDir}" STREQUAL "")
+    list(APPEND _ngin_windows_sdk_roots "$ENV{WindowsSdkDir}")
+  endif()
+  if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.24)
+    cmake_host_system_information(
+      RESULT _ngin_windows_sdk_registry_root
+      QUERY WINDOWS_REGISTRY
+        "HKLM/SOFTWARE/Microsoft/Windows Kits/Installed Roots"
+      VALUE "KitsRoot10"
+    )
+    if(_ngin_windows_sdk_registry_root
+       AND IS_DIRECTORY "${_ngin_windows_sdk_registry_root}")
+      list(APPEND _ngin_windows_sdk_roots
+        "${_ngin_windows_sdk_registry_root}")
+    endif()
+  endif()
+  list(REMOVE_DUPLICATES _ngin_windows_sdk_roots)
+
+  if(CMAKE_SIZEOF_VOID_P EQUAL 4)
+    set(_ngin_windows_sdk_arch x86)
+  elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(ARM64|arm64|aarch64)$")
+    set(_ngin_windows_sdk_arch arm64)
+  else()
+    set(_ngin_windows_sdk_arch x64)
+  endif()
+
+  set(_ngin_windows_sdk_library_dirs)
+  foreach(_ngin_windows_sdk_root IN LISTS _ngin_windows_sdk_roots)
+    file(GLOB _ngin_windows_sdk_versions
+      LIST_DIRECTORIES TRUE
+      "${_ngin_windows_sdk_root}/Lib/*"
+    )
+    list(SORT _ngin_windows_sdk_versions COMPARE NATURAL ORDER DESCENDING)
+    foreach(_ngin_windows_sdk_version IN LISTS _ngin_windows_sdk_versions)
+      if(IS_DIRECTORY
+         "${_ngin_windows_sdk_version}/um/${_ngin_windows_sdk_arch}")
+        list(APPEND _ngin_windows_sdk_library_dirs
+          "${_ngin_windows_sdk_version}/um/${_ngin_windows_sdk_arch}")
+      endif()
+    endforeach()
+  endforeach()
+
+  find_library(
+    _ngin_windows_library
+    NAMES ${ARGN}
+    PATHS ${_ngin_windows_sdk_library_dirs}
+    NO_DEFAULT_PATH
+  )
+  set(${output_variable} "${_ngin_windows_library}" PARENT_SCOPE)
+  unset(_ngin_windows_library CACHE)
+endfunction()
+
 function(ngin_base_link_platform_libraries)
   # Windows: link Synchronization, Winsock, and BCrypt for WaitOnAddress/WakeByAddress*,
   # socket APIs, and platform secure random. For MSVC, rely on the toolchain's default library search
@@ -54,7 +117,8 @@ function(ngin_base_link_platform_libraries)
       ngin_base_link_if_target(NGIN.Base.Static PUBLIC Synchronization Ws2_32 Bcrypt Crypt32)
       ngin_base_link_if_target(NGIN.Base.Shared PRIVATE Synchronization Ws2_32 Bcrypt Crypt32)
     else()
-      find_library(_ngin_synchronization_lib NAMES Synchronization synchronization)
+      ngin_base_find_windows_library(
+        _ngin_synchronization_lib Synchronization synchronization)
       if(_ngin_synchronization_lib)
         ngin_base_link_if_target(NGIN.Base.Static PUBLIC ${_ngin_synchronization_lib})
         ngin_base_link_if_target(NGIN.Base.Shared PRIVATE ${_ngin_synchronization_lib})
@@ -62,7 +126,7 @@ function(ngin_base_link_platform_libraries)
         message(WARNING "Windows Synchronization.lib not found; WaitOnAddress/WakeByAddress* will fail to link")
       endif()
 
-      find_library(_ngin_ws2_32_lib NAMES Ws2_32 ws2_32)
+      ngin_base_find_windows_library(_ngin_ws2_32_lib Ws2_32 ws2_32)
       if(_ngin_ws2_32_lib)
         ngin_base_link_if_target(NGIN.Base.Static PUBLIC ${_ngin_ws2_32_lib})
         ngin_base_link_if_target(NGIN.Base.Shared PRIVATE ${_ngin_ws2_32_lib})
@@ -70,7 +134,7 @@ function(ngin_base_link_platform_libraries)
         message(WARNING "Windows Ws2_32.lib not found; socket APIs will fail to link")
       endif()
 
-      find_library(_ngin_bcrypt_lib NAMES Bcrypt bcrypt)
+      ngin_base_find_windows_library(_ngin_bcrypt_lib Bcrypt bcrypt)
       if(_ngin_bcrypt_lib)
         ngin_base_link_if_target(NGIN.Base.Static PUBLIC ${_ngin_bcrypt_lib})
         ngin_base_link_if_target(NGIN.Base.Shared PRIVATE ${_ngin_bcrypt_lib})
@@ -78,7 +142,7 @@ function(ngin_base_link_platform_libraries)
         message(WARNING "Windows Bcrypt.lib not found; secure random APIs will fail to link")
       endif()
 
-      find_library(_ngin_crypt32_lib NAMES Crypt32 crypt32)
+      ngin_base_find_windows_library(_ngin_crypt32_lib Crypt32 crypt32)
       if(_ngin_crypt32_lib)
         ngin_base_link_if_target(NGIN.Base.Static PUBLIC ${_ngin_crypt32_lib})
         ngin_base_link_if_target(NGIN.Base.Shared PRIVATE ${_ngin_crypt32_lib})
