@@ -2,7 +2,9 @@
 /// @brief Type-erased allocator reference (non-owning) for rare dynamic dispatch cases.
 #pragma once
 
+#include <concepts>
 #include <cstddef>
+#include <type_traits>
 
 #include <NGIN/Memory/AllocatorConcept.hpp>
 
@@ -30,7 +32,13 @@ namespace NGIN::Memory
         {
         }
 
+        PolyAllocatorRef(const PolyAllocatorRef&) noexcept            = default;
+        PolyAllocatorRef& operator=(const PolyAllocatorRef&) noexcept = default;
+        PolyAllocatorRef(PolyAllocatorRef&&) noexcept                 = default;
+        PolyAllocatorRef& operator=(PolyAllocatorRef&&) noexcept      = default;
+
         template<AllocatorConcept A>
+            requires(!std::same_as<std::remove_cvref_t<A>, PolyAllocatorRef>)
         explicit PolyAllocatorRef(A& allocator) noexcept
             : m_object(&allocator),
               m_vt({
@@ -115,4 +123,3 @@ namespace NGIN::Memory
     static_assert(AllocatorConcept<PolyAllocatorRef>);
 
 }// namespace NGIN::Memory
-
