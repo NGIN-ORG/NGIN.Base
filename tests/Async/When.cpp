@@ -79,6 +79,13 @@ namespace
         co_return;
     }
 
+    NGIN::Async::Task<void> RecordParallelStart(NGIN::Async::TaskContext& ctx, int& started)
+    {
+        ++started;
+        co_await ctx.YieldNow();
+        co_return;
+    }
+
     NGIN::Async::Task<int> ThrowOnce(NGIN::Async::TaskContext& ctx)
     {
 #if NGIN_ASYNC_HAS_EXCEPTIONS
@@ -152,6 +159,24 @@ TEST_CASE("WhenAll consumes void tasks")
     auto result = operation.TakeResult();
     REQUIRE(result);
     REQUIRE(value == 2);
+}
+
+TEST_CASE("WhenAll starts every child before waiting for the first result")
+{
+    ManualExecutor           exec;
+    NGIN::Async::TaskContext ctx(exec);
+    int                      started = 0;
+
+    auto operation = NGIN::Async::Spawn(
+            ctx,
+            NGIN::Async::WhenAll(ctx, RecordParallelStart(ctx, started), RecordParallelStart(ctx, started)));
+
+    REQUIRE(exec.RunOne());
+    REQUIRE(exec.RunOne());
+    REQUIRE(exec.RunOne());
+    CHECK(started == 2);
+    exec.RunUntilIdle();
+    CHECK(operation.IsCompleted());
 }
 
 TEST_CASE("WhenAny returns index of first completed task")
