@@ -275,6 +275,8 @@ namespace NGIN::Memory
         template<class UBase, class UDerived, AllocatorConcept A, class... Args>
             requires std::derived_from<UDerived, UBase> && std::has_virtual_destructor_v<UBase>
         friend Shared<UBase, A> MakeSharedAs(A alloc, Args&&... args);
+        template<class U, AllocatorConcept A, class Owner>
+        friend Shared<U, A> MakeSharedAlias(A alloc, U* object, Owner&& owner);
         template<class U, AllocatorConcept A>
         friend Ticket<U, A> MakeTicket(const Shared<U, A>&) noexcept;
 
@@ -514,6 +516,57 @@ namespace NGIN::Memory
         return Shared<TBase, Alloc>(ctrl);
     }
 
+    /// \brief Share an externally owned object while retaining its owning handle.
+    ///
+    /// The aliased object is never deleted by `Shared`. The owner is stored in the
+    /// control allocation and released after the last strong reference. This is
+    /// useful for objects whose destruction must happen through another ABI.
+    template<class T, AllocatorConcept Alloc = SystemAllocator, class Owner>
+    [[nodiscard]] Shared<T, Alloc> MakeSharedAlias(Alloc alloc, T* object, Owner&& owner)
+    {
+        using Control   = detail::SharedControl<T, Alloc>;
+        using OwnerType = std::remove_cvref_t<Owner>;
+        static_assert(std::is_nothrow_destructible_v<OwnerType>, "shared alias owner must be nothrow destructible");
+
+        if (object == nullptr)
+            return {};
+
+        constexpr std::size_t ownerAlign = alignof(OwnerType);
+        constexpr std::size_t ctrlAlign  = alignof(Control);
+        const std::size_t     alignment  = ctrlAlign > ownerAlign ? ctrlAlign : ownerAlign;
+        const std::size_t     total      = sizeof(Control) + (ownerAlign - 1) + sizeof(OwnerType);
+
+        void* base = alloc.Allocate(total, alignment);
+        if (!base)
+            throw std::bad_alloc {};
+
+        auto* ctrl = ::new (base) Control(
+            std::move(alloc),
+            base,
+            total,
+            alignment,
+            object,
+            nullptr,
+            +[](void* ptr) noexcept {
+                static_cast<OwnerType*>(ptr)->~OwnerType();
+            });
+
+        auto*       raw   = static_cast<std::byte*>(base) + sizeof(Control);
+        std::size_t space = total - sizeof(Control);
+        void*       ownerVoid = static_cast<void*>(raw);
+        if (std::align(alignof(OwnerType), sizeof(OwnerType), ownerVoid, space) == nullptr)
+        {
+            ctrl->DeallocateSelf();
+            throw std::bad_alloc {};
+        }
+
+        auto* ownerPtr = std::construct_at(static_cast<OwnerType*>(ownerVoid), std::forward<Owner>(owner));
+        ctrl->destroyObjectPtr = ownerPtr;
+        ctrl->strong.store(1, std::memory_order_relaxed);
+        ctrl->weak.store(1, std::memory_order_relaxed);
+        return Shared<T, Alloc>(ctrl);
+    }
+
     /// \brief Create a weak Ticket from a Shared, bumping weak count.
     template<class T, AllocatorConcept Alloc>
     [[nodiscard]] Ticket<T, Alloc> MakeTicket(const Shared<T, Alloc>& shared) noexcept
@@ -547,5 +600,13 @@ namespace NGIN::Memory
     {
         SystemAllocator alloc {};
         return MakeSharedAs<TBase, TDerived, SystemAllocator>(alloc, std::forward<Args>(args)...);
+    }
+
+    /// \brief Share an externally owned object with a retained owner.
+    template<class T, class Owner>
+    [[nodiscard]] Shared<T, SystemAllocator> MakeSharedAlias(T* object, Owner&& owner)
+    {
+        SystemAllocator alloc {};
+        return MakeSharedAlias<T, SystemAllocator>(alloc, object, std::forward<Owner>(owner));
     }
 }// namespace NGIN::Memory

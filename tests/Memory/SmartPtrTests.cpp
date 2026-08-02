@@ -7,6 +7,8 @@
 #include <NGIN/Memory/TrackingAllocator.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <memory>
+
 namespace
 {
     struct Probe
@@ -216,4 +218,23 @@ TEST_CASE("MakeSharedAs supports allocator overload", "[Memory][SmartPointers]")
     CHECK(PolyBase::destructed == 1);
     CHECK(tracking.GetStats().currentBytes == baseline);
     CHECK(tracking.GetStats().currentCount == 0U);
+}
+
+TEST_CASE("MakeSharedAlias retains an external owner", "[Memory][SmartPointers]")
+{
+    auto owner = std::make_shared<Probe>(91);
+    auto* object = owner.get();
+    std::weak_ptr<Probe> lifetime = owner;
+
+    auto alias = NGIN::Memory::MakeSharedAlias(object, std::move(owner));
+    REQUIRE(alias);
+    CHECK(alias.Get() == object);
+    CHECK(alias->value == 91);
+    CHECK_FALSE(lifetime.expired());
+
+    auto copy = alias;
+    alias.Reset();
+    CHECK_FALSE(lifetime.expired());
+    copy.Reset();
+    CHECK(lifetime.expired());
 }
