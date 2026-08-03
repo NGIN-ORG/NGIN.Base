@@ -23,7 +23,7 @@ Important semantics:
 - `operator[]`, `At()`, `Substr()`, `Find()`, and `RFind()` are code-unit based
 - UTF aliases such as `UTF8String` and `UTF16String` do not imply validation
 
-Common aliases in [include/NGIN/Text/String.hpp](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/include/NGIN/Text/String.hpp):
+Common aliases in [`include/NGIN/Text/String.hpp`](../include/NGIN/Text/String.hpp):
 
 - `String`
 - `AnsiString`

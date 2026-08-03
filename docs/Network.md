@@ -278,4 +278,5 @@ Important types:
 - `TcpByteStream`
 - `LengthPrefixedMessageStream`
 
-For design notes and follow-up work, read [NetworkPlan.md](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/NetworkPlan.md).
+The public headers and tests are the source of truth for behavior not covered
+by this guide.

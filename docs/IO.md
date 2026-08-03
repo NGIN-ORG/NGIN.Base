@@ -367,5 +367,5 @@ Core types:
 - `DirectoryHandle`
 - `DirectoryEnumerator`
 
-Use the practical guide above first. For design direction and follow-up work, read
-[FileSystemPlan.md](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/FileSystemPlan.md).
+The public headers and tests are the source of truth for behavior not covered
+by this guide.

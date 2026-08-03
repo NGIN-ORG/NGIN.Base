@@ -466,8 +466,8 @@ path:
 Unsupported algorithms must return `UnsupportedAlgorithm` or `UnsupportedBackend`. Do not silently downgrade to a weaker
 algorithm.
 
-The forward plan for native platform providers, package-backed providers, and parser-heavy network features is tracked
-in [CryptoPlatformAndInteropPlan.md](/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/docs/CryptoPlatformAndInteropPlan.md).
+Future provider and interoperability work is tracked outside this documentation
+tree. The public headers and tests define the implemented surface.
 
 ## References
 
