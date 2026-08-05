@@ -59,7 +59,7 @@ set(NGIN_BASE_NET_SOURCES
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/Endpoint.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/IpAddress.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/NetworkDriver.cpp
-  ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/Resolver.cpp
+  ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/Resolve.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/TcpListener.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/TcpSocket.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/TransportInterfaces.cpp

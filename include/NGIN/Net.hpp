@@ -3,7 +3,7 @@
 /// @file Net.hpp
 /// @brief Convenience surface for addressing, resolution, sockets, and plaintext transports.
 
-#include <NGIN/Net/Resolver.hpp>
+#include <NGIN/Net/Resolve.hpp>
 #include <NGIN/Net/Runtime/NetworkDriver.hpp>
 #include <NGIN/Net/Sockets/TcpListener.hpp>
 #include <NGIN/Net/Sockets/TcpSocket.hpp>

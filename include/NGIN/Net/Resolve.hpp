@@ -1,4 +1,4 @@
-/// @file Resolver.hpp
+/// @file Resolve.hpp
 /// @brief Synchronous and explicitly driven asynchronous name resolution.
 #pragma once
 

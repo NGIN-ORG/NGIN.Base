@@ -17,7 +17,6 @@
 - [Text](Text.md): text primitives and Unicode-related utilities
 - [Serialization](../include/NGIN/Serialization/README.md): strict JSON and XML
 - [Components](Components.md): public-header ownership and dependency direction
-- [Public header and documentation style](CodeStyle.md): filename ownership and Doxygen conventions
 - [Completion baseline](Baseline.md): header/test inventory, library sizes, and performance reference
 - [Platform support](PlatformSupport.md): supported systems, capability differences, and known limitations
 - [Release readiness](ReleaseReadiness.md): verification evidence and remaining approval gates

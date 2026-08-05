@@ -74,5 +74,5 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-See the [documentation index](docs/README.md) and
-[public header style](docs/CodeStyle.md), and the [contribution guide](AGENTS.md).
+See the [documentation index](docs/README.md) and the
+[contribution guide](AGENTS.md).

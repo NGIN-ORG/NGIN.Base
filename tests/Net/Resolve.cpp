@@ -1,14 +1,17 @@
+/// @file Resolve.cpp
+/// @brief Tests for synchronous and explicitly driven asynchronous name resolution.
+
 #include <NGIN/Async/Cancellation.hpp>
 #include <NGIN/Async/Task.hpp>
 #include <NGIN/Async/TaskContext.hpp>
 #include <NGIN/Execution/ThreadPoolScheduler.hpp>
-#include <NGIN/Net/Resolver.hpp>
+#include <NGIN/Net/Resolve.hpp>
 
 #include <chrono>
 
 #include <catch2/catch_test_macros.hpp>
 
-TEST_CASE("Net.Resolver resolves numeric loopback without external network access", "[Net][Resolver]")
+TEST_CASE("Net.Resolve resolves numeric loopback without external network access", "[Net][Resolve]")
 {
     NGIN::Net::ResolveOptions options;
     options.family         = NGIN::Net::AddressFamily::V4;
@@ -27,7 +30,7 @@ TEST_CASE("Net.Resolver resolves numeric loopback without external network acces
     }
 }
 
-TEST_CASE("Net.Resolver applies address-family filters and preserves resolver diagnostics", "[Net][Resolver]")
+TEST_CASE("Net.Resolve applies address-family filters and preserves resolver diagnostics", "[Net][Resolve]")
 {
     NGIN::Net::ResolveOptions v6;
     v6.family           = NGIN::Net::AddressFamily::V6;
@@ -53,7 +56,7 @@ TEST_CASE("Net.Resolver applies address-family filters and preserves resolver di
     CHECK(invalid.Error().network.code == NGIN::Net::NetErrorCode::InvalidArgument);
 }
 
-TEST_CASE("Net.Resolver async work uses its explicit driver and caller executor", "[Net][Resolver]")
+TEST_CASE("Net.Resolve async work uses its explicit driver and caller executor", "[Net][Resolve]")
 {
     NGIN::Execution::ThreadPoolScheduler scheduler {1};
     NGIN::Async::TaskContext             context {scheduler};
@@ -72,7 +75,7 @@ TEST_CASE("Net.Resolver async work uses its explicit driver and caller executor"
     CHECK(completion.Value().front().endpoint.port == 443);
 }
 
-TEST_CASE("Net.Resolver async cancellation and timeout complete without waiting for lookup", "[Net][Resolver]")
+TEST_CASE("Net.Resolve async cancellation and timeout complete without waiting for lookup", "[Net][Resolve]")
 {
     NGIN::Execution::ThreadPoolScheduler scheduler {1};
     NGIN::Async::TaskContext             context {scheduler};

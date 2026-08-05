@@ -55,7 +55,7 @@ set(NGIN_BASE_NET_PUBLIC_HEADER_FILES
   Net/ResolvedAddress.hpp
   Net/ResolveOptions.hpp
   Net/ResolveSocketType.hpp
-  Net/Resolver.hpp
+  Net/Resolve.hpp
   Net/ResolverDriver.hpp
 )
 set(NGIN_BASE_NETTLS_PUBLIC_HEADER_ROOTS Net/TLS)

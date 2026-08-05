@@ -2,9 +2,9 @@
 /// @brief Decorator allocator adding allocation statistics (current / peak / totals).
 #pragma once
 
-#include <cstddef>
 #include <NGIN/Memory/AllocationStats.hpp>
 #include <NGIN/Memory/AllocatorConcept.hpp>
+#include <cstddef>
 
 #include <utility>
 
@@ -99,10 +99,7 @@ namespace NGIN::Memory
 
     private:
         [[no_unique_address]] Inner m_inner {};
-        AllocationStats m_stats {};
+        AllocationStats             m_stats {};
     };
 
-    /// @brief Backward-compatible alias for TrackingAllocator.
-    template<AllocatorConcept Inner>
-    using Tracking = TrackingAllocator<Inner>;
 }// namespace NGIN::Memory

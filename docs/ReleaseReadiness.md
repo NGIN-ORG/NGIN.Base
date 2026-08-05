@@ -24,8 +24,8 @@ collapse into one code.
 
 ## Verification evidence
 
-- Configure-time ownership and dependency-direction validation: 289 installed
-  headers, 287 standalone public contracts, zero forbidden public-header edges.
+- Configure-time ownership and dependency-direction validation: 282 installed
+  headers, 280 standalone public contracts, zero forbidden public-header edges.
 - Windows independent public-header matrix and seven focused umbrella tests pass.
 - Windows incremental JSON/XML suite: 1,872 assertions in five test cases.
 - Windows allocator suite: 56 assertions in eight test cases.

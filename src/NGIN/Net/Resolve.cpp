@@ -1,4 +1,4 @@
-#include <NGIN/Net/Resolver.hpp>
+#include <NGIN/Net/Resolve.hpp>
 
 #include "SocketPlatform.hpp"
 

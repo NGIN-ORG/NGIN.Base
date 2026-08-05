@@ -10,7 +10,7 @@
 #include <type_traits>
 #include <utility>
 
-#include <NGIN/Async/AsyncException.hpp>
+#include <NGIN/Async/AsyncConfig.hpp>
 #include <NGIN/Async/Cancellation.hpp>
 #include <NGIN/Async/Completion.hpp>
 #include <NGIN/Async/NoError.hpp>
