@@ -2,7 +2,7 @@
 
 #if defined(__linux__)
 
-#include <NGIN/Async/AsyncError.hpp>
+#include <NGIN/Async/AsyncFault.hpp>
 
 #include <cerrno>
 #include <condition_variable>
@@ -50,11 +50,11 @@ namespace NGIN::IO::detail
             m_cqRing = ::mmap(nullptr, cqRingSize, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE, m_ringFd, IORING_OFF_CQ_RING);
             m_sqes   = static_cast<io_uring_sqe*>(
                     ::mmap(nullptr,
-                             params.sq_entries * sizeof(io_uring_sqe),
-                             PROT_READ | PROT_WRITE,
-                             MAP_SHARED | MAP_POPULATE,
-                             m_ringFd,
-                             IORING_OFF_SQES));
+                           params.sq_entries * sizeof(io_uring_sqe),
+                           PROT_READ | PROT_WRITE,
+                           MAP_SHARED | MAP_POPULATE,
+                           m_ringFd,
+                           IORING_OFF_SQES));
 
             if (m_sqRing == MAP_FAILED || m_cqRing == MAP_FAILED || m_sqes == MAP_FAILED)
             {

@@ -108,7 +108,7 @@ TEST_CASE("ThreadSafeAllocator supports concurrent allocations", "[Memory][Threa
 
 TEST_CASE("Tracking allocator reports usage", "[Memory][TrackingAllocator]")
 {
-    NGIN::Memory::Tracking<NGIN::Memory::SystemAllocator> tracking {NGIN::Memory::SystemAllocator {}};
+    NGIN::Memory::TrackingAllocator<NGIN::Memory::SystemAllocator> tracking {NGIN::Memory::SystemAllocator {}};
     void*                                                 first  = tracking.Allocate(64, alignof(std::max_align_t));
     void*                                                 second = tracking.Allocate(32, alignof(std::max_align_t));
 

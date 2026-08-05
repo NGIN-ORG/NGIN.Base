@@ -75,4 +75,4 @@ ctest --test-dir build --output-on-failure
 ```
 
 See the [documentation index](docs/README.md) and
-[contribution guide](AGENTS.md).
+[public header style](docs/CodeStyle.md), and the [contribution guide](AGENTS.md).

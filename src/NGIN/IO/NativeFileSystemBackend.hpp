@@ -1,6 +1,6 @@
 #pragma once
 
-#include <NGIN/Async/AsyncError.hpp>
+#include <NGIN/Async/AsyncFault.hpp>
 #include <NGIN/IO/FileSystemDriver.hpp>
 
 #include <cstddef>
@@ -24,10 +24,10 @@ namespace NGIN::IO::detail
             Fault,
         };
 
-        Status                    status {Status::Fault};
-        Int64                     value {0};
-        int                       systemCode {0};
-        NGIN::Async::AsyncFault   fault {};
+        Status                  status {Status::Fault};
+        Int64                   value {0};
+        int                     systemCode {0};
+        NGIN::Async::AsyncFault fault {};
     };
 
     using NativeFileCompletionCallback = void (*)(void* userData, NativeFileCompletion completion) noexcept;
@@ -49,11 +49,11 @@ namespace NGIN::IO::detail
     public:
         virtual ~NativeFileBackend() = default;
 
-        [[nodiscard]] virtual FileSystemDriver::ActiveBackend GetActiveBackend() const noexcept = 0;
-        [[nodiscard]] virtual bool Submit(NativeFileRequest request) noexcept = 0;
+        [[nodiscard]] virtual FileSystemDriver::ActiveBackend GetActiveBackend() const noexcept          = 0;
+        [[nodiscard]] virtual bool                            Submit(NativeFileRequest request) noexcept = 0;
     };
 
     [[nodiscard]] std::unique_ptr<NativeFileBackend> CreateNativeFileBackend(const FileSystemDriver::Options& options);
-    [[nodiscard]] NativeFileBackend* GetNativeFileBackend(FileSystemDriver& driver) noexcept;
-    [[nodiscard]] const NativeFileBackend* GetNativeFileBackend(const FileSystemDriver& driver) noexcept;
+    [[nodiscard]] NativeFileBackend*                 GetNativeFileBackend(FileSystemDriver& driver) noexcept;
+    [[nodiscard]] const NativeFileBackend*           GetNativeFileBackend(const FileSystemDriver& driver) noexcept;
 }// namespace NGIN::IO::detail

@@ -1,14 +1,14 @@
-/// @file TrackingAllocatorTests.cpp
-/// @brief Tests for Tracking allocator decorator.
+/// @file TrackingAllocator.cpp
+/// @brief Tests for the TrackingAllocator decorator.
 
 #include <NGIN/Memory/LinearAllocator.hpp>
 #include <NGIN/Memory/SystemAllocator.hpp>
 #include <NGIN/Memory/TrackingAllocator.hpp>
 #include <catch2/catch_test_macros.hpp>
 
-TEST_CASE("Tracking allocator accumulates and resets statistics", "[Memory][TrackingAllocator]")
+TEST_CASE("TrackingAllocator accumulates and resets statistics", "[Memory][TrackingAllocator]")
 {
-    using Tracked = NGIN::Memory::Tracking<NGIN::Memory::LinearAllocator<>>;
+    using Tracked = NGIN::Memory::TrackingAllocator<NGIN::Memory::LinearAllocator<>>;
     Tracked tracked {NGIN::Memory::LinearAllocator {256}};
 
     void* first  = tracked.Allocate(32, 8);
@@ -30,9 +30,9 @@ TEST_CASE("Tracking allocator accumulates and resets statistics", "[Memory][Trac
     CHECK(stats.peakBytes >= 48U);
 }
 
-TEST_CASE("Tracking allocator works with system allocator backend", "[Memory][TrackingAllocator]")
+TEST_CASE("TrackingAllocator works with system allocator backend", "[Memory][TrackingAllocator]")
 {
-    using TrackedSys = NGIN::Memory::Tracking<NGIN::Memory::SystemAllocator>;
+    using TrackedSys = NGIN::Memory::TrackingAllocator<NGIN::Memory::SystemAllocator>;
     TrackedSys tracked {NGIN::Memory::SystemAllocator {}};
 
     void* first  = tracked.Allocate(64, alignof(std::max_align_t));

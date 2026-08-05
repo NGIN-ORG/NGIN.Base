@@ -6,9 +6,9 @@
 /// Optional subsystems use focused umbrellas: Execution.hpp, IO.hpp, Net.hpp,
 /// Serialization.hpp, Crypto/Crypto.hpp, and NetTLS.hpp.
 
-#include <NGIN/Containers/HashMap.hpp>
-#include <NGIN/Containers/Vector.hpp>
 #include <NGIN/BaseVersion.hpp>
+#include <NGIN/Containers/FlatHashMap.hpp>
+#include <NGIN/Containers/Vector.hpp>
 #include <NGIN/Defines.hpp>
 #include <NGIN/Exceptions/Exception.hpp>
 #include <NGIN/Memory/AllocationHelpers.hpp>

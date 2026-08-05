@@ -95,7 +95,7 @@ Use this as a starting point:
 | Fixed-capacity typed construction | `ObjectPool<T, Capacity>` |
 | “Try A then B” without relying on `Owns()` | `TaggedFallbackAllocator` |
 | “Try A then B” where both can reliably `Owns()` | `FallbackAllocator` |
-| Instrumentation (bytes/counts/peaks) | `Tracking<Inner>` |
+| Instrumentation (bytes/counts/peaks) | `TrackingAllocator<Inner>` |
 | Thread-safe wrapper around a stateful allocator | `ThreadSafeAllocator<Inner, Lockable>` |
 | Rare dynamic dispatch over “some allocator” | `PolyAllocatorRef` |
 
@@ -168,12 +168,12 @@ pool must outlive all of its objects.
 
 Decorator allocators wrap an “inner” allocator and add behavior without changing call sites.
 
-### `Tracking<Inner>`
+### `TrackingAllocator<Inner>`
 
-`NGIN::Memory::Tracking<Inner>` counts current/peak bytes and allocation counts.
+`NGIN::Memory::TrackingAllocator<Inner>` counts current/peak bytes and allocation counts.
 
 ```cpp
-using Tracked = NGIN::Memory::Tracking<NGIN::Memory::SystemAllocator>;
+using Tracked = NGIN::Memory::TrackingAllocator<NGIN::Memory::SystemAllocator>;
 Tracked tracked{NGIN::Memory::SystemAllocator{}};
 
 void* p = tracked.Allocate(128, 16);
@@ -399,7 +399,7 @@ In debug builds you can wrap allocators for observability:
 
 ```cpp
 using DebugAlloc = NGIN::Memory::ThreadSafeAllocator<
-    NGIN::Memory::Tracking<NGIN::Memory::SystemAllocator>>;
+    NGIN::Memory::TrackingAllocator<NGIN::Memory::SystemAllocator>>;
 ```
 
 In release builds, prefer the simplest allocator that meets your requirements (often `SystemAllocator` or an arena).

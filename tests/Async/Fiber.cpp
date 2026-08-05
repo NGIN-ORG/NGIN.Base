@@ -1,9 +1,9 @@
 /// @file FiberTest.cpp
 /// @brief Tests for NGIN::Execution::Fiber.
 
-#include <NGIN/Async/AsyncError.hpp>
-#include <NGIN/Execution/Fiber.hpp>
+#include <NGIN/Async/AsyncConfig.hpp>
 #include <NGIN/Execution/Config.hpp>
+#include <NGIN/Execution/Fiber.hpp>
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <exception>
@@ -60,7 +60,7 @@ TEST_CASE("Fiber supports multiple yield/resume cycles", "[Execution][Fiber]")
 
 TEST_CASE("Fiber TryAssign only succeeds when idle", "[Execution][Fiber]")
 {
-    bool entered = false;
+    bool entered  = false;
     bool finished = false;
 
     Fiber fiber(FiberOptions {.stackSize = 64 * 1024});
@@ -234,7 +234,7 @@ TEST_CASE("Fiber CUSTOM_ASM preserves fpcr across Yield/Resume", "[Execution][Fi
     };
 
     const auto fpcrOriginal = readFpcr();
-    const auto fpcrCaller   = fpcrOriginal ^ (1ull << 24); // toggle FZ (flush-to-zero)
+    const auto fpcrCaller   = fpcrOriginal ^ (1ull << 24);// toggle FZ (flush-to-zero)
     writeFpcr(fpcrCaller);
 
     std::uint64_t fpcrFiberAfterYield = 0;

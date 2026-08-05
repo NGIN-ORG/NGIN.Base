@@ -7,7 +7,7 @@
 #endif
 #include <windows.h>
 
-#include <NGIN/Async/AsyncError.hpp>
+#include <NGIN/Async/AsyncFault.hpp>
 
 #include <deque>
 #include <memory>

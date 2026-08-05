@@ -1,30 +1,5 @@
+/// @file ErrorCode.hpp
+/// @brief Compatibility include for the renamed CryptoErrorCode header.
 #pragma once
 
-#include <NGIN/Defines.hpp>
-#include <NGIN/Primitives.hpp>
-
-namespace NGIN::Crypto
-{
-    /// @brief Recoverable crypto failure categories.
-    enum class CryptoErrorCode : NGIN::UInt8
-    {
-        None,
-        InvalidArgument,
-        OutputBufferTooSmall,
-        InvalidKey,
-        InvalidNonce,
-        InvalidTag,
-        AuthenticationFailed,
-        UnsupportedAlgorithm,
-        UnsupportedBackend,
-        BackendUnavailable,
-        EntropyUnavailable,
-        EncodingError,
-        ParseError,
-        PolicyRejected,
-        InternalError,
-    };
-
-    /// @brief Returns a stable diagnostic string for a crypto error code.
-    [[nodiscard]] NGIN_CRYPTO_API const char* ToString(CryptoErrorCode code) noexcept;
-}// namespace NGIN::Crypto
+#include <NGIN/Crypto/Errors/CryptoErrorCode.hpp>

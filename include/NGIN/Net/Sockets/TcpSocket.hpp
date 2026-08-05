@@ -8,10 +8,9 @@
 #include <NGIN/Net/Types/Endpoint.hpp>
 #include <NGIN/Net/Types/NetError.hpp>
 #include <NGIN/Net/Types/ShutdownMode.hpp>
-#include <NGIN/Async/AsyncError.hpp>
 
-#include <utility>
 #include <NGIN/Net/Types/SocketOptions.hpp>
+#include <utility>
 
 namespace NGIN::Async
 {
@@ -31,18 +30,18 @@ namespace NGIN::Net
     public:
         TcpSocket() noexcept = default;
 
-        TcpSocket(const TcpSocket&)            = delete;
-        TcpSocket& operator=(const TcpSocket&) = delete;
-        TcpSocket(TcpSocket&&) noexcept        = default;
+        TcpSocket(const TcpSocket&)                = delete;
+        TcpSocket& operator=(const TcpSocket&)     = delete;
+        TcpSocket(TcpSocket&&) noexcept            = default;
         TcpSocket& operator=(TcpSocket&&) noexcept = default;
 
-        NetExpected<void> Open(AddressFamily family = AddressFamily::DualStack,
+        NetExpected<void> Open(AddressFamily family  = AddressFamily::DualStack,
                                SocketOptions options = {}) noexcept;
 
-        NetExpected<bool> TryConnect(Endpoint remoteEndpoint) noexcept;
-        NGIN::Async::Task<void, NetError> ConnectAsync(NGIN::Async::TaskContext& ctx,
-                                                       NetworkDriver& driver,
-                                                       Endpoint remoteEndpoint,
+        NetExpected<bool>                 TryConnect(Endpoint remoteEndpoint) noexcept;
+        NGIN::Async::Task<void, NetError> ConnectAsync(NGIN::Async::TaskContext&      ctx,
+                                                       NetworkDriver&                 driver,
+                                                       Endpoint                       remoteEndpoint,
                                                        NGIN::Async::CancellationToken token);
 
         NetExpected<void> Connect(Endpoint remoteEndpoint);
@@ -52,25 +51,24 @@ namespace NGIN::Net
         NetExpected<NGIN::UInt32> TrySendSegments(BufferSegmentSpan data) noexcept;
         NetExpected<NGIN::UInt32> TryReceiveSegments(MutableBufferSegmentSpan destination) noexcept;
 
-        NGIN::Async::Task<NGIN::UInt32, NetError> SendAsync(NGIN::Async::TaskContext& ctx,
-                                                            NetworkDriver& driver,
-                                                            ConstByteSpan data,
+        NGIN::Async::Task<NGIN::UInt32, NetError> SendAsync(NGIN::Async::TaskContext&      ctx,
+                                                            NetworkDriver&                 driver,
+                                                            ConstByteSpan                  data,
                                                             NGIN::Async::CancellationToken token);
-        NGIN::Async::Task<NGIN::UInt32, NetError> ReceiveAsync(NGIN::Async::TaskContext& ctx,
-                                                               NetworkDriver& driver,
-                                                               ByteSpan destination,
+        NGIN::Async::Task<NGIN::UInt32, NetError> ReceiveAsync(NGIN::Async::TaskContext&      ctx,
+                                                               NetworkDriver&                 driver,
+                                                               ByteSpan                       destination,
                                                                NGIN::Async::CancellationToken token);
 
         NetExpected<void> Shutdown(ShutdownMode mode) noexcept;
-        void Close() noexcept;
+        void              Close() noexcept;
 
-        [[nodiscard]] SocketHandle& Handle() noexcept { return m_handle; }
+        [[nodiscard]] SocketHandle&       Handle() noexcept { return m_handle; }
         [[nodiscard]] const SocketHandle& Handle() const noexcept { return m_handle; }
 
     private:
         explicit TcpSocket(SocketHandle&& handle, bool nonBlocking) noexcept
-            : m_handle(std::move(handle))
-            , m_nonBlocking(nonBlocking)
+            : m_handle(std::move(handle)), m_nonBlocking(nonBlocking)
         {
         }
 

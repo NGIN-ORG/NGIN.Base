@@ -1,6 +1,6 @@
 #pragma once
 
-#include <NGIN/Memory/PolyAllocator.hpp>
+#include <NGIN/Memory/PolyAllocatorRef.hpp>
 #include <NGIN/Primitives.hpp>
 
 namespace NGIN::Serialization

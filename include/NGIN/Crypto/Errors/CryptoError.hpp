@@ -1,6 +1,6 @@
 #pragma once
 
-#include <NGIN/Crypto/Errors/ErrorCode.hpp>
+#include <NGIN/Crypto/Errors/CryptoErrorCode.hpp>
 #include <NGIN/Primitives.hpp>
 
 namespace NGIN::Crypto

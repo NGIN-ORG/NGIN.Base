@@ -109,6 +109,7 @@ namespace
 #if NGIN_ASYNC_HAS_EXCEPTIONS
         co_await ctx.YieldNow();
         throw std::runtime_error("boom");
+        co_return 0;
 #else
         co_await ctx.YieldNow();
         co_return NGIN::Async::Completion<int, NGIN::Async::NoError>::Faulted(

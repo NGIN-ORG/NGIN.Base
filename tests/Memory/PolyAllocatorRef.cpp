@@ -1,7 +1,7 @@
-/// @file PolyAllocatorTests.cpp
+/// @file PolyAllocatorRef.cpp
 /// @brief Tests for the non-owning type-erased allocator reference.
 
-#include <NGIN/Memory/PolyAllocator.hpp>
+#include <NGIN/Memory/PolyAllocatorRef.hpp>
 #include <NGIN/Memory/SystemAllocator.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -29,7 +29,7 @@ namespace
 }// namespace
 
 TEST_CASE("PolyAllocatorRef direct copies preserve the referenced allocator",
-          "[Memory][PolyAllocator]")
+          "[Memory][PolyAllocatorRef]")
 {
     CountingAllocator              allocator;
     NGIN::Memory::PolyAllocatorRef original {allocator};
@@ -45,7 +45,7 @@ TEST_CASE("PolyAllocatorRef direct copies preserve the referenced allocator",
     CHECK(allocator.deallocations == 1);
 }
 
-TEST_CASE("empty PolyAllocatorRef rejects allocations", "[Memory][PolyAllocator]")
+TEST_CASE("empty PolyAllocatorRef rejects allocations", "[Memory][PolyAllocatorRef]")
 {
     NGIN::Memory::PolyAllocatorRef allocator;
 

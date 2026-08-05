@@ -9,7 +9,7 @@
 #include <type_traits>
 #include <utility>
 
-#include <NGIN/Async/AsyncError.hpp>
+#include <NGIN/Async/AsyncConfig.hpp>
 #include <NGIN/Meta/TypeTraits.hpp>
 
 namespace NGIN::Async
@@ -24,7 +24,7 @@ namespace NGIN::Async
     public:
         struct promise_type final
         {
-            std::optional<T>  current {};
+            std::optional<T>   current {};
             std::exception_ptr error {};
 
             Generator get_return_object() noexcept

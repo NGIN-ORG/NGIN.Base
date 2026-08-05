@@ -2,7 +2,7 @@
 
 #include "SocketPlatform.hpp"
 
-#include <NGIN/Async/AsyncError.hpp>
+#include <NGIN/Async/AsyncFault.hpp>
 #include <NGIN/Time/MonotonicClock.hpp>
 #include <NGIN/Time/TimePoint.hpp>
 

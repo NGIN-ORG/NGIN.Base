@@ -7,7 +7,7 @@
 #include <memory>
 #include <utility>
 
-#include <NGIN/Async/AsyncError.hpp>
+#include <NGIN/Async/AsyncFault.hpp>
 #include <NGIN/Async/Cancellation.hpp>
 #include <NGIN/Execution/ExecutorRef.hpp>
 #include <NGIN/Time/MonotonicClock.hpp>

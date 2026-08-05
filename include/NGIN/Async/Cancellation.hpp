@@ -1,7 +1,8 @@
+/// @file Cancellation.hpp
+/// @brief Cancellation tokens, registrations, sources, and linked cancellation ownership.
 #pragma once
 
 #include <coroutine>
-#include <exception>
 #include <initializer_list>
 #include <memory>
 #include <utility>
@@ -9,6 +10,7 @@
 #include <vector>
 
 #include <NGIN/Execution/ExecutorRef.hpp>
+#include <NGIN/Async/TaskCanceled.hpp>
 #include <NGIN/Memory/SmartPointers.hpp>
 #include <NGIN/Sync/LockGuard.hpp>
 #include <NGIN/Sync/SpinLock.hpp>
@@ -19,33 +21,29 @@
 
 namespace NGIN::Async
 {
-    /// @brief Exception thrown when an async operation observes cancellation.
-    class TaskCanceled : public std::exception
-    {
-    public:
-        const char* what() const noexcept override
-        {
-            return "Task was canceled";
-        }
-    };
-
     namespace detail
     {
         struct CancellationState;
     }// namespace detail
 
+    /// @brief Callback invoked once when a cancellation registration fires.
+    /// @return Whether the associated coroutine handle should also be resumed.
     using CancellationCallback = bool (*)(void*) noexcept;
 
+    /// @brief Move-only ownership handle for one callback registered with a cancellation token.
     class CancellationRegistration final
     {
     public:
+        /// @brief Constructs an empty registration.
         CancellationRegistration() noexcept = default;
 
+        /// @brief Transfers ownership of an active registration.
         CancellationRegistration(CancellationRegistration&& other) noexcept
         {
             MoveFrom(std::move(other));
         }
 
+        /// @brief Replaces this registration with another registration.
         CancellationRegistration& operator=(CancellationRegistration&& other) noexcept
         {
             if (this != &other)
@@ -59,13 +57,16 @@ namespace NGIN::Async
         CancellationRegistration(const CancellationRegistration&)            = delete;
         CancellationRegistration& operator=(const CancellationRegistration&) = delete;
 
+        /// @brief Unregisters the callback when this object is destroyed.
         ~CancellationRegistration()
         {
             Reset();
         }
 
+        /// @brief Unregisters the callback and returns this object to an empty state.
         void Reset() noexcept;
 
+        /// @brief Returns whether this object owns a callback registration.
         [[nodiscard]] bool IsValid() const noexcept
         {
             return m_state.Get() != nullptr;
@@ -88,21 +89,25 @@ namespace NGIN::Async
         std::atomic<bool>                         m_armed {false};
     };
 
-    // Cancellation primitives
+    /// @brief Copyable observation handle for shared cancellation state.
     class CancellationToken
     {
     public:
+        /// @brief Constructs a token with no cancellation state.
         CancellationToken() = default;
+        /// @brief Constructs a token that observes shared cancellation state.
         explicit CancellationToken(Memory::Shared<detail::CancellationState> state) noexcept
             : m_state(std::move(state))
         {
         }
 
+        /// @brief Returns whether this token is associated with cancellation state.
         [[nodiscard]] bool HasState() const noexcept
         {
             return static_cast<bool>(m_state);
         }
 
+        /// @brief Returns whether cancellation has been requested.
         [[nodiscard]] bool IsCancellationRequested() const noexcept;
 
         [[nodiscard]] explicit operator bool() const noexcept
@@ -110,6 +115,7 @@ namespace NGIN::Async
             return IsCancellationRequested();
         }
 
+        /// @brief Registers a callback and optional coroutine continuation for cancellation.
         void Register(CancellationRegistration& outRegistration,
                       NGIN::Execution::ExecutorRef exec,
                       std::coroutine_handle<> handle,
@@ -212,29 +218,35 @@ namespace NGIN::Async
         };
     }// namespace detail
 
+    /// @brief Owns mutable cancellation state and creates observation tokens.
     class CancellationSource
     {
     public:
+        /// @brief Constructs a new, independently cancelable source.
         CancellationSource()
             : m_state(Memory::MakeShared<detail::CancellationState>())
         {
         }
 
+        /// @brief Requests cancellation and fires registered callbacks once.
         void Cancel() noexcept
         {
             m_state->Cancel();
         }
 
+        /// @brief Returns a token that observes this source.
         [[nodiscard]] CancellationToken GetToken() const noexcept
         {
             return CancellationToken(m_state);
         }
 
+        /// @brief Returns whether cancellation has been requested.
         [[nodiscard]] bool IsCancellationRequested() const noexcept
         {
             return m_state->canceled.load(std::memory_order_acquire);
         }
 
+        /// @brief Schedules cancellation at an absolute monotonic time.
         void CancelAt(NGIN::Execution::ExecutorRef exec, NGIN::Time::TimePoint at) noexcept
         {
             if (IsCancellationRequested() || !exec.IsValid())
@@ -246,6 +258,7 @@ namespace NGIN::Async
             exec.ExecuteAt(NGIN::Utilities::Callable<void()>([state]() noexcept { state->Cancel(); }), at);
         }
 
+        /// @brief Schedules cancellation after a duration.
         template<typename TUnit>
             requires NGIN::Units::QuantityOf<NGIN::Units::TIME, TUnit>
         void CancelAfter(NGIN::Execution::ExecutorRef exec, const TUnit& delay) noexcept
@@ -370,14 +383,17 @@ namespace NGIN::Async
     class LinkedCancellationSource final
     {
     public:
+        /// @brief Constructs an empty linked source.
         LinkedCancellationSource() = default;
 
+        /// @brief Links cancellation to any token in the supplied list.
         explicit LinkedCancellationSource(std::initializer_list<CancellationToken> tokens)
             : m_state(Memory::MakeShared<detail::LinkedCancellationState>())
         {
             m_state->Link(tokens);
         }
 
+        /// @brief Links cancellation to any token in the supplied parameter pack.
         template<typename... TTokens>
             requires(sizeof...(TTokens) > 0)
         explicit LinkedCancellationSource(const TTokens&... tokens)
@@ -385,6 +401,7 @@ namespace NGIN::Async
         {
         }
 
+        /// @brief Returns a token that observes the linked source.
         [[nodiscard]] CancellationToken GetToken() const noexcept
         {
             if (!m_state)
@@ -394,6 +411,7 @@ namespace NGIN::Async
             return m_state->source.GetToken();
         }
 
+        /// @brief Explicitly requests cancellation of the linked source.
         void Cancel() noexcept
         {
             if (m_state)
@@ -402,6 +420,7 @@ namespace NGIN::Async
             }
         }
 
+        /// @brief Returns whether this source or any linked token requested cancellation.
         [[nodiscard]] bool IsCancellationRequested() const noexcept
         {
             return m_state && m_state->source.IsCancellationRequested();

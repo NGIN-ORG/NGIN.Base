@@ -49,7 +49,15 @@ set(NGIN_BASE_NET_PUBLIC_HEADER_ROOTS
   Net/Transport
   Net/Types
 )
-set(NGIN_BASE_NET_PUBLIC_HEADER_FILES Net.hpp Net/Resolver.hpp)
+set(NGIN_BASE_NET_PUBLIC_HEADER_FILES
+  Net.hpp
+  Net/ResolveError.hpp
+  Net/ResolvedAddress.hpp
+  Net/ResolveOptions.hpp
+  Net/ResolveSocketType.hpp
+  Net/Resolver.hpp
+  Net/ResolverDriver.hpp
+)
 set(NGIN_BASE_NETTLS_PUBLIC_HEADER_ROOTS Net/TLS)
 set(NGIN_BASE_NETTLS_PUBLIC_HEADER_FILES NetTLS.hpp)
 

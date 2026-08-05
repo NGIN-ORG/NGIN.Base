@@ -2,7 +2,7 @@
 /// @brief Header-only string interning utility with allocator customization.
 #pragma once
 
-#include <NGIN/Containers/HashMap.hpp>
+#include <NGIN/Containers/FlatHashMap.hpp>
 #include <NGIN/Containers/Vector.hpp>
 #include <NGIN/Hashing/FNV.hpp>
 #include <NGIN/Memory/AllocatorConcept.hpp>

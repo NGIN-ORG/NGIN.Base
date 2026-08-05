@@ -1,11 +1,11 @@
 #include <NGIN/Benchmark.hpp>
-#include <NGIN/Containers/HashMap.hpp>
 #include <NGIN/Containers/ConcurrentHashMap.hpp>
-#include <iostream>
-#include <random>
+#include <NGIN/Containers/FlatHashMap.hpp>
 #include <NGIN/Execution/FiberScheduler.hpp>
 #include <NGIN/Execution/ThreadPoolScheduler.hpp>
 #include <coroutine>
+#include <iostream>
+#include <random>
 
 int main()
 {

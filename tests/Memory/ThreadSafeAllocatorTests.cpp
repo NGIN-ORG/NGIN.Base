@@ -76,7 +76,7 @@ TEST_CASE("ThreadSafeAllocator handles concurrent access", "[Memory][ThreadSafeA
 TEST_CASE("ThreadSafeAllocator composes with tracking decorator", "[Memory][ThreadSafeAllocator]")
 {
     using Arena      = NGIN::Memory::LinearAllocator<>;
-    using Tracked    = NGIN::Memory::Tracking<Arena>;
+    using Tracked    = NGIN::Memory::TrackingAllocator<Arena>;
     using ThreadSafe = NGIN::Memory::ThreadSafeAllocator<Tracked>;
 
     ThreadSafe allocator {Tracked {Arena {512}}};

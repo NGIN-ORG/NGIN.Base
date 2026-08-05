@@ -1,7 +1,7 @@
 #pragma once
 
 #include <NGIN/Containers/Vector.hpp>
-#include <NGIN/Memory/PolyAllocator.hpp>
+#include <NGIN/Memory/PolyAllocatorRef.hpp>
 #include <NGIN/Memory/SystemAllocator.hpp>
 #include <NGIN/Primitives.hpp>
 

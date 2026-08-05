@@ -217,10 +217,10 @@ namespace
 
     struct TrackingRef
     {
-        NGIN::Memory::Tracking<NGIN::Memory::SystemAllocator>* tracker {nullptr};
+        NGIN::Memory::TrackingAllocator<NGIN::Memory::SystemAllocator>* tracker {nullptr};
 
         TrackingRef() = default;
-        explicit TrackingRef(NGIN::Memory::Tracking<NGIN::Memory::SystemAllocator>& ref)
+        explicit TrackingRef(NGIN::Memory::TrackingAllocator<NGIN::Memory::SystemAllocator>& ref)
             : tracker(&ref)
         {
         }
@@ -1019,7 +1019,7 @@ TEST_CASE("String packed storage handles representation transitions", "[Text][St
 
 TEST_CASE("String shrink-to-fit can release heap storage back to SBO", "[Text][String]")
 {
-    using Tracked  = NGIN::Memory::Tracking<NGIN::Memory::SystemAllocator>;
+    using Tracked  = NGIN::Memory::TrackingAllocator<NGIN::Memory::SystemAllocator>;
     using SmallStr = NGIN::Text::BasicString<char, 16, TrackingRef>;
 
     Tracked     tracking {NGIN::Memory::SystemAllocator {}};

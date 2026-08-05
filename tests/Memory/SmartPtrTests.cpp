@@ -56,7 +56,7 @@ namespace
 
 TEST_CASE("Scoped pointers manage lifetime", "[Memory][SmartPointers]")
 {
-    using Tracked = NGIN::Memory::Tracking<NGIN::Memory::SystemAllocator>;
+    using Tracked = NGIN::Memory::TrackingAllocator<NGIN::Memory::SystemAllocator>;
 
     Probe::constructed = 0;
     Probe::destructed  = 0;
@@ -78,7 +78,7 @@ TEST_CASE("Scoped pointers manage lifetime", "[Memory][SmartPointers]")
 
 TEST_CASE("Scoped pointers support move and release", "[Memory][SmartPointers]")
 {
-    using Tracked = NGIN::Memory::Tracking<NGIN::Memory::SystemAllocator>;
+    using Tracked = NGIN::Memory::TrackingAllocator<NGIN::Memory::SystemAllocator>;
 
     Probe::constructed = 0;
     Probe::destructed  = 0;
@@ -102,7 +102,7 @@ TEST_CASE("Scoped pointers support move and release", "[Memory][SmartPointers]")
 
 TEST_CASE("Shared and ticket pointers manage reference counts", "[Memory][SmartPointers]")
 {
-    using Tracked = NGIN::Memory::Tracking<NGIN::Memory::SystemAllocator>;
+    using Tracked = NGIN::Memory::TrackingAllocator<NGIN::Memory::SystemAllocator>;
 
     Probe::constructed = 0;
     Probe::destructed  = 0;
@@ -150,7 +150,7 @@ TEST_CASE("Shared and ticket pointers manage reference counts", "[Memory][SmartP
 
 TEST_CASE("Tickets handle edge cases", "[Memory][SmartPointers]")
 {
-    using Tracked = NGIN::Memory::Tracking<NGIN::Memory::SystemAllocator>;
+    using Tracked = NGIN::Memory::TrackingAllocator<NGIN::Memory::SystemAllocator>;
 
     Probe::constructed = 0;
     Probe::destructed  = 0;
@@ -198,7 +198,7 @@ TEST_CASE("MakeSharedAs constructs derived as base and destroys virtually", "[Me
 
 TEST_CASE("MakeSharedAs supports allocator overload", "[Memory][SmartPointers]")
 {
-    using Tracked = NGIN::Memory::Tracking<NGIN::Memory::SystemAllocator>;
+    using Tracked = NGIN::Memory::TrackingAllocator<NGIN::Memory::SystemAllocator>;
 
     PolyBase::destructed = 0;
     PolyDerived::destructed = 0;

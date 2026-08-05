@@ -144,7 +144,13 @@ Checklist Summary:
 
 ## Documentation / Comments
 
+- Name public headers after their primary public declaration. Keep closely coupled
+  nested helpers with their owner, move reusable implementation machinery to
+  `detail`, and use plural/family headers only when the filename clearly describes
+  the grouped declarations.
 - Provide concise doxygen-style summaries on public classes / templates / free functions.
+- Add `@file` and `@brief` to public headers and document non-trivial public members,
+  parameters, return values, ownership, invalidation, error, and thread-safety rules.
 - Use `detail` namespaces instead of comments for scoping internals.
 - Avoid redundant comments (e.g., `// increment i`). Focus on rationale and invariants.
 

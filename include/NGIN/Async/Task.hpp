@@ -1,6 +1,5 @@
-/// <summary>
-/// Core coroutine types: cold Task<T, E>, running Operation<T, E>, and TaskContext integration.
-/// </summary>
+/// @file Task.hpp
+/// @brief Cold Task coroutines and their running Operation handles.
 #pragma once
 
 #include <atomic>
@@ -8,12 +7,13 @@
 #include <coroutine>
 #include <exception>
 #include <optional>
-#include <stdexcept>
 #include <type_traits>
 #include <utility>
 
+#include <NGIN/Async/AsyncException.hpp>
 #include <NGIN/Async/Cancellation.hpp>
 #include <NGIN/Async/Completion.hpp>
+#include <NGIN/Async/NoError.hpp>
 #include <NGIN/Async/TaskContext.hpp>
 #include <NGIN/Sync/AtomicCondition.hpp>
 #include <NGIN/Units.hpp>
@@ -21,77 +21,10 @@
 
 namespace NGIN::Async
 {
+    /// @brief Common marker base for Task specializations.
     class BaseTask
     {
     };
-
-#if NGIN_ASYNC_HAS_EXCEPTIONS
-    class AsyncCanceledException : public std::exception
-    {
-    public:
-        [[nodiscard]] const char* what() const noexcept override
-        {
-            return "async task canceled";
-        }
-    };
-
-    class AsyncFaultException : public std::exception
-    {
-    public:
-        explicit AsyncFaultException(AsyncFault fault) noexcept
-            : m_fault(std::move(fault))
-        {
-        }
-
-        [[nodiscard]] const AsyncFault& Fault() const noexcept
-        {
-            return m_fault;
-        }
-
-        [[nodiscard]] const char* what() const noexcept override
-        {
-            return "async task fault";
-        }
-
-    private:
-        AsyncFault m_fault;
-    };
-
-    template<typename E>
-    class AsyncDomainErrorException : public std::exception
-    {
-    public:
-        explicit AsyncDomainErrorException(E error) noexcept(std::is_nothrow_move_constructible_v<E>)
-            : m_error(std::move(error))
-        {
-        }
-
-        [[nodiscard]] const E& Error() const noexcept
-        {
-            return m_error;
-        }
-
-        [[nodiscard]] const char* what() const noexcept override
-        {
-            return "async task domain error";
-        }
-
-    private:
-        E m_error;
-    };
-
-    template<typename E>
-    struct AsyncExceptionTraits
-    {
-        [[noreturn]] static void Throw(const E& error)
-        {
-            throw AsyncDomainErrorException<E>(error);
-        }
-    };
-
-    template<typename E>
-    using AsyncExceptionAdapter = AsyncExceptionTraits<E>;
-#endif
 
     template<typename T, typename E = NoError>
     class Task;
@@ -445,6 +378,9 @@ namespace NGIN::Async
         }
     }// namespace detail
 
+    /// @brief Cold single-result coroutine that starts only when spawned, awaited, or synchronously run.
+    /// @tparam T Successful result type.
+    /// @tparam E Recoverable domain-error type.
     template<typename T, typename E>
     class Task final : public BaseTask
     {
@@ -933,6 +869,8 @@ namespace NGIN::Async
         std::atomic_bool             m_started {false};
     };
 
+    /// @brief Cold coroutine specialization for operations that succeed without a value.
+    /// @tparam E Recoverable domain-error type.
     template<typename E>
     class Task<void, E> final : public BaseTask
     {
@@ -1359,6 +1297,9 @@ namespace NGIN::Async
         std::atomic_bool             m_started {false};
     };
 
+    /// @brief Running owner of a spawned Task and its eventual completion.
+    /// @tparam T Successful result type.
+    /// @tparam E Recoverable domain-error type.
     template<typename T, typename E>
     class Operation final
     {
@@ -1594,6 +1535,8 @@ namespace NGIN::Async
         bool                         m_resultTaken {false};
     };
 
+    /// @brief Running owner of a spawned value-less Task and its eventual completion.
+    /// @tparam E Recoverable domain-error type.
     template<typename E>
     class Operation<void, E> final
     {

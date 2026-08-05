@@ -2,7 +2,6 @@
 /// @brief Behavioral tests for NGIN synchronization primitives and guards.
 
 #include <NGIN/Sync/Concepts.hpp>
-#include <NGIN/Sync/FIFOSpinLock.hpp>
 #include <NGIN/Sync/LockGuard.hpp>
 #include <NGIN/Sync/Mutex.hpp>
 #include <NGIN/Sync/ReadWriteLock.hpp>
@@ -10,6 +9,7 @@
 #include <NGIN/Sync/Semaphore.hpp>
 #include <NGIN/Sync/SharedMutex.hpp>
 #include <NGIN/Sync/SpinLock.hpp>
+#include <NGIN/Sync/TicketLock.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <thread>

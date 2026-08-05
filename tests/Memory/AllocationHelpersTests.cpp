@@ -26,7 +26,7 @@ namespace
 
 TEST_CASE("AllocationHelpers allocate/deallocate over-aligned arrays correctly", "[Memory][AllocationHelpers]")
 {
-    using Tracked = NGIN::Memory::Tracking<NGIN::Memory::SystemAllocator>;
+    using Tracked = NGIN::Memory::TrackingAllocator<NGIN::Memory::SystemAllocator>;
     Tracked tracked {NGIN::Memory::SystemAllocator {}};
 
     OverAligned* ptr = NGIN::Memory::AllocateArray<OverAligned>(tracked, 8);

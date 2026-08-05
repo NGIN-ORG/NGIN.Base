@@ -8,7 +8,7 @@ Modern, composable, header-only allocators for high-performance components.
 |-----------|---------|
 | `SystemAllocator` | Aligned system allocations (stateless) |
 | `BumpArena` | Fast linear arena with markers & rollback |
-| `Tracking<Inner>` | Decorator collecting allocation statistics |
+| `TrackingAllocator<Inner>` | Decorator collecting allocation statistics |
 | `FallbackAllocator<Primary,Secondary>` | Try primary then fallback |
 | `ThreadSafe<Inner>` | Mutex-protected decorator |
 | `AllocationHelpers` | Safe object/array construction helpers |
@@ -35,7 +35,7 @@ arena.Rollback(mark); // free all since mark
 Tracking:
 
 ```cpp
-using TrackedArena = NGIN::Memory::Tracking<Arena>;
+using TrackedArena = NGIN::Memory::TrackingAllocator<Arena>;
 TrackedArena tracked{ Arena{NGIN::Memory::OwnedTag{}, 4096} };
 void* p = tracked.Allocate(128, 16);
 auto stats = tracked.GetStats(); // peak/current

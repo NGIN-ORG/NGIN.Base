@@ -5,5 +5,5 @@
 #include <NGIN/Text/Unicode/Convert.hpp>
 #include <NGIN/Text/Unicode/ErrorPolicy.hpp>
 #include <NGIN/Text/Unicode/Types.hpp>
+#include <NGIN/Text/Unicode/Utf8View.hpp>
 #include <NGIN/Text/Unicode/Validation.hpp>
-#include <NGIN/Text/Unicode/View.hpp>

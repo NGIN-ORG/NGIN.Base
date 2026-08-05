@@ -1,7 +1,7 @@
 /// @file HashMapTest.cpp
 /// @brief Tests for NGIN::Containers::FlatHashMap using Catch2.
 
-#include <NGIN/Containers/HashMap.hpp>
+#include <NGIN/Containers/FlatHashMap.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <stdexcept>
 #include <string>

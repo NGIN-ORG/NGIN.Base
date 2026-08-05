@@ -1,6 +1,6 @@
 #pragma once
 
-#include <NGIN/Async/AsyncError.hpp>
+#include <NGIN/Async/AsyncFault.hpp>
 #include <NGIN/Primitives.hpp>
 
 #include <cassert>

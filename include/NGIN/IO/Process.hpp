@@ -2,118 +2,46 @@
 /// @brief Cross-platform child-process execution with explicit IO and lifetime policy.
 #pragma once
 
-#include <NGIN/Async/Cancellation.hpp>
 #include <NGIN/Async/Task.hpp>
 #include <NGIN/Defines.hpp>
-#include <NGIN/IO/Path.hpp>
-#include <NGIN/Text/String.hpp>
-#include <NGIN/Utilities/Expected.hpp>
+#include <NGIN/IO/ProcessError.hpp>
+#include <NGIN/IO/ProcessOptions.hpp>
+#include <NGIN/IO/ProcessResult.hpp>
 
-#include <chrono>
-#include <functional>
-#include <limits>
 #include <memory>
-#include <optional>
-#include <string>
-#include <string_view>
-#include <vector>
 
 namespace NGIN::IO
 {
-    enum class ProcessErrorCode : UInt8
-    {
-        None,
-        InvalidArgument,
-        StartFailed,
-        WaitFailed,
-        StreamFailed,
-        AlreadyWaited,
-        NotRunning,
-        NotSupported,
-    };
-
-    struct ProcessError
-    {
-        ProcessErrorCode   code {ProcessErrorCode::None};
-        Int32              systemCode {0};
-        Path               executable {};
-        NGIN::Text::String message {};
-    };
-
-    template<typename T>
-    using ProcessExpected = NGIN::Utilities::Expected<T, ProcessError>;
-
-    enum class ProcessStreamMode : UInt8
-    {
-        Inherit,
-        Capture,
-        Discard,
-        File,
-    };
-
-    struct ProcessStreamOptions
-    {
-        ProcessStreamMode mode {ProcessStreamMode::Inherit};
-        Path              file {};
-        bool              append {false};
-    };
-
-    struct ProcessEnvironmentEntry
-    {
-        std::string                name {};
-        std::optional<std::string> value {};
-    };
-
-    struct ProcessOptions
-    {
-        Path                                     executable {};
-        std::vector<std::string>                 arguments {};
-        std::optional<Path>                      workingDirectory {};
-        bool                                     inheritEnvironment {true};
-        std::vector<ProcessEnvironmentEntry>     environment {};
-        ProcessStreamOptions                     standardInput {};
-        ProcessStreamOptions                     standardOutput {};
-        ProcessStreamOptions                     standardError {};
-        UIntSize                                 maximumOutputBytes {(std::numeric_limits<UIntSize>::max)()};
-        std::optional<std::chrono::milliseconds> timeout {};
-        std::chrono::milliseconds                terminationGracePeriod {250};
-        NGIN::Async::CancellationToken           cancellation {};
-        std::function<bool()>                    cancellationProbe {};
-        std::function<void(std::string_view)>    standardOutputObserver {};
-        std::function<void(std::string_view)>    standardErrorObserver {};
-        bool                                     isolateProcessTree {true};
-        bool                                     createWindow {false};
-    };
-
-    struct ProcessResult
-    {
-        int                exitCode {0};
-        std::optional<int> terminationSignal {};
-        std::string        standardOutput {};
-        std::string        standardError {};
-        bool               timedOut {false};
-        bool               canceled {false};
-        bool               outputLimitExceeded {false};
-    };
-
+    /// @brief Owns a running child process and provides explicit wait and termination operations.
     class NGIN_IO_API Process final
     {
     public:
+        /// @brief Constructs an empty process handle.
         Process() noexcept;
+        /// @brief Releases the platform process state owned by this handle.
         ~Process();
 
+        /// @brief Transfers process ownership from another handle.
         Process(Process&& other) noexcept;
+        /// @brief Replaces this handle with another process handle.
         Process& operator=(Process&& other) noexcept;
 
         Process(const Process&)            = delete;
         Process& operator=(const Process&) = delete;
 
+        /// @brief Starts a child process using the supplied launch policy.
+        /// @param options Launch and supervision policy transferred into the operation.
+        /// @return A running process handle or a structured startup error.
         [[nodiscard]] static ProcessExpected<Process> Start(ProcessOptions options);
 
-        [[nodiscard]] bool                           IsValid() const noexcept;
-        [[nodiscard]] bool                           IsRunning() const noexcept;
+        /// @brief Returns whether this object owns platform process state.
+        [[nodiscard]] bool IsValid() const noexcept;
+        /// @brief Returns whether the owned child has not yet terminated.
+        [[nodiscard]] bool IsRunning() const noexcept;
+        /// @brief Waits for termination and consumes the child result.
         [[nodiscard]] ProcessExpected<ProcessResult> Wait();
-        [[nodiscard]] ProcessExpected<void>          Terminate();
+        /// @brief Requests termination of the running child process tree.
+        [[nodiscard]] ProcessExpected<void> Terminate();
 
     private:
         struct Impl;
@@ -122,7 +50,9 @@ namespace NGIN::IO
         std::unique_ptr<Impl> m_implementation {};
     };
 
+    /// @brief Starts a child process and waits synchronously for its terminal result.
     [[nodiscard]] NGIN_IO_API ProcessExpected<ProcessResult> RunProcess(ProcessOptions options);
-    [[nodiscard]] NGIN_IO_API                                NGIN::Async::Task<ProcessResult, ProcessError>
-                                                             RunProcessAsync(NGIN::Async::TaskContext& context, ProcessOptions options);
+    /// @brief Starts a child process and waits asynchronously for its terminal result.
+    [[nodiscard]] NGIN_IO_API NGIN::Async::Task<ProcessResult, ProcessError>
+                              RunProcessAsync(NGIN::Async::TaskContext& context, ProcessOptions options);
 }// namespace NGIN::IO

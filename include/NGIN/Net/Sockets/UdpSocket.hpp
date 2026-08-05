@@ -8,7 +8,6 @@
 #include <NGIN/Net/Types/Endpoint.hpp>
 #include <NGIN/Net/Types/NetError.hpp>
 #include <NGIN/Net/Types/SocketOptions.hpp>
-#include <NGIN/Async/AsyncError.hpp>
 
 namespace NGIN::Async
 {
@@ -33,34 +32,34 @@ namespace NGIN::Net
     class NGIN_NET_API UdpSocket final
     {
     public:
-        UdpSocket() noexcept = default;
-        UdpSocket(const UdpSocket&)            = delete;
-        UdpSocket& operator=(const UdpSocket&) = delete;
-        UdpSocket(UdpSocket&&) noexcept        = default;
+        UdpSocket() noexcept                       = default;
+        UdpSocket(const UdpSocket&)                = delete;
+        UdpSocket& operator=(const UdpSocket&)     = delete;
+        UdpSocket(UdpSocket&&) noexcept            = default;
         UdpSocket& operator=(UdpSocket&&) noexcept = default;
 
-        NetExpected<void> Open(AddressFamily family = AddressFamily::DualStack,
+        NetExpected<void> Open(AddressFamily family  = AddressFamily::DualStack,
                                SocketOptions options = {}) noexcept;
         NetExpected<void> Bind(Endpoint localEndpoint) noexcept;
         NetExpected<void> Connect(Endpoint remoteEndpoint) noexcept;
-        void Close() noexcept;
+        void              Close() noexcept;
 
-        NetExpected<NGIN::UInt32> TrySendTo(Endpoint remoteEndpoint, ConstByteSpan payload) noexcept;
+        NetExpected<NGIN::UInt32>          TrySendTo(Endpoint remoteEndpoint, ConstByteSpan payload) noexcept;
         NetExpected<DatagramReceiveResult> TryReceiveFrom(ByteSpan destination) noexcept;
-        NetExpected<NGIN::UInt32> TrySendToSegments(Endpoint remoteEndpoint, BufferSegmentSpan payload) noexcept;
+        NetExpected<NGIN::UInt32>          TrySendToSegments(Endpoint remoteEndpoint, BufferSegmentSpan payload) noexcept;
         NetExpected<DatagramReceiveResult> TryReceiveFromSegments(MutableBufferSegmentSpan destination) noexcept;
 
-        NGIN::Async::Task<NGIN::UInt32, NetError> SendToAsync(NGIN::Async::TaskContext& ctx,
-                                                              NetworkDriver& driver,
-                                                              Endpoint remoteEndpoint,
-                                                              ConstByteSpan payload,
-                                                              NGIN::Async::CancellationToken token);
-        NGIN::Async::Task<DatagramReceiveResult, NetError> ReceiveFromAsync(NGIN::Async::TaskContext& ctx,
-                                                                            NetworkDriver& driver,
-                                                                            ByteSpan destination,
+        NGIN::Async::Task<NGIN::UInt32, NetError>          SendToAsync(NGIN::Async::TaskContext&      ctx,
+                                                                       NetworkDriver&                 driver,
+                                                                       Endpoint                       remoteEndpoint,
+                                                                       ConstByteSpan                  payload,
+                                                                       NGIN::Async::CancellationToken token);
+        NGIN::Async::Task<DatagramReceiveResult, NetError> ReceiveFromAsync(NGIN::Async::TaskContext&      ctx,
+                                                                            NetworkDriver&                 driver,
+                                                                            ByteSpan                       destination,
                                                                             NGIN::Async::CancellationToken token);
 
-        [[nodiscard]] SocketHandle& Handle() noexcept { return m_handle; }
+        [[nodiscard]] SocketHandle&       Handle() noexcept { return m_handle; }
         [[nodiscard]] const SocketHandle& Handle() const noexcept { return m_handle; }
 
     private:

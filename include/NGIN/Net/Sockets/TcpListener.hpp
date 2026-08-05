@@ -9,7 +9,6 @@
 #include <NGIN/Net/Types/NetError.hpp>
 #include <NGIN/Net/Types/SocketOptions.hpp>
 #include <NGIN/Primitives.hpp>
-#include <NGIN/Async/AsyncError.hpp>
 
 namespace NGIN::Async
 {
@@ -27,25 +26,25 @@ namespace NGIN::Net
     class NGIN_NET_API TcpListener final
     {
     public:
-        TcpListener() noexcept = default;
-        TcpListener(const TcpListener&)            = delete;
-        TcpListener& operator=(const TcpListener&) = delete;
-        TcpListener(TcpListener&&) noexcept        = default;
+        TcpListener() noexcept                         = default;
+        TcpListener(const TcpListener&)                = delete;
+        TcpListener& operator=(const TcpListener&)     = delete;
+        TcpListener(TcpListener&&) noexcept            = default;
         TcpListener& operator=(TcpListener&&) noexcept = default;
 
-        NetExpected<void> Open(AddressFamily family = AddressFamily::DualStack,
-                               SocketOptions options = {}) noexcept;
-        NetExpected<void> Bind(Endpoint localEndpoint) noexcept;
-        NetExpected<void> Listen(NGIN::Int32 backlog = 128) noexcept;
+        NetExpected<void>      Open(AddressFamily family  = AddressFamily::DualStack,
+                                    SocketOptions options = {}) noexcept;
+        NetExpected<void>      Bind(Endpoint localEndpoint) noexcept;
+        NetExpected<void>      Listen(NGIN::Int32 backlog = 128) noexcept;
         NetExpected<TcpSocket> TryAccept() noexcept;
 
-        NGIN::Async::Task<TcpSocket, NetError> AcceptAsync(NGIN::Async::TaskContext& ctx,
-                                                           NetworkDriver& driver,
+        NGIN::Async::Task<TcpSocket, NetError> AcceptAsync(NGIN::Async::TaskContext&      ctx,
+                                                           NetworkDriver&                 driver,
                                                            NGIN::Async::CancellationToken token);
 
         void Close() noexcept;
 
-        [[nodiscard]] SocketHandle& Handle() noexcept { return m_handle; }
+        [[nodiscard]] SocketHandle&       Handle() noexcept { return m_handle; }
         [[nodiscard]] const SocketHandle& Handle() const noexcept { return m_handle; }
 
     private:

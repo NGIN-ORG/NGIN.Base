@@ -1,3 +1,5 @@
+/// @file SpinLock.hpp
+/// @brief Exponential-backoff spin lock for short critical sections.
 #pragma once
 
 #include <atomic>
@@ -5,14 +7,16 @@
 
 namespace NGIN::Sync
 {
-    /// @brief A simple spin lock implementation
+    /// @brief Mutual-exclusion primitive that uses bounded exponential yield backoff while waiting.
     class SpinLock
     {
     public:
+        /// @brief Constructs an unlocked spin lock.
         SpinLock()                           = default;
         SpinLock(const SpinLock&)            = delete;
         SpinLock& operator=(const SpinLock&) = delete;
 
+        /// @brief Blocks until the caller acquires the lock.
         void Lock() noexcept
         {
             int backoff = 1;
@@ -25,33 +29,38 @@ namespace NGIN::Sync
                 for (int i = 0; i < backoff; ++i)
                     std::this_thread::yield();
 
-                if (backoff < 1024)// Cap the backoff to avoid excessive delays
+                if (backoff < 1024)
                     backoff *= 2;
             }
         }
 
-
+        /// @brief Releases the lock.
         void Unlock() noexcept
         {
             m_locked.store(false, std::memory_order_release);
         }
 
+        /// @brief Attempts to acquire the lock without waiting.
+        /// @return `true` when the caller acquired the lock; otherwise `false`.
         [[nodiscard]] bool TryLock() noexcept
         {
             bool expected = false;
             return m_locked.compare_exchange_strong(expected, true, std::memory_order_acquire);
         }
 
+        /// @brief Standard-library-compatible spelling of Lock().
         void lock() noexcept
         {
             Lock();
         }
 
+        /// @brief Standard-library-compatible spelling of Unlock().
         void unlock() noexcept
         {
             Unlock();
         }
 
+        /// @brief Standard-library-compatible spelling of TryLock().
         [[nodiscard]] bool try_lock() noexcept
         {
             return TryLock();
