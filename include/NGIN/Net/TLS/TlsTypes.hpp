@@ -13,18 +13,21 @@
 
 namespace NGIN::Net::TLS
 {
+    /// @brief Supported TLS protocol version.
     enum class TlsProtocolVersion : NGIN::UInt8
     {
         Tls12,
         Tls13,
     };
 
+    /// @brief Client policy for verifying server certificates and identity.
     enum class TlsPeerVerification : NGIN::UInt8
     {
         Required,
         Disabled,
     };
 
+    /// @brief Server policy for requesting and verifying client certificates.
     enum class TlsClientAuthentication : NGIN::UInt8
     {
         None,
@@ -32,6 +35,7 @@ namespace NGIN::Net::TLS
         Required,
     };
 
+    /// @brief Lifecycle state of a TLS stream.
     enum class TlsStreamState : NGIN::UInt8
     {
         Created,
@@ -42,6 +46,7 @@ namespace NGIN::Net::TLS
         Failed,
     };
 
+    /// @brief Protocol-version and cipher-suite policy.
     struct TlsProtocolOptions final
     {
         TlsProtocolVersion       minimum {TlsProtocolVersion::Tls12};
@@ -49,12 +54,14 @@ namespace NGIN::Net::TLS
         std::vector<std::string> cipherSuites;
     };
 
+    /// @brief Certificate trust-anchor policy.
     struct TlsTrustOptions final
     {
         bool                                                 useSystemRoots {true};
         std::vector<NGIN::Crypto::Certificates::Certificate> customCertificates;
     };
 
+    /// @brief Immutable client-context configuration.
     struct TlsClientContextOptions final
     {
         TlsProtocolOptions                                               protocols;
@@ -65,6 +72,7 @@ namespace NGIN::Net::TLS
         bool                                                             requireApplicationProtocol {false};
     };
 
+    /// @brief Immutable server-context configuration and credentials.
     struct TlsServerContextOptions final
     {
         TlsProtocolOptions                                protocols;
@@ -75,6 +83,7 @@ namespace NGIN::Net::TLS
         bool                                              requireApplicationProtocol {false};
     };
 
+    /// @brief Per-connection client identity and truncated-EOF policy.
     struct TlsClientOptions final
     {
         std::string serverName;
@@ -82,11 +91,13 @@ namespace NGIN::Net::TLS
         bool        allowTruncatedEof {false};
     };
 
+    /// @brief Per-connection server behavior.
     struct TlsServerOptions final
     {
         bool allowTruncatedEof {false};
     };
 
+    /// @brief Per-handshake timeout policy; zero disables the timeout.
     struct TlsHandshakeOptions final
     {
         std::chrono::milliseconds timeout {0};

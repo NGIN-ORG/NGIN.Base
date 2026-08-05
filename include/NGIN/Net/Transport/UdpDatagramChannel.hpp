@@ -15,11 +15,14 @@ namespace NGIN::Net::Transport
     class UdpDatagramChannel final : public IDatagramChannel
     {
     public:
+        /// @brief Takes ownership of a UDP socket and borrows its network driver.
+        /// @note The driver must outlive this channel and all outstanding operations.
         UdpDatagramChannel(UdpSocket&& socket, NetworkDriver& driver) noexcept
             : m_socket(std::move(socket)), m_driver(&driver)
         {
         }
 
+        /// @copydoc IDatagramChannel::SendAsync
         NGIN::Async::Task<void, NGIN::Net::NetError> SendAsync(NGIN::Async::TaskContext&      ctx,
                                                                NGIN::Net::Endpoint            remoteEndpoint,
                                                                NGIN::Net::ConstByteSpan       payload,
@@ -28,6 +31,7 @@ namespace NGIN::Net::Transport
             return SendImpl(ctx, m_socket, m_driver, remoteEndpoint, payload, token);
         }
 
+        /// @copydoc IDatagramChannel::ReceiveAsync
         NGIN::Async::Task<ReceivedDatagram, NGIN::Net::NetError> ReceiveAsync(NGIN::Async::TaskContext&      ctx,
                                                                               NGIN::Net::Buffer&             receiveBuffer,
                                                                               NGIN::Async::CancellationToken token) override
@@ -35,7 +39,9 @@ namespace NGIN::Net::Transport
             return ReceiveImpl(ctx, m_socket, m_driver, receiveBuffer, token);
         }
 
-        [[nodiscard]] UdpSocket&       Socket() noexcept { return m_socket; }
+        /// @brief Returns mutable access to the owned UDP socket.
+        [[nodiscard]] UdpSocket& Socket() noexcept { return m_socket; }
+        /// @brief Returns the owned UDP socket.
         [[nodiscard]] const UdpSocket& Socket() const noexcept { return m_socket; }
 
     private:
@@ -73,11 +79,11 @@ namespace NGIN::Net::Transport
                         NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidTaskUsage));
             }
 
-            auto result = co_await socket.ReceiveFromAsync(ctx,
-                                                           *driver,
-                                                           NGIN::Net::ByteSpan {receiveBuffer.data,
-                                                                                receiveBuffer.capacity},
-                                                           token);
+            DatagramReceiveResult result = co_await socket.ReceiveFromAsync(
+                    ctx,
+                    *driver,
+                    NGIN::Net::ByteSpan {receiveBuffer.data, receiveBuffer.capacity},
+                    token);
 
             receiveBuffer.size = result.bytesReceived;
 

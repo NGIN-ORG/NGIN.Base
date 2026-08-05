@@ -12,7 +12,7 @@ namespace NGIN::Net
     template<NGIN::Memory::AllocatorConcept Allocator>
     class BufferPool;
 
-    using ByteSpan = std::span<NGIN::Byte>;
+    using ByteSpan      = std::span<NGIN::Byte>;
     using ConstByteSpan = std::span<const NGIN::Byte>;
 
     /// @brief Segment of a payload.
@@ -33,9 +33,9 @@ namespace NGIN::Net
 
     using MutableBufferSegmentSpan = std::span<MutableBufferSegment>;
 
-    using IOVec = BufferSegment;
-    using IOVecSpan = BufferSegmentSpan;
-    using MutableIOVec = MutableBufferSegment;
+    using IOVec            = BufferSegment;
+    using IOVecSpan        = BufferSegmentSpan;
+    using MutableIOVec     = MutableBufferSegment;
     using MutableIOVecSpan = MutableBufferSegmentSpan;
 
     /// @brief Move-only buffer that can return to a BufferPool.
@@ -47,10 +47,13 @@ namespace NGIN::Net
         NGIN::UInt32 size {0};
         NGIN::UInt32 capacity {0};
 
+        /// @brief Constructs an empty buffer.
         constexpr Buffer() noexcept = default;
 
+        /// @brief Transfers data and pool-return ownership from another buffer.
         Buffer(Buffer&& other) noexcept { MoveFrom(std::move(other)); }
 
+        /// @brief Releases this buffer and transfers ownership from another buffer.
         Buffer& operator=(Buffer&& other) noexcept
         {
             if (this != &other)
@@ -61,13 +64,18 @@ namespace NGIN::Net
             return *this;
         }
 
-        Buffer(const Buffer&)            = delete;
+        /// @brief Buffers are non-copyable because they uniquely own their release callback.
+        Buffer(const Buffer&) = delete;
+        /// @brief Buffers are non-copy-assignable because they uniquely own their release callback.
         Buffer& operator=(const Buffer&) = delete;
 
+        /// @brief Returns owned storage to its pool or allocator.
         ~Buffer() { Release(); }
 
+        /// @brief Returns whether this buffer contains storage.
         [[nodiscard]] constexpr bool IsValid() const noexcept { return data != nullptr; }
 
+        /// @brief Returns storage through its release callback and resets this buffer.
         void Release() noexcept
         {
             if (m_release)
@@ -86,10 +94,10 @@ namespace NGIN::Net
 
         void Reset() noexcept
         {
-            data     = nullptr;
-            size     = 0;
-            capacity = 0;
-            m_owner  = nullptr;
+            data      = nullptr;
+            size      = 0;
+            capacity  = 0;
+            m_owner   = nullptr;
             m_release = nullptr;
         }
 

@@ -15,11 +15,14 @@ namespace NGIN::Net::Transport
     class TcpByteStream final : public IByteStream
     {
     public:
+        /// @brief Takes ownership of a TCP socket and borrows its network driver.
+        /// @note The driver must outlive this stream and all outstanding operations.
         TcpByteStream(TcpSocket&& socket, NetworkDriver& driver) noexcept
             : m_socket(std::move(socket)), m_driver(&driver)
         {
         }
 
+        /// @copydoc IByteStream::ReadAsync
         NGIN::Async::Task<NGIN::UInt32, NGIN::Net::NetError> ReadAsync(NGIN::Async::TaskContext&      ctx,
                                                                        NGIN::Net::ByteSpan            destination,
                                                                        NGIN::Async::CancellationToken token) override
@@ -27,6 +30,7 @@ namespace NGIN::Net::Transport
             return ReadImpl(ctx, m_socket, m_driver, destination, token);
         }
 
+        /// @copydoc IByteStream::WriteAsync
         NGIN::Async::Task<NGIN::UInt32, NGIN::Net::NetError> WriteAsync(NGIN::Async::TaskContext&      ctx,
                                                                         NGIN::Net::ConstByteSpan       source,
                                                                         NGIN::Async::CancellationToken token) override
@@ -34,13 +38,16 @@ namespace NGIN::Net::Transport
             return WriteImpl(ctx, m_socket, m_driver, source, token);
         }
 
+        /// @copydoc IByteStream::Close
         NGIN::Net::NetExpected<void> Close() override
         {
             m_socket.Close();
             return {};
         }
 
-        [[nodiscard]] TcpSocket&       Socket() noexcept { return m_socket; }
+        /// @brief Returns mutable access to the owned TCP socket.
+        [[nodiscard]] TcpSocket& Socket() noexcept { return m_socket; }
+        /// @brief Returns the owned TCP socket.
         [[nodiscard]] const TcpSocket& Socket() const noexcept { return m_socket; }
 
     private:

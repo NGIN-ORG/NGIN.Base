@@ -34,21 +34,26 @@ namespace NGIN::Net
         NetErrorCode code {NetErrorCode::Ok};
         int          native {0};
 
+        /// @brief Constructs a successful result code.
         constexpr NetError() noexcept = default;
 
+        /// @brief Constructs a portable network error with an optional native code.
         constexpr explicit NetError(NetErrorCode errorCode, int nativeCode = 0) noexcept
             : code(errorCode), native(nativeCode)
         {
         }
 
+        /// @brief Returns whether this payload represents success.
         [[nodiscard]] constexpr bool IsOk() const noexcept { return code == NetErrorCode::Ok; }
 
+        /// @brief Converts this payload to the common error-domain representation.
         [[nodiscard]] constexpr NGIN::Utilities::ErrorInfo ToErrorInfo() const noexcept
         {
             return {NGIN::Utilities::ErrorDomain::Net, code, native};
         }
     };
 
+    /// @brief Converts a network error to the closest standard or native error code.
     [[nodiscard]] inline std::error_code ToErrorCode(NetError error) noexcept
     {
         if (error.native != 0)

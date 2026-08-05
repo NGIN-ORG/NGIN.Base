@@ -23,38 +23,48 @@ namespace NGIN::Net
     public:
         using NativeHandle = NGIN::IntPtr;
 
+        /// @brief Constructs a closed socket handle.
         constexpr SocketHandle() noexcept = default;
+        /// @brief Takes ownership of a native socket handle.
         explicit constexpr SocketHandle(NativeHandle handle) noexcept
             : m_handle(handle)
         {
         }
 
-        SocketHandle(const SocketHandle&)            = delete;
+        /// @brief Socket handles are non-copyable because they uniquely own native state.
+        SocketHandle(const SocketHandle&) = delete;
+        /// @brief Socket handles are non-copy-assignable because they uniquely own native state.
         SocketHandle& operator=(const SocketHandle&) = delete;
 
+        /// @brief Transfers native socket ownership from another handle.
         SocketHandle(SocketHandle&& other) noexcept
             : m_handle(other.m_handle)
         {
             other.Reset();
         }
 
+        /// @brief Closes this socket and transfers native ownership from another handle.
         SocketHandle& operator=(SocketHandle&& other) noexcept
         {
             if (this != &other)
             {
-                (void)detail::CloseSocket(*this);
+                (void) detail::CloseSocket(*this);
                 m_handle = other.m_handle;
                 other.Reset();
             }
             return *this;
         }
 
+        /// @brief Closes the owned native socket.
         ~SocketHandle() { Close(); }
 
+        /// @brief Returns whether this wrapper owns a native socket.
         [[nodiscard]] constexpr bool IsOpen() const noexcept { return m_handle != InvalidHandle(); }
 
+        /// @brief Returns the native socket value without transferring ownership.
         [[nodiscard]] constexpr NativeHandle Native() const noexcept { return m_handle; }
 
+        /// @brief Closes the socket; calling Close() repeatedly is safe.
         void Close() noexcept;
 
     private:

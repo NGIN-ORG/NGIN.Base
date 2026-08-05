@@ -10,6 +10,7 @@
 
 namespace NGIN::Net::TLS
 {
+    /// @brief Broad subsystem category of a TLS failure.
     enum class TlsErrorCategory : NGIN::UInt8
     {
         Transport,
@@ -22,6 +23,7 @@ namespace NGIN::Net::TLS
         State,
     };
 
+    /// @brief Provider-neutral TLS failure code.
     enum class TlsErrorCode : NGIN::UInt8
     {
         Unknown,
@@ -41,6 +43,7 @@ namespace NGIN::Net::TLS
         Closed,
     };
 
+    /// @brief Structured TLS failure with provider and transport context.
     struct TlsError final
     {
         TlsErrorCategory    category {TlsErrorCategory::State};
@@ -49,6 +52,7 @@ namespace NGIN::Net::TLS
         std::string         message;
         NGIN::Net::NetError transportError {};
 
+        /// @brief Maps this TLS failure to the closest transport-layer error.
         [[nodiscard]] NGIN::Net::NetError ToNetError() const noexcept
         {
             switch (category)

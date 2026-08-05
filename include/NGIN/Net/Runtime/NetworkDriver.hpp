@@ -42,22 +42,33 @@ namespace NGIN::Net
     class NGIN_NET_API NetworkDriver final
     {
     public:
-        NetworkDriver(const NetworkDriver&)            = delete;
+        /// @brief Drivers are non-copyable because they own runtime and platform state.
+        NetworkDriver(const NetworkDriver&) = delete;
+        /// @brief Drivers are non-copy-assignable because they own runtime and platform state.
         NetworkDriver& operator=(const NetworkDriver&) = delete;
-        NetworkDriver(NetworkDriver&&)                 = delete;
-        NetworkDriver& operator=(NetworkDriver&&)      = delete;
+        /// @brief Drivers are immovable because registered operations retain their address.
+        NetworkDriver(NetworkDriver&&) = delete;
+        /// @brief Drivers are non-move-assignable because registered operations retain their address.
+        NetworkDriver& operator=(NetworkDriver&&) = delete;
 
+        /// @brief Stops the driver and releases all platform resources.
         ~NetworkDriver();
 
+        /// @brief Creates a network driver using the requested worker and polling policy.
         static std::unique_ptr<NetworkDriver> Create(NetworkDriverOptions options);
 
+        /// @brief Runs the driver loop until Stop() is requested.
         void Run();
+        /// @brief Performs one non-blocking or configured-interval poll cycle.
         void PollOnce();
+        /// @brief Requests termination of a running driver loop.
         void Stop();
 
+        /// @brief Asynchronously waits until a socket can be read or cancellation occurs.
         NGIN::Async::Task<void, NetError> WaitUntilReadable(NGIN::Async::TaskContext&      ctx,
                                                             SocketHandle&                  handle,
                                                             NGIN::Async::CancellationToken token);
+        /// @brief Asynchronously waits until a socket can be written or cancellation occurs.
         NGIN::Async::Task<void, NetError> WaitUntilWritable(NGIN::Async::TaskContext&      ctx,
                                                             SocketHandle&                  handle,
                                                             NGIN::Async::CancellationToken token);

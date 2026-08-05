@@ -32,34 +32,51 @@ namespace NGIN::Net
     class NGIN_NET_API UdpSocket final
     {
     public:
-        UdpSocket() noexcept                       = default;
-        UdpSocket(const UdpSocket&)                = delete;
-        UdpSocket& operator=(const UdpSocket&)     = delete;
-        UdpSocket(UdpSocket&&) noexcept            = default;
+        /// @brief Constructs a closed UDP socket.
+        UdpSocket() noexcept = default;
+        /// @brief UDP sockets are non-copyable because they uniquely own a native socket.
+        UdpSocket(const UdpSocket&) = delete;
+        /// @brief UDP sockets are non-copy-assignable because they uniquely own a native socket.
+        UdpSocket& operator=(const UdpSocket&) = delete;
+        /// @brief Transfers native socket ownership from another socket.
+        UdpSocket(UdpSocket&&) noexcept = default;
+        /// @brief Transfers native socket ownership from another socket.
         UdpSocket& operator=(UdpSocket&&) noexcept = default;
 
+        /// @brief Creates a non-blocking UDP socket with the requested family and options.
         NetExpected<void> Open(AddressFamily family  = AddressFamily::DualStack,
                                SocketOptions options = {}) noexcept;
+        /// @brief Binds the socket to a local endpoint.
         NetExpected<void> Bind(Endpoint localEndpoint) noexcept;
+        /// @brief Sets the default peer for connected datagram operations.
         NetExpected<void> Connect(Endpoint remoteEndpoint) noexcept;
-        void              Close() noexcept;
+        /// @brief Closes the socket; calling Close() repeatedly is safe.
+        void Close() noexcept;
 
-        NetExpected<NGIN::UInt32>          TrySendTo(Endpoint remoteEndpoint, ConstByteSpan payload) noexcept;
+        /// @brief Attempts to send one datagram without blocking.
+        NetExpected<NGIN::UInt32> TrySendTo(Endpoint remoteEndpoint, ConstByteSpan payload) noexcept;
+        /// @brief Attempts to receive one datagram without blocking.
         NetExpected<DatagramReceiveResult> TryReceiveFrom(ByteSpan destination) noexcept;
-        NetExpected<NGIN::UInt32>          TrySendToSegments(Endpoint remoteEndpoint, BufferSegmentSpan payload) noexcept;
+        /// @brief Attempts to send one scatter/gather datagram without blocking.
+        NetExpected<NGIN::UInt32> TrySendToSegments(Endpoint remoteEndpoint, BufferSegmentSpan payload) noexcept;
+        /// @brief Attempts to receive one datagram into scatter/gather buffers without blocking.
         NetExpected<DatagramReceiveResult> TryReceiveFromSegments(MutableBufferSegmentSpan destination) noexcept;
 
-        NGIN::Async::Task<NGIN::UInt32, NetError>          SendToAsync(NGIN::Async::TaskContext&      ctx,
-                                                                       NetworkDriver&                 driver,
-                                                                       Endpoint                       remoteEndpoint,
-                                                                       ConstByteSpan                  payload,
-                                                                       NGIN::Async::CancellationToken token);
+        /// @brief Asynchronously sends one datagram using driver readiness and cancellation.
+        NGIN::Async::Task<NGIN::UInt32, NetError> SendToAsync(NGIN::Async::TaskContext&      ctx,
+                                                              NetworkDriver&                 driver,
+                                                              Endpoint                       remoteEndpoint,
+                                                              ConstByteSpan                  payload,
+                                                              NGIN::Async::CancellationToken token);
+        /// @brief Asynchronously receives one datagram using driver readiness and cancellation.
         NGIN::Async::Task<DatagramReceiveResult, NetError> ReceiveFromAsync(NGIN::Async::TaskContext&      ctx,
                                                                             NetworkDriver&                 driver,
                                                                             ByteSpan                       destination,
                                                                             NGIN::Async::CancellationToken token);
 
-        [[nodiscard]] SocketHandle&       Handle() noexcept { return m_handle; }
+        /// @brief Returns mutable access to the owned native-handle wrapper.
+        [[nodiscard]] SocketHandle& Handle() noexcept { return m_handle; }
+        /// @brief Returns the owned native-handle wrapper.
         [[nodiscard]] const SocketHandle& Handle() const noexcept { return m_handle; }
 
     private:

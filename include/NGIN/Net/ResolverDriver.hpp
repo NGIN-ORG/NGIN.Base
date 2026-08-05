@@ -28,10 +28,14 @@ namespace NGIN::Net
         /// @brief Stops resolver workers and releases backend state.
         ~ResolverDriver();
 
-        ResolverDriver(const ResolverDriver&)            = delete;
+        /// @brief Resolver drivers are non-copyable because they own worker state.
+        ResolverDriver(const ResolverDriver&) = delete;
+        /// @brief Resolver drivers are non-copy-assignable because they own worker state.
         ResolverDriver& operator=(const ResolverDriver&) = delete;
-        ResolverDriver(ResolverDriver&&)                 = delete;
-        ResolverDriver& operator=(ResolverDriver&&)      = delete;
+        /// @brief Resolver drivers are immovable because executor references retain scheduler state.
+        ResolverDriver(ResolverDriver&&) = delete;
+        /// @brief Resolver drivers are non-move-assignable because executor references retain scheduler state.
+        ResolverDriver& operator=(ResolverDriver&&) = delete;
 
         /// @brief Returns the executor used to dispatch blocking resolver work.
         [[nodiscard]] NGIN::Execution::ExecutorRef GetExecutor() noexcept;

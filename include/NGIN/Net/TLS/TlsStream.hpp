@@ -23,58 +23,81 @@ namespace NGIN::Net::TLS
     class NGIN_NETTLS_API TlsStream final : public NGIN::Net::Transport::IByteStream
     {
     public:
-        TlsStream(const TlsStream&)            = delete;
+        /// @brief TLS streams are non-copyable because they uniquely own session and transport state.
+        TlsStream(const TlsStream&) = delete;
+        /// @brief TLS streams are non-copy-assignable because they uniquely own session and transport state.
         TlsStream& operator=(const TlsStream&) = delete;
-        TlsStream(TlsStream&&)                 = delete;
-        TlsStream& operator=(TlsStream&&)      = delete;
+        /// @brief TLS streams are immovable because outstanding operations retain their address.
+        TlsStream(TlsStream&&) = delete;
+        /// @brief TLS streams are non-move-assignable because outstanding operations retain their address.
+        TlsStream& operator=(TlsStream&&) = delete;
+        /// @brief Closes provider and transport state.
         ~TlsStream() override;
 
+        /// @brief Creates a client TLS filter over an owned byte stream.
+        /// @note The context may be released after creation because provider state is shared internally.
         [[nodiscard]] static TlsExpected<std::unique_ptr<TlsStream>> CreateClient(
                 std::unique_ptr<NGIN::Net::Transport::IByteStream> inner,
                 const TlsContext&                                  context,
                 TlsClientOptions                                   options);
 
+        /// @brief Creates a server TLS filter over an owned byte stream.
         [[nodiscard]] static TlsExpected<std::unique_ptr<TlsStream>> CreateServer(
                 std::unique_ptr<NGIN::Net::Transport::IByteStream> inner,
                 const TlsContext&                                  context,
                 TlsServerOptions                                   options = {});
 
+        /// @brief Performs the TLS handshake with cancellation and optional timeout policy.
         NGIN::Async::Task<void, TlsError> HandshakeAsync(
                 NGIN::Async::TaskContext&      ctx,
                 NGIN::Async::CancellationToken token   = {},
                 TlsHandshakeOptions            options = {});
 
+        /// @brief Asynchronously reads decrypted application data.
+        /// @pre The handshake completed and no concurrent read is active.
         NGIN::Async::Task<NGIN::UInt32, TlsError> ReadTlsAsync(
                 NGIN::Async::TaskContext&      ctx,
                 NGIN::Net::ByteSpan            destination,
                 NGIN::Async::CancellationToken token = {});
 
+        /// @brief Asynchronously writes application data through TLS encryption.
+        /// @pre The handshake completed and no concurrent write is active.
         NGIN::Async::Task<NGIN::UInt32, TlsError> WriteTlsAsync(
                 NGIN::Async::TaskContext&      ctx,
                 NGIN::Net::ConstByteSpan       source,
                 NGIN::Async::CancellationToken token = {});
 
+        /// @brief Sends the TLS close notification and closes the filtered stream.
         NGIN::Async::Task<void, TlsError> ShutdownAsync(
                 NGIN::Async::TaskContext&      ctx,
                 NGIN::Async::CancellationToken token = {});
 
+        /// @copydoc NGIN::Net::Transport::IByteStream::ReadAsync
         NGIN::Async::Task<NGIN::UInt32, NGIN::Net::NetError> ReadAsync(
                 NGIN::Async::TaskContext&      ctx,
                 NGIN::Net::ByteSpan            destination,
                 NGIN::Async::CancellationToken token) override;
 
+        /// @copydoc NGIN::Net::Transport::IByteStream::WriteAsync
         NGIN::Async::Task<NGIN::UInt32, NGIN::Net::NetError> WriteAsync(
                 NGIN::Async::TaskContext&      ctx,
                 NGIN::Net::ConstByteSpan       source,
                 NGIN::Async::CancellationToken token) override;
 
+        /// @copydoc NGIN::Net::Transport::IByteStream::Close
         NGIN::Net::NetExpected<void> Close() override;
 
-        [[nodiscard]] TlsStreamState                                                State() const noexcept;
-        [[nodiscard]] std::string_view                                              NegotiatedProtocol() const noexcept;
-        [[nodiscard]] std::string_view                                              ServerName() const noexcept;
+        /// @brief Returns the current TLS session state.
+        [[nodiscard]] TlsStreamState State() const noexcept;
+        /// @brief Returns the negotiated ALPN protocol, or an empty view when none was selected.
+        /// @note The view remains valid until this stream is destroyed.
+        [[nodiscard]] std::string_view NegotiatedProtocol() const noexcept;
+        /// @brief Returns the configured or observed server name.
+        [[nodiscard]] std::string_view ServerName() const noexcept;
+        /// @brief Returns the peer leaf certificate when the provider supplied one.
         [[nodiscard]] const std::optional<NGIN::Crypto::Certificates::Certificate>& PeerCertificate() const noexcept;
-        [[nodiscard]] NGIN::Net::Transport::IByteStream*                            Inner() noexcept;
+        /// @brief Returns the owned underlying transport without transferring ownership.
+        [[nodiscard]] NGIN::Net::Transport::IByteStream* Inner() noexcept;
 
     private:
         TlsStream(

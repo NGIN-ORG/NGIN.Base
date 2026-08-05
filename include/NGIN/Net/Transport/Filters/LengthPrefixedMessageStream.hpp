@@ -20,14 +20,18 @@ namespace NGIN::Net::Transport::Filters
     public:
         static constexpr std::size_t LengthBytes = 4;
 
+        /// @brief Takes ownership of the underlying byte stream.
         explicit LengthPrefixedMessageStream(std::unique_ptr<IByteStream> inner) noexcept
             : m_inner(std::move(inner))
         {
         }
 
-        [[nodiscard]] IByteStream*       Inner() noexcept { return m_inner.get(); }
+        /// @brief Returns the underlying stream, or null when this filter is empty.
+        [[nodiscard]] IByteStream* Inner() noexcept { return m_inner.get(); }
+        /// @brief Returns the underlying stream, or null when this filter is empty.
         [[nodiscard]] const IByteStream* Inner() const noexcept { return m_inner.get(); }
 
+        /// @brief Writes one message preceded by a 32-bit big-endian byte length.
         NGIN::Async::Task<void, NGIN::Net::NetError> WriteMessageAsync(NGIN::Async::TaskContext&      ctx,
                                                                        NGIN::Net::ConstByteSpan       message,
                                                                        NGIN::Async::CancellationToken token)
@@ -54,6 +58,8 @@ namespace NGIN::Net::Transport::Filters
             co_return;
         }
 
+        /// @brief Reads one length-prefixed message into caller-owned buffer storage.
+        /// @return A view borrowing @p messageBuffer until that buffer is reused or released.
         NGIN::Async::Task<NGIN::Net::ConstByteSpan, NGIN::Net::NetError> ReadMessageAsync(NGIN::Async::TaskContext&      ctx,
                                                                                           NGIN::Net::Buffer&             messageBuffer,
                                                                                           NGIN::Async::CancellationToken token)
@@ -67,7 +73,7 @@ namespace NGIN::Net::Transport::Filters
             std::array<NGIN::Byte, LengthBytes> header {};
             co_await ReadExact(ctx, *m_inner, NGIN::Net::ByteSpan {header.data(), header.size()}, token);
 
-            const auto messageSize = DecodeLength(header);
+            const NGIN::UInt32 messageSize = DecodeLength(header);
             if (messageSize == 0)
             {
                 messageBuffer.size = 0;
@@ -85,6 +91,7 @@ namespace NGIN::Net::Transport::Filters
             co_return NGIN::Net::ConstByteSpan {messageBuffer.data, messageSize};
         }
 
+        /// @brief Closes the underlying stream.
         NGIN::Net::NetExpected<void> Close()
         {
             if (!m_inner)
@@ -105,10 +112,10 @@ namespace NGIN::Net::Transport::Filters
 
         static NGIN::UInt32 DecodeLength(const std::array<NGIN::Byte, LengthBytes>& header) noexcept
         {
-            const auto b0 = static_cast<NGIN::UInt32>(std::to_integer<NGIN::UInt8>(header[0]));
-            const auto b1 = static_cast<NGIN::UInt32>(std::to_integer<NGIN::UInt8>(header[1]));
-            const auto b2 = static_cast<NGIN::UInt32>(std::to_integer<NGIN::UInt8>(header[2]));
-            const auto b3 = static_cast<NGIN::UInt32>(std::to_integer<NGIN::UInt8>(header[3]));
+            const NGIN::UInt32 b0 = static_cast<NGIN::UInt32>(std::to_integer<NGIN::UInt8>(header[0]));
+            const NGIN::UInt32 b1 = static_cast<NGIN::UInt32>(std::to_integer<NGIN::UInt8>(header[1]));
+            const NGIN::UInt32 b2 = static_cast<NGIN::UInt32>(std::to_integer<NGIN::UInt8>(header[2]));
+            const NGIN::UInt32 b3 = static_cast<NGIN::UInt32>(std::to_integer<NGIN::UInt8>(header[3]));
             return (b0 << 24) | (b1 << 16) | (b2 << 8) | b3;
         }
 
@@ -120,7 +127,7 @@ namespace NGIN::Net::Transport::Filters
             std::size_t offset = 0;
             while (offset < data.size())
             {
-                const auto bytes = co_await stream.WriteAsync(ctx, data.subspan(offset), token);
+                const NGIN::UInt32 bytes = co_await stream.WriteAsync(ctx, data.subspan(offset), token);
                 if (bytes == 0)
                 {
                     co_await NGIN::Async::DomainFailure(
@@ -140,7 +147,7 @@ namespace NGIN::Net::Transport::Filters
             std::size_t offset = 0;
             while (offset < destination.size())
             {
-                const auto bytes = co_await stream.ReadAsync(ctx, destination.subspan(offset), token);
+                const NGIN::UInt32 bytes = co_await stream.ReadAsync(ctx, destination.subspan(offset), token);
                 if (bytes == 0)
                 {
                     co_await NGIN::Async::DomainFailure(

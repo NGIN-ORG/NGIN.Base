@@ -26,25 +26,38 @@ namespace NGIN::Net
     class NGIN_NET_API TcpListener final
     {
     public:
-        TcpListener() noexcept                         = default;
-        TcpListener(const TcpListener&)                = delete;
-        TcpListener& operator=(const TcpListener&)     = delete;
-        TcpListener(TcpListener&&) noexcept            = default;
+        /// @brief Constructs a closed listener.
+        TcpListener() noexcept = default;
+        /// @brief Listeners are non-copyable because they uniquely own a native socket.
+        TcpListener(const TcpListener&) = delete;
+        /// @brief Listeners are non-copy-assignable because they uniquely own a native socket.
+        TcpListener& operator=(const TcpListener&) = delete;
+        /// @brief Transfers native socket ownership from another listener.
+        TcpListener(TcpListener&&) noexcept = default;
+        /// @brief Transfers native socket ownership from another listener.
         TcpListener& operator=(TcpListener&&) noexcept = default;
 
-        NetExpected<void>      Open(AddressFamily family  = AddressFamily::DualStack,
-                                    SocketOptions options = {}) noexcept;
-        NetExpected<void>      Bind(Endpoint localEndpoint) noexcept;
-        NetExpected<void>      Listen(NGIN::Int32 backlog = 128) noexcept;
+        /// @brief Creates a non-blocking TCP socket with the requested family and options.
+        NetExpected<void> Open(AddressFamily family  = AddressFamily::DualStack,
+                               SocketOptions options = {}) noexcept;
+        /// @brief Binds the listener socket to a local endpoint.
+        NetExpected<void> Bind(Endpoint localEndpoint) noexcept;
+        /// @brief Begins listening with the requested pending-connection backlog.
+        NetExpected<void> Listen(NGIN::Int32 backlog = 128) noexcept;
+        /// @brief Attempts to accept one connection without blocking.
         NetExpected<TcpSocket> TryAccept() noexcept;
 
+        /// @brief Asynchronously accepts one connection using driver readiness and cancellation.
         NGIN::Async::Task<TcpSocket, NetError> AcceptAsync(NGIN::Async::TaskContext&      ctx,
                                                            NetworkDriver&                 driver,
                                                            NGIN::Async::CancellationToken token);
 
+        /// @brief Closes the listener; calling Close() repeatedly is safe.
         void Close() noexcept;
 
-        [[nodiscard]] SocketHandle&       Handle() noexcept { return m_handle; }
+        /// @brief Returns mutable access to the owned native-handle wrapper.
+        [[nodiscard]] SocketHandle& Handle() noexcept { return m_handle; }
+        /// @brief Returns the owned native-handle wrapper.
         [[nodiscard]] const SocketHandle& Handle() const noexcept { return m_handle; }
 
     private:
