@@ -26,7 +26,9 @@ namespace NGIN::IO
         /// @brief Replaces this handle with another process handle.
         Process& operator=(Process&& other) noexcept;
 
-        Process(const Process&)            = delete;
+        /// @brief Processes are non-copyable because they uniquely own platform process state.
+        Process(const Process&) = delete;
+        /// @brief Processes are non-copy-assignable because they uniquely own platform process state.
         Process& operator=(const Process&) = delete;
 
         /// @brief Starts a child process using the supplied launch policy.

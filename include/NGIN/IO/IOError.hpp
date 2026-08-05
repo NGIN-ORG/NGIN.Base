@@ -1,9 +1,9 @@
 #pragma once
 
-#include <NGIN/IO/Path.hpp>
-#include <NGIN/Text/String.hpp>
 #include <NGIN/Defines.hpp>
+#include <NGIN/IO/Path.hpp>
 #include <NGIN/Primitives.hpp>
+#include <NGIN/Text/String.hpp>
 #include <NGIN/Utilities/Error.hpp>
 
 namespace NGIN::IO
@@ -43,14 +43,16 @@ namespace NGIN::IO
         Path        secondaryPath {};
         String      message {};
 
+        /// @brief Constructs an empty error payload.
         IOError() noexcept = default;
 
+        /// @brief Constructs an error from its portable and optional native codes.
         explicit IOError(IOErrorCode errorCode, Int32 errorSystemCode = 0) noexcept
-            : code(errorCode)
-            , systemCode(errorSystemCode)
+            : code(errorCode), systemCode(errorSystemCode)
         {
         }
 
+        /// @brief Converts this payload to the common error-domain representation.
         [[nodiscard]] constexpr NGIN::Utilities::ErrorInfo ToErrorInfo() const noexcept
         {
             return {NGIN::Utilities::ErrorDomain::IO, code, systemCode};

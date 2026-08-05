@@ -19,6 +19,7 @@ namespace NGIN::IO
     class NGIN_IO_API DynamicLibraryError final : public std::runtime_error
     {
     public:
+        /// @brief Constructs an error with platform or symbol-resolution context.
         explicit DynamicLibraryError(const std::string& message)
             : std::runtime_error(message)
         {
@@ -45,19 +46,33 @@ namespace NGIN::IO
             Now,
         };
 
+        /// @brief Constructs a wrapper and loads immediately when @p loadMode is `Now`.
+        /// @throws DynamicLibraryError if immediate loading fails.
         explicit DynamicLibrary(Path libraryPath, LoadMode loadMode = LoadMode::Now);
+        /// @brief Constructs a wrapper from UTF-8 path text and optionally loads it immediately.
+        /// @throws DynamicLibraryError if immediate loading fails.
         explicit DynamicLibrary(std::string_view libraryPath, LoadMode loadMode = LoadMode::Now);
+        /// @brief Unloads the library if necessary.
         ~DynamicLibrary() noexcept;
 
+        /// @brief Transfers the native library handle from another wrapper.
         DynamicLibrary(DynamicLibrary&& other) noexcept;
+        /// @brief Unloads this library and transfers the handle from another wrapper.
         DynamicLibrary& operator=(DynamicLibrary&& other) noexcept;
 
+        /// @brief Loads the selected library if it is not already loaded.
+        /// @throws DynamicLibraryError when the platform loader rejects the library.
         void Load();
+        /// @brief Unloads the library and invalidates all previously resolved symbols.
         void Unload() noexcept;
 
+        /// @brief Constructs and returns a loaded dynamic library.
         [[nodiscard]] static DynamicLibrary Open(Path libraryPath, LoadMode loadMode = LoadMode::Now);
+        /// @brief Constructs and returns a loaded dynamic library from UTF-8 path text.
         [[nodiscard]] static DynamicLibrary Open(std::string_view libraryPath, LoadMode loadMode = LoadMode::Now);
 
+        /// @brief Resolves a required object or function pointer by exported symbol name.
+        /// @throws DynamicLibraryError when the library is unloaded or the symbol is absent.
         template<typename T>
         [[nodiscard]] T Resolve(std::string_view symbolName) const
         {
@@ -65,6 +80,8 @@ namespace NGIN::IO
             return reinterpret_cast<T>(ResolveRaw(symbolName));
         }
 
+        /// @brief Attempts to resolve an exported object or function pointer.
+        /// @return The pointer, or an empty optional when the library or symbol is unavailable.
         template<typename T>
         [[nodiscard]] std::optional<T> TryResolve(std::string_view symbolName) const
         {
@@ -78,9 +95,12 @@ namespace NGIN::IO
             return std::nullopt;
         }
 
-        [[nodiscard]] bool        IsLoaded() const noexcept;
+        /// @brief Returns whether a native library handle is currently loaded.
+        [[nodiscard]] bool IsLoaded() const noexcept;
+        /// @brief Returns the configured library path.
         [[nodiscard]] const Path& GetPath() const noexcept;
-        [[nodiscard]] LoadMode    GetLoadMode() const noexcept;
+        /// @brief Returns the configured binding mode.
+        [[nodiscard]] LoadMode GetLoadMode() const noexcept;
 
     private:
         [[nodiscard]] void*              ResolveRaw(std::string_view symbolName) const;

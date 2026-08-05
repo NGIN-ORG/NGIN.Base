@@ -19,6 +19,7 @@ namespace NGIN::IO
 
     using AsyncTaskVoid = NGIN::Async::Task<void, IOError>;
 
+    /// @brief Converts an IO result to the representation returned by asynchronous IO operations.
     template<typename T>
     [[nodiscard]] inline AsyncResult<T> ToAsyncResult(Result<T>&& result)
     {
@@ -27,6 +28,7 @@ namespace NGIN::IO
         return AsyncResult<T>(std::move(result).TakeValue());
     }
 
+    /// @brief Converts a value-less IO result to its asynchronous representation.
     [[nodiscard]] inline AsyncResult<void> ToAsyncResult(ResultVoid&& result)
     {
         if (!result.HasValue())

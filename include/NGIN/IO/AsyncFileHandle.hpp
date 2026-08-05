@@ -7,6 +7,7 @@
 
 namespace NGIN::IO
 {
+    /// @brief Move-only type-erased handle for cancellation-aware asynchronous file IO.
     class NGIN_IO_API AsyncFileHandle
     {
     public:
@@ -30,6 +31,7 @@ namespace NGIN::IO
         using CloseFn  = AsyncTaskVoid (*)(const std::shared_ptr<void>& state, NGIN::Async::TaskContext& ctx);
         using IsOpenFn = bool (*)(const std::shared_ptr<void>& state) noexcept;
 
+        /// @brief Function table implemented by an asynchronous file backend.
         struct Operations
         {
             ReadFn    read {};
@@ -41,21 +43,32 @@ namespace NGIN::IO
             IsOpenFn  isOpen {};
         };
 
+        /// @brief Constructs an empty asynchronous handle.
         AsyncFileHandle() noexcept = default;
+        /// @brief Binds shared backend state to a static operation table.
+        /// @note The operation table must outlive this handle and all of its moves.
         AsyncFileHandle(std::shared_ptr<void> state, const Operations* operations) noexcept
             : m_state(std::move(state)), m_operations(operations)
         {
         }
 
-        AsyncFileHandle(const AsyncFileHandle&)                = delete;
-        AsyncFileHandle& operator=(const AsyncFileHandle&)     = delete;
-        AsyncFileHandle(AsyncFileHandle&&) noexcept            = default;
+        /// @brief Asynchronous handles are non-copyable to keep ownership explicit.
+        AsyncFileHandle(const AsyncFileHandle&) = delete;
+        /// @brief Asynchronous handles are non-copy-assignable to keep ownership explicit.
+        AsyncFileHandle& operator=(const AsyncFileHandle&) = delete;
+        /// @brief Transfers shared backend state and its operation table.
+        AsyncFileHandle(AsyncFileHandle&&) noexcept = default;
+        /// @brief Transfers shared backend state and its operation table.
         AsyncFileHandle& operator=(AsyncFileHandle&&) noexcept = default;
-        ~AsyncFileHandle()                                     = default;
+        /// @brief Releases this handle's reference to the backend state.
+        ~AsyncFileHandle() = default;
 
+        /// @brief Returns whether state and an operation table are both bound.
         [[nodiscard]] bool IsValid() const noexcept { return static_cast<bool>(m_state) && m_operations != nullptr; }
-        explicit           operator bool() const noexcept { return IsValid(); }
+        /// @brief Returns whether state and an operation table are both bound.
+        explicit operator bool() const noexcept { return IsValid(); }
 
+        /// @brief Asynchronously reads from the backend's sequential position.
         AsyncTask<UIntSize> ReadAsync(NGIN::Async::TaskContext& ctx, std::span<NGIN::Byte> destination)
         {
             if (!IsValid() || m_operations->read == nullptr)
@@ -63,6 +76,7 @@ namespace NGIN::IO
             co_return co_await m_operations->read(m_state, ctx, destination);
         }
 
+        /// @brief Asynchronously writes at the backend's sequential position.
         AsyncTask<UIntSize> WriteAsync(NGIN::Async::TaskContext& ctx, std::span<const NGIN::Byte> source)
         {
             if (!IsValid() || m_operations->write == nullptr)
@@ -70,6 +84,7 @@ namespace NGIN::IO
             co_return co_await m_operations->write(m_state, ctx, source);
         }
 
+        /// @brief Asynchronously reads at an absolute offset without changing sequential position.
         AsyncTask<UIntSize> ReadAtAsync(NGIN::Async::TaskContext& ctx, UInt64 offset, std::span<NGIN::Byte> destination)
         {
             if (!IsValid() || m_operations->readAt == nullptr)
@@ -77,6 +92,7 @@ namespace NGIN::IO
             co_return co_await m_operations->readAt(m_state, ctx, offset, destination);
         }
 
+        /// @brief Asynchronously writes at an absolute offset without changing sequential position.
         AsyncTask<UIntSize> WriteAtAsync(NGIN::Async::TaskContext& ctx, UInt64 offset, std::span<const NGIN::Byte> source)
         {
             if (!IsValid() || m_operations->writeAt == nullptr)
@@ -84,6 +100,7 @@ namespace NGIN::IO
             co_return co_await m_operations->writeAt(m_state, ctx, offset, source);
         }
 
+        /// @brief Asynchronously flushes buffered contents to storage.
         AsyncTaskVoid FlushAsync(NGIN::Async::TaskContext& ctx)
         {
             if (!IsValid() || m_operations->flush == nullptr)
@@ -95,6 +112,7 @@ namespace NGIN::IO
             co_return;
         }
 
+        /// @brief Asynchronously closes the backend file resource.
         AsyncTaskVoid CloseAsync(NGIN::Async::TaskContext& ctx)
         {
             if (!IsValid() || m_operations->close == nullptr)
@@ -106,6 +124,7 @@ namespace NGIN::IO
             co_return;
         }
 
+        /// @brief Returns whether the bound backend reports an open file resource.
         [[nodiscard]] bool IsOpen() const noexcept
         {
             return IsValid() && m_operations->isOpen != nullptr && m_operations->isOpen(m_state);

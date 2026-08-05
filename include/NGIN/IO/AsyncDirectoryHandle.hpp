@@ -7,6 +7,7 @@
 
 namespace NGIN::IO
 {
+    /// @brief Move-only type-erased handle for asynchronous directory-relative operations.
     class NGIN_IO_API AsyncDirectoryHandle
     {
     public:
@@ -27,6 +28,7 @@ namespace NGIN::IO
         using ReadSymlinkFn = AsyncTask<Path> (*)(
                 const std::shared_ptr<void>& state, NGIN::Async::TaskContext& ctx, const Path& path);
 
+        /// @brief Function table implemented by an asynchronous directory backend.
         struct Operations
         {
             ExistsFn        exists {};
@@ -36,21 +38,32 @@ namespace NGIN::IO
             ReadSymlinkFn   readSymlink {};
         };
 
+        /// @brief Constructs an empty asynchronous directory handle.
         AsyncDirectoryHandle() noexcept = default;
+        /// @brief Binds shared backend state to a static operation table.
+        /// @note The operation table must outlive this handle and all of its moves.
         AsyncDirectoryHandle(std::shared_ptr<void> state, const Operations* operations) noexcept
             : m_state(std::move(state)), m_operations(operations)
         {
         }
 
-        AsyncDirectoryHandle(const AsyncDirectoryHandle&)                = delete;
-        AsyncDirectoryHandle& operator=(const AsyncDirectoryHandle&)     = delete;
-        AsyncDirectoryHandle(AsyncDirectoryHandle&&) noexcept            = default;
+        /// @brief Asynchronous directory handles are non-copyable to keep ownership explicit.
+        AsyncDirectoryHandle(const AsyncDirectoryHandle&) = delete;
+        /// @brief Asynchronous directory handles are non-copy-assignable to keep ownership explicit.
+        AsyncDirectoryHandle& operator=(const AsyncDirectoryHandle&) = delete;
+        /// @brief Transfers shared backend state and its operation table.
+        AsyncDirectoryHandle(AsyncDirectoryHandle&&) noexcept = default;
+        /// @brief Transfers shared backend state and its operation table.
         AsyncDirectoryHandle& operator=(AsyncDirectoryHandle&&) noexcept = default;
-        ~AsyncDirectoryHandle()                                          = default;
+        /// @brief Releases this handle's reference to the backend state.
+        ~AsyncDirectoryHandle() = default;
 
+        /// @brief Returns whether state and an operation table are both bound.
         [[nodiscard]] bool IsValid() const noexcept { return static_cast<bool>(m_state) && m_operations != nullptr; }
-        explicit           operator bool() const noexcept { return IsValid(); }
+        /// @brief Returns whether state and an operation table are both bound.
+        explicit operator bool() const noexcept { return IsValid(); }
 
+        /// @brief Asynchronously checks whether a relative entry exists.
         AsyncTask<bool> ExistsAsync(NGIN::Async::TaskContext& ctx, Path path)
         {
             if (!IsValid() || m_operations->exists == nullptr)
@@ -58,6 +71,7 @@ namespace NGIN::IO
             co_return co_await m_operations->exists(m_state, ctx, path);
         }
 
+        /// @brief Asynchronously queries metadata for a relative entry.
         AsyncTask<FileInfo> GetInfoAsync(NGIN::Async::TaskContext& ctx, Path path, MetadataOptions options = {})
         {
             if (!IsValid() || m_operations->getInfo == nullptr)
@@ -65,6 +79,7 @@ namespace NGIN::IO
             co_return co_await m_operations->getInfo(m_state, ctx, path, options);
         }
 
+        /// @brief Asynchronously opens a file relative to this directory.
         AsyncTask<AsyncFileHandle> OpenFileAsync(NGIN::Async::TaskContext& ctx, Path path, FileOpenOptions options)
         {
             if (!IsValid() || m_operations->openFile == nullptr)
@@ -72,6 +87,7 @@ namespace NGIN::IO
             co_return co_await m_operations->openFile(m_state, ctx, path, options);
         }
 
+        /// @brief Asynchronously opens a directory relative to this directory.
         AsyncTask<AsyncDirectoryHandle> OpenDirectoryAsync(NGIN::Async::TaskContext& ctx, Path path)
         {
             if (!IsValid() || m_operations->openDirectory == nullptr)
@@ -79,6 +95,7 @@ namespace NGIN::IO
             co_return co_await m_operations->openDirectory(m_state, ctx, path);
         }
 
+        /// @brief Asynchronously reads the stored target of a relative symbolic link.
         AsyncTask<Path> ReadSymlinkAsync(NGIN::Async::TaskContext& ctx, Path path)
         {
             if (!IsValid() || m_operations->readSymlink == nullptr)

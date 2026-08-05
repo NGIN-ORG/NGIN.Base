@@ -7,24 +7,35 @@
 
 namespace NGIN::IO
 {
+    /// @brief Move-only owning facade over an incremental directory enumerator.
     class NGIN_IO_API DirectoryEnumerator
     {
     public:
+        /// @brief Constructs an empty enumerator.
         DirectoryEnumerator() noexcept = default;
+        /// @brief Takes ownership of a concrete enumerator implementation.
         explicit DirectoryEnumerator(std::unique_ptr<IDirectoryEnumerator> enumerator) noexcept
             : m_enumerator(std::move(enumerator))
         {
         }
 
-        DirectoryEnumerator(const DirectoryEnumerator&)                = delete;
-        DirectoryEnumerator& operator=(const DirectoryEnumerator&)     = delete;
-        DirectoryEnumerator(DirectoryEnumerator&&) noexcept            = default;
+        /// @brief Enumerators are non-copyable because they uniquely own traversal state.
+        DirectoryEnumerator(const DirectoryEnumerator&) = delete;
+        /// @brief Enumerators are non-copy-assignable because they uniquely own traversal state.
+        DirectoryEnumerator& operator=(const DirectoryEnumerator&) = delete;
+        /// @brief Transfers traversal ownership from another enumerator.
+        DirectoryEnumerator(DirectoryEnumerator&&) noexcept = default;
+        /// @brief Transfers traversal ownership from another enumerator.
         DirectoryEnumerator& operator=(DirectoryEnumerator&&) noexcept = default;
-        ~DirectoryEnumerator()                                         = default;
+        /// @brief Destroys the owned traversal state.
+        ~DirectoryEnumerator() = default;
 
+        /// @brief Returns whether this facade contains an enumerator implementation.
         [[nodiscard]] bool IsValid() const noexcept { return static_cast<bool>(m_enumerator); }
-        explicit           operator bool() const noexcept { return IsValid(); }
+        /// @brief Returns whether this facade contains an enumerator implementation.
+        explicit operator bool() const noexcept { return IsValid(); }
 
+        /// @brief Returns the next entry, or a successful empty result at end of enumeration.
         Result<DirectoryEnumerationNext> Next() noexcept
         {
             if (!m_enumerator)
