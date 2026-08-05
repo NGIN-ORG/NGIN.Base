@@ -263,14 +263,14 @@ namespace NGIN::SIMD
                 __m128 fx = _mm_mul_ps(x, _mm_set1_ps(LOG2_E));
                 fx        = _mm_add_ps(fx, _mm_set1_ps(0.5F));
 
-                emm0 = _mm_cvttps_epi32(fx);
+                emm0       = _mm_cvttps_epi32(fx);
                 __m128 tmp = _mm_cvtepi32_ps(emm0);
 
                 __m128 mask = _mm_cmpgt_ps(tmp, fx);
                 mask        = _mm_and_ps(mask, one);
                 fx          = _mm_sub_ps(tmp, mask);
 
-                tmp = _mm_mul_ps(fx, _mm_set1_ps(C1));
+                tmp      = _mm_mul_ps(fx, _mm_set1_ps(C1));
                 __m128 z = _mm_mul_ps(fx, _mm_set1_ps(C2));
                 x        = _mm_sub_ps(x, tmp);
                 x        = _mm_sub_ps(x, z);
@@ -293,26 +293,26 @@ namespace NGIN::SIMD
                 y = _mm_add_ps(y, x);
                 y = _mm_add_ps(y, one);
 
-                emm0 = _mm_cvttps_epi32(_mm_add_ps(fx, _mm_set1_ps(127.0F)));
-                emm0 = _mm_slli_epi32(emm0, 23);
+                emm0         = _mm_cvttps_epi32(_mm_add_ps(fx, _mm_set1_ps(127.0F)));
+                emm0         = _mm_slli_epi32(emm0, 23);
                 __m128 pow2n = _mm_castsi128_ps(emm0);
                 return _mm_mul_ps(y, pow2n);
             }
 
             [[nodiscard]] inline auto LogPs(__m128 x) noexcept -> __m128
             {
-                __m128i emm0;
-                __m128  one = _mm_set1_ps(1.0F);
+                __m128i      emm0;
+                __m128       one         = _mm_set1_ps(1.0F);
                 const __m128 original    = x;
                 const __m128 invalidMask = _mm_cmple_ps(original, _mm_setzero_ps());
 
-                x = _mm_max_ps(x, _mm_set1_ps(MIN_NORM_POS));
+                x    = _mm_max_ps(x, _mm_set1_ps(MIN_NORM_POS));
                 emm0 = _mm_srli_epi32(_mm_castps_si128(x), 23);
 
                 x = _mm_and_ps(x, _mm_castsi128_ps(_mm_set1_epi32(0x7FFFFF)));
                 x = _mm_or_ps(x, _mm_set1_ps(0.5F));
 
-                emm0 = _mm_sub_epi32(emm0, _mm_set1_epi32(0x7F));
+                emm0     = _mm_sub_epi32(emm0, _mm_set1_epi32(0x7F));
                 __m128 e = _mm_cvtepi32_ps(emm0);
                 e        = _mm_add_ps(e, one);
 
@@ -373,31 +373,31 @@ namespace NGIN::SIMD
                 __m128 signSin = _mm_and_ps(x, _mm_set1_ps(-0.0F));
                 x              = _mm_and_ps(x, _mm_castsi128_ps(_mm_set1_epi32(0x7FFFFFFF)));
 
-                __m128 y = _mm_mul_ps(x, _mm_set1_ps(CEPHES_FOPI));
+                __m128  y    = _mm_mul_ps(x, _mm_set1_ps(CEPHES_FOPI));
                 __m128i emm2 = _mm_cvttps_epi32(y);
                 emm2         = _mm_add_epi32(emm2, _mm_set1_epi32(1));
                 emm2         = _mm_and_si128(emm2, _mm_set1_epi32(~1));
                 y            = _mm_cvtepi32_ps(emm2);
 
-                __m128i emm0 = _mm_and_si128(emm2, _mm_set1_epi32(4));
-                emm0         = _mm_slli_epi32(emm0, 29);
+                __m128i emm0    = _mm_and_si128(emm2, _mm_set1_epi32(4));
+                emm0            = _mm_slli_epi32(emm0, 29);
                 __m128 swapSign = _mm_castsi128_ps(emm0);
-                signSin        = _mm_xor_ps(signSin, swapSign);
+                signSin         = _mm_xor_ps(signSin, swapSign);
 
-                __m128i emm4 = _mm_sub_epi32(emm2, _mm_set1_epi32(2));
-                emm4          = _mm_and_si128(emm4, _mm_set1_epi32(4));
+                __m128i emm4   = _mm_sub_epi32(emm2, _mm_set1_epi32(2));
+                emm4           = _mm_and_si128(emm4, _mm_set1_epi32(4));
                 __m128 signCos = _mm_castsi128_ps(emm4);
 
-                emm0 = _mm_and_si128(emm2, _mm_set1_epi32(2));
-                emm0 = _mm_cmpeq_epi32(emm0, _mm_setzero_si128());
+                emm0            = _mm_and_si128(emm2, _mm_set1_epi32(2));
+                emm0            = _mm_cmpeq_epi32(emm0, _mm_setzero_si128());
                 __m128 polyMask = _mm_castsi128_ps(emm0);
 
                 const __m128 pi1 = _mm_set1_ps(1.5707962512969971F);
                 const __m128 pi2 = _mm_set1_ps(7.5497894158615964e-08F);
                 const __m128 pi3 = _mm_set1_ps(5.390302529957764e-15F);
                 __m128       xr  = _mm_sub_ps(x, _mm_mul_ps(y, pi1));
-                xr                = _mm_sub_ps(xr, _mm_mul_ps(y, pi2));
-                xr                = _mm_sub_ps(xr, _mm_mul_ps(y, pi3));
+                xr               = _mm_sub_ps(xr, _mm_mul_ps(y, pi2));
+                xr               = _mm_sub_ps(xr, _mm_mul_ps(y, pi3));
 
                 __m128 z = _mm_mul_ps(xr, xr);
 
@@ -484,17 +484,17 @@ namespace NGIN::SIMD
 
         namespace fast_math_detail
         {
-            inline constexpr float LN2                 = 0.69314718055994530942F;
-            inline constexpr float LN2_HIGH            = 0.693359375F;
-            inline constexpr float LN2_LOW             = -2.12194440e-4F;
-            inline constexpr float LOG2_E              = 1.4426950408889634074F;
-            inline constexpr float EXP_MAX_INPUT       = 88.72283905206835F;
-            inline constexpr float EXP_MIN_INPUT       = -87.33654475F;
-            inline constexpr float SQRT_HALF           = 0.70710678118654752440F;
-            inline constexpr float HALF_PI_HIGH        = 1.57079625129699707031F;
-            inline constexpr float HALF_PI_LOW         = 7.54978941586159635335e-08F;
-            inline constexpr float INV_HALF_PI         = 0.63661977236758134308F;
-            inline constexpr float TWO_POW_24          = 16777216.0F;
+            inline constexpr float LN2           = 0.69314718055994530942F;
+            inline constexpr float LN2_HIGH      = 0.693359375F;
+            inline constexpr float LN2_LOW       = -2.12194440e-4F;
+            inline constexpr float LOG2_E        = 1.4426950408889634074F;
+            inline constexpr float EXP_MAX_INPUT = 88.72283905206835F;
+            inline constexpr float EXP_MIN_INPUT = -87.33654475F;
+            inline constexpr float SQRT_HALF     = 0.70710678118654752440F;
+            inline constexpr float HALF_PI_HIGH  = 1.57079625129699707031F;
+            inline constexpr float HALF_PI_LOW   = 7.54978941586159635335e-08F;
+            inline constexpr float INV_HALF_PI   = 0.63661977236758134308F;
+            inline constexpr float TWO_POW_24    = 16777216.0F;
 
             struct AngleReductionResult
             {
@@ -519,9 +519,7 @@ namespace NGIN::SIMD
             [[nodiscard]] inline constexpr auto EvaluateSinPolynomial(float x) noexcept -> float
             {
                 const float x2 = x * x;
-                return x + x * x2 * (-1.6666667163e-1F +
-                                     x2 * (8.3333337680e-3F +
-                                           x2 * (-1.9841270114e-4F + x2 * 2.7557314297e-6F)));
+                return x + x * x2 * (-1.6666667163e-1F + x2 * (8.3333337680e-3F + x2 * (-1.9841270114e-4F + x2 * 2.7557314297e-6F)));
             }
 
             [[nodiscard]] inline constexpr auto EvaluateCosPolynomial(float x) noexcept -> float
@@ -541,8 +539,8 @@ namespace NGIN::SIMD
                 constexpr float c4 = 1.6666665459e-1F;
                 constexpr float c5 = 5.0000001201e-1F;
 
-                const float     r2   = residual * residual;
-                const float     poly = (((((c0 * residual + c1) * residual + c2) * residual + c3) * residual + c4) * residual + c5) * r2;
+                const float r2   = residual * residual;
+                const float poly = (((((c0 * residual + c1) * residual + c2) * residual + c3) * residual + c4) * residual + c5) * r2;
                 return poly + residual + 1.0F;
             }
 
@@ -639,14 +637,14 @@ namespace NGIN::SIMD
 
                 switch (reduction.quadrant)
                 {
-                case 0:
-                    return sinBase;
-                case 1:
-                    return cosBase;
-                case 2:
-                    return -sinBase;
-                default:
-                    return -cosBase;
+                    case 0:
+                        return sinBase;
+                    case 1:
+                        return cosBase;
+                    case 2:
+                        return -sinBase;
+                    default:
+                        return -cosBase;
                 }
             }
 
@@ -672,14 +670,14 @@ namespace NGIN::SIMD
 
                 switch (reduction.quadrant)
                 {
-                case 0:
-                    return cosBase;
-                case 1:
-                    return -sinBase;
-                case 2:
-                    return -cosBase;
-                default:
-                    return sinBase;
+                    case 0:
+                        return cosBase;
+                    case 1:
+                        return -sinBase;
+                    case 2:
+                        return -cosBase;
+                    default:
+                        return sinBase;
                 }
             }
 
@@ -758,36 +756,36 @@ namespace NGIN::SIMD
             }
         };
 
-	        template<class Backend, class T>
-	        struct MathPolicyLane<FastMathPolicy, Backend, T> : MathPolicyLane<StrictMathPolicy, Backend, T>
-	        {
-	            static_assert(std::is_floating_point_v<T>, "FastMathPolicy requires floating-point lane types.");
+        template<class Backend, class T>
+        struct MathPolicyLane<FastMathPolicy, Backend, T> : MathPolicyLane<StrictMathPolicy, Backend, T>
+        {
+            static_assert(std::is_floating_point_v<T>, "FastMathPolicy requires floating-point lane types.");
 
-	            [[nodiscard]] static auto Exp(T value) noexcept -> T
-	            {
-	                return std::exp(value);
-	            }
+            [[nodiscard]] static auto Exp(T value) noexcept -> T
+            {
+                return std::exp(value);
+            }
 
-	            [[nodiscard]] static auto Log(T value) noexcept -> T
-	            {
-	                return std::log(value);
-	            }
+            [[nodiscard]] static auto Log(T value) noexcept -> T
+            {
+                return std::log(value);
+            }
 
-	            [[nodiscard]] static auto Sin(T value) noexcept -> T
-	            {
-	                return std::sin(value);
-	            }
+            [[nodiscard]] static auto Sin(T value) noexcept -> T
+            {
+                return std::sin(value);
+            }
 
-	            [[nodiscard]] static auto Cos(T value) noexcept -> T
-	            {
-	                return std::cos(value);
-	            }
+            [[nodiscard]] static auto Cos(T value) noexcept -> T
+            {
+                return std::cos(value);
+            }
 
-	            [[nodiscard]] static auto Sqrt(T value) noexcept -> T
-	            {
-	                return std::sqrt(value);
-	            }
-	        };
+            [[nodiscard]] static auto Sqrt(T value) noexcept -> T
+            {
+                return std::sqrt(value);
+            }
+        };
 
         template<class Policy, class VecType>
         struct VectorizedMath
@@ -803,8 +801,8 @@ namespace NGIN::SIMD
         template<int Lanes>
         struct VectorizedMath<StrictMathPolicy, Vec<float, SSE2Tag, Lanes>>
         {
-            using VecType = Vec<float, SSE2Tag, Lanes>;
-            static constexpr bool lane_match = VecType::lanes == detail::BackendTraits<SSE2Tag, float>::native_lanes;
+            using VecType                      = Vec<float, SSE2Tag, Lanes>;
+            static constexpr bool lane_match   = VecType::lanes == detail::BackendTraits<SSE2Tag, float>::native_lanes;
             static constexpr bool supportsExp  = false;
             static constexpr bool supportsLog  = false;
             static constexpr bool supportsSin  = false;
@@ -857,8 +855,8 @@ namespace NGIN::SIMD
         template<int Lanes>
         struct VectorizedMath<StrictMathPolicy, Vec<float, AVX2Tag, Lanes>>
         {
-            using VecType = Vec<float, AVX2Tag, Lanes>;
-            static constexpr bool lane_match = VecType::lanes == detail::BackendTraits<AVX2Tag, float>::native_lanes;
+            using VecType                      = Vec<float, AVX2Tag, Lanes>;
+            static constexpr bool lane_match   = VecType::lanes == detail::BackendTraits<AVX2Tag, float>::native_lanes;
             static constexpr bool supportsExp  = false;
             static constexpr bool supportsLog  = false;
             static constexpr bool supportsSin  = false;
@@ -971,6 +969,7 @@ namespace NGIN::SIMD
 
     }// namespace detail
 
+    /// @brief Boolean lane mask implemented by the selected SIMD backend.
     template<int Lanes, class Backend>
     struct Mask
     {
@@ -981,15 +980,21 @@ namespace NGIN::SIMD
         using storage_type         = typename detail::BackendTraits<Backend, bool>::template MaskStorage<Lanes>;
         using operations           = typename detail::BackendTraits<Backend, bool>::template Ops<Lanes>;
 
+        /// @brief Constructs a mask with backend-default lane state.
         constexpr Mask() noexcept = default;
+        /// @brief Broadcasts one Boolean value to every lane.
         constexpr explicit Mask(bool value) noexcept
             : storage(value) {}
 
+        /// @brief Returns one lane value.
+        /// @pre @p index is in `[0, lanes)`.
         [[nodiscard]] constexpr auto GetLane(int index) const noexcept -> bool
         {
             return storage.Get(index);
         }
 
+        /// @brief Replaces one lane value.
+        /// @pre @p index is in `[0, lanes)`.
         constexpr void SetLane(int index, bool value) noexcept
         {
             storage.Set(index, value);
@@ -998,6 +1003,7 @@ namespace NGIN::SIMD
         storage_type storage {};
     };
 
+    /// @brief Fixed-lane arithmetic vector implemented by a selectable SIMD backend.
     template<class T, class Backend, int Lanes>
     struct Vec
     {
@@ -1010,11 +1016,14 @@ namespace NGIN::SIMD
         using storage_type = typename detail::BackendTraits<Backend, T>::template Storage<lanes>;
         using operations   = typename detail::BackendTraits<Backend, T>::template Ops<lanes>;
 
+        /// @brief Constructs a vector with backend-default lane state.
         constexpr Vec() noexcept = default;
 
+        /// @brief Broadcasts one value to every lane.
         constexpr explicit Vec(T value) noexcept
             : storage(value) {}
 
+        /// @brief Returns lanes initialized to `start + lane * step`.
         [[nodiscard]] static constexpr auto Iota(T start, T step) noexcept -> Vec
         {
             Vec result;
@@ -1027,6 +1036,8 @@ namespace NGIN::SIMD
             return result;
         }
 
+        /// @brief Loads one unaligned contiguous vector from memory.
+        /// @pre @p pointer refers to at least `lanes` readable values.
         [[nodiscard]] static constexpr auto Load(const T* pointer) noexcept -> Vec
         {
             Vec result;
@@ -1034,6 +1045,8 @@ namespace NGIN::SIMD
             return result;
         }
 
+        /// @brief Loads one aligned contiguous vector from memory.
+        /// @pre @p pointer satisfies the backend alignment represented by @p align.
         [[nodiscard]] static constexpr auto LoadAligned(const T*             pointer,
                                                         [[maybe_unused]] int align = alignof(T) * lanes) noexcept -> Vec
         {
@@ -1042,6 +1055,7 @@ namespace NGIN::SIMD
             return result;
         }
 
+        /// @brief Loads enabled lanes and fills disabled lanes with @p fill.
         [[nodiscard]] static constexpr auto Load(const T*         pointer,
                                                  const mask_type& mask,
                                                  T                fill = T {}) noexcept -> Vec
@@ -1051,22 +1065,28 @@ namespace NGIN::SIMD
             return result;
         }
 
+        /// @brief Stores every lane to unaligned contiguous memory.
+        /// @pre @p pointer refers to at least `lanes` writable values.
         constexpr void Store(T* pointer) const noexcept
         {
             operations::Store(storage, pointer);
         }
 
+        /// @brief Stores every lane to aligned contiguous memory.
+        /// @pre @p pointer satisfies the backend alignment represented by @p align.
         constexpr void StoreAligned(T*                   pointer,
                                     [[maybe_unused]] int align = alignof(T) * lanes) const noexcept
         {
             operations::StoreAligned(storage, pointer);
         }
 
+        /// @brief Stores only lanes enabled by @p mask.
         constexpr void Store(T* pointer, const mask_type& mask) const noexcept
         {
             operations::StoreMasked(storage, pointer, mask.storage);
         }
 
+        /// @brief Gathers lanes from `base[indices[lane]]`.
         template<class IndexVec>
         [[nodiscard]] static constexpr auto Gather(const T* base, const IndexVec& indices) noexcept -> Vec
             requires SimdVecConcept<IndexVec> && std::is_integral_v<typename IndexVec::value_type>
@@ -1077,6 +1097,7 @@ namespace NGIN::SIMD
             return result;
         }
 
+        /// @brief Gathers enabled lanes and fills disabled lanes with @p fill.
         template<class IndexVec>
         [[nodiscard]] static constexpr auto Gather(const T*         base,
                                                    const IndexVec&  indices,
@@ -1090,6 +1111,7 @@ namespace NGIN::SIMD
             return result;
         }
 
+        /// @brief Scatters every lane to `base[indices[lane]]`.
         template<class IndexVec>
         constexpr void Scatter(T* base, const IndexVec& indices) const noexcept
             requires SimdVecConcept<IndexVec> && std::is_integral_v<typename IndexVec::value_type>
@@ -1098,6 +1120,7 @@ namespace NGIN::SIMD
             operations::Scatter(storage, base, indices.storage);
         }
 
+        /// @brief Scatters only lanes enabled by @p mask.
         template<class IndexVec>
         constexpr void Scatter(T* base, const IndexVec& indices, const mask_type& mask) const noexcept
             requires SimdVecConcept<IndexVec> && std::is_integral_v<typename IndexVec::value_type>
@@ -1106,11 +1129,15 @@ namespace NGIN::SIMD
             operations::ScatterMasked(storage, base, indices.storage, mask.storage);
         }
 
+        /// @brief Returns one lane value.
+        /// @pre @p index is in `[0, lanes)`.
         [[nodiscard]] constexpr auto GetLane(int index) const noexcept -> T
         {
             return storage.Get(index);
         }
 
+        /// @brief Replaces one lane value.
+        /// @pre @p index is in `[0, lanes)`.
         constexpr void SetLane(int index, T value) noexcept
         {
             storage.Set(index, value);
@@ -1119,6 +1146,7 @@ namespace NGIN::SIMD
         storage_type storage {};
     };
 
+    /// @brief Converts every lane according to the exact, saturating, or truncating mode.
     template<class To,
              class Mode = ExactConversion,
              class FromT,
@@ -1137,7 +1165,7 @@ namespace NGIN::SIMD
         ResultVec result;
         for (int lane = 0; lane < ResultVec::lanes; ++lane)
         {
-            const auto laneValue = value.GetLane(lane);
+            const FromT laneValue = value.GetLane(lane);
             if constexpr (std::is_same_v<Mode, ExactConversion>)
             {
                 result.storage.Set(lane, detail::ExactConvertLane<To>(laneValue));
@@ -1160,8 +1188,8 @@ namespace NGIN::SIMD
         template<class Policy, class T, class Backend, int Lanes>
         struct MathPolicyAdapter
         {
-            using VecType = Vec<T, Backend, Lanes>;
-            using LaneOps = MathPolicyLane<Policy, Backend, T>;
+            using VecType    = Vec<T, Backend, Lanes>;
+            using LaneOps    = MathPolicyLane<Policy, Backend, T>;
             using Vectorized = VectorizedMath<Policy, VecType>;
 
             [[nodiscard]] static auto Exp(const VecType& value) noexcept -> VecType
@@ -1252,6 +1280,7 @@ namespace NGIN::SIMD
 
     }// namespace detail
 
+    /// @brief Computes the exponential of every lane using the selected math policy.
     template<class Policy = MathPolicy, class T, class Backend, int Lanes>
         requires detail::IsSupportedMathPolicy<Policy>
     [[nodiscard]] inline auto Exp(const Vec<T, Backend, Lanes>& value) noexcept -> Vec<T, Backend, Lanes>
@@ -1259,6 +1288,7 @@ namespace NGIN::SIMD
         return detail::MathPolicyAdapter<Policy, T, Backend, Lanes>::Exp(value);
     }
 
+    /// @brief Computes the natural logarithm of every lane using the selected math policy.
     template<class Policy = MathPolicy, class T, class Backend, int Lanes>
         requires detail::IsSupportedMathPolicy<Policy>
     [[nodiscard]] inline auto Log(const Vec<T, Backend, Lanes>& value) noexcept -> Vec<T, Backend, Lanes>
@@ -1266,6 +1296,7 @@ namespace NGIN::SIMD
         return detail::MathPolicyAdapter<Policy, T, Backend, Lanes>::Log(value);
     }
 
+    /// @brief Computes the sine of every lane using the selected math policy.
     template<class Policy = MathPolicy, class T, class Backend, int Lanes>
         requires detail::IsSupportedMathPolicy<Policy>
     [[nodiscard]] inline auto Sin(const Vec<T, Backend, Lanes>& value) noexcept -> Vec<T, Backend, Lanes>
@@ -1273,6 +1304,7 @@ namespace NGIN::SIMD
         return detail::MathPolicyAdapter<Policy, T, Backend, Lanes>::Sin(value);
     }
 
+    /// @brief Computes the cosine of every lane using the selected math policy.
     template<class Policy = MathPolicy, class T, class Backend, int Lanes>
         requires detail::IsSupportedMathPolicy<Policy>
     [[nodiscard]] inline auto Cos(const Vec<T, Backend, Lanes>& value) noexcept -> Vec<T, Backend, Lanes>
@@ -1280,6 +1312,7 @@ namespace NGIN::SIMD
         return detail::MathPolicyAdapter<Policy, T, Backend, Lanes>::Cos(value);
     }
 
+    /// @brief Computes the square root of every lane using the selected math policy.
     template<class Policy = MathPolicy, class T, class Backend, int Lanes>
         requires detail::IsSupportedMathPolicy<Policy>
     [[nodiscard]] inline auto Sqrt(const Vec<T, Backend, Lanes>& value) noexcept -> Vec<T, Backend, Lanes>
@@ -1287,6 +1320,7 @@ namespace NGIN::SIMD
         return detail::MathPolicyAdapter<Policy, T, Backend, Lanes>::Sqrt(value);
     }
 
+    /// @brief Adds corresponding vector lanes.
     template<class T, class Backend, int Lanes>
     [[nodiscard]] constexpr auto operator+(Vec<T, Backend, Lanes>        lhs,
                                            const Vec<T, Backend, Lanes>& rhs) noexcept -> Vec<T, Backend, Lanes>
@@ -1295,6 +1329,7 @@ namespace NGIN::SIMD
         return lhs;
     }
 
+    /// @brief Subtracts corresponding vector lanes.
     template<class T, class Backend, int Lanes>
     [[nodiscard]] constexpr auto operator-(Vec<T, Backend, Lanes>        lhs,
                                            const Vec<T, Backend, Lanes>& rhs) noexcept -> Vec<T, Backend, Lanes>
@@ -1303,6 +1338,7 @@ namespace NGIN::SIMD
         return lhs;
     }
 
+    /// @brief Multiplies corresponding vector lanes.
     template<class T, class Backend, int Lanes>
     [[nodiscard]] constexpr auto operator*(Vec<T, Backend, Lanes>        lhs,
                                            const Vec<T, Backend, Lanes>& rhs) noexcept -> Vec<T, Backend, Lanes>
@@ -1311,6 +1347,7 @@ namespace NGIN::SIMD
         return lhs;
     }
 
+    /// @brief Divides corresponding vector lanes.
     template<class T, class Backend, int Lanes>
     [[nodiscard]] constexpr auto operator/(Vec<T, Backend, Lanes>        lhs,
                                            const Vec<T, Backend, Lanes>& rhs) noexcept -> Vec<T, Backend, Lanes>
@@ -1319,6 +1356,7 @@ namespace NGIN::SIMD
         return lhs;
     }
 
+    /// @brief Computes fused `a * b + c` for corresponding lanes when supported.
     template<class T, class Backend, int Lanes>
     [[nodiscard]] constexpr auto Fma(Vec<T, Backend, Lanes>        a,
                                      const Vec<T, Backend, Lanes>& b,
@@ -1328,6 +1366,7 @@ namespace NGIN::SIMD
         return a;
     }
 
+    /// @brief Returns the lane-wise minimum.
     template<class T, class Backend, int Lanes>
     [[nodiscard]] constexpr auto Min(const Vec<T, Backend, Lanes>& a,
                                      const Vec<T, Backend, Lanes>& b) noexcept -> Vec<T, Backend, Lanes>
@@ -1337,6 +1376,7 @@ namespace NGIN::SIMD
         return result;
     }
 
+    /// @brief Returns the lane-wise maximum.
     template<class T, class Backend, int Lanes>
     [[nodiscard]] constexpr auto Max(const Vec<T, Backend, Lanes>& a,
                                      const Vec<T, Backend, Lanes>& b) noexcept -> Vec<T, Backend, Lanes>
@@ -1346,6 +1386,7 @@ namespace NGIN::SIMD
         return result;
     }
 
+    /// @brief Returns the lane-wise absolute value.
     template<class T, class Backend, int Lanes>
     [[nodiscard]] constexpr auto Abs(const Vec<T, Backend, Lanes>& a) noexcept -> Vec<T, Backend, Lanes>
     {
@@ -1354,6 +1395,7 @@ namespace NGIN::SIMD
         return result;
     }
 
+    /// @brief Compares corresponding lanes for equality.
     template<class T, class Backend, int Lanes>
     [[nodiscard]] constexpr auto operator==(const Vec<T, Backend, Lanes>& a,
                                             const Vec<T, Backend, Lanes>& b) noexcept -> Mask<Vec<T, Backend, Lanes>::lanes, Backend>
@@ -1364,6 +1406,7 @@ namespace NGIN::SIMD
         return mask;
     }
 
+    /// @brief Compares corresponding lanes for inequality.
     template<class T, class Backend, int Lanes>
     [[nodiscard]] constexpr auto operator!=(const Vec<T, Backend, Lanes>& a,
                                             const Vec<T, Backend, Lanes>& b) noexcept -> Mask<Vec<T, Backend, Lanes>::lanes, Backend>
@@ -1374,6 +1417,7 @@ namespace NGIN::SIMD
         return mask;
     }
 
+    /// @brief Compares corresponding lanes using less-than.
     template<class T, class Backend, int Lanes>
     [[nodiscard]] constexpr auto operator<(const Vec<T, Backend, Lanes>& a,
                                            const Vec<T, Backend, Lanes>& b) noexcept -> Mask<Vec<T, Backend, Lanes>::lanes, Backend>
@@ -1384,6 +1428,7 @@ namespace NGIN::SIMD
         return mask;
     }
 
+    /// @brief Compares corresponding lanes using less-than-or-equal.
     template<class T, class Backend, int Lanes>
     [[nodiscard]] constexpr auto operator<=(const Vec<T, Backend, Lanes>& a,
                                             const Vec<T, Backend, Lanes>& b) noexcept -> Mask<Vec<T, Backend, Lanes>::lanes, Backend>
@@ -1394,6 +1439,7 @@ namespace NGIN::SIMD
         return mask;
     }
 
+    /// @brief Compares corresponding lanes using greater-than.
     template<class T, class Backend, int Lanes>
     [[nodiscard]] constexpr auto operator>(const Vec<T, Backend, Lanes>& a,
                                            const Vec<T, Backend, Lanes>& b) noexcept -> Mask<Vec<T, Backend, Lanes>::lanes, Backend>
@@ -1401,6 +1447,7 @@ namespace NGIN::SIMD
         return b < a;
     }
 
+    /// @brief Compares corresponding lanes using greater-than-or-equal.
     template<class T, class Backend, int Lanes>
     [[nodiscard]] constexpr auto operator>=(const Vec<T, Backend, Lanes>& a,
                                             const Vec<T, Backend, Lanes>& b) noexcept -> Mask<Vec<T, Backend, Lanes>::lanes, Backend>
@@ -1408,6 +1455,7 @@ namespace NGIN::SIMD
         return b <= a;
     }
 
+    /// @brief Computes the lane-wise bitwise AND.
     template<class T, class Backend, int Lanes>
     [[nodiscard]] constexpr auto operator&(const Vec<T, Backend, Lanes>& a,
                                            const Vec<T, Backend, Lanes>& b) noexcept -> Vec<T, Backend, Lanes>
@@ -1417,6 +1465,7 @@ namespace NGIN::SIMD
         return result;
     }
 
+    /// @brief Computes the lane-wise bitwise OR.
     template<class T, class Backend, int Lanes>
     [[nodiscard]] constexpr auto operator|(const Vec<T, Backend, Lanes>& a,
                                            const Vec<T, Backend, Lanes>& b) noexcept -> Vec<T, Backend, Lanes>
@@ -1426,6 +1475,7 @@ namespace NGIN::SIMD
         return result;
     }
 
+    /// @brief Computes the lane-wise bitwise XOR.
     template<class T, class Backend, int Lanes>
     [[nodiscard]] constexpr auto operator^(const Vec<T, Backend, Lanes>& a,
                                            const Vec<T, Backend, Lanes>& b) noexcept -> Vec<T, Backend, Lanes>
@@ -1435,6 +1485,7 @@ namespace NGIN::SIMD
         return result;
     }
 
+    /// @brief Computes lane-wise `a & ~b`.
     template<class T, class Backend, int Lanes>
     [[nodiscard]] constexpr auto AndNot(const Vec<T, Backend, Lanes>& a,
                                         const Vec<T, Backend, Lanes>& b) noexcept -> Vec<T, Backend, Lanes>
@@ -1444,6 +1495,7 @@ namespace NGIN::SIMD
         return result;
     }
 
+    /// @brief Shifts every integral lane left by @p amount.
     template<class T, class Backend, int Lanes>
     [[nodiscard]] constexpr auto Shl(const Vec<T, Backend, Lanes>& value, int amount) noexcept -> Vec<T, Backend, Lanes>
     {
@@ -1453,6 +1505,7 @@ namespace NGIN::SIMD
         return result;
     }
 
+    /// @brief Shifts every integral lane right by @p amount.
     template<class T, class Backend, int Lanes>
     [[nodiscard]] constexpr auto Shr(const Vec<T, Backend, Lanes>& value, int amount) noexcept -> Vec<T, Backend, Lanes>
     {
@@ -1462,24 +1515,28 @@ namespace NGIN::SIMD
         return result;
     }
 
+    /// @brief Adds all lanes and returns the scalar result.
     template<class T, class Backend, int Lanes>
     [[nodiscard]] constexpr auto ReduceAdd(const Vec<T, Backend, Lanes>& value) noexcept -> T
     {
         return detail::BackendTraits<Backend, T>::template Ops<Vec<T, Backend, Lanes>::lanes>::ReduceAdd(value.storage);
     }
 
+    /// @brief Returns the minimum lane value.
     template<class T, class Backend, int Lanes>
     [[nodiscard]] constexpr auto ReduceMin(const Vec<T, Backend, Lanes>& value) noexcept -> T
     {
         return detail::BackendTraits<Backend, T>::template Ops<Vec<T, Backend, Lanes>::lanes>::ReduceMin(value.storage);
     }
 
+    /// @brief Returns the maximum lane value.
     template<class T, class Backend, int Lanes>
     [[nodiscard]] constexpr auto ReduceMax(const Vec<T, Backend, Lanes>& value) noexcept -> T
     {
         return detail::BackendTraits<Backend, T>::template Ops<Vec<T, Backend, Lanes>::lanes>::ReduceMax(value.storage);
     }
 
+    /// @brief Reinterprets an equal-sized SIMD object without changing its bits.
     template<class To, class From>
     [[nodiscard]] constexpr auto BitCast(const From& from) noexcept -> To
     {
@@ -1487,6 +1544,7 @@ namespace NGIN::SIMD
         return std::bit_cast<To>(from);
     }
 
+    /// @brief Inverts every Boolean mask lane.
     template<int Lanes, class Backend>
     [[nodiscard]] constexpr auto operator~(const Mask<Lanes, Backend>& mask) noexcept -> Mask<Lanes, Backend>
     {
@@ -1495,6 +1553,7 @@ namespace NGIN::SIMD
         return result;
     }
 
+    /// @brief Computes the lane-wise logical AND of two masks.
     template<int Lanes, class Backend>
     [[nodiscard]] constexpr auto operator&(const Mask<Lanes, Backend>& lhs,
                                            const Mask<Lanes, Backend>& rhs) noexcept -> Mask<Lanes, Backend>
@@ -1504,6 +1563,7 @@ namespace NGIN::SIMD
         return result;
     }
 
+    /// @brief Computes the lane-wise logical OR of two masks.
     template<int Lanes, class Backend>
     [[nodiscard]] constexpr auto operator|(const Mask<Lanes, Backend>& lhs,
                                            const Mask<Lanes, Backend>& rhs) noexcept -> Mask<Lanes, Backend>
@@ -1513,6 +1573,7 @@ namespace NGIN::SIMD
         return result;
     }
 
+    /// @brief Computes the lane-wise logical XOR of two masks.
     template<int Lanes, class Backend>
     [[nodiscard]] constexpr auto operator^(const Mask<Lanes, Backend>& lhs,
                                            const Mask<Lanes, Backend>& rhs) noexcept -> Mask<Lanes, Backend>
@@ -1522,24 +1583,28 @@ namespace NGIN::SIMD
         return result;
     }
 
+    /// @brief Returns whether at least one mask lane is true.
     template<int Lanes, class Backend>
     [[nodiscard]] constexpr auto Any(const Mask<Lanes, Backend>& mask) noexcept -> bool
     {
         return Mask<Lanes, Backend>::operations::MaskAny(mask.storage);
     }
 
+    /// @brief Returns whether every mask lane is true.
     template<int Lanes, class Backend>
     [[nodiscard]] constexpr auto All(const Mask<Lanes, Backend>& mask) noexcept -> bool
     {
         return Mask<Lanes, Backend>::operations::MaskAll(mask.storage);
     }
 
+    /// @brief Returns whether every mask lane is false.
     template<int Lanes, class Backend>
     [[nodiscard]] constexpr auto None(const Mask<Lanes, Backend>& mask) noexcept -> bool
     {
         return !Mask<Lanes, Backend>::operations::MaskAny(mask.storage);
     }
 
+    /// @brief Packs up to 64 Boolean lanes into low-order result bits.
     template<int Lanes, class Backend>
     [[nodiscard]] constexpr auto MaskToBits(const Mask<Lanes, Backend>& mask) noexcept -> std::uint64_t
     {
@@ -1555,6 +1620,7 @@ namespace NGIN::SIMD
         return bits;
     }
 
+    /// @brief Selects corresponding lanes from @p a when true and @p b when false.
     template<int Lanes, class Backend, class T>
     [[nodiscard]] constexpr auto Select(const Mask<Lanes, Backend>&   mask,
                                         const Vec<T, Backend, Lanes>& a,
@@ -1568,6 +1634,7 @@ namespace NGIN::SIMD
         return result;
     }
 
+    /// @brief Reverses vector lane order.
     template<class T, class Backend, int Lanes>
     [[nodiscard]] constexpr auto Reverse(const Vec<T, Backend, Lanes>& value) noexcept -> Vec<T, Backend, Lanes>
     {
@@ -1579,6 +1646,7 @@ namespace NGIN::SIMD
         return result;
     }
 
+    /// @brief Interleaves the lower halves of two even-lane vectors.
     template<class T, class Backend, int Lanes>
     [[nodiscard]] constexpr auto ZipLo(const Vec<T, Backend, Lanes>& a,
                                        const Vec<T, Backend, Lanes>& b) noexcept -> Vec<T, Backend, Lanes>
@@ -1594,6 +1662,7 @@ namespace NGIN::SIMD
         return result;
     }
 
+    /// @brief Interleaves the upper halves of two even-lane vectors.
     template<class T, class Backend, int Lanes>
     [[nodiscard]] constexpr auto ZipHi(const Vec<T, Backend, Lanes>& a,
                                        const Vec<T, Backend, Lanes>& b) noexcept -> Vec<T, Backend, Lanes>
@@ -1609,11 +1678,12 @@ namespace NGIN::SIMD
         return result;
     }
 
+    /// @brief Returns a mask with the first clamped @p count lanes enabled.
     template<int Lanes, class Backend>
     [[nodiscard]] constexpr auto FirstNMask(int count) noexcept -> Mask<Lanes, Backend>
     {
         Mask<Lanes, Backend> mask;
-        const auto           clamped = std::clamp(count, 0, Lanes);
+        const int            clamped = std::clamp(count, 0, Lanes);
         for (int lane = 0; lane < clamped; ++lane)
         {
             mask.SetLane(lane, true);
@@ -1621,6 +1691,8 @@ namespace NGIN::SIMD
         return mask;
     }
 
+    /// @brief Applies a vector transform over contiguous arrays with a masked tail.
+    /// @pre Source and destination each contain at least @p count elements.
     template<class T, class Backend, int Lanes, class Func>
     constexpr void ForEachSimd(T*          destination,
                                const T*    source,
@@ -1632,16 +1704,16 @@ namespace NGIN::SIMD
         std::size_t   index = 0;
         for (; index + width <= count; index += width)
         {
-            auto loaded      = Vector::Load(source + index);
-            auto transformed = std::forward<Func>(functor)(loaded);
+            Vector loaded      = Vector::Load(source + index);
+            Vector transformed = std::forward<Func>(functor)(loaded);
             transformed.Store(destination + index);
         }
-        const auto remainder = static_cast<int>(count - index);
+        const int remainder = static_cast<int>(count - index);
         if (remainder > 0)
         {
-            auto mask        = FirstNMask<width, Backend>(remainder);
-            auto loaded      = Vector::Load(source + index, mask);
-            auto transformed = std::forward<Func>(functor)(loaded);
+            typename Vector::mask_type mask        = FirstNMask<width, Backend>(remainder);
+            Vector                     loaded      = Vector::Load(source + index, mask);
+            Vector                     transformed = std::forward<Func>(functor)(loaded);
             transformed.Store(destination + index, mask);
         }
     }

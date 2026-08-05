@@ -57,9 +57,11 @@ namespace NGIN::SIMD
     template<int Lanes, class Backend = NGIN_SIMD_DEFAULT_BACKEND>
     struct Mask;
 
+    /// @brief Reinterprets a SIMD object as an equal-sized target type without changing bits.
     template<class To, class From>
     [[nodiscard]] constexpr auto BitCast(const From& from) noexcept -> To;
 
+    /// @brief Selects each result lane from @p ifTrue or @p ifFalse according to a mask.
     template<int Lanes, class Backend, class T>
     [[nodiscard]] constexpr auto Select(const Mask<Lanes, Backend>&   mask,
                                         const Vec<T, Backend, Lanes>& ifTrue,
