@@ -48,7 +48,7 @@ set_target_properties(NGIN.Base.Serialization PROPERTIES
 target_link_libraries(NGIN.Base.Execution INTERFACE NGIN.Base.Foundation)
 target_link_libraries(NGIN.Base.IO INTERFACE NGIN.Base.Foundation NGIN.Base.Execution)
 target_link_libraries(NGIN.Base.Crypto INTERFACE NGIN.Base.Foundation NGIN.Base.IO NGIN.Base.Serialization)
-target_link_libraries(NGIN.Base.Net INTERFACE NGIN.Base.Foundation NGIN.Base.IO NGIN.Base.Execution)
+target_link_libraries(NGIN.Base.Net INTERFACE NGIN.Base.Foundation NGIN.Base.IO NGIN.Base.Execution NGIN.Base.Crypto)
 target_link_libraries(NGIN.Base.Serialization INTERFACE NGIN.Base.Foundation NGIN.Base.IO)
 
 set_target_properties(NGIN.Base.Foundation PROPERTIES
@@ -64,7 +64,7 @@ set_target_properties(NGIN.Base.Crypto PROPERTIES
   NGIN_BASE_ALLOWED_COMPONENT_DEPENDENCIES "NGIN.Base.Foundation;NGIN.Base.IO;NGIN.Base.Serialization"
 )
 set_target_properties(NGIN.Base.Net PROPERTIES
-  NGIN_BASE_ALLOWED_COMPONENT_DEPENDENCIES "NGIN.Base.Foundation;NGIN.Base.IO;NGIN.Base.Execution"
+  NGIN_BASE_ALLOWED_COMPONENT_DEPENDENCIES "NGIN.Base.Foundation;NGIN.Base.IO;NGIN.Base.Execution;NGIN.Base.Crypto"
 )
 set_target_properties(NGIN.Base.Serialization PROPERTIES
   NGIN_BASE_ALLOWED_COMPONENT_DEPENDENCIES "NGIN.Base.Foundation;NGIN.Base.IO"

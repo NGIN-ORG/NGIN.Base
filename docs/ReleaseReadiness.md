@@ -3,8 +3,8 @@
 Last updated: 2026-08-05.
 
 This page records evidence for the completion plan. It distinguishes verified
-work from the two approval-gated changes; it is not a claim that the full plan
-is complete.
+work from the approved TLS and component changes; it is not a claim that the
+full plan is complete.
 
 ## Error and cancellation consistency
 
@@ -17,10 +17,10 @@ is complete.
 | Resolver | `ResolveError` preserves native status | async timeout/cancellation can return before the owned resolver worker exits |
 | Serialization | `ParseDiagnostic` / `WriteDiagnostic` | no asynchronous operation; handler rejection is a typed diagnostic |
 | Crypto | `CryptoError` and capability diagnostics | synchronous provider operations; no cancellation contract |
+| TLS | `TlsError` preserves provider, protocol, certificate, hostname, ALPN, transport, state, timeout, and cancellation categories | caller cancellation and handshake timeout remain distinct typed outcomes |
 
-The planned TLS API retains caller cancellation as an operation outcome while
-using a distinct TLS timeout/category diagnostic so provider, protocol,
-certificate, hostname, transport, timeout, and cancellation failures do not
+The TLS API retains caller cancellation as an operation outcome while using a
+distinct timeout/category diagnostic, so unrelated failure classes do not
 collapse into one code.
 
 ## Verification evidence
@@ -37,6 +37,10 @@ collapse into one code.
   consumer configures, links, and runs against that installation.
 - OpenSSL 3 crypto configuration satisfies all required provider capabilities;
   62 focused provider/include tests pass.
+- The OpenSSL 3 TLS provider passes 190 assertions across trusted fragmented
+  transport, SNI, hostname verification, ALPN, mutual authentication,
+  cancellation, timeout, clean shutdown, and truncated-EOF scenarios. The
+  provider-disabled Windows contract passes independently.
 - The Windows CLI target rebuilds after migration to the shared Process API;
   the direct, shell-free process facade test passes with two assertions.
 - The Windows Release aggregate and all 257 standalone public-header contract
@@ -58,7 +62,6 @@ areas (`Async`, `Sync`, `IO`, `Process`, `Net`, `Serialization`, and `Crypto`).
 
 ## Pending release gates
 
-- TLS provider implementation and loopback certificate matrix.
 - Real compiled component targets, component-level symbol visibility, package
   exports, and downstream consumer migration.
 - Execution of the newly expanded hosted CI matrix on the published branch.

@@ -32,12 +32,14 @@ option(NGIN_BASE_CRYPTO_WITH_BORINGSSL "Enable optional BoringSSL-backed crypto 
 option(NGIN_BASE_CRYPTO_WITH_LIBSODIUM "Enable optional libsodium-backed crypto algorithms" OFF)
 option(NGIN_BASE_CRYPTO_OPENSSL "Enable optional OpenSSL-backed crypto algorithms" OFF)
 option(NGIN_CRYPTO_WITH_OPENSSL "Enable optional OpenSSL-backed crypto algorithms for split Crypto targets" OFF)
+option(NGIN_BASE_TLS_WITH_OPENSSL "Enable the OpenSSL 3 TLS provider" OFF)
 option(NGIN_BASE_BUILD_SPLIT_TARGETS "Create transitional NGIN::Crypto/Net/Serialization targets" ON)
 
 set(NGIN_BASE_CLANG_GCC_TOOLCHAIN "" CACHE PATH "Clang (Linux): GCC toolchain root passed via --gcc-toolchain")
 set(NGIN_BASE_FIBER_BACKEND "default" CACHE STRING "Fiber backend: default/ucontext/winfiber/custom_asm")
 set(NGIN_BASE_CRYPTO_REQUIRE_PROVIDER "" CACHE STRING "Required crypto providers: platform, platform-random, cng, openssl, boringssl, libsodium")
 set(NGIN_BASE_CRYPTO_REQUIRE_ALGORITHMS "" CACHE STRING "Required crypto algorithms, separated by semicolons, commas, or spaces")
+set(NGIN_BASE_TLS_REQUIRE_PROVIDER "" CACHE STRING "Required TLS provider: openssl")
 set_property(CACHE NGIN_BASE_FIBER_BACKEND PROPERTY STRINGS default ucontext winfiber custom_asm)
 
 if(NGIN_BASE_ALL_FEATURES)
@@ -69,6 +71,14 @@ if(NGIN_BASE_CRYPTO_WITH_OPENSSL AND NGIN_BASE_CRYPTO_WITH_BORINGSSL)
     "NGIN_BASE_CRYPTO_WITH_OPENSSL and NGIN_BASE_CRYPTO_WITH_BORINGSSL cannot both be enabled in one NGIN.Base build. "
     "Select exactly one OpenSSL-compatible libcrypto provider."
   )
+endif()
+
+string(TOLOWER "${NGIN_BASE_TLS_REQUIRE_PROVIDER}" _ngin_base_tls_required_provider)
+if(_ngin_base_tls_required_provider)
+  if(NOT _ngin_base_tls_required_provider STREQUAL "openssl")
+    message(FATAL_ERROR "Unsupported NGIN_BASE_TLS_REQUIRE_PROVIDER value: ${NGIN_BASE_TLS_REQUIRE_PROVIDER}")
+  endif()
+  set(NGIN_BASE_TLS_WITH_OPENSSL ON CACHE BOOL "Enable the required OpenSSL 3 TLS provider" FORCE)
 endif()
 
 if(NGIN_BASE_DEVELOPMENT_MODE)

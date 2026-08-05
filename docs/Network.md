@@ -65,6 +65,9 @@ You probably do not need it when:
   - use `TcpByteStream`
 - Need framed messages:
   - use `LengthPrefixedMessageStream`
+- Need authenticated and encrypted byte-stream transport:
+  - create a client or server `TLS::TlsContext`, then wrap an `IByteStream` in
+    `TLS::TlsStream`
 
 ## Most Important Rule
 
@@ -265,6 +268,30 @@ At the root of the program or in tests:
 - `IsFault()` means async/runtime failure
 
 Cancellation is not reported as `NetError`.
+
+### TLS streams
+
+TLS is a provider-neutral filter over `IByteStream`. It is available from
+`<NGIN/Net/TLS/TlsContext.hpp>` and `<NGIN/Net/TLS/TlsStream.hpp>` when the
+library is configured with an implementation provider. The OpenSSL provider is
+enabled with `NGIN_BASE_TLS_WITH_OPENSSL=ON`; a configuration that must have it
+can additionally set `NGIN_BASE_TLS_REQUIRE_PROVIDER=openssl`.
+
+Client peer and hostname verification are required by default. Trust can come
+from system roots, an explicit certificate collection, or both. Server
+contexts require certificate-chain and private-key material and can optionally
+require client authentication. SNI, hostname/IP verification, TLS 1.2/1.3,
+ALPN server preference, clean shutdown, fragmented records, operation
+cancellation, and handshake deadlines are part of the public contract.
+
+Use `ReadTlsAsync` and `WriteTlsAsync` when the caller needs the full
+`TlsError` taxonomy. The inherited `IByteStream` methods map failures to the
+coarser `NetError` domain for generic transport consumers. Only one read, one
+write, and one control operation may be active at a time; overlapping
+operations fail explicitly.
+
+If no provider was compiled, context and stream factories return
+`TlsErrorCode::ProviderUnavailable`. They never silently fall back to plaintext.
 
 ## `NetworkDriver` In Practice
 

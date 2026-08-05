@@ -33,8 +33,12 @@ configurations.
 - Numeric IPv6 scope identifiers are supported. Interface-name scopes require
   an OS lookup and are intentionally not accepted by pure endpoint parsing.
 - Non-Windows async sockets currently use readiness polling; Windows uses IOCP.
-- TLS is not part of the default build. The provider-neutral/OpenSSL design is
-  held at the explicit approval gate documented in the repository plan.
+- TLS is not part of the default build. The provider-neutral API is available
+  on every platform and returns `ProviderUnavailable` when no implementation
+  was compiled. The OpenSSL 3 provider is enabled explicitly with
+  `NGIN_BASE_TLS_WITH_OPENSSL`; requiring `openssl` makes absence a configure
+  error. Provider-enabled loopback coverage currently runs on Linux, while the
+  provider-disabled contract is also verified on Windows.
 
 ## Crypto providers
 

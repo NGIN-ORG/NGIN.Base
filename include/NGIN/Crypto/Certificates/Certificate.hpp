@@ -68,6 +68,7 @@ namespace NGIN::Crypto::Certificates
     struct Certificate
     {
         NGIN::UInt32                                                     version {1};
+        ByteBuffer                                                       certificateDer;
         ByteBuffer                                                       serialNumber;
         ByteBuffer                                                       tbsCertificateDer;
         ByteBuffer                                                       issuerDer;

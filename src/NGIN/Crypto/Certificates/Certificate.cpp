@@ -447,8 +447,7 @@ namespace NGIN::Crypto::Certificates
                     return !generalName.tag.constructed && !generalName.value.empty() && IsIa5StringValue(generalName.value)
                                    ? CryptoExpected<void> {}
                                    : ParseError();
-                case 4:
-                {
+                case 4: {
                     if (!generalName.tag.constructed)
                     {
                         return ParseError();
@@ -466,8 +465,7 @@ namespace NGIN::Crypto::Certificates
                                            (generalName.value.size() == 4 || generalName.value.size() == 16)
                                    ? CryptoExpected<void> {}
                                    : ParseError();
-                case 8:
-                {
+                case 8: {
                     if (generalName.tag.constructed || generalName.value.empty())
                     {
                         return ParseError();
@@ -514,7 +512,7 @@ namespace NGIN::Crypto::Certificates
                     return generalName.Error();
                 }
                 hasAnyGeneralName = true;
-                auto schema = ValidateGeneralNameSchema(generalName.Value());
+                auto schema       = ValidateGeneralNameSchema(generalName.Value());
                 if (!schema.HasValue())
                 {
                     return schema.Error();
@@ -845,7 +843,7 @@ namespace NGIN::Crypto::Certificates
 
             bool sawSubjectAltName         = false;
             bool sawKeyUsage               = false;
-            bool sawBasicConstraints        = false;
+            bool sawBasicConstraints       = false;
             bool sawSubjectKeyIdentifier   = false;
             bool sawAuthorityKeyIdentifier = false;
             bool sawExtendedKeyUsage       = false;
@@ -915,7 +913,7 @@ namespace NGIN::Crypto::Certificates
                         return ParseError();
                     }
                     sawSubjectAltName = true;
-                    auto result = ParseSubjectAltNameExtension(extensionValue.Value(), certificate.subjectAltNames);
+                    auto result       = ParseSubjectAltNameExtension(extensionValue.Value(), certificate.subjectAltNames);
                     if (!result.HasValue())
                     {
                         return result.Error();
@@ -943,7 +941,7 @@ namespace NGIN::Crypto::Certificates
                         return ParseError();
                     }
                     sawBasicConstraints = true;
-                    auto result = ParseBasicConstraintsExtension(extensionValue.Value(), certificate.basicConstraints);
+                    auto result         = ParseBasicConstraintsExtension(extensionValue.Value(), certificate.basicConstraints);
                     if (!result.HasValue())
                     {
                         return result.Error();
@@ -957,7 +955,7 @@ namespace NGIN::Crypto::Certificates
                         return ParseError();
                     }
                     sawSubjectKeyIdentifier = true;
-                    auto result = ParseSubjectKeyIdentifierExtension(extensionValue.Value(), certificate);
+                    auto result             = ParseSubjectKeyIdentifierExtension(extensionValue.Value(), certificate);
                     if (!result.HasValue())
                     {
                         return result.Error();
@@ -970,7 +968,7 @@ namespace NGIN::Crypto::Certificates
                         return ParseError();
                     }
                     sawAuthorityKeyIdentifier = true;
-                    auto result = ParseAuthorityKeyIdentifierExtension(extensionValue.Value(), certificate);
+                    auto result               = ParseAuthorityKeyIdentifierExtension(extensionValue.Value(), certificate);
                     if (!result.HasValue())
                     {
                         return result.Error();
@@ -983,7 +981,7 @@ namespace NGIN::Crypto::Certificates
                         return ParseError();
                     }
                     sawExtendedKeyUsage = true;
-                    auto result = ParseExtendedKeyUsageExtension(extensionValue.Value(), certificate.extendedKeyUsages);
+                    auto result         = ParseExtendedKeyUsageExtension(extensionValue.Value(), certificate.extendedKeyUsages);
                     if (!result.HasValue())
                     {
                         return result.Error();
@@ -1038,6 +1036,7 @@ namespace NGIN::Crypto::Certificates
         }
 
         Certificate certificate;
+        certificate.certificateDer        = CopyBytes(certificateElement.Value().encoded);
         certificate.tbsCertificateDer     = CopyBytes(tbsElement.Value().encoded);
         certificate.signatureAlgorithmDer = CopyBytes(signatureAlgorithmElement.Value().encoded);
 
