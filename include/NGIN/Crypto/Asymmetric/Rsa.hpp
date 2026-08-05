@@ -38,19 +38,19 @@ namespace NGIN::Crypto::Asymmetric
         ConstByteSpan                    label;
     };
 
-    [[nodiscard]] CryptoExpected<ByteBuffer> SignRsaPssSha256(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<ByteBuffer> SignRsaPssSha256(
             const NGIN::Crypto::Backend::CryptoContext& context,
             const RsaPssSha256SignInput&                input);
 
-    [[nodiscard]] CryptoExpected<void> VerifyRsaPssSha256(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<void> VerifyRsaPssSha256(
             const NGIN::Crypto::Backend::CryptoContext& context,
             const RsaPssSha256VerifyInput&              input) noexcept;
 
-    [[nodiscard]] CryptoExpected<ByteBuffer> EncryptRsaOaepSha256(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<ByteBuffer> EncryptRsaOaepSha256(
             const NGIN::Crypto::Backend::CryptoContext& context,
             const RsaOaepSha256EncryptInput&            input);
 
-    [[nodiscard]] CryptoExpected<ByteBuffer> DecryptRsaOaepSha256(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<ByteBuffer> DecryptRsaOaepSha256(
             const NGIN::Crypto::Backend::CryptoContext& context,
             const RsaOaepSha256DecryptInput&            input);
 }// namespace NGIN::Crypto::Asymmetric

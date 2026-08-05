@@ -8,6 +8,7 @@
 #include <string>
 #include <string_view>
 
+#include <NGIN/Defines.hpp>
 #include <NGIN/Net/Types/AddressFamily.hpp>
 #include <NGIN/Primitives.hpp>
 #include <NGIN/Utilities/Expected.hpp>
@@ -35,7 +36,7 @@ namespace NGIN::Net
     using AddressExpected = NGIN::Utilities::Expected<T, AddressParseError>;
 
     /// @brief IPv4 or IPv6 address stored as raw bytes.
-    struct IpAddress final
+    struct NGIN_NET_API IpAddress final
     {
         static constexpr std::size_t V4Size = 4;
         static constexpr std::size_t V6Size = 16;
@@ -88,7 +89,7 @@ namespace NGIN::Net
         std::array<NGIN::Byte, V6Size> m_bytes {};
     };
 
-    struct IpAddressHash final
+    struct NGIN_NET_API IpAddressHash final
     {
         [[nodiscard]] std::size_t operator()(const IpAddress& address) const noexcept;
     };

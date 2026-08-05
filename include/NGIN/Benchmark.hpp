@@ -105,7 +105,7 @@ namespace NGIN
     };
 
     template<typename DesiredUnit>
-        requires Units::QuantityOf<TIME, DesiredUnit>
+        requires Units::QuantityOf<Units::TIME, DesiredUnit>
     struct BenchmarkResult
     {
         std::string name              = "Unknown Benchmark";
@@ -174,7 +174,7 @@ namespace NGIN
                 overheadTimer.Reset();
                 overheadTimer.Start();
                 overheadTimer.Stop();
-                sum += overheadTimer.GetElapsed<Nanoseconds>().GetValue();
+                sum += overheadTimer.GetElapsed<Units::Nanoseconds>().GetValue();
             }
             return sum / static_cast<F64>(iterations);
         }
@@ -183,7 +183,7 @@ namespace NGIN
         ///         collecting min, max, avg, stddev, and percentiles.
         /// \throws std::runtime_error if the user’s callable throws.
         template<typename DesiredUnit>
-            requires Units::QuantityOf<TIME, DesiredUnit>
+            requires Units::QuantityOf<Units::TIME, DesiredUnit>
         [[nodiscard]] BenchmarkResult<DesiredUnit> Run()
         {
             assert(m_callable && "Run() called but m_callable is empty");
@@ -258,10 +258,10 @@ namespace NGIN
             F64 variance = (count > 1 ? (M2 / static_cast<F64>(count)) : 0.0);
             F64 stddev   = std::sqrt(variance);
 
-            result.averageTime       = UnitCast<DesiredUnit>(Nanoseconds(mean));
-            result.minTime           = UnitCast<DesiredUnit>(Nanoseconds(minT));
-            result.maxTime           = UnitCast<DesiredUnit>(Nanoseconds(maxT));
-            result.standardDeviation = UnitCast<DesiredUnit>(Nanoseconds(stddev));
+            result.averageTime       = Units::UnitCast<DesiredUnit>(Units::Nanoseconds(mean));
+            result.minTime           = Units::UnitCast<DesiredUnit>(Units::Nanoseconds(minT));
+            result.maxTime           = Units::UnitCast<DesiredUnit>(Units::Nanoseconds(maxT));
+            result.standardDeviation = Units::UnitCast<DesiredUnit>(Units::Nanoseconds(stddev));
 
             if (config.keepRawTimings && !rawTimings.empty())
             {
@@ -273,9 +273,9 @@ namespace NGIN
                 F64 p25 = at(rawTimings.size() / 4);
                 F64 p75 = at((3 * rawTimings.size()) / 4);
 
-                result.medianTime   = UnitCast<DesiredUnit>(Nanoseconds(med));
-                result.percentile25 = UnitCast<DesiredUnit>(Nanoseconds(p25));
-                result.percentile75 = UnitCast<DesiredUnit>(Nanoseconds(p75));
+                result.medianTime   = Units::UnitCast<DesiredUnit>(Units::Nanoseconds(med));
+                result.percentile25 = Units::UnitCast<DesiredUnit>(Units::Nanoseconds(p25));
+                result.percentile75 = Units::UnitCast<DesiredUnit>(Units::Nanoseconds(p75));
             }
 
             return result;
@@ -354,7 +354,7 @@ namespace NGIN
 
         /// \brief  Runs all registered benchmarks and returns their results.
         template<typename DesiredUnit>
-            requires Units::QuantityOf<TIME, DesiredUnit>
+            requires Units::QuantityOf<Units::TIME, DesiredUnit>
         static std::vector<BenchmarkResult<DesiredUnit>> RunAll()
         {
             std::vector<BenchmarkResult<DesiredUnit>> results;
@@ -367,7 +367,7 @@ namespace NGIN
             return results;
         }
         template<typename DesiredUnit>
-            requires Units::QuantityOf<TIME, DesiredUnit>
+            requires Units::QuantityOf<Units::TIME, DesiredUnit>
         static void PrintSummaryTable(std::ostream&                                    os,
                                       const std::vector<BenchmarkResult<DesiredUnit>>& results)
         {
@@ -486,7 +486,7 @@ namespace NGIN
 
     /// \brief  Prints key statistics of a BenchmarkResult.
     template<typename DesiredUnit>
-        requires Units::QuantityOf<TIME, DesiredUnit>
+        requires Units::QuantityOf<Units::TIME, DesiredUnit>
     std::ostream& operator<<(std::ostream& os, BenchmarkResult<DesiredUnit> const& r)
     {
         os << "[" << r.name << "]  "

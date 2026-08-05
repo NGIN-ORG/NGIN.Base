@@ -18,7 +18,7 @@ namespace NGIN::Net::TLS
 
     class TlsStream;
 
-    class NGIN_NET_API TlsContext final
+    class NGIN_NETTLS_API TlsContext final
     {
     public:
         TlsContext() noexcept = default;
@@ -38,5 +38,5 @@ namespace NGIN::Net::TLS
         friend class TlsStream;
     };
 
-    [[nodiscard]] NGIN_NET_API bool TlsProviderAvailable() noexcept;
+    [[nodiscard]] NGIN_NETTLS_API bool TlsProviderAvailable() noexcept;
 }// namespace NGIN::Net::TLS

@@ -46,6 +46,14 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     )
     target_link_options(NGIN.Base.BuildOptions INTERFACE $<BUILD_INTERFACE:-fsanitize=thread>)
   endif()
+  if(NGIN_BASE_ENABLE_COVERAGE)
+    target_compile_options(NGIN.Base.BuildOptions INTERFACE
+      $<BUILD_INTERFACE:--coverage>
+      $<BUILD_INTERFACE:-O0>
+      $<BUILD_INTERFACE:-g>
+    )
+    target_link_options(NGIN.Base.BuildOptions INTERFACE $<BUILD_INTERFACE:--coverage>)
+  endif()
 endif()
 
 # Clang (Linux): allow selecting an explicit GCC toolchain for libstdc++/runtime.

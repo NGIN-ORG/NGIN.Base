@@ -11,7 +11,9 @@ endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/NGINBaseTargets.cmake")
 
-foreach(_ngin_component IN ITEMS Foundation Execution IO Serialization Crypto Net)
+set(_ngin_available_components @NGIN_BASE_ENABLED_COMPONENTS@)
+
+foreach(_ngin_component IN LISTS _ngin_available_components)
   if(TARGET NGIN::Base${_ngin_component}Static AND
      NOT TARGET NGIN::Base::${_ngin_component}::Static)
     add_library(NGIN::Base::${_ngin_component}::Static ALIAS NGIN::Base${_ngin_component}Static)
@@ -32,6 +34,7 @@ foreach(_ngin_component IN ITEMS Foundation Execution IO Serialization Crypto Ne
   if(NOT TARGET NGIN::Base::${_ngin_component})
     add_library(NGIN::Base::${_ngin_component} ALIAS ${_ngin_component_primary})
   endif()
+  set(NGINBase_${_ngin_component}_FOUND TRUE)
 endforeach()
 
 if(TARGET NGIN::BaseStatic AND NOT TARGET NGIN::Base::Static)
@@ -52,3 +55,5 @@ endif()
 if(NOT TARGET NGIN::Base)
   add_library(NGIN::Base ALIAS ${_ngin_base_primary_target})
 endif()
+
+check_required_components(NGINBase)

@@ -2,6 +2,9 @@ function(ngin_base_resolve_test_link_target test_group suite_name out_var)
   set(link_target NGIN::Base::Foundation)
   if(test_group STREQUAL "Crypto" OR (test_group STREQUAL "Include" AND suite_name STREQUAL "Crypto"))
     set(link_target NGIN::Base::Crypto)
+  elseif((test_group STREQUAL "Net" AND suite_name STREQUAL "TLS") OR
+         (test_group STREQUAL "Include" AND suite_name STREQUAL "NetTLS"))
+    set(link_target NGIN::Base::NetTLS)
   elseif(test_group STREQUAL "Net" OR (test_group STREQUAL "Include" AND suite_name STREQUAL "Net"))
     set(link_target NGIN::Base::Net)
   elseif(test_group STREQUAL "Serialization" OR (test_group STREQUAL "Include" AND suite_name STREQUAL "Serialization"))
@@ -22,6 +25,9 @@ function(ngin_base_add_test_executable exe_name test_src test_label test_prefix 
   set(NGIN_BASE_TEST_TARGETS ${NGIN_BASE_TEST_TARGETS} PARENT_SCOPE)
 
   target_link_libraries(${exe_name} PRIVATE Catch2::Catch2WithMain ngin_base_test_config ${link_target})
+  if(WIN32 AND test_label STREQUAL "Net")
+    target_link_libraries(${exe_name} PRIVATE ws2_32)
+  endif()
   set_target_properties(${exe_name} PROPERTIES
     FOLDER "Tests"
     LABELS "${test_label}"
@@ -30,7 +36,8 @@ function(ngin_base_add_test_executable exe_name test_src test_label test_prefix 
   catch_discover_tests(${exe_name}
     TEST_PREFIX "${test_prefix}"
     WORKING_DIRECTORY $<TARGET_FILE_DIR:${exe_name}>
-    PROPERTIES LABELS "${test_label}"
+    DL_PATHS $<TARGET_FILE_DIR:${link_target}>
+    PROPERTIES LABELS "${test_label}" SKIP_RETURN_CODE 4
   )
 endfunction()
 

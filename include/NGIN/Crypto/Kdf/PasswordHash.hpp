@@ -49,19 +49,19 @@ namespace NGIN::Crypto::Kdf
     };
 
     /// @brief Hashes a password into a backend-owned PHC-style Argon2id string.
-    [[nodiscard]] CryptoExpected<PasswordHashString> HashPassword(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<PasswordHashString> HashPassword(
             const NGIN::Crypto::Backend::CryptoContext& context,
             NGIN::Crypto::Memory::SecretView            password,
             PasswordHashOptions                         options = {});
 
     /// @brief Verifies a password against a PHC-style Argon2id hash string.
-    [[nodiscard]] CryptoExpected<void> VerifyPassword(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<void> VerifyPassword(
             const NGIN::Crypto::Backend::CryptoContext& context,
             NGIN::Crypto::Memory::SecretView            password,
             std::string_view                            encodedHash) noexcept;
 
     /// @brief Reports whether a PHC-style Argon2id hash should be regenerated with the supplied cost options.
-    [[nodiscard]] CryptoExpected<bool> PasswordHashNeedsRehash(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<bool> PasswordHashNeedsRehash(
             const NGIN::Crypto::Backend::CryptoContext& context,
             std::string_view                            encodedHash,
             PasswordHashOptions                         options = {}) noexcept;

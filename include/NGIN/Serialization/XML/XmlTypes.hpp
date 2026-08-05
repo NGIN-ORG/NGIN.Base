@@ -94,7 +94,7 @@ namespace NGIN::Serialization::XML
     public:
         constexpr AttributeRange() noexcept = default;
 
-        class Iterator
+        class NGIN_SERIALIZATION_API Iterator
         {
         public:
             using iterator_category = std::forward_iterator_tag;
@@ -137,7 +137,7 @@ namespace NGIN::Serialization::XML
     public:
         constexpr ChildRange() noexcept = default;
 
-        class Iterator
+        class NGIN_SERIALIZATION_API Iterator
         {
         public:
             using iterator_category = std::forward_iterator_tag;
@@ -187,7 +187,7 @@ namespace NGIN::Serialization::XML
     class NGIN_SERIALIZATION_API FilteredChildRange
     {
     public:
-        class Iterator
+        class NGIN_SERIALIZATION_API Iterator
         {
         public:
             using iterator_category = std::forward_iterator_tag;

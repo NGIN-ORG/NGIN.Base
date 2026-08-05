@@ -1,5 +1,6 @@
 #pragma once
 
+#include <NGIN/Defines.hpp>
 #include <NGIN/Primitives.hpp>
 
 namespace NGIN::Crypto
@@ -25,5 +26,5 @@ namespace NGIN::Crypto
     };
 
     /// @brief Returns a stable diagnostic string for a crypto error code.
-    [[nodiscard]] const char* ToString(CryptoErrorCode code) noexcept;
+    [[nodiscard]] NGIN_CRYPTO_API const char* ToString(CryptoErrorCode code) noexcept;
 }// namespace NGIN::Crypto

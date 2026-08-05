@@ -60,9 +60,8 @@ adapter when a real BoringSSL target or library/header layout is available. It i
 `NGIN_BASE_CRYPTO_WITH_OPENSSL`.
 `NGIN_BASE_CRYPTO_WITH_LIBSODIUM` enables the optional libsodium-backed path for XChaCha20-Poly1305, Ed25519, X25519,
 and Argon2id when a usable libsodium package/header/library is available.
-`NGIN_BASE_CRYPTO_OPENSSL` and `NGIN_CRYPTO_WITH_OPENSSL` remain compatibility aliases. External engines such as
-BoringSSL or libsodium should be introduced through package wrappers or explicitly approved workspace composition rather
-than as unconditional Base dependencies.
+External engines such as BoringSSL or libsodium should be introduced through package wrappers or explicitly approved
+workspace composition rather than as unconditional Base dependencies.
 
 `NGIN_BASE_CRYPTO_REQUIRE_PROVIDER` and `NGIN_BASE_CRYPTO_REQUIRE_ALGORITHMS` fail CMake configuration when a build does
 not provide required crypto support. Requirement values accept semicolon-, comma-, or space-separated provider/algorithm

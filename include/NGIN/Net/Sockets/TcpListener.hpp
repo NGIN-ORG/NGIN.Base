@@ -24,7 +24,7 @@ namespace NGIN::Net
     class NetworkDriver;
 
     /// @brief TCP listen socket with non-blocking accept.
-    class TcpListener final
+    class NGIN_NET_API TcpListener final
     {
     public:
         TcpListener() noexcept = default;

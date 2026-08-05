@@ -10,6 +10,7 @@
 #endif
 
 #include <NGIN/Async/AsyncError.hpp>
+#include <NGIN/Defines.hpp>
 #include <NGIN/Net/Types/NetError.hpp>
 #include <NGIN/Primitives.hpp>
 #include <NGIN/Units.hpp>
@@ -39,7 +40,7 @@ namespace NGIN::Net
     };
 
     /// @brief Explicit async runtime for socket readiness.
-    class NetworkDriver final
+    class NGIN_NET_API NetworkDriver final
     {
     public:
         NetworkDriver(const NetworkDriver&)            = delete;

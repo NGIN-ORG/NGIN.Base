@@ -15,20 +15,21 @@ namespace NGIN::Crypto::Keys
         ByteBuffer             publicKey;
     };
 
-    [[nodiscard]] CryptoExpected<SubjectPublicKeyInfo> ParseSubjectPublicKeyInfo(ConstByteSpan der);
-    [[nodiscard]] CryptoExpected<ByteBuffer>           WriteSubjectPublicKeyInfo(KeyAlgorithm algorithm, ConstByteSpan publicKey);
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<SubjectPublicKeyInfo> ParseSubjectPublicKeyInfo(ConstByteSpan der);
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<ByteBuffer> WriteSubjectPublicKeyInfo(
+            KeyAlgorithm algorithm, ConstByteSpan publicKey);
 
-    [[nodiscard]] CryptoExpected<NGIN::Crypto::Asymmetric::Ed25519PublicKey> ImportEd25519PublicKey(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<NGIN::Crypto::Asymmetric::Ed25519PublicKey> ImportEd25519PublicKey(
             const SubjectPublicKeyInfo& publicKeyInfo) noexcept;
-    [[nodiscard]] CryptoExpected<NGIN::Crypto::Asymmetric::X25519PublicKey> ImportX25519PublicKey(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<NGIN::Crypto::Asymmetric::X25519PublicKey> ImportX25519PublicKey(
             const SubjectPublicKeyInfo& publicKeyInfo) noexcept;
-    [[nodiscard]] CryptoExpected<NGIN::Crypto::Asymmetric::EcdsaP256PublicKey> ImportEcdsaP256PublicKey(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<NGIN::Crypto::Asymmetric::EcdsaP256PublicKey> ImportEcdsaP256PublicKey(
             const SubjectPublicKeyInfo& publicKeyInfo) noexcept;
 
-    [[nodiscard]] SubjectPublicKeyInfo ExportSubjectPublicKeyInfo(
+    [[nodiscard]] NGIN_CRYPTO_API SubjectPublicKeyInfo ExportSubjectPublicKeyInfo(
             const NGIN::Crypto::Asymmetric::Ed25519PublicKey& publicKey);
-    [[nodiscard]] SubjectPublicKeyInfo ExportSubjectPublicKeyInfo(
+    [[nodiscard]] NGIN_CRYPTO_API SubjectPublicKeyInfo ExportSubjectPublicKeyInfo(
             const NGIN::Crypto::Asymmetric::X25519PublicKey& publicKey);
-    [[nodiscard]] SubjectPublicKeyInfo ExportSubjectPublicKeyInfo(
+    [[nodiscard]] NGIN_CRYPTO_API SubjectPublicKeyInfo ExportSubjectPublicKeyInfo(
             const NGIN::Crypto::Asymmetric::EcdsaP256PublicKey& publicKey);
 }// namespace NGIN::Crypto::Keys

@@ -137,7 +137,7 @@ namespace NGIN::Serialization::JSON
     class NGIN_SERIALIZATION_API ArrayView
     {
     public:
-        class Iterator
+        class NGIN_SERIALIZATION_API Iterator
         {
         public:
             using iterator_category = std::forward_iterator_tag;
@@ -192,7 +192,7 @@ namespace NGIN::Serialization::JSON
     class NGIN_SERIALIZATION_API ObjectView
     {
     public:
-        class Iterator
+        class NGIN_SERIALIZATION_API Iterator
         {
         public:
             using iterator_category = std::forward_iterator_tag;

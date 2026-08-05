@@ -2,6 +2,7 @@
 /// @brief Async datagram channel interface.
 #pragma once
 
+#include <NGIN/Defines.hpp>
 #include <NGIN/Net/Types/Buffer.hpp>
 #include <NGIN/Net/Types/Endpoint.hpp>
 #include <NGIN/Net/Types/NetError.hpp>
@@ -25,10 +26,11 @@ namespace NGIN::Net::Transport
     };
 
     /// @brief Async datagram channel interface for transport layers.
-    class IDatagramChannel
+    class NGIN_NET_API IDatagramChannel
     {
     public:
-        virtual ~IDatagramChannel() = default;
+        IDatagramChannel() noexcept;
+        virtual ~IDatagramChannel();
 
         virtual NGIN::Async::Task<void, NGIN::Net::NetError> SendAsync(NGIN::Async::TaskContext& ctx,
                                                                         NGIN::Net::Endpoint remoteEndpoint,

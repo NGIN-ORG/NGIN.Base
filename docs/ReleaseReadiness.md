@@ -24,20 +24,20 @@ collapse into one code.
 
 ## Verification evidence
 
-- Configure-time ownership and dependency-direction validation: 263 installed
-  headers, 261 standalone public contracts, zero forbidden public-header edges.
-- Windows independent public-header matrix and six focused umbrella tests pass.
+- Configure-time ownership and dependency-direction validation: 265 installed
+  headers, 263 standalone public contracts, zero forbidden public-header edges.
+- Windows independent public-header matrix and seven focused umbrella tests pass.
 - Windows incremental JSON/XML suite: 1,872 assertions in five test cases.
 - Windows allocator suite: 56 assertions in eight test cases.
 - Linux incremental and allocator suites pass with the same assertion counts.
 - Filesystem behavior suites pass on Windows (local: 183 assertions/11 cases;
   VFS: 105/6) and Linux (local: 282/14; VFS: 105/6).
-- Windows static-only and shared-only builds produce all six component
+- Windows static-only and shared-only builds produce all seven component
   libraries. Build-tree and installed external-consumer matrices link and run
-  the aggregate plus all six preferred component targets for both linkage
+  the aggregate plus all seven preferred component targets for both linkage
   forms.
-- Linux combined static/shared builds produce all twelve component libraries;
-  the installed seven-consumer matrix configures, links, and runs against an
+- Linux combined static/shared builds produce all fourteen component libraries;
+  the installed eight-consumer matrix configures, links, and runs against an
   empty-prefix installation.
 - OpenSSL 3 crypto configuration satisfies all required provider capabilities;
   62 focused provider/include tests pass.
@@ -58,10 +58,10 @@ collapse into one code.
 ## Documentation-example review
 
 Public examples were checked against the current narrow headers and type names.
-The aggregate external consumer compiles the focused Net and Serialization
-umbrellas, while six focused consumers compile and execute one public API from
-each component. Focused tests compile the Foundation, Execution, IO, Net,
-Serialization, and Crypto umbrellas.
+The aggregate external consumer validates the Foundation package surface,
+while seven focused consumers compile and execute one public API from each
+component. Focused tests compile the Foundation, Execution, IO, Net,
+NetTLS, Serialization, and Crypto umbrellas.
 Behavioral documentation examples remain backed by their matching focused test
 areas (`Async`, `Sync`, `IO`, `Process`, `Net`, `Serialization`, and `Crypto`).
 
@@ -70,6 +70,6 @@ areas (`Async`, `Sync`, `IO`, `Process`, `Net`, `Serialization`, and `Crypto`).
 - Execution of the newly expanded hosted CI matrix on the published branch.
 
 The target-name, dependency-propagation, and component-visibility review is
-complete. Windows shared builds currently retain automatic symbol export as a
-compatibility bridge; removing it is a later ABI-hardening task, not a blocker
-for the canonical component package contract.
+complete. Windows shared builds use explicit component API annotations and no
+longer rely on automatic symbol export. Full and Foundation-only installed
+consumer matrices validate the package component contract.

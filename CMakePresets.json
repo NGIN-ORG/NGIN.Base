@@ -2,7 +2,7 @@
   "version": 3,
   "cmakeMinimumRequired": {
     "major": 3,
-    "minor": 20
+    "minor": 24
   },
   "configurePresets": [
     {
@@ -16,17 +16,21 @@
       "inherits": "base",
       "binaryDir": "${sourceDir}/build/coverage",
       "cacheVariables": {
-        "CODE_COVERAGE": "ON",
-        "NGIN_BASE_BUILD_STATIC": "ON"
+        "NGIN_BASE_ENABLE_COVERAGE": "ON",
+        "NGIN_BASE_BUILD_TESTS": "ON",
+        "NGIN_BASE_BUILD_EXAMPLES": "OFF",
+        "NGIN_BASE_BUILD_BENCHMARKS": "OFF",
+        "NGIN_BASE_BUILD_STATIC": "ON",
+        "NGIN_BASE_BUILD_SHARED": "OFF"
       }
     },
     {
       "name": "development",
-      "description": "Development mode (dummy source, no examples/tests)",
+      "description": "Fast Foundation-only development build",
       "inherits": "base",
       "binaryDir": "${sourceDir}/build/development",
       "cacheVariables": {
-        "NGIN_BASE_DEVELOPMENT_MODE": "ON",
+        "NGIN_BASE_BUILD_COMPONENTS": "Foundation",
         "NGIN_BASE_BUILD_EXAMPLES": "OFF",
         "NGIN_BASE_BUILD_TESTS": "OFF",
         "NGIN_BASE_BUILD_STATIC": "ON"
@@ -80,7 +84,7 @@
         "NGIN_BASE_BUILD_STATIC": "ON"
       }
     },
-      {
+    {
       "name": "tests-asan",
       "description": "Tests with ASAN/UBSAN (RelWithDebInfo)",
       "inherits": "tests",
@@ -109,6 +113,14 @@
     }
   ],
   "buildPresets": [
+    {
+      "name": "coverage-build",
+      "configurePreset": "coverage",
+      "description": "Build tests with coverage instrumentation",
+      "configuration": "Debug",
+      "jobs": 4,
+      "targets": ["all"]
+    },
     {
       "name": "benchmarks-debug",
       "configurePreset": "benchmarks",

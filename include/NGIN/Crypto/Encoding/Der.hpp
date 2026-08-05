@@ -62,7 +62,7 @@ namespace NGIN::Crypto::Encoding
     };
 
     /// @brief Streaming reader over DER TLV elements. Returned element views borrow from the original input.
-    class DerReader
+    class NGIN_CRYPTO_API DerReader
     {
     public:
         explicit DerReader(ConstByteSpan input, DerReadOptions options = {}) noexcept;
@@ -91,22 +91,26 @@ namespace NGIN::Crypto::Encoding
         };
     }
 
-    [[nodiscard]] bool IsDerUniversalElement(
+    [[nodiscard]] NGIN_CRYPTO_API bool IsDerUniversalElement(
             const DerElement& element, DerUniversalTag tag, bool constructed = false) noexcept;
 
-    [[nodiscard]] CryptoExpected<ConstByteSpan>                          ReadDerInteger(const DerElement& element) noexcept;
-    [[nodiscard]] CryptoExpected<DerBitString>                           ReadDerBitString(const DerElement& element) noexcept;
-    [[nodiscard]] CryptoExpected<ConstByteSpan>                          ReadDerOctetString(const DerElement& element) noexcept;
-    [[nodiscard]] CryptoExpected<NGIN::Containers::Vector<NGIN::UInt32>> ReadDerObjectIdentifier(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<ConstByteSpan> ReadDerInteger(const DerElement& element) noexcept;
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<DerBitString>  ReadDerBitString(const DerElement& element) noexcept;
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<ConstByteSpan> ReadDerOctetString(const DerElement& element) noexcept;
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<NGIN::Containers::Vector<NGIN::UInt32>> ReadDerObjectIdentifier(
             const DerElement& element);
-    [[nodiscard]] CryptoExpected<DerReader> ReadDerSequence(const DerReader& parent, const DerElement& element) noexcept;
-    [[nodiscard]] CryptoExpected<DerReader> ReadDerSet(const DerReader& parent, const DerElement& element) noexcept;
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<DerReader> ReadDerSequence(
+            const DerReader& parent, const DerElement& element) noexcept;
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<DerReader> ReadDerSet(
+            const DerReader& parent, const DerElement& element) noexcept;
 
-    [[nodiscard]] CryptoExpected<ByteBuffer> EncodeDerElement(DerTag tag, ConstByteSpan value);
-    [[nodiscard]] CryptoExpected<ByteBuffer> EncodeDerInteger(ConstByteSpan value);
-    [[nodiscard]] CryptoExpected<ByteBuffer> EncodeDerBitString(NGIN::UInt8 unusedBitCount, ConstByteSpan bytes);
-    [[nodiscard]] CryptoExpected<ByteBuffer> EncodeDerOctetString(ConstByteSpan value);
-    [[nodiscard]] CryptoExpected<ByteBuffer> EncodeDerObjectIdentifier(std::span<const NGIN::UInt32> arcs);
-    [[nodiscard]] CryptoExpected<ByteBuffer> EncodeDerSequence(ConstByteSpan encodedChildren);
-    [[nodiscard]] CryptoExpected<ByteBuffer> EncodeDerSet(ConstByteSpan encodedChildren);
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<ByteBuffer> EncodeDerElement(DerTag tag, ConstByteSpan value);
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<ByteBuffer> EncodeDerInteger(ConstByteSpan value);
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<ByteBuffer> EncodeDerBitString(
+            NGIN::UInt8 unusedBitCount, ConstByteSpan bytes);
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<ByteBuffer> EncodeDerOctetString(ConstByteSpan value);
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<ByteBuffer> EncodeDerObjectIdentifier(
+            std::span<const NGIN::UInt32> arcs);
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<ByteBuffer> EncodeDerSequence(ConstByteSpan encodedChildren);
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<ByteBuffer> EncodeDerSet(ConstByteSpan encodedChildren);
 }// namespace NGIN::Crypto::Encoding

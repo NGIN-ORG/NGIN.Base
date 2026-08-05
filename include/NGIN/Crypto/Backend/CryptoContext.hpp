@@ -64,7 +64,7 @@ namespace NGIN::Crypto::Backend
     };
 
     /// @brief Explicit neutral handle for crypto backend capabilities and operations.
-    class CryptoContext
+    class NGIN_CRYPTO_API CryptoContext
     {
     public:
         constexpr CryptoContext() noexcept = default;
@@ -381,17 +381,17 @@ namespace NGIN::Crypto::Backend
     };
 
     /// @brief Creates a neutral context backed by the platform facilities available in NGIN.Base core.
-    [[nodiscard]] CryptoExpected<CryptoContext> CreateContext(const BackendOptions& options = {}) noexcept;
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<CryptoContext> CreateContext(const BackendOptions& options = {}) noexcept;
 
     /// @brief Creates a context and returns diagnostics for rejected candidate providers.
-    [[nodiscard]] BackendContextSelection CreateContextWithDiagnostics(const BackendOptions& options = {}) noexcept;
+    [[nodiscard]] NGIN_CRYPTO_API BackendContextSelection CreateContextWithDiagnostics(const BackendOptions& options = {}) noexcept;
 
     /// @brief Creates a context from the strongest compiled provider that satisfies the default policy.
-    [[nodiscard]] CryptoExpected<CryptoContext> CreateBestAvailableContext() noexcept;
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<CryptoContext> CreateBestAvailableContext() noexcept;
 
     /// @brief Creates a context backed only by platform facilities.
-    [[nodiscard]] CryptoExpected<CryptoContext> CreatePlatformContext() noexcept;
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<CryptoContext> CreatePlatformContext() noexcept;
 
     /// @brief Creates a context backed by a named package provider such as "openssl".
-    [[nodiscard]] CryptoExpected<CryptoContext> CreatePackageContext(std::string_view packageName) noexcept;
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<CryptoContext> CreatePackageContext(std::string_view packageName) noexcept;
 }// namespace NGIN::Crypto::Backend

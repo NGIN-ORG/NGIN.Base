@@ -368,7 +368,7 @@ TEST_CASE("Backend policy reports unsupported platform algorithm requirements", 
 {
     NGIN::Crypto::Backend::BackendOptions options;
     options.policy = NGIN::Crypto::Backend::BackendPolicy::PlatformOnly;
-    options.requiredAlgorithms.Require(NGIN::Crypto::HashAlgorithm::Sha256);
+    options.requiredAlgorithms.Require(NGIN::Crypto::HashAlgorithm::Sha3_256);
 
     auto context = NGIN::Crypto::Backend::CreateContext(options);
 

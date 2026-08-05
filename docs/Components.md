@@ -1,6 +1,6 @@
 # NGIN.Base Components
 
-NGIN.Base ships six independently compiled ownership components. The component
+NGIN.Base ships seven independently compiled ownership components. The component
 model is enforced at configure time and is shared by build-tree and installed
 package exports.
 
@@ -14,6 +14,7 @@ package exports.
 | Serialization | Serialization core plus JSON and XML |
 | Crypto | Crypto providers, algorithms, keys, certificates, tokens, and secure memory |
 | Net | Addressing, sockets, network drivers, buffers, and transport adapters |
+| NetTLS | Provider-neutral TLS contexts and TLS byte streams |
 
 The source of truth for installed-header classification is
 `cmake/NGINBaseComponentHeaders.cmake`. Adding an unowned header or assigning a
@@ -25,14 +26,8 @@ are not standalone public contracts.
 
 ```text
 Foundation
-   |
-Execution
-   |
-IO ------> Serialization
-|               |
-+-------> Crypto+
-|
-+-------> Net
+   `--> Execution --> IO --> Serialization --> Crypto --.
+                       `--> Net ------------------------> NetTLS
 ```
 
 In explicit terms:
@@ -42,10 +37,11 @@ In explicit terms:
 - IO depends on Foundation and Execution.
 - Serialization depends on Foundation and IO.
 - Crypto depends on Foundation, IO, and Serialization.
-- Net depends on Foundation, IO, Execution, and Crypto.
+- Net depends on Foundation, Execution, and IO.
+- NetTLS depends on Net and Crypto.
 
-Net depends on Crypto for the provider-neutral TLS credential contract. It does
-not introduce a Crypto-to-Net dependency.
+This keeps plaintext sockets and transports independent of Crypto. Applications
+that need TLS include `<NGIN/NetTLS.hpp>` and link `NGIN::Base::NetTLS`.
 
 The 2026-08-05 public-header include audit found no dependency outside these
 allowed directions. The compiled targets enforce the same direction through
@@ -58,6 +54,11 @@ Each component provides `NGIN::Base::<Component>::Static`,
 `NGIN::Base::<Component>` alias. `NGIN::Base::Static`, `NGIN::Base::Shared`,
 and `NGIN::Base` are interface aggregates over the corresponding components;
 they do not compile a second copy of component sources.
+
+`NGIN_BASE_BUILD_COMPONENTS` accepts `all` or a semicolon-separated component
+list and computes its dependency closure. Installed package metadata exposes
+only the component targets that were built, and supports normal CMake component
+requests such as `find_package(NGINBase CONFIG REQUIRED COMPONENTS Foundation)`.
 
 ## Public-surface conventions
 
@@ -86,5 +87,5 @@ When tests are enabled, `NGINBasePublicHeaderChecks` compiles every public
 contract header in an independent translation unit. This catches accidental
 reliance on transitive includes. Detail headers are compiled through their
 owning public header. Component-focused tests link the narrow owning component.
-The external-consumer matrix links and runs the aggregate plus all six
+The external-consumer matrix links and runs the aggregate plus all seven
 components against both build-tree and installed package exports.

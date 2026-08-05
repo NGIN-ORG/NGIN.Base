@@ -26,8 +26,12 @@ namespace NGIN::Crypto::Keys
         bool                                   hasParameters {false};
     };
 
-    [[nodiscard]] CryptoExpected<SignatureAlgorithm>    ToSignatureAlgorithm(KeyAlgorithm algorithm) noexcept;
-    [[nodiscard]] CryptoExpected<KeyAgreementAlgorithm> ToKeyAgreementAlgorithm(KeyAlgorithm algorithm) noexcept;
-    [[nodiscard]] CryptoExpected<KeyAlgorithm>          FromSignatureAlgorithm(SignatureAlgorithm algorithm) noexcept;
-    [[nodiscard]] CryptoExpected<KeyAlgorithm>          FromKeyAgreementAlgorithm(KeyAgreementAlgorithm algorithm) noexcept;
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<SignatureAlgorithm> ToSignatureAlgorithm(
+            KeyAlgorithm algorithm) noexcept;
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<KeyAgreementAlgorithm> ToKeyAgreementAlgorithm(
+            KeyAlgorithm algorithm) noexcept;
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<KeyAlgorithm> FromSignatureAlgorithm(
+            SignatureAlgorithm algorithm) noexcept;
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<KeyAlgorithm> FromKeyAgreementAlgorithm(
+            KeyAgreementAlgorithm algorithm) noexcept;
 }// namespace NGIN::Crypto::Keys

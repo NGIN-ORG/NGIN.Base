@@ -7,7 +7,7 @@
 namespace NGIN::Crypto::Memory
 {
     /// @brief Move-only byte buffer that wipes its storage before releasing it.
-    class SecureBuffer
+    class NGIN_CRYPTO_API SecureBuffer
     {
     public:
         SecureBuffer() = default;

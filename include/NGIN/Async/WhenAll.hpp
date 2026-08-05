@@ -114,7 +114,18 @@ namespace NGIN::Async
                 ctx, operations, failure);
         if (failure)
         {
-            co_return std::move(*failure);
+            if (failure->IsDomainError())
+            {
+                co_await DomainFailure(std::move(*failure).DomainError());
+            }
+            else if (failure->IsCanceled())
+            {
+                co_await Canceled();
+            }
+            else
+            {
+                co_await Faulted(std::move(*failure).Fault());
+            }
         }
         co_return;
     }

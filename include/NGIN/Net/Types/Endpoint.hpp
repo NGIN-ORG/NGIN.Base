@@ -2,6 +2,7 @@
 /// @brief Network endpoint (address + port).
 #pragma once
 
+#include <NGIN/Defines.hpp>
 #include <NGIN/Net/Types/IpAddress.hpp>
 #include <NGIN/Primitives.hpp>
 
@@ -13,7 +14,7 @@
 namespace NGIN::Net
 {
     /// @brief Address and port pair.
-    struct Endpoint final
+    struct NGIN_NET_API Endpoint final
     {
         IpAddress    address {};
         NGIN::UInt16 port {0};
@@ -28,7 +29,7 @@ namespace NGIN::Net
         [[nodiscard]] constexpr auto operator<=>(const Endpoint&) const noexcept = default;
     };
 
-    struct EndpointHash final
+    struct NGIN_NET_API EndpointHash final
     {
         [[nodiscard]] std::size_t operator()(const Endpoint& endpoint) const noexcept;
     };

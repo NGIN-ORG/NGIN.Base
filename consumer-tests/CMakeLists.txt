@@ -1,9 +1,14 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.24)
 project(NGINBaseConsumer LANGUAGES CXX)
 
 include(CTest)
 
-find_package(NGINBase CONFIG REQUIRED)
+set(NGIN_BASE_CONSUMER_COMPONENTS
+  "Foundation;Execution;IO;Serialization;Crypto;Net;NetTLS"
+  CACHE STRING "NGIN.Base components exercised by the consumer matrix"
+)
+
+find_package(NGINBase CONFIG REQUIRED COMPONENTS ${NGIN_BASE_CONSUMER_COMPONENTS})
 
 function(ngin_base_add_consumer_test target_name)
   add_test(NAME "${target_name}" COMMAND "${target_name}")
@@ -19,7 +24,7 @@ target_compile_features(NGINBaseConsumer PRIVATE cxx_std_23)
 target_link_libraries(NGINBaseConsumer PRIVATE NGIN::Base)
 ngin_base_add_consumer_test(NGINBaseConsumer)
 
-foreach(component IN ITEMS Foundation Execution IO Serialization Crypto Net)
+foreach(component IN LISTS NGIN_BASE_CONSUMER_COMPONENTS)
   string(TOUPPER "${component}" component_upper)
   add_executable("NGINBase${component}Consumer" component_main.cpp)
   target_compile_features("NGINBase${component}Consumer" PRIVATE cxx_std_23)

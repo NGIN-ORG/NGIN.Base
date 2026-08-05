@@ -86,13 +86,13 @@ namespace NGIN::Crypto::Kdf
     };
 
     /// @brief Derives key material into caller-provided output storage.
-    [[nodiscard]] CryptoExpected<void> DeriveKeyInto(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<void> DeriveKeyInto(
             const NGIN::Crypto::Backend::CryptoContext& context,
             const KeyDerivationParameters&              parameters,
             ByteSpan                                    output) noexcept;
 
     /// @brief Derives key material into owned non-secret output storage.
-    [[nodiscard]] CryptoExpected<ByteBuffer> DeriveKey(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<ByteBuffer> DeriveKey(
             const NGIN::Crypto::Backend::CryptoContext& context,
             const KeyDerivationParameters&              parameters,
             NGIN::UIntSize                              outputSize);

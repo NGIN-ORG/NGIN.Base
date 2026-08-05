@@ -24,33 +24,35 @@ namespace NGIN::Crypto::Hashing
     }
 
     /// @brief Hashes input into a caller-provided digest buffer.
-    [[nodiscard]] CryptoExpected<void> HashInto(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<void> HashInto(
             const NGIN::Crypto::Backend::CryptoContext& context,
             HashAlgorithm                               algorithm,
             ConstByteSpan                               input,
             ByteSpan                                    output) noexcept;
 
     /// @brief Hashes input into an owned byte buffer.
-    [[nodiscard]] CryptoExpected<ByteBuffer> Hash(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<ByteBuffer> Hash(
             const NGIN::Crypto::Backend::CryptoContext& context,
             HashAlgorithm                               algorithm,
             ConstByteSpan                               input);
 
     /// @brief Hashes input as SHA-256 into a caller-provided digest.
-    [[nodiscard]] CryptoExpected<void> Sha256Into(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<void> Sha256Into(
             const NGIN::Crypto::Backend::CryptoContext& context,
             ConstByteSpan                               input,
             Sha256Digest&                               output) noexcept;
 
     /// @brief Hashes input as SHA-512 into a caller-provided digest.
-    [[nodiscard]] CryptoExpected<void> Sha512Into(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<void> Sha512Into(
             const NGIN::Crypto::Backend::CryptoContext& context,
             ConstByteSpan                               input,
             Sha512Digest&                               output) noexcept;
 
     /// @brief Hashes input as SHA-256 into an owned fixed-size digest.
-    [[nodiscard]] CryptoExpected<Sha256Digest> Sha256(const NGIN::Crypto::Backend::CryptoContext& context, ConstByteSpan input);
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<Sha256Digest> Sha256(
+            const NGIN::Crypto::Backend::CryptoContext& context, ConstByteSpan input);
 
     /// @brief Hashes input as SHA-512 into an owned fixed-size digest.
-    [[nodiscard]] CryptoExpected<Sha512Digest> Sha512(const NGIN::Crypto::Backend::CryptoContext& context, ConstByteSpan input);
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<Sha512Digest> Sha512(
+            const NGIN::Crypto::Backend::CryptoContext& context, ConstByteSpan input);
 }// namespace NGIN::Crypto::Hashing

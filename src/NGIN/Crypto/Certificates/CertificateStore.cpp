@@ -527,8 +527,7 @@ namespace NGIN::Crypto::Certificates
 
     CryptoExpected<CertificateStore> CreateCustomCertificateStore(NGIN::Containers::Vector<Certificate> certificates)
     {
-        return CertificateStore {
-                CertificateStoreInfo {
+        CertificateStoreInfo info {
                         .kind               = CertificateStoreKind::Custom,
                         .name               = "custom",
                         .operatingSystem    = {},
@@ -538,9 +537,8 @@ namespace NGIN::Crypto::Certificates
                         .platformBacked     = false,
                         .available          = true,
                         .diagnostic         = {},
-                },
-                std::move(certificates),
         };
+        return CertificateStore {std::move(info), std::move(certificates)};
     }
 
     CryptoExpected<CertificateStore> OpenPlatformRootCertificateStore() noexcept

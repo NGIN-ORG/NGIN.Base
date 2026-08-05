@@ -79,7 +79,7 @@ namespace NGIN::Crypto::Symmetric
     }
 
     /// @brief Encrypts and authenticates plaintext into caller-provided ciphertext and tag buffers.
-    [[nodiscard]] CryptoExpected<void> SealInto(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<void> SealInto(
             const NGIN::Crypto::Backend::CryptoContext& context,
             AeadAlgorithm                               algorithm,
             const AeadSealInput&                        input,
@@ -87,20 +87,20 @@ namespace NGIN::Crypto::Symmetric
             ByteSpan                                    tag) noexcept;
 
     /// @brief Authenticates and decrypts ciphertext into caller-provided plaintext storage.
-    [[nodiscard]] CryptoExpected<void> OpenInto(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<void> OpenInto(
             const NGIN::Crypto::Backend::CryptoContext& context,
             AeadAlgorithm                               algorithm,
             const AeadOpenInput&                        input,
             ByteSpan                                    plaintext) noexcept;
 
     /// @brief Encrypts and authenticates plaintext into owned ciphertext and tag storage.
-    [[nodiscard]] CryptoExpected<AeadSealResult> Seal(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<AeadSealResult> Seal(
             const NGIN::Crypto::Backend::CryptoContext& context,
             AeadAlgorithm                               algorithm,
             const AeadSealInput&                        input);
 
     /// @brief Authenticates and decrypts ciphertext into owned plaintext storage.
-    [[nodiscard]] CryptoExpected<ByteBuffer> Open(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<ByteBuffer> Open(
             const NGIN::Crypto::Backend::CryptoContext& context,
             AeadAlgorithm                               algorithm,
             const AeadOpenInput&                        input);

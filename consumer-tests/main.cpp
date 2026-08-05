@@ -1,10 +1,10 @@
-#include <NGIN/Net.hpp>
-#include <NGIN/Serialization.hpp>
+#include <NGIN/BaseVersion.hpp>
+#include <NGIN/Timer.hpp>
 
 int main()
 {
-    const auto address  = NGIN::Net::IpAddress::Parse("127.0.0.1");
-    const auto document = NGIN::Serialization::JSON::Parse(
-            NGIN::Serialization::OwnedTextBuffer {R"({"installed":true})"});
-    return address && document ? 0 : 1;
+    NGIN::Timer timer;
+    timer.Start();
+    timer.Stop();
+    return NGIN::BaseVersion::Major == 0 && !timer.IsRunning() ? 0 : 1;
 }

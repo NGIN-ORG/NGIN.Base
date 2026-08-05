@@ -41,7 +41,7 @@ namespace NGIN::Crypto::Certificates
         NGIN::Containers::Vector<Certificate> certificates;
     };
 
-    class CertificateStore
+    class NGIN_CRYPTO_API CertificateStore
     {
     public:
         CertificateStore() = default;
@@ -70,10 +70,10 @@ namespace NGIN::Crypto::Certificates
         NGIN::Containers::Vector<CertificateStoreOpenDiagnostic> diagnostics;
     };
 
-    [[nodiscard]] CryptoExpected<CertificateStore> CreateCustomCertificateStore(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<CertificateStore> CreateCustomCertificateStore(
             NGIN::Containers::Vector<Certificate> certificates);
 
-    [[nodiscard]] CryptoExpected<CertificateStore> OpenPlatformRootCertificateStore() noexcept;
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<CertificateStore> OpenPlatformRootCertificateStore() noexcept;
 
-    [[nodiscard]] CertificateStoreOpenSelection OpenPlatformRootCertificateStoreWithDiagnostics() noexcept;
+    [[nodiscard]] NGIN_CRYPTO_API CertificateStoreOpenSelection OpenPlatformRootCertificateStoreWithDiagnostics() noexcept;
 }// namespace NGIN::Crypto::Certificates

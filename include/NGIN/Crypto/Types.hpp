@@ -1,5 +1,6 @@
 #pragma once
 
+#include <NGIN/Defines.hpp>
 #include <NGIN/Primitives.hpp>
 
 #include <array>

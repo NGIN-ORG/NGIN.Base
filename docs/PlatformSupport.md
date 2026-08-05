@@ -32,7 +32,8 @@ configurations.
   removed without claiming a portable sort order.
 - Numeric IPv6 scope identifiers are supported. Interface-name scopes require
   an OS lookup and are intentionally not accepted by pure endpoint parsing.
-- Non-Windows async sockets currently use readiness polling; Windows uses IOCP.
+- Windows async sockets use IOCP. Linux uses epoll, macOS uses kqueue, and other
+  POSIX targets use the select fallback.
 - TLS is not part of the default build. The provider-neutral API is available
   on every platform and returns `ProviderUnavailable` when no implementation
   was compiled. The OpenSSL 3 provider is enabled explicitly with
@@ -54,15 +55,14 @@ configurations.
 
 ## Linkage and packaging
 
-- Foundation, Execution, IO, Serialization, Crypto, and Net are independently
+- Foundation, Execution, IO, Serialization, Crypto, Net, and NetTLS are independently
   compiled in static and shared forms. Aggregate targets are interface-only and
   do not duplicate component objects.
 - Build-tree and installed package exports provide canonical aggregate and
   per-component targets. External-consumer matrices link and run all seven
   preferred targets.
-- Component-specific import/export macros support Windows DLL consumers. The
-  build also enables Windows automatic symbol export as a compatibility bridge
-  for older compiled declarations that predate component-specific annotations.
+- Component-specific import/export macros define the Windows DLL ABI; automatic
+  symbol export is not used.
 - Static-only and shared-only builds are verified on Windows, and a combined
   static/shared build is verified on Linux. The hosted workflow covers the
-  shared install and consumer matrix on Linux.
+  shared install and consumer matrix on Linux and Windows.

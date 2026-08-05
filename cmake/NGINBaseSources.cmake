@@ -1,7 +1,7 @@
 #-------------------------------------------------------------------------------
 # Source ownership groups
 #-------------------------------------------------------------------------------
-foreach(_ngin_component IN ITEMS FOUNDATION EXECUTION IO SERIALIZATION CRYPTO NET)
+foreach(_ngin_component IN ITEMS FOUNDATION EXECUTION IO SERIALIZATION CRYPTO NET NETTLS)
   set(NGIN_BASE_${_ngin_component}_PRIVATE_DEFINITIONS)
   set(NGIN_BASE_${_ngin_component}_PRIVATE_INCLUDE_DIRECTORIES)
   set(NGIN_BASE_${_ngin_component}_PRIVATE_LIBRARIES)
@@ -58,8 +58,15 @@ set(NGIN_BASE_CRYPTO_SOURCES
 set(NGIN_BASE_NET_SOURCES
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/Endpoint.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/IpAddress.cpp
+  ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/NetworkDriver.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/Resolver.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/TcpListener.cpp
+  ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/TcpSocket.cpp
+  ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/TransportInterfaces.cpp
+  ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/UdpSocket.cpp
+)
+
+set(NGIN_BASE_NETTLS_SOURCES
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/TLS/TlsContext.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/TLS/TlsStream.cpp
 )
@@ -109,11 +116,11 @@ endif()
 
 if(NGIN_BASE_TLS_WITH_OPENSSL)
   find_package(OpenSSL 3 REQUIRED COMPONENTS SSL Crypto)
-  list(APPEND NGIN_BASE_NET_SOURCES
+  list(APPEND NGIN_BASE_NETTLS_SOURCES
     ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/TLS/OpenSslTlsProvider.cpp
   )
-  list(APPEND NGIN_BASE_NET_PRIVATE_DEFINITIONS NGIN_BASE_TLS_HAS_OPENSSL)
-  list(APPEND NGIN_BASE_NET_PRIVATE_LIBRARIES OpenSSL::SSL OpenSSL::Crypto)
+  list(APPEND NGIN_BASE_NETTLS_PRIVATE_DEFINITIONS NGIN_BASE_TLS_HAS_OPENSSL)
+  list(APPEND NGIN_BASE_NETTLS_PRIVATE_LIBRARIES OpenSSL::SSL OpenSSL::Crypto)
 endif()
 
 if(NGIN_BASE_CRYPTO_WITH_BORINGSSL)
@@ -407,6 +414,13 @@ function(ngin_base_validate_crypto_requirements)
 endfunction()
 
 ngin_base_validate_crypto_requirements()
+
+foreach(_ngin_component IN LISTS NGIN_BASE_COMPONENTS)
+  string(TOUPPER "${_ngin_component}" _ngin_component_upper)
+  if(NOT DEFINED NGIN_BASE_${_ngin_component_upper}_SOURCES)
+    message(FATAL_ERROR "Missing source ownership list for component ${_ngin_component}")
+  endif()
+endforeach()
 if(WIN32)
   list(APPEND NGIN_BASE_EXECUTION_SOURCES
     ${NGIN_BASE_ROOT_DIR}/src/Async/Fiber/Fiber.win32.cpp
@@ -422,9 +436,6 @@ if(WIN32)
   )
   list(APPEND NGIN_BASE_NET_SOURCES
     ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/SocketPlatform.win32.cpp
-    ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/NetworkDriver.win32.cpp
-    ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/TcpSocket.win32.cpp
-    ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/UdpSocket.win32.cpp
   )
   list(APPEND NGIN_BASE_CRYPTO_SOURCES
     ${NGIN_BASE_ROOT_DIR}/src/NGIN/Crypto/Random/SecureRandom.win32.cpp
@@ -449,9 +460,6 @@ elseif(APPLE)
   )
   list(APPEND NGIN_BASE_NET_SOURCES
     ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/SocketPlatform.posix.cpp
-    ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/NetworkDriver.posix.cpp
-    ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/TcpSocket.posix.cpp
-    ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/UdpSocket.posix.cpp
   )
   list(APPEND NGIN_BASE_CRYPTO_SOURCES
     ${NGIN_BASE_ROOT_DIR}/src/NGIN/Crypto/Random/SecureRandom.apple.cpp
@@ -476,9 +484,6 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   )
   list(APPEND NGIN_BASE_NET_SOURCES
     ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/SocketPlatform.posix.cpp
-    ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/NetworkDriver.linux.cpp
-    ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/TcpSocket.posix.cpp
-    ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/UdpSocket.posix.cpp
   )
   list(APPEND NGIN_BASE_CRYPTO_SOURCES
     ${NGIN_BASE_ROOT_DIR}/src/NGIN/Crypto/Random/SecureRandom.linux.cpp
@@ -503,9 +508,6 @@ elseif(UNIX)
   )
   list(APPEND NGIN_BASE_NET_SOURCES
     ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/SocketPlatform.posix.cpp
-    ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/NetworkDriver.posix.cpp
-    ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/TcpSocket.posix.cpp
-    ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/UdpSocket.posix.cpp
   )
   list(APPEND NGIN_BASE_CRYPTO_SOURCES
     ${NGIN_BASE_ROOT_DIR}/src/NGIN/Crypto/Random/SecureRandom.posix.cpp

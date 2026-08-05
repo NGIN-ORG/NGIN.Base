@@ -15,7 +15,7 @@ namespace NGIN::Crypto::Mac
     }
 
     /// @brief Computes HMAC-SHA256 into an owned fixed-size tag.
-    [[nodiscard]] CryptoExpected<HmacSha256Tag> HmacSha256(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<HmacSha256Tag> HmacSha256(
             const NGIN::Crypto::Backend::CryptoContext& context,
             NGIN::Crypto::Memory::SecretView            key,
             ConstByteSpan                               input);

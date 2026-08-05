@@ -18,6 +18,7 @@ low-level building blocks that can also be adopted independently.
 | SIMD | [SIMD](docs/SIMD.md) |
 | Paths and files | [I/O](docs/IO.md) |
 | Sockets and async networking | [Network](docs/Network.md) |
+| TLS streams | [Network TLS](docs/Network.md#tls-streams) |
 | Allocators | [Memory](docs/Memory.md) |
 | Containers | [Containers](docs/Containers.md) |
 | JSON and XML | [Serialization](include/NGIN/Serialization/README.md) |
@@ -54,8 +55,13 @@ the async guide for completion, error, and cancellation handling.
 - `NGIN::Base`, the aggregate convenience target
 
 `<Component>` is one of `Foundation`, `Execution`, `IO`, `Serialization`,
-`Crypto`, or `Net`. Prefer the narrowest component that owns the APIs a target
+`Crypto`, `Net`, or `NetTLS`. Prefer the narrowest component that owns the APIs a target
 uses; the aggregate remains available for applications that need several areas.
+
+Source builds may select a component and its transitive dependencies with, for
+example, `-DNGIN_BASE_BUILD_COMPONENTS=Net`. The default value, `all`, builds
+all seven components. Tests, examples, benchmarks, and fuzzers intentionally
+enable the full graph.
 
 ## Build and test
 

@@ -15,7 +15,6 @@ function(ngin_base_configure_component_target target_name component linkage)
     CXX_EXTENSIONS OFF
     OUTPUT_NAME "NGINBase${component}"
     EXPORT_NAME "Base${component}${linkage}"
-    WINDOWS_EXPORT_ALL_SYMBOLS ON
   )
   target_include_directories(${target_name}
     PUBLIC
@@ -56,7 +55,7 @@ function(ngin_base_configure_component_target target_name component linkage)
   endif()
 endfunction()
 
-foreach(component IN LISTS NGIN_BASE_COMPONENTS)
+foreach(component IN LISTS NGIN_BASE_ENABLED_COMPONENTS)
   string(TOUPPER "${component}" component_upper)
 
   if(NGIN_BASE_BUILD_STATIC)
@@ -100,7 +99,7 @@ if(NGIN_BASE_BUILD_SHARED)
   list(APPEND NGIN_BASE_EXPORT_TARGETS NGIN.Base.Shared)
 endif()
 
-foreach(component IN LISTS NGIN_BASE_COMPONENTS)
+foreach(component IN LISTS NGIN_BASE_ENABLED_COMPONENTS)
   if(NGIN_BASE_BUILD_SHARED)
     add_library(NGIN::Base::${component} ALIAS NGIN.Base.${component}.Shared)
   else()

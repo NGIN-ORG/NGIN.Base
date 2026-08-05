@@ -13,7 +13,7 @@ namespace NGIN::Crypto::Signatures
     };
 
     /// @brief Verifies a signature over a message.
-    [[nodiscard]] CryptoExpected<void> Verify(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<void> Verify(
             const NGIN::Crypto::Backend::CryptoContext& context,
             SignatureAlgorithm                          algorithm,
             const VerifyInput&                          input) noexcept;

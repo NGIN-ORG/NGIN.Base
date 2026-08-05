@@ -11,7 +11,7 @@ namespace NGIN::Crypto::Asymmetric
     using Ed25519KeyPair    = KeyPair<Ed25519PublicKey, Ed25519PrivateKey>;
 
     /// @brief Generates an Ed25519 key pair using a backend implementation.
-    [[nodiscard]] CryptoExpected<Ed25519KeyPair> GenerateEd25519KeyPair(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<Ed25519KeyPair> GenerateEd25519KeyPair(
             const NGIN::Crypto::Backend::CryptoContext& context) noexcept;
 
     [[nodiscard]] inline CryptoExpected<void> SignEd25519Into(

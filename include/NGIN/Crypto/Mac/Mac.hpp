@@ -30,7 +30,7 @@ namespace NGIN::Crypto::Mac
     }
 
     /// @brief Computes a MAC into caller-provided tag storage.
-    [[nodiscard]] CryptoExpected<void> MacInto(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<void> MacInto(
             const NGIN::Crypto::Backend::CryptoContext& context,
             MacAlgorithm                                algorithm,
             NGIN::Crypto::Memory::SecretView            key,
@@ -38,14 +38,14 @@ namespace NGIN::Crypto::Mac
             ByteSpan                                    output) noexcept;
 
     /// @brief Computes a MAC into an owned byte buffer.
-    [[nodiscard]] CryptoExpected<ByteBuffer> ComputeMac(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<ByteBuffer> ComputeMac(
             const NGIN::Crypto::Backend::CryptoContext& context,
             MacAlgorithm                                algorithm,
             NGIN::Crypto::Memory::SecretView            key,
             ConstByteSpan                               input);
 
     /// @brief Verifies a MAC tag. Future backend implementations must compare computed tags in constant time.
-    [[nodiscard]] CryptoExpected<void> VerifyMac(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<void> VerifyMac(
             const NGIN::Crypto::Backend::CryptoContext& context,
             MacAlgorithm                                algorithm,
             NGIN::Crypto::Memory::SecretView            key,

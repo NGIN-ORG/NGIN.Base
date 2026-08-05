@@ -23,14 +23,14 @@ namespace NGIN::Crypto::Encoding
     }
 
     /// @brief Encodes bytes as lowercase hexadecimal text.
-    [[nodiscard]] CryptoExpected<std::string> EncodeHex(ConstByteSpan input);
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<std::string> EncodeHex(ConstByteSpan input);
 
     /// @brief Encodes bytes as lowercase hexadecimal text into caller-owned output.
-    [[nodiscard]] CryptoExpected<void> EncodeHexInto(ConstByteSpan input, std::span<char> output) noexcept;
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<void> EncodeHexInto(ConstByteSpan input, std::span<char> output) noexcept;
 
     /// @brief Decodes strict hexadecimal text into an owned byte buffer.
-    [[nodiscard]] CryptoExpected<ByteBuffer> DecodeHex(std::string_view text);
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<ByteBuffer> DecodeHex(std::string_view text);
 
     /// @brief Decodes strict hexadecimal text into caller-owned output.
-    [[nodiscard]] CryptoExpected<void> DecodeHexInto(std::string_view text, ByteSpan output) noexcept;
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<void> DecodeHexInto(std::string_view text, ByteSpan output) noexcept;
 }// namespace NGIN::Crypto::Encoding

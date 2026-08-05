@@ -30,7 +30,7 @@ namespace NGIN::Net
     };
 
     /// @brief UDP socket with non-blocking Try* operations.
-    class UdpSocket final
+    class NGIN_NET_API UdpSocket final
     {
     public:
         UdpSocket() noexcept = default;

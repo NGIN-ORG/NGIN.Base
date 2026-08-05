@@ -6,7 +6,7 @@
 namespace NGIN::Crypto
 {
     /// @brief Small value object describing a recoverable crypto failure.
-    class CryptoError
+    class NGIN_CRYPTO_API CryptoError
     {
     public:
         constexpr CryptoError() noexcept = default;

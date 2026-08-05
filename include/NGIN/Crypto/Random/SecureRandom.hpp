@@ -6,8 +6,8 @@
 namespace NGIN::Crypto::Random
 {
     /// @brief Returns whether the platform secure random source is available.
-    [[nodiscard]] bool IsAvailable() noexcept;
+    [[nodiscard]] NGIN_CRYPTO_API bool IsAvailable() noexcept;
 
     /// @brief Fills `output` with bytes from the platform secure random source.
-    [[nodiscard]] CryptoExpected<void> Fill(ByteSpan output) noexcept;
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<void> Fill(ByteSpan output) noexcept;
 }// namespace NGIN::Crypto::Random

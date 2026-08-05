@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.24)
 project(NGINBenchmarks LANGUAGES CXX)
 
 # Determine the top-level source/binary directories even when this subproject is

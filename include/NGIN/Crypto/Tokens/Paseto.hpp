@@ -59,40 +59,44 @@ namespace NGIN::Crypto::Tokens
         PasetoParseOptions limits {};
     };
 
-    [[nodiscard]] CryptoExpected<PasetoV4PublicToken> ParsePasetoV4Public(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<PasetoV4PublicToken> ParsePasetoV4Public(
             std::string_view   token,
             PasetoParseOptions options = {});
 
-    [[nodiscard]] CryptoExpected<bool>        HasPasetoClaim(const PasetoV4PublicToken& token, std::string_view name);
-    [[nodiscard]] CryptoExpected<bool>        HasPasetoClaim(const PasetoV4LocalToken& token, std::string_view name);
-    [[nodiscard]] CryptoExpected<std::string> GetPasetoStringClaim(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<bool> HasPasetoClaim(
+            const PasetoV4PublicToken& token, std::string_view name);
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<bool> HasPasetoClaim(
+            const PasetoV4LocalToken& token, std::string_view name);
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<std::string> GetPasetoStringClaim(
             const PasetoV4PublicToken& token,
             std::string_view           name);
-    [[nodiscard]] CryptoExpected<std::string> GetPasetoStringClaim(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<std::string> GetPasetoStringClaim(
             const PasetoV4LocalToken& token,
             std::string_view          name);
-    [[nodiscard]] CryptoExpected<NGIN::Int64> GetPasetoInt64Claim(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<NGIN::Int64> GetPasetoInt64Claim(
             const PasetoV4PublicToken& token,
             std::string_view           name);
-    [[nodiscard]] CryptoExpected<NGIN::Int64> GetPasetoInt64Claim(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<NGIN::Int64> GetPasetoInt64Claim(
             const PasetoV4LocalToken& token,
             std::string_view          name);
-    [[nodiscard]] CryptoExpected<bool> GetPasetoBoolClaim(const PasetoV4PublicToken& token, std::string_view name);
-    [[nodiscard]] CryptoExpected<bool> GetPasetoBoolClaim(const PasetoV4LocalToken& token, std::string_view name);
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<bool> GetPasetoBoolClaim(
+            const PasetoV4PublicToken& token, std::string_view name);
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<bool> GetPasetoBoolClaim(
+            const PasetoV4LocalToken& token, std::string_view name);
 
-    [[nodiscard]] CryptoExpected<PasetoV4PublicToken> ValidatePasetoV4Public(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<PasetoV4PublicToken> ValidatePasetoV4Public(
             const NGIN::Crypto::Backend::CryptoContext& context,
             std::string_view                            token,
             ConstByteSpan                               publicKey,
             const PasetoValidationPolicy&               policy = {});
 
-    [[nodiscard]] CryptoExpected<PasetoV4LocalToken> OpenPasetoV4Local(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<PasetoV4LocalToken> OpenPasetoV4Local(
             const NGIN::Crypto::Backend::CryptoContext& context,
             std::string_view                            token,
             NGIN::Crypto::Memory::SecretView            key,
             const PasetoValidationPolicy&               policy = {});
 
-    [[nodiscard]] CryptoExpected<std::string> SealPasetoV4Local(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<std::string> SealPasetoV4Local(
             const NGIN::Crypto::Backend::CryptoContext& context,
             std::string_view                            payloadJson,
             NGIN::Crypto::Memory::SecretView            key,

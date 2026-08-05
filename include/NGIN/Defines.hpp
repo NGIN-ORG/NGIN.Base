@@ -99,6 +99,14 @@
 #define NGIN_NET_API
 #endif
 
+#if defined(NGIN_NETTLS_SHARED_BUILD)
+#define NGIN_NETTLS_API NGIN_DETAIL_EXPORT_API
+#elif defined(NGIN_NETTLS_SHARED)
+#define NGIN_NETTLS_API NGIN_DETAIL_IMPORT_API
+#else
+#define NGIN_NETTLS_API
+#endif
+
 #ifndef NGIN_CPU_RELAX
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386) || defined(_M_IX86)
 #if defined(_MSC_VER)

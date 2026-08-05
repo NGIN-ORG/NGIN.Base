@@ -45,5 +45,5 @@ namespace NGIN::Crypto::Random
     };
 
     /// @brief Returns the platform secure random source used by Random::Fill.
-    [[nodiscard]] EntropySource PlatformEntropySource() noexcept;
+    [[nodiscard]] NGIN_CRYPTO_API EntropySource PlatformEntropySource() noexcept;
 }// namespace NGIN::Crypto::Random

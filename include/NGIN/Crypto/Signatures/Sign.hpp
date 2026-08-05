@@ -14,14 +14,14 @@ namespace NGIN::Crypto::Signatures
     };
 
     /// @brief Signs a message into caller-provided signature storage.
-    [[nodiscard]] CryptoExpected<void> SignInto(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<void> SignInto(
             const NGIN::Crypto::Backend::CryptoContext& context,
             SignatureAlgorithm                          algorithm,
             const SignInput&                            input,
             ByteSpan                                    signature) noexcept;
 
     /// @brief Signs a message into owned signature storage.
-    [[nodiscard]] CryptoExpected<ByteBuffer> Sign(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<ByteBuffer> Sign(
             const NGIN::Crypto::Backend::CryptoContext& context,
             SignatureAlgorithm                          algorithm,
             const SignInput&                            input);

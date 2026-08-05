@@ -508,31 +508,44 @@ TEST_CASE("CertificateStore supports custom lookup and platform root loading", "
     REQUIRE(platformSelection.diagnostics.Size() > 0);
 
     auto platform = NGIN::Crypto::Certificates::OpenPlatformRootCertificateStore();
-    if (HasReadableLinuxCaBundle())
+    if (platform.HasValue())
     {
-        REQUIRE(platform.HasValue());
         REQUIRE(platformSelection.store.HasValue());
         REQUIRE(platform.Value().Info().kind == NGIN::Crypto::Certificates::CertificateStoreKind::PlatformRoot);
         REQUIRE(platform.Value().Info().platformBacked);
         REQUIRE(platform.Value().Info().available);
         REQUIRE(platform.Value().Size() > 0);
-        REQUIRE(platform.Value().Info().operatingSystem == "linux");
-        REQUIRE(platform.Value().Info().source == "system-ca-bundle");
         REQUIRE_FALSE(platform.Value().Info().sourcePath.empty());
         REQUIRE(platform.Value().Info().certificatesLoaded == platform.Value().Size());
         REQUIRE_FALSE(platform.Value().Info().diagnostic.empty());
 
-        const auto& successfulDiagnostic = platformSelection.diagnostics[platformSelection.diagnostics.Size() - 1];
-        REQUIRE(successfulDiagnostic.code == NGIN::Crypto::CryptoErrorCode::None);
-        REQUIRE(successfulDiagnostic.info.available);
-        REQUIRE(successfulDiagnostic.info.source == "system-ca-bundle");
+#if defined(__linux__)
+        REQUIRE(HasReadableLinuxCaBundle());
+        REQUIRE(platform.Value().Info().operatingSystem == "linux");
+        REQUIRE(platform.Value().Info().source == "system-ca-bundle");
+#elif defined(_WIN32)
+        REQUIRE(platform.Value().Info().operatingSystem == "windows");
+        REQUIRE(platform.Value().Info().source == "native-windows-certificate-store");
+#elif defined(__APPLE__)
+        REQUIRE(platform.Value().Info().operatingSystem == "macos");
+        REQUIRE(platform.Value().Info().source == "native-apple-security-trust-anchors");
+#endif
+
+        bool sawSuccessfulDiagnostic = false;
+        for (const auto& diagnostic: platformSelection.diagnostics)
+        {
+            sawSuccessfulDiagnostic = sawSuccessfulDiagnostic ||
+                                      (diagnostic.code == NGIN::Crypto::CryptoErrorCode::None &&
+                                       diagnostic.info.available &&
+                                       diagnostic.info.source == platform.Value().Info().source);
+        }
+        REQUIRE(sawSuccessfulDiagnostic);
     }
     else
     {
-        REQUIRE_FALSE(platform.HasValue());
         REQUIRE_FALSE(platformSelection.store.HasValue());
-        REQUIRE(platform.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedBackend);
-        REQUIRE(platformSelection.store.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedBackend);
+        REQUIRE(platform.Error().Code() != NGIN::Crypto::CryptoErrorCode::None);
+        REQUIRE(platformSelection.store.Error().Code() != NGIN::Crypto::CryptoErrorCode::None);
         REQUIRE_FALSE(platformSelection.diagnostics[0].info.available);
     }
 }

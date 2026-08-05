@@ -18,18 +18,18 @@ namespace NGIN::Crypto::Encoding
     };
 
     /// @brief Returns the maximum exact encoded length for `byteCount` bytes with the requested padding policy.
-    [[nodiscard]] NGIN::UIntSize Base64EncodedLength(NGIN::UIntSize byteCount, Base64Padding padding = Base64Padding::Required) noexcept;
+    [[nodiscard]] NGIN_CRYPTO_API NGIN::UIntSize Base64EncodedLength(NGIN::UIntSize byteCount, Base64Padding padding = Base64Padding::Required) noexcept;
 
     /// @brief Encodes bytes as standard Base64 text.
-    [[nodiscard]] CryptoExpected<std::string> EncodeBase64(ConstByteSpan input, Base64Padding padding = Base64Padding::Required);
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<std::string> EncodeBase64(ConstByteSpan input, Base64Padding padding = Base64Padding::Required);
 
     /// @brief Encodes bytes as standard Base64 text into caller-owned output.
-    [[nodiscard]] CryptoExpected<void> EncodeBase64Into(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<void> EncodeBase64Into(
             ConstByteSpan input, std::span<char> output, Base64Padding padding = Base64Padding::Required) noexcept;
 
     /// @brief Decodes strict standard Base64 text into an owned byte buffer.
-    [[nodiscard]] CryptoExpected<ByteBuffer> DecodeBase64(std::string_view text);
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<ByteBuffer> DecodeBase64(std::string_view text);
 
     /// @brief Decodes strict standard Base64 text into caller-owned output.
-    [[nodiscard]] CryptoExpected<void> DecodeBase64Into(std::string_view text, ByteSpan output) noexcept;
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<void> DecodeBase64Into(std::string_view text, ByteSpan output) noexcept;
 }// namespace NGIN::Crypto::Encoding

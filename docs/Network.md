@@ -271,9 +271,10 @@ Cancellation is not reported as `NetError`.
 
 ### TLS streams
 
-TLS is a provider-neutral filter over `IByteStream`. It is available from
-`<NGIN/Net/TLS/TlsContext.hpp>` and `<NGIN/Net/TLS/TlsStream.hpp>` when the
-library is configured with an implementation provider. The OpenSSL provider is
+TLS is a provider-neutral filter over `IByteStream`. Include
+`<NGIN/NetTLS.hpp>` and link `NGIN::Base::NetTLS`; plaintext networking remains
+available through `<NGIN/Net.hpp>` and `NGIN::Base::Net` without a Crypto
+dependency. The OpenSSL provider is
 enabled with `NGIN_BASE_TLS_WITH_OPENSSL=ON`; a configuration that must have it
 can additionally set `NGIN_BASE_TLS_REQUIRE_PROVIDER=openssl`.
 
@@ -327,7 +328,7 @@ Choose `PollOnce()` when you want to integrate it into an existing loop.
 ## Platform Notes
 
 - Windows uses IOCP-backed async operations.
-- Non-Windows platforms use readiness polling.
+- Linux uses epoll, macOS uses kqueue, and other POSIX targets use the select fallback.
 - All platforms expose non-blocking `Try*` APIs.
 
 Platform differences should not change the basic usage model:

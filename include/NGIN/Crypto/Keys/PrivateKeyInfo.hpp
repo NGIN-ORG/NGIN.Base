@@ -49,27 +49,31 @@ namespace NGIN::Crypto::Keys
         NGIN::UIntSize maxPlaintextBytes {1u << 20};
     };
 
-    [[nodiscard]] CryptoExpected<PrivateKeyInfo> ParsePrivateKeyInfo(ConstByteSpan der);
-    [[nodiscard]] CryptoExpected<ByteBuffer>     WritePrivateKeyInfo(KeyAlgorithm algorithm, ConstByteSpan privateKey);
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<PrivateKeyInfo> ParsePrivateKeyInfo(ConstByteSpan der);
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<ByteBuffer> WritePrivateKeyInfo(
+            KeyAlgorithm algorithm, ConstByteSpan privateKey);
 
-    [[nodiscard]] CryptoExpected<EncryptedPrivateKeyInfo> ParseEncryptedPrivateKeyInfo(ConstByteSpan der);
-    [[nodiscard]] CryptoExpected<ByteBuffer> WriteEncryptedPrivateKeyInfo(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<EncryptedPrivateKeyInfo> ParseEncryptedPrivateKeyInfo(ConstByteSpan der);
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<ByteBuffer> WriteEncryptedPrivateKeyInfo(
             const EncryptedPrivateKeyAlgorithmIdentifier& encryptionAlgorithm,
             ConstByteSpan encryptedData);
-    [[nodiscard]] CryptoExpected<PrivateKeyInfo> DecryptEncryptedPrivateKeyInfo(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<PrivateKeyInfo> DecryptEncryptedPrivateKeyInfo(
             const NGIN::Crypto::Backend::CryptoContext& context,
             const EncryptedPrivateKeyInfo&              encryptedPrivateKeyInfo,
             NGIN::Crypto::Memory::SecretView            password,
             const EncryptedPrivateKeyDecryptOptions&     options = {});
 
-    [[nodiscard]] CryptoExpected<NGIN::Crypto::Asymmetric::Ed25519PrivateKey> ImportEd25519PrivateKey(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<NGIN::Crypto::Asymmetric::Ed25519PrivateKey> ImportEd25519PrivateKey(
             const PrivateKeyInfo& privateKeyInfo) noexcept;
-    [[nodiscard]] CryptoExpected<NGIN::Crypto::Asymmetric::X25519PrivateKey> ImportX25519PrivateKey(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<NGIN::Crypto::Asymmetric::X25519PrivateKey> ImportX25519PrivateKey(
             const PrivateKeyInfo& privateKeyInfo) noexcept;
-    [[nodiscard]] CryptoExpected<NGIN::Crypto::Asymmetric::EcdsaP256PrivateKey> ImportEcdsaP256PrivateKey(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<NGIN::Crypto::Asymmetric::EcdsaP256PrivateKey> ImportEcdsaP256PrivateKey(
             const PrivateKeyInfo& privateKeyInfo) noexcept;
 
-    [[nodiscard]] PrivateKeyInfo ExportPrivateKeyInfo(const NGIN::Crypto::Asymmetric::Ed25519PrivateKey& privateKey);
-    [[nodiscard]] PrivateKeyInfo ExportPrivateKeyInfo(const NGIN::Crypto::Asymmetric::X25519PrivateKey& privateKey);
-    [[nodiscard]] PrivateKeyInfo ExportPrivateKeyInfo(const NGIN::Crypto::Asymmetric::EcdsaP256PrivateKey& privateKey);
+    [[nodiscard]] NGIN_CRYPTO_API PrivateKeyInfo ExportPrivateKeyInfo(
+            const NGIN::Crypto::Asymmetric::Ed25519PrivateKey& privateKey);
+    [[nodiscard]] NGIN_CRYPTO_API PrivateKeyInfo ExportPrivateKeyInfo(
+            const NGIN::Crypto::Asymmetric::X25519PrivateKey& privateKey);
+    [[nodiscard]] NGIN_CRYPTO_API PrivateKeyInfo ExportPrivateKeyInfo(
+            const NGIN::Crypto::Asymmetric::EcdsaP256PrivateKey& privateKey);
 }// namespace NGIN::Crypto::Keys

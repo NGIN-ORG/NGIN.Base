@@ -77,16 +77,20 @@ namespace NGIN::Crypto::Tokens
         JwtParseOptions                         parseOptions {};
     };
 
-    [[nodiscard]] CryptoExpected<JwtCompactToken> ParseJwtCompact(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<JwtCompactToken> ParseJwtCompact(
             std::string_view token,
             JwtParseOptions  options = {});
 
-    [[nodiscard]] CryptoExpected<bool>        HasJwtClaim(const JwtCompactToken& token, std::string_view name);
-    [[nodiscard]] CryptoExpected<std::string> GetJwtStringClaim(const JwtCompactToken& token, std::string_view name);
-    [[nodiscard]] CryptoExpected<NGIN::Int64> GetJwtInt64Claim(const JwtCompactToken& token, std::string_view name);
-    [[nodiscard]] CryptoExpected<bool>        GetJwtBoolClaim(const JwtCompactToken& token, std::string_view name);
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<bool> HasJwtClaim(
+            const JwtCompactToken& token, std::string_view name);
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<std::string> GetJwtStringClaim(
+            const JwtCompactToken& token, std::string_view name);
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<NGIN::Int64> GetJwtInt64Claim(
+            const JwtCompactToken& token, std::string_view name);
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<bool> GetJwtBoolClaim(
+            const JwtCompactToken& token, std::string_view name);
 
-    [[nodiscard]] CryptoExpected<JwtCompactToken> ValidateJwt(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<JwtCompactToken> ValidateJwt(
             const NGIN::Crypto::Backend::CryptoContext& context,
             std::string_view                            token,
             const JwtValidationKey&                     key,

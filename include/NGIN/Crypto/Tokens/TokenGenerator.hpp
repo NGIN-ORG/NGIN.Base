@@ -20,23 +20,23 @@ namespace NGIN::Crypto::Tokens
     };
 
     /// @brief Generates random opaque token bytes.
-    [[nodiscard]] CryptoExpected<ByteBuffer> GenerateBytes(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<ByteBuffer> GenerateBytes(
             const NGIN::Crypto::Backend::CryptoContext& context,
             NGIN::UIntSize                              byteLength,
             NGIN::UIntSize                              minimumEntropyBytes = 16);
 
     /// @brief Generates random token text using the encoding selected in `options`.
-    [[nodiscard]] CryptoExpected<SecureToken> GenerateToken(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<SecureToken> GenerateToken(
             const NGIN::Crypto::Backend::CryptoContext& context,
             const TokenOptions&                         options = {});
 
     /// @brief Generates random token text encoded as lowercase hexadecimal.
-    [[nodiscard]] CryptoExpected<SecureToken> GenerateHex(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<SecureToken> GenerateHex(
             const NGIN::Crypto::Backend::CryptoContext& context,
             const TokenOptions&                         options = {});
 
     /// @brief Generates random token text encoded as unpadded URL-safe Base64.
-    [[nodiscard]] CryptoExpected<SecureToken> GenerateBase64Url(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<SecureToken> GenerateBase64Url(
             const NGIN::Crypto::Backend::CryptoContext& context,
             const TokenOptions&                         options = {});
 }// namespace NGIN::Crypto::Tokens

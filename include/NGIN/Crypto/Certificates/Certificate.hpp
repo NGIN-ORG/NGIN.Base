@@ -95,9 +95,9 @@ namespace NGIN::Crypto::Certificates
         bool                                                             hasAuthorityKeyIdentifier {false};
     };
 
-    [[nodiscard]] CryptoExpected<Certificate> ParseX509Certificate(ConstByteSpan der);
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<Certificate> ParseX509Certificate(ConstByteSpan der);
 
-    [[nodiscard]] CryptoExpected<void> VerifyCertificateSignature(
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<void> VerifyCertificateSignature(
             const NGIN::Crypto::Backend::CryptoContext&     context,
             const Certificate&                              certificate,
             const NGIN::Crypto::Keys::SubjectPublicKeyInfo& issuerPublicKey) noexcept;

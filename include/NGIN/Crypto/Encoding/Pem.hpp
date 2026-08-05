@@ -34,5 +34,6 @@ namespace NGIN::Crypto::Encoding
     using PemBlocks = NGIN::Containers::Vector<PemBlock>;
 
     /// @brief Parses strict RFC 7468-style PEM blocks and returns decoded bytes without interpreting their contents.
-    [[nodiscard]] CryptoExpected<PemBlocks> ParsePem(std::string_view input, PemParseOptions options = {});
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<PemBlocks> ParsePem(
+            std::string_view input, PemParseOptions options = {});
 }// namespace NGIN::Crypto::Encoding

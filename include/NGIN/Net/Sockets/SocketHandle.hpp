@@ -2,6 +2,7 @@
 /// @brief Lightweight socket handle wrapper.
 #pragma once
 
+#include <NGIN/Defines.hpp>
 #include <NGIN/Primitives.hpp>
 
 namespace NGIN::Net
@@ -11,13 +12,13 @@ namespace NGIN::Net
 
 namespace NGIN::Net::detail
 {
-    [[nodiscard]] bool CloseSocket(SocketHandle& handle) noexcept;
+    [[nodiscard]] NGIN_NET_API bool CloseSocket(SocketHandle& handle) noexcept;
 }
 
 namespace NGIN::Net
 {
     /// @brief Lightweight socket handle wrapper with RAII lifetime.
-    class SocketHandle final
+    class NGIN_NET_API SocketHandle final
     {
     public:
         using NativeHandle = NGIN::IntPtr;

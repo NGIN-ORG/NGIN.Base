@@ -26,7 +26,7 @@ namespace NGIN::Net
     class NetworkDriver;
 
     /// @brief TCP socket with non-blocking Try* operations.
-    class TcpSocket final
+    class NGIN_NET_API TcpSocket final
     {
     public:
         TcpSocket() noexcept = default;

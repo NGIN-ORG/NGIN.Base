@@ -1,17 +1,13 @@
 #pragma once
 
 /// @file Net.hpp
-/// @brief Convenience surface for addressing, resolution, sockets, and transports.
+/// @brief Convenience surface for addressing, resolution, sockets, and plaintext transports.
 
 #include <NGIN/Net/Resolver.hpp>
 #include <NGIN/Net/Runtime/NetworkDriver.hpp>
 #include <NGIN/Net/Sockets/TcpListener.hpp>
 #include <NGIN/Net/Sockets/TcpSocket.hpp>
 #include <NGIN/Net/Sockets/UdpSocket.hpp>
-#include <NGIN/Net/TLS/TlsContext.hpp>
-#include <NGIN/Net/TLS/TlsError.hpp>
-#include <NGIN/Net/TLS/TlsStream.hpp>
-#include <NGIN/Net/TLS/TlsTypes.hpp>
 #include <NGIN/Net/Transport/ByteStreamBuilder.hpp>
 #include <NGIN/Net/Transport/DatagramBuilder.hpp>
 #include <NGIN/Net/Transport/Filters/LengthPrefixedMessageStream.hpp>

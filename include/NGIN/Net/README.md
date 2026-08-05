@@ -17,7 +17,9 @@ Usage Notes:
 - Try* APIs are non-blocking and report errors via NetExpected.
 - Async APIs use typed `Task<T, NetError>` results; cancellation and faults stay in the async layer.
 - Async methods require TaskContext and NetworkDriver.
-- Filters wrap transports to add semantics like framing, TLS, compression, or metrics.
+- Filters wrap transports to add semantics like framing, compression, or metrics.
+- TLS is the separate `NetTLS` component; include `<NGIN/NetTLS.hpp>` and link
+  `NGIN::Base::NetTLS` when encrypted streams are required.
 - Length-prefixed framing uses a 32-bit big-endian size prefix per message.
 - ByteStreamBuilder::BuildLengthPrefixed() returns NetExpected<std::unique_ptr<LengthPrefixedMessageStream>>.
 

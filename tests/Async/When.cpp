@@ -86,11 +86,25 @@ namespace
         co_return;
     }
 
+    NGIN::Async::Task<void, int> VoidDomainFailure(NGIN::Async::TaskContext& ctx, int error)
+    {
+        co_await ctx.YieldNow();
+        co_await NGIN::Async::DomainFailure(error);
+        co_return;
+    }
+
+    NGIN::Async::Task<void, int> VoidSuccess(NGIN::Async::TaskContext& ctx)
+    {
+        co_await ctx.YieldNow();
+        co_return;
+    }
+
     NGIN::Async::Task<int> ThrowOnce(NGIN::Async::TaskContext& ctx)
     {
 #if NGIN_ASYNC_HAS_EXCEPTIONS
         co_await ctx.YieldNow();
         throw std::runtime_error("boom");
+        co_return 0;
 #else
         co_await ctx.YieldNow();
         co_return NGIN::Async::Completion<int, NGIN::Async::NoError>::Faulted(
@@ -159,6 +173,21 @@ TEST_CASE("WhenAll consumes void tasks")
     auto result = operation.TakeResult();
     REQUIRE(result);
     REQUIRE(value == 2);
+}
+
+TEST_CASE("WhenAll propagates failures from void tasks")
+{
+    ManualExecutor           exec;
+    NGIN::Async::TaskContext ctx(exec);
+
+    auto operation =
+            NGIN::Async::Spawn(ctx, NGIN::Async::WhenAll(ctx, VoidDomainFailure(ctx, 42), VoidSuccess(ctx)));
+    exec.RunUntilIdle();
+
+    REQUIRE(operation.IsCompleted());
+    auto result = operation.TakeResult();
+    REQUIRE(result.IsDomainError());
+    REQUIRE(result.DomainError() == 42);
 }
 
 TEST_CASE("WhenAll starts every child before waiting for the first result")

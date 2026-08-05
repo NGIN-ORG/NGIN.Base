@@ -2,6 +2,7 @@
 /// @brief Async byte stream interface.
 #pragma once
 
+#include <NGIN/Defines.hpp>
 #include <NGIN/Net/Types/Buffer.hpp>
 #include <NGIN/Net/Types/NetError.hpp>
 
@@ -16,10 +17,11 @@ namespace NGIN::Async
 namespace NGIN::Net::Transport
 {
     /// @brief Async byte stream interface for transport layers.
-    class IByteStream
+    class NGIN_NET_API IByteStream
     {
     public:
-        virtual ~IByteStream() = default;
+        IByteStream() noexcept;
+        virtual ~IByteStream();
 
         virtual NGIN::Async::Task<NGIN::UInt32, NGIN::Net::NetError> ReadAsync(NGIN::Async::TaskContext& ctx,
                                                                                 NGIN::Net::ByteSpan destination,

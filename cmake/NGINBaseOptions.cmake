@@ -3,24 +3,28 @@
 #-------------------------------------------------------------------------------
 option(NGIN_BASE_BUILD_STATIC "Build NGIN.Base as a static library" ON)
 option(NGIN_BASE_BUILD_SHARED "Build NGIN.Base as a shared library" OFF)
-option(NGIN_BASE_BUILD_TESTS "Build NGIN.Base tests" ON)
-option(NGIN_BASE_BUILD_EXAMPLES "Build NGIN.Base examples" ON)
-option(NGIN_BASE_BUILD_BENCHMARKS "Build NGIN.Base benchmarks" ON)
+option(NGIN_BASE_BUILD_TESTS "Build NGIN.Base tests" ${PROJECT_IS_TOP_LEVEL})
+option(NGIN_BASE_BUILD_EXAMPLES "Build NGIN.Base examples" OFF)
+option(NGIN_BASE_BUILD_BENCHMARKS "Build NGIN.Base benchmarks" OFF)
 option(NGIN_BASE_BUILD_FUZZERS "Build optional LLVM libFuzzer harnesses for parser-heavy components" OFF)
-option(NGIN_BASE_DEVELOPMENT_MODE "Deprecated compatibility toggle for non-header builds" OFF)
+set(NGIN_BASE_BUILD_COMPONENTS "all" CACHE STRING
+  "Components to build: all, or a semicolon-separated subset of Foundation;Execution;IO;Serialization;Crypto;Net;NetTLS")
 
 # Extended developer / diagnostics options.
 set(_ngin_base_crypto_cng_default OFF)
-if(WIN32)
+if(WIN32 AND (NGIN_BASE_BUILD_COMPONENTS STREQUAL "all" OR
+              Crypto IN_LIST NGIN_BASE_BUILD_COMPONENTS))
   set(_ngin_base_crypto_cng_default ON)
 endif()
 set(_ngin_base_crypto_apple_default OFF)
-if(APPLE)
+if(APPLE AND (NGIN_BASE_BUILD_COMPONENTS STREQUAL "all" OR
+              Crypto IN_LIST NGIN_BASE_BUILD_COMPONENTS))
   set(_ngin_base_crypto_apple_default ON)
 endif()
 
 option(NGIN_BASE_ENABLE_ASAN "Enable Address + Undefined Sanitizers (GNU/Clang)" OFF)
 option(NGIN_BASE_ENABLE_TSAN "Enable ThreadSanitizer (GNU/Clang)" OFF)
+option(NGIN_BASE_ENABLE_COVERAGE "Enable gcov-compatible coverage instrumentation (GNU/Clang)" OFF)
 option(NGIN_BASE_ENABLE_LTO "Enable Link Time Optimization for Release/RelWithDebInfo" OFF)
 option(NGIN_BASE_STRICT_WARNINGS "Enable extra warning flags" ON)
 option(NGIN_BASE_ALL_FEATURES "Convenience: enable tests + examples + benchmarks" OFF)
@@ -30,8 +34,6 @@ option(NGIN_BASE_CRYPTO_WITH_APPLE "Enable Apple CommonCrypto-backed crypto algo
 option(NGIN_BASE_CRYPTO_WITH_OPENSSL "Enable optional OpenSSL-backed crypto algorithms" OFF)
 option(NGIN_BASE_CRYPTO_WITH_BORINGSSL "Enable optional BoringSSL-backed crypto algorithms" OFF)
 option(NGIN_BASE_CRYPTO_WITH_LIBSODIUM "Enable optional libsodium-backed crypto algorithms" OFF)
-option(NGIN_BASE_CRYPTO_OPENSSL "Enable optional OpenSSL-backed crypto algorithms" OFF)
-option(NGIN_CRYPTO_WITH_OPENSSL "Enable optional OpenSSL-backed crypto algorithms for split Crypto targets" OFF)
 option(NGIN_BASE_TLS_WITH_OPENSSL "Enable the OpenSSL 3 TLS provider" OFF)
 
 set(NGIN_BASE_CLANG_GCC_TOOLCHAIN "" CACHE PATH "Clang (Linux): GCC toolchain root passed via --gcc-toolchain")
@@ -51,18 +53,21 @@ if(NGIN_BASE_ENABLE_ASAN AND NGIN_BASE_ENABLE_TSAN)
   message(FATAL_ERROR "Cannot enable ASAN and TSAN simultaneously")
 endif()
 
+if(NGIN_BASE_ENABLE_COVERAGE AND (NGIN_BASE_ENABLE_ASAN OR NGIN_BASE_ENABLE_TSAN))
+  message(FATAL_ERROR "Coverage instrumentation cannot be combined with ASAN or TSAN")
+endif()
+
+if(NGIN_BASE_ENABLE_COVERAGE AND
+   (MSVC OR NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang"))
+  message(FATAL_ERROR "NGIN_BASE_ENABLE_COVERAGE requires GCC or Clang")
+endif()
+
 if(NGIN_BASE_CRYPTO_WITH_CNG AND NOT WIN32)
   message(FATAL_ERROR "NGIN_BASE_CRYPTO_WITH_CNG is only supported on Windows")
 endif()
 
 if(NGIN_BASE_CRYPTO_WITH_APPLE AND NOT APPLE)
   message(FATAL_ERROR "NGIN_BASE_CRYPTO_WITH_APPLE is only supported on Apple platforms")
-endif()
-
-if(NGIN_BASE_CRYPTO_WITH_OPENSSL OR NGIN_BASE_CRYPTO_OPENSSL OR NGIN_CRYPTO_WITH_OPENSSL)
-  set(NGIN_BASE_CRYPTO_WITH_OPENSSL ON CACHE BOOL "Enable optional OpenSSL-backed crypto algorithms" FORCE)
-  set(NGIN_CRYPTO_WITH_OPENSSL ON CACHE BOOL "Enable optional OpenSSL-backed crypto algorithms" FORCE)
-  set(NGIN_BASE_CRYPTO_OPENSSL ON CACHE BOOL "Enable optional OpenSSL-backed crypto algorithms" FORCE)
 endif()
 
 if(NGIN_BASE_CRYPTO_WITH_OPENSSL AND NGIN_BASE_CRYPTO_WITH_BORINGSSL)
@@ -78,13 +83,6 @@ if(_ngin_base_tls_required_provider)
     message(FATAL_ERROR "Unsupported NGIN_BASE_TLS_REQUIRE_PROVIDER value: ${NGIN_BASE_TLS_REQUIRE_PROVIDER}")
   endif()
   set(NGIN_BASE_TLS_WITH_OPENSSL ON CACHE BOOL "Enable the required OpenSSL 3 TLS provider" FORCE)
-endif()
-
-if(NGIN_BASE_DEVELOPMENT_MODE)
-  message(DEPRECATION "NGIN_BASE_DEVELOPMENT_MODE is deprecated; enable explicit static/shared options instead.")
-  if(NOT (NGIN_BASE_BUILD_STATIC OR NGIN_BASE_BUILD_SHARED))
-    set(NGIN_BASE_BUILD_STATIC ON CACHE BOOL "Build NGIN.Base as a static library" FORCE)
-  endif()
 endif()
 
 if(NOT NGIN_BASE_BUILD_STATIC AND NOT NGIN_BASE_BUILD_SHARED)

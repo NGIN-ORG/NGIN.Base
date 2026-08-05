@@ -2,6 +2,7 @@
 /// @brief OS-thread backed thread handle (no std::thread).
 #pragma once
 
+#include <NGIN/Defines.hpp>
 #include <NGIN/Execution/Config.hpp>
 #include <NGIN/Execution/ThisThread.hpp>
 #include <NGIN/Execution/ThreadName.hpp>
@@ -17,7 +18,7 @@
 
 namespace NGIN::Execution
 {
-    class Thread
+    class NGIN_EXECUTION_API Thread
     {
     public:
         using NativeHandle = void*;
