@@ -27,24 +27,31 @@ namespace NGIN::Execution
 
     inline constexpr UIntSize DEFAULT_FIBER_STACK_SIZE = 128uz * 1024uz;
 
+    /// @brief Non-owning type-erased allocator used for fiber stack storage.
     class FiberAllocatorRef final
     {
     public:
-        using AllocateFn   = void* (*) (void*, UIntSize, UIntSize) noexcept;
+        /// @brief Type-erased stack-allocation callback.
+        using AllocateFn = void* (*) (void*, UIntSize, UIntSize) noexcept;
+        /// @brief Type-erased stack-deallocation callback.
         using DeallocateFn = void (*)(void*, void*, UIntSize, UIntSize) noexcept;
 
+        /// @brief Constructs an invalid allocator reference.
         constexpr FiberAllocatorRef() noexcept = default;
 
+        /// @brief Constructs a reference from borrowed state and allocation callbacks.
         constexpr FiberAllocatorRef(void* self, AllocateFn allocate, DeallocateFn deallocate) noexcept
             : m_self(self), m_allocate(allocate), m_deallocate(deallocate)
         {
         }
 
+        /// @brief Returns whether both allocation callbacks are installed.
         [[nodiscard]] constexpr bool IsValid() const noexcept
         {
             return m_allocate != nullptr && m_deallocate != nullptr;
         }
 
+        /// @brief Allocates a stack byte block, or returns `nullptr` when invalid or exhausted.
         [[nodiscard]] void* Allocate(UIntSize size, UIntSize alignment) const noexcept
         {
             if (!IsValid())
@@ -54,6 +61,7 @@ namespace NGIN::Execution
             return m_allocate(m_self, size, alignment);
         }
 
+        /// @brief Releases a stack byte block; an invalid reference ignores the request.
         void Deallocate(void* ptr, UIntSize size, UIntSize alignment) const noexcept
         {
             if (!IsValid())
@@ -63,6 +71,7 @@ namespace NGIN::Execution
             m_deallocate(m_self, ptr, size, alignment);
         }
 
+        /// @brief Returns a stateless reference backed by aligned global allocation.
         [[nodiscard]] static constexpr FiberAllocatorRef System() noexcept
         {
             return FiberAllocatorRef(
@@ -72,7 +81,7 @@ namespace NGIN::Execution
                         {
                             return nullptr;
                         }
-                        const auto aln = alignment == 0 ? alignof(std::max_align_t) : alignment;
+                        const UIntSize aln = alignment == 0 ? alignof(std::max_align_t) : alignment;
                         return ::operator new(size, std::align_val_t(aln), std::nothrow);
                     },
                     +[](void*, void* ptr, UIntSize, UIntSize alignment) noexcept {
@@ -80,18 +89,20 @@ namespace NGIN::Execution
                         {
                             return;
                         }
-                        const auto aln = alignment == 0 ? alignof(std::max_align_t) : alignment;
+                        const UIntSize aln = alignment == 0 ? alignof(std::max_align_t) : alignment;
                         ::operator delete(ptr, std::align_val_t(aln), std::nothrow);
                     });
         }
 
+        /// @brief Creates a non-owning allocator reference from a compatible allocator.
+        /// @warning The allocator must outlive this reference and all stacks allocated through it.
         template<class A>
         static constexpr FiberAllocatorRef From(A& allocator) noexcept
         {
             return FiberAllocatorRef(
                     &allocator,
                     +[](void* self, UIntSize size, UIntSize alignment) noexcept -> void* {
-                        auto* a = static_cast<A*>(self);
+                        A* a = static_cast<A*>(self);
                         if constexpr (requires(A& x, UIntSize s, UIntSize al) { x.Allocate(s, al); })
                         {
                             return a->Allocate(size, alignment);
@@ -102,7 +113,7 @@ namespace NGIN::Execution
                         }
                     },
                     +[](void* self, void* ptr, UIntSize size, UIntSize alignment) noexcept {
-                        auto* a = static_cast<A*>(self);
+                        A* a = static_cast<A*>(self);
                         if constexpr (requires(A& x, void* p, UIntSize s, UIntSize al) { x.Deallocate(p, s, al); })
                         {
                             a->Deallocate(ptr, size, alignment);
@@ -116,6 +127,7 @@ namespace NGIN::Execution
         DeallocateFn m_deallocate {nullptr};
     };
 
+    /// @brief Stack allocation and guard-page options for a fiber.
     struct FiberOptions final
     {
         UIntSize          stackSize {DEFAULT_FIBER_STACK_SIZE};
@@ -124,6 +136,7 @@ namespace NGIN::Execution
         FiberAllocatorRef allocator {FiberAllocatorRef::System()};
     };
 
+    /// @brief State transition observed after resuming a fiber.
     enum class FiberResumeResult : UInt8
     {
         Yielded,
@@ -131,34 +144,60 @@ namespace NGIN::Execution
         Faulted,
     };
 
+    /// @brief Move-only reusable stackful execution context.
     class NGIN_EXECUTION_API Fiber
     {
     public:
-        using Job                                    = NGIN::Utilities::Callable<void()>;
+        /// @brief Owning callable executed by a fiber.
+        using Job = NGIN::Utilities::Callable<void()>;
+        /// @brief Default stack size in bytes.
         constexpr static UIntSize DEFAULT_STACK_SIZE = DEFAULT_FIBER_STACK_SIZE;
 
+        /// @brief Constructs an idle fiber with default options.
         Fiber();
+        /// @brief Constructs an idle fiber with a requested stack size.
         explicit Fiber(UIntSize stackSize);
+        /// @brief Constructs an idle fiber with explicit options.
         explicit Fiber(FiberOptions options);
+        /// @brief Constructs a fiber with an initial job and stack size.
         Fiber(Job job, UIntSize stackSize = DEFAULT_STACK_SIZE);
+        /// @brief Constructs a fiber with an initial job and explicit options.
         Fiber(Job job, FiberOptions options);
+        /// @brief Releases the fiber context and its stack.
         ~Fiber();
 
-        Fiber(const Fiber&)            = delete;
+        /// @brief Fibers are non-copyable because they own an execution stack.
+        Fiber(const Fiber&) = delete;
+        /// @brief Fibers are non-copy-assignable because they own an execution stack.
         Fiber& operator=(const Fiber&) = delete;
+        /// @brief Transfers ownership of a fiber context.
         Fiber(Fiber&& other) noexcept;
+        /// @brief Releases this context and transfers ownership from another fiber.
         Fiber& operator=(Fiber&& other) noexcept;
 
-        void                             Assign(Job job);
-        [[nodiscard]] bool               TryAssign(Job job) noexcept;
-        [[nodiscard]] FiberResumeResult  Resume() noexcept;
+        /// @brief Assigns or replaces a job on a non-running fiber owned by the calling thread.
+        /// @warning Terminates for an empty job, invalid fiber, wrong owner thread, or running fiber.
+        void Assign(Job job);
+        /// @brief Attempts to assign a job when the fiber is idle and has no pending job.
+        /// @return `false` when the fiber is running or already has a job.
+        /// @warning Terminates for an empty job, invalid fiber, or wrong owner thread.
+        [[nodiscard]] bool TryAssign(Job job) noexcept;
+        /// @brief Resumes the assigned job until it yields, completes, or faults.
+        [[nodiscard]] FiberResumeResult Resume() noexcept;
+        /// @brief Removes and returns the exception captured from a faulted job.
         [[nodiscard]] std::exception_ptr TakeException() noexcept;
-        [[nodiscard]] bool               HasJob() const noexcept;
-        [[nodiscard]] bool               IsRunning() const noexcept;
+        /// @brief Returns whether a job is assigned.
+        [[nodiscard]] bool HasJob() const noexcept;
+        /// @brief Returns whether this fiber is currently executing.
+        [[nodiscard]] bool IsRunning() const noexcept;
 
+        /// @brief Initializes fiber support for the calling thread when needed.
         static void EnsureMainFiber();
+        /// @brief Returns whether fiber support is initialized for the calling thread.
         static bool IsMainFiberInitialized() noexcept;
+        /// @brief Returns whether the calling thread is currently executing inside a fiber.
         static bool IsInFiber() noexcept;
+        /// @brief Suspends the current fiber and returns control to its resumer.
         static void YieldNow() noexcept;
 
     private:

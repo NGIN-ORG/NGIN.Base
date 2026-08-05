@@ -3,29 +3,30 @@
 /// </summary>
 #pragma once
 
-#include <queue>
-#include <vector>
-#include <memory>
-#include <mutex>
-#include <atomic>
-#include <condition_variable>
-#include <coroutine>
-#include <algorithm>
-#include <array>
-#include <cassert>
-#include <functional>
-#include <exception>
-#include <NGIN/Primitives.hpp>
-#include <NGIN/Time/MonotonicClock.hpp>
-#include <NGIN/Time/Sleep.hpp>
-#include <NGIN/Sync/AtomicCondition.hpp>
-#include <NGIN/Units.hpp>
-#include <NGIN/Execution/Thread.hpp>
 #include "Fiber.hpp"
 #include "WorkItem.hpp"
+#include <NGIN/Execution/Thread.hpp>
+#include <NGIN/Primitives.hpp>
+#include <NGIN/Sync/AtomicCondition.hpp>
+#include <NGIN/Time/MonotonicClock.hpp>
+#include <NGIN/Time/Sleep.hpp>
+#include <NGIN/Units.hpp>
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <cassert>
+#include <condition_variable>
+#include <coroutine>
+#include <exception>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <queue>
+#include <vector>
 
 namespace NGIN::Execution
 {
+    /// @brief Background scheduler that executes queued work on reusable cooperative fibers.
     class FiberScheduler
     {
     private:
@@ -33,14 +34,16 @@ namespace NGIN::Execution
         constexpr static UIntSize DEFAULT_NUM_THREADS = 4;
 
     public:
+        /// @brief Monotonic time-point type used for delayed work.
         using time_point = NGIN::Time::TimePoint;
 
+        /// @brief Starts worker and timer-driver threads with a per-thread fiber pool.
         FiberScheduler(size_t numThreads = DEFAULT_NUM_THREADS, size_t numFibers = DEFAULT_NUM_FIBERS)
             : m_stop(false)
         {
-            const auto effectiveThreads = numThreads == 0 ? static_cast<size_t>(DEFAULT_NUM_THREADS) : numThreads;
-            const auto effectiveFibers  = numFibers == 0 ? static_cast<size_t>(DEFAULT_NUM_FIBERS) : numFibers;
-            m_fibersPerThread           = (effectiveFibers + effectiveThreads - 1) / effectiveThreads;
+            const size_t effectiveThreads = numThreads == 0 ? static_cast<size_t>(DEFAULT_NUM_THREADS) : numThreads;
+            const size_t effectiveFibers  = numFibers == 0 ? static_cast<size_t>(DEFAULT_NUM_FIBERS) : numFibers;
+            m_fibersPerThread             = (effectiveFibers + effectiveThreads - 1) / effectiveThreads;
             if (m_fibersPerThread == 0)
             {
                 m_fibersPerThread = 1;
@@ -62,6 +65,7 @@ namespace NGIN::Execution
             }
         }
 
+        /// @brief Stops workers, discards queued work, and joins background threads.
         ~FiberScheduler()
         {
             m_stop.store(true);
@@ -86,6 +90,7 @@ namespace NGIN::Execution
             }
         }
 
+        /// @brief Queues a work item for execution by a worker fiber.
         void Execute(WorkItem item) noexcept
         {
             {
@@ -95,6 +100,7 @@ namespace NGIN::Execution
             m_readyCv.notify_one();
         }
 
+        /// @brief Queues a work item for execution no earlier than a monotonic time point.
         void ExecuteAt(WorkItem item, NGIN::Time::TimePoint resumeAt)
         {
             {
@@ -106,21 +112,24 @@ namespace NGIN::Execution
         }
 
 
+        /// @brief Returns `false` because background workers pump this scheduler automatically.
         bool RunOne() noexcept
         {
             // Not needed: scheduler runs automatically.
             return false;
         }
 
+        /// @brief Does nothing because background workers pump this scheduler automatically.
         void RunUntilIdle() noexcept
         {
             // Not needed: scheduler runs automatically.
         }
 
+        /// @brief Discards queued and timed work without interrupting running work.
         void CancelAll() noexcept
         {
             {
-                std::lock_guard lock(m_readyMutex);
+                std::lock_guard      lock(m_readyMutex);
                 std::queue<WorkItem> empty;
                 std::swap(m_readyQueue, empty);
             }
@@ -132,17 +141,23 @@ namespace NGIN::Execution
             m_timerWake.NotifyAll();
         }
 
+        /// @brief Stores a priority hint for scheduler policy.
         void SetPriority(int priority) noexcept
         {
             m_priority = priority;
         }
+        /// @brief Stores an affinity hint for scheduler policy.
         void SetAffinity(uint64_t affinityMask) noexcept
         {
             m_affinityMask = affinityMask;
         }
+        /// @brief Receives a task-start notification; currently no metrics are recorded.
         void OnTaskStart(uint64_t, const char*) noexcept {}
+        /// @brief Receives a task-suspend notification; currently no metrics are recorded.
         void OnTaskSuspend(uint64_t) noexcept {}
+        /// @brief Receives a task-resume notification; currently no metrics are recorded.
         void OnTaskResume(uint64_t) noexcept {}
+        /// @brief Receives a task-complete notification; currently no metrics are recorded.
         void OnTaskComplete(uint64_t) noexcept {}
 
     private:
@@ -180,8 +195,8 @@ namespace NGIN::Execution
         }
 
         std::atomic<bool> m_stop {false};
-        int m_priority {0};
-        uint64_t m_affinityMask {0};
+        int               m_priority {0};
+        uint64_t          m_affinityMask {0};
 
         size_t m_fibersPerThread {1};
 
@@ -191,8 +206,8 @@ namespace NGIN::Execution
         WorkerThread m_driverThread;
 
         // Ready queue
-        std::queue<WorkItem> m_readyQueue;
-        std::mutex m_readyMutex;
+        std::queue<WorkItem>    m_readyQueue;
+        std::mutex              m_readyMutex;
         std::condition_variable m_readyCv;
 
         // Delayed tasks
@@ -204,14 +219,14 @@ namespace NGIN::Execution
                 return a.first > b.first;// Min-heap: soonest first
             }
         };
-        std::vector<SleepEntry> m_timerHeap;
-        std::mutex m_timersMutex;
+        std::vector<SleepEntry>     m_timerHeap;
+        std::mutex                  m_timersMutex;
         NGIN::Sync::AtomicCondition m_timerWake;
 
         // Timer management
         void CheckSleepingTasks()
         {
-            auto now = NGIN::Time::MonotonicClock::Now();
+            auto                  now = NGIN::Time::MonotonicClock::Now();
             std::vector<WorkItem> expired;
             {
                 std::lock_guard lock(m_timersMutex);
@@ -234,8 +249,8 @@ namespace NGIN::Execution
             while (!m_stop.load(std::memory_order_acquire))
             {
                 NGIN::Units::Milliseconds nextSleep {5.0};
-                bool hasSleeping                    = false;
-                const auto observedWakeGeneration   = m_timerWake.Load();
+                bool                      hasSleeping            = false;
+                const auto                observedWakeGeneration = m_timerWake.Load();
 
                 {
                     std::lock_guard lock(m_timersMutex);
@@ -274,7 +289,7 @@ namespace NGIN::Execution
                     continue;
                 }
 
-                (void)m_timerWake.WaitFor(observedWakeGeneration, nextSleep);
+                (void) m_timerWake.WaitFor(observedWakeGeneration, nextSleep);
             }
         }
 

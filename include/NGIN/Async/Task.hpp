@@ -388,6 +388,7 @@ namespace NGIN::Async
         using ValueType = T;
         using ErrorType = E;
 
+        /// @brief Coroutine promise that stores a typed task completion and continuation.
         struct promise_type final : detail::PromiseStorage<T, E>
         {
             using Base = detail::PromiseStorage<T, E>;
@@ -397,11 +398,13 @@ namespace NGIN::Async
             using Base::SetDomainError;
             using Base::SetFault;
 
+            /// @brief Returns the task that owns this coroutine frame.
             Task get_return_object() noexcept
             {
                 return Task {std::coroutine_handle<promise_type>::from_promise(*this)};
             }
 
+            /// @brief Keeps the task cold until explicitly started or awaited.
             std::suspend_always initial_suspend() noexcept
             {
                 return {};
@@ -409,8 +412,10 @@ namespace NGIN::Async
 
             struct FinalAwaiter final
             {
+                /// @brief Always enters final suspension.
                 bool await_ready() noexcept { return false; }
 
+                /// @brief Marks completion, resumes a continuation, and destroys detached frames when required.
                 void await_suspend(std::coroutine_handle<promise_type> h) noexcept
                 {
                     const bool destroyOnCompletion = h.promise().ShouldDestroyDetachedWithoutContinuation();
@@ -421,24 +426,29 @@ namespace NGIN::Async
                     }
                 }
 
+                /// @brief Performs no resume-time work.
                 void await_resume() noexcept {}
             };
 
+            /// @brief Returns the final awaiter that publishes task completion.
             FinalAwaiter final_suspend() noexcept
             {
                 return {};
             }
 
+            /// @brief Completes the task successfully with a value.
             void return_value(T value)
             {
                 SetCompletion(Completion<T, E>::Success(std::move(value)));
             }
 
+            /// @brief Completes the task from an explicit asynchronous outcome.
             void return_value(Completion<T, E> completion)
             {
                 SetCompletion(std::move(completion));
             }
 
+            /// @brief Completes the task from an `Expected`, mapping errors to domain errors.
             void return_value(NGIN::Utilities::Expected<T, E> result)
             {
                 if (!result)
@@ -450,11 +460,13 @@ namespace NGIN::Async
                 SetCompletion(Completion<T, E>::Success(std::move(result).TakeValue()));
             }
 
+            /// @brief Completes the task with an unexpected/domain error wrapper.
             void return_value(NGIN::Utilities::Unexpected<E> error)
             {
                 SetDomainError(error.Error());
             }
 
+            /// @brief Completes the task with a domain error when value and error types differ.
             void return_value(E error)
                 requires(!std::is_same_v<T, E>)
             {
@@ -462,15 +474,19 @@ namespace NGIN::Async
             }
         };
 
+        /// @brief Coroutine handle type owned by this task.
         using handle_type = std::coroutine_handle<promise_type>;
 
+        /// @brief Constructs an empty task.
         Task() noexcept = default;
 
+        /// @brief Takes ownership of a cold task coroutine handle.
         explicit Task(handle_type h) noexcept
             : m_handle(h), m_executor(h ? h.promise().m_executor : NGIN::Execution::ExecutorRef {})
         {
         }
 
+        /// @brief Transfers ownership and start state from another task.
         Task(Task&& other) noexcept
             : m_handle(other.m_handle), m_executor(other.m_executor), m_started(other.m_started.load(std::memory_order_acquire))
         {
@@ -479,6 +495,7 @@ namespace NGIN::Async
             other.m_started.store(false, std::memory_order_release);
         }
 
+        /// @brief Releases this frame and transfers ownership from another task.
         Task& operator=(Task&& other) noexcept
         {
             if (this != &other)
@@ -496,35 +513,43 @@ namespace NGIN::Async
             return *this;
         }
 
-        Task(const Task&)            = delete;
+        /// @brief Tasks are non-copyable because they uniquely own coroutine frames.
+        Task(const Task&) = delete;
+        /// @brief Tasks are non-copy-assignable because they uniquely own coroutine frames.
         Task& operator=(const Task&) = delete;
 
+        /// @brief Releases an unstarted frame or detaches ownership from running work.
         ~Task()
         {
             ReleaseHandle();
         }
 
+        /// @brief Returns whether execution has been started.
         [[nodiscard]] bool IsStarted() const noexcept
         {
             return m_started.load(std::memory_order_acquire);
         }
 
+        /// @brief Returns whether the coroutine has published a terminal completion.
         [[nodiscard]] bool IsCompleted() const noexcept
         {
             return m_handle && m_handle.promise().m_finished.load(std::memory_order_acquire);
         }
 
+        /// @brief Returns whether the task completed with an unexpected fault.
         [[nodiscard]] bool IsFaulted() const noexcept
         {
             return m_handle && m_handle.promise().m_completion.has_value() && m_handle.promise().m_completion->IsFault();
         }
 
+        /// @brief Returns whether the task completed through cancellation.
         [[nodiscard]] bool IsCanceled() const noexcept
         {
             return m_handle && m_handle.promise().m_completion.has_value() && m_handle.promise().m_completion->IsCanceled();
         }
 
 #if NGIN_ASYNC_CAPTURE_EXCEPTIONS
+        /// @brief Returns the exception captured from an unhandled coroutine exception, if any.
         [[nodiscard]] std::exception_ptr GetException() const noexcept
         {
             if (!m_handle)
@@ -535,14 +560,17 @@ namespace NGIN::Async
         }
 #endif
 
+        /// @brief Non-owning awaiter that propagates failures into the awaiting task.
         class PropagationAwaiter final
         {
         public:
+            /// @brief Constructs an awaiter borrowing a task.
             explicit PropagationAwaiter(Task& task) noexcept
                 : m_task(task)
             {
             }
 
+            /// @brief Returns whether the task already completed successfully.
             [[nodiscard]] bool await_ready() const noexcept
             {
                 return m_task.m_handle &&
@@ -550,16 +578,18 @@ namespace NGIN::Async
                        m_task.m_handle.promise().IsSucceeded();
             }
 
+            /// @brief Starts or connects the child task to a compatible parent promise.
             template<typename ParentPromise>
             std::coroutine_handle<> await_suspend(std::coroutine_handle<ParentPromise> awaiting) noexcept
             {
                 return m_task.template AwaitSuspend<ParentPromise>(awaiting);
             }
 
+            /// @brief Moves the successful child value into the parent coroutine.
             [[nodiscard]] T await_resume() noexcept
             {
                 assert(m_task.m_handle);
-                auto& promise = m_task.m_handle.promise();
+                promise_type& promise = m_task.m_handle.promise();
                 assert(promise.IsSucceeded());
                 return std::move(promise.m_completion->Value());
             }
@@ -568,14 +598,17 @@ namespace NGIN::Async
             Task& m_task;
         };
 
+        /// @brief Owning awaiter for an rvalue task that propagates failures to its parent.
         class OwnedPropagationAwaiter final
         {
         public:
+            /// @brief Takes ownership of the awaited task.
             explicit OwnedPropagationAwaiter(Task&& task) noexcept
                 : m_task(std::move(task))
             {
             }
 
+            /// @brief Returns whether the task already completed successfully.
             [[nodiscard]] bool await_ready() const noexcept
             {
                 return m_task.m_handle &&
@@ -583,16 +616,18 @@ namespace NGIN::Async
                        m_task.m_handle.promise().IsSucceeded();
             }
 
+            /// @brief Starts or connects the child task to a compatible parent promise.
             template<typename ParentPromise>
             std::coroutine_handle<> await_suspend(std::coroutine_handle<ParentPromise> awaiting) noexcept
             {
                 return m_task.template AwaitSuspend<ParentPromise>(awaiting);
             }
 
+            /// @brief Moves the successful child value into the parent coroutine.
             [[nodiscard]] T await_resume() noexcept
             {
                 assert(m_task.m_handle);
-                auto& promise = m_task.m_handle.promise();
+                promise_type& promise = m_task.m_handle.promise();
                 assert(promise.IsSucceeded());
                 return std::move(promise.m_completion->Value());
             }
@@ -601,14 +636,17 @@ namespace NGIN::Async
             Task m_task;
         };
 
+        /// @brief Non-owning awaiter that also observes a task context's cancellation token.
         class CancellablePropagationAwaiter final
         {
         public:
+            /// @brief Constructs a cancellation-aware awaiter borrowing a task and context.
             CancellablePropagationAwaiter(Task& task, TaskContext& ctx) noexcept
                 : m_task(task), m_ctx(&ctx)
             {
             }
 
+            /// @brief Returns whether the task already completed successfully.
             [[nodiscard]] bool await_ready() const noexcept
             {
                 return m_task.m_handle &&
@@ -616,6 +654,7 @@ namespace NGIN::Async
                        m_task.m_handle.promise().IsSucceeded();
             }
 
+            /// @brief Starts the child or cancels the compatible parent when the context is canceled.
             template<typename ParentPromise>
             std::coroutine_handle<> await_suspend(std::coroutine_handle<ParentPromise> awaiting) noexcept
             {
@@ -637,10 +676,11 @@ namespace NGIN::Async
                 return m_task.template AwaitSuspend<ParentPromise>(awaiting);
             }
 
+            /// @brief Moves the successful child value into the parent coroutine.
             [[nodiscard]] T await_resume() noexcept
             {
                 assert(m_task.m_handle);
-                auto& promise = m_task.m_handle.promise();
+                promise_type& promise = m_task.m_handle.promise();
                 assert(promise.IsSucceeded());
                 return std::move(promise.m_completion->Value());
             }
@@ -655,21 +695,25 @@ namespace NGIN::Async
             std::coroutine_handle<>  m_awaiting {};
         };
 
+        /// @brief Creates a non-owning failure-propagating awaiter for an lvalue task.
         [[nodiscard]] PropagationAwaiter operator co_await() & noexcept
         {
             return PropagationAwaiter {*this};
         }
 
+        /// @brief Creates an owning failure-propagating awaiter for an rvalue task.
         [[nodiscard]] OwnedPropagationAwaiter operator co_await() && noexcept
         {
             return OwnedPropagationAwaiter {std::move(*this)};
         }
 
+        /// @brief Creates a cancellation-aware failure-propagating awaiter.
         [[nodiscard]] CancellablePropagationAwaiter WithCancellation(TaskContext& ctx) noexcept
         {
             return CancellablePropagationAwaiter {*this, ctx};
         }
 
+        /// @brief Creates a value-less task that completes after a cancellation-aware delay.
         template<typename TUnit>
             requires NGIN::Units::QuantityOf<NGIN::Units::TIME, TUnit>
         static Task<void, E> Delay(TaskContext& ctx, const TUnit& duration)
@@ -682,16 +726,18 @@ namespace NGIN::Async
         template<typename, typename>
         friend class Operation;
 
+        /// @brief Declares the task-to-operation conversion helper as a friend.
         template<typename TValue, typename TError>
         friend Operation<TValue, TError> Spawn(TaskContext&, Task<TValue, TError>&&) noexcept;
 
+        /// @brief Declares the detached-task launch helper as a friend.
         template<typename TValue, typename TError>
         friend void Detach(TaskContext&, Task<TValue, TError>&&) noexcept;
 
         [[nodiscard]] handle_type ReleaseForOperation() noexcept
         {
-            auto handle = m_handle;
-            m_handle    = {};
+            handle_type handle = m_handle;
+            m_handle           = {};
             m_started.store(true, std::memory_order_release);
             return handle;
         }
@@ -709,10 +755,10 @@ namespace NGIN::Async
                 return false;
             }
 
-            m_executor         = ctx.GetExecutor();
-            auto& promise      = m_handle.promise();
-            promise.m_ctx      = &ctx;
-            promise.m_executor = m_executor;
+            m_executor            = ctx.GetExecutor();
+            promise_type& promise = m_handle.promise();
+            promise.m_ctx         = &ctx;
+            promise.m_executor    = m_executor;
 
             if (!m_executor.IsValid())
             {
@@ -738,7 +784,7 @@ namespace NGIN::Async
                 return std::noop_coroutine();
             }
 
-            auto& child = m_handle.promise();
+            promise_type& child = m_handle.promise();
             if (child.m_finished.load(std::memory_order_acquire))
             {
                 if (child.IsSucceeded())
@@ -790,12 +836,12 @@ namespace NGIN::Async
                 return;
             }
 
-            auto handle = m_handle;
-            m_handle    = {};
+            handle_type handle = m_handle;
+            m_handle           = {};
 
-            auto&      promise  = handle.promise();
-            const bool started  = m_started.load(std::memory_order_acquire);
-            const bool finished = promise.m_finished.load(std::memory_order_acquire);
+            promise_type& promise  = handle.promise();
+            const bool    started  = m_started.load(std::memory_order_acquire);
+            const bool    finished = promise.m_finished.load(std::memory_order_acquire);
             if (started && !finished)
             {
                 promise.m_detached.store(true, std::memory_order_release);
@@ -808,9 +854,10 @@ namespace NGIN::Async
         template<typename ParentPromise>
         static void PropagateChildCompletion(std::coroutine_handle<> self, std::coroutine_handle<> continuation) noexcept
         {
-            auto  childHandle  = handle_type::from_address(self.address());
-            auto  parentHandle = std::coroutine_handle<ParentPromise>::from_address(continuation.address());
-            auto& child        = childHandle.promise();
+            handle_type                          childHandle = handle_type::from_address(self.address());
+            std::coroutine_handle<ParentPromise> parentHandle =
+                    std::coroutine_handle<ParentPromise>::from_address(continuation.address());
+            promise_type& child = childHandle.promise();
 
             if (parentHandle.promise().m_finished.load(std::memory_order_acquire))
             {
@@ -838,7 +885,8 @@ namespace NGIN::Async
 
             if constexpr (requires(ParentPromise& p) { p.SetChildException(ex); })
             {
-                auto typed = std::coroutine_handle<ParentPromise>::from_address(continuation.address());
+                std::coroutine_handle<ParentPromise> typed =
+                        std::coroutine_handle<ParentPromise>::from_address(continuation.address());
                 typed.promise().SetChildException(ex);
             }
         }
@@ -847,13 +895,14 @@ namespace NGIN::Async
         template<typename ParentPromise, typename TAwaiter>
         static bool CancelAwaitingContinuation(void* rawAwaiter) noexcept
         {
-            auto* awaiter = static_cast<TAwaiter*>(rawAwaiter);
+            TAwaiter* awaiter = static_cast<TAwaiter*>(rawAwaiter);
             if (awaiter == nullptr || !awaiter->m_awaiting)
             {
                 return false;
             }
 
-            auto parentHandle = std::coroutine_handle<ParentPromise>::from_address(awaiter->m_awaiting.address());
+            std::coroutine_handle<ParentPromise> parentHandle =
+                    std::coroutine_handle<ParentPromise>::from_address(awaiter->m_awaiting.address());
             if (parentHandle.promise().m_finished.load(std::memory_order_acquire))
             {
                 return false;
@@ -878,6 +927,7 @@ namespace NGIN::Async
         using ValueType = void;
         using ErrorType = E;
 
+        /// @brief Coroutine promise that stores a value-less task completion and continuation.
         struct promise_type final : detail::PromiseStorage<void, E>
         {
             using Base = detail::PromiseStorage<void, E>;
@@ -887,11 +937,13 @@ namespace NGIN::Async
             using Base::SetDomainError;
             using Base::SetFault;
 
+            /// @brief Returns the task that owns this coroutine frame.
             Task get_return_object() noexcept
             {
                 return Task {std::coroutine_handle<promise_type>::from_promise(*this)};
             }
 
+            /// @brief Keeps the task cold until explicitly started or awaited.
             std::suspend_always initial_suspend() noexcept
             {
                 return {};
@@ -899,8 +951,10 @@ namespace NGIN::Async
 
             struct FinalAwaiter final
             {
+                /// @brief Always enters final suspension.
                 bool await_ready() noexcept { return false; }
 
+                /// @brief Marks completion, resumes a continuation, and destroys detached frames when required.
                 void await_suspend(std::coroutine_handle<promise_type> h) noexcept
                 {
                     const bool destroyOnCompletion = h.promise().ShouldDestroyDetachedWithoutContinuation();
@@ -911,29 +965,36 @@ namespace NGIN::Async
                     }
                 }
 
+                /// @brief Performs no resume-time work.
                 void await_resume() noexcept {}
             };
 
+            /// @brief Returns the final awaiter that publishes task completion.
             FinalAwaiter final_suspend() noexcept
             {
                 return {};
             }
 
+            /// @brief Completes the task successfully without a value.
             void return_void()
             {
                 SetCompletion(Completion<void, E>::Success());
             }
         };
 
+        /// @brief Coroutine handle type owned by this task.
         using handle_type = std::coroutine_handle<promise_type>;
 
+        /// @brief Constructs an empty task.
         Task() noexcept = default;
 
+        /// @brief Takes ownership of a cold task coroutine handle.
         explicit Task(handle_type h) noexcept
             : m_handle(h), m_executor(h ? h.promise().m_executor : NGIN::Execution::ExecutorRef {})
         {
         }
 
+        /// @brief Transfers ownership and start state from another task.
         Task(Task&& other) noexcept
             : m_handle(other.m_handle), m_executor(other.m_executor), m_started(other.m_started.load(std::memory_order_acquire))
         {
@@ -942,6 +1003,7 @@ namespace NGIN::Async
             other.m_started.store(false, std::memory_order_release);
         }
 
+        /// @brief Releases this frame and transfers ownership from another task.
         Task& operator=(Task&& other) noexcept
         {
             if (this != &other)
@@ -959,35 +1021,43 @@ namespace NGIN::Async
             return *this;
         }
 
-        Task(const Task&)            = delete;
+        /// @brief Tasks are non-copyable because they uniquely own coroutine frames.
+        Task(const Task&) = delete;
+        /// @brief Tasks are non-copy-assignable because they uniquely own coroutine frames.
         Task& operator=(const Task&) = delete;
 
+        /// @brief Releases an unstarted frame or detaches ownership from running work.
         ~Task()
         {
             ReleaseHandle();
         }
 
+        /// @brief Returns whether execution has been started.
         [[nodiscard]] bool IsStarted() const noexcept
         {
             return m_started.load(std::memory_order_acquire);
         }
 
+        /// @brief Returns whether the coroutine has published a terminal completion.
         [[nodiscard]] bool IsCompleted() const noexcept
         {
             return m_handle && m_handle.promise().m_finished.load(std::memory_order_acquire);
         }
 
+        /// @brief Returns whether the task completed with an unexpected fault.
         [[nodiscard]] bool IsFaulted() const noexcept
         {
             return m_handle && m_handle.promise().m_completion.has_value() && m_handle.promise().m_completion->IsFault();
         }
 
+        /// @brief Returns whether the task completed through cancellation.
         [[nodiscard]] bool IsCanceled() const noexcept
         {
             return m_handle && m_handle.promise().m_completion.has_value() && m_handle.promise().m_completion->IsCanceled();
         }
 
 #if NGIN_ASYNC_CAPTURE_EXCEPTIONS
+        /// @brief Returns the exception captured from an unhandled coroutine exception, if any.
         [[nodiscard]] std::exception_ptr GetException() const noexcept
         {
             if (!m_handle)
@@ -998,14 +1068,17 @@ namespace NGIN::Async
         }
 #endif
 
+        /// @brief Non-owning awaiter that propagates failures into the awaiting task.
         class PropagationAwaiter final
         {
         public:
+            /// @brief Constructs an awaiter borrowing a task.
             explicit PropagationAwaiter(Task& task) noexcept
                 : m_task(task)
             {
             }
 
+            /// @brief Returns whether the task already completed successfully.
             [[nodiscard]] bool await_ready() const noexcept
             {
                 return m_task.m_handle &&
@@ -1013,12 +1086,14 @@ namespace NGIN::Async
                        m_task.m_handle.promise().IsSucceeded();
             }
 
+            /// @brief Starts or connects the child task to a compatible parent promise.
             template<typename ParentPromise>
             std::coroutine_handle<> await_suspend(std::coroutine_handle<ParentPromise> awaiting) noexcept
             {
                 return m_task.template AwaitSuspend<ParentPromise>(awaiting);
             }
 
+            /// @brief Verifies that the child completed successfully.
             void await_resume() noexcept
             {
                 assert(m_task.m_handle);
@@ -1029,14 +1104,17 @@ namespace NGIN::Async
             Task& m_task;
         };
 
+        /// @brief Owning awaiter for an rvalue task that propagates failures to its parent.
         class OwnedPropagationAwaiter final
         {
         public:
+            /// @brief Takes ownership of the awaited task.
             explicit OwnedPropagationAwaiter(Task&& task) noexcept
                 : m_task(std::move(task))
             {
             }
 
+            /// @brief Returns whether the task already completed successfully.
             [[nodiscard]] bool await_ready() const noexcept
             {
                 return m_task.m_handle &&
@@ -1044,12 +1122,14 @@ namespace NGIN::Async
                        m_task.m_handle.promise().IsSucceeded();
             }
 
+            /// @brief Starts or connects the child task to a compatible parent promise.
             template<typename ParentPromise>
             std::coroutine_handle<> await_suspend(std::coroutine_handle<ParentPromise> awaiting) noexcept
             {
                 return m_task.template AwaitSuspend<ParentPromise>(awaiting);
             }
 
+            /// @brief Verifies that the child completed successfully.
             void await_resume() noexcept
             {
                 assert(m_task.m_handle);
@@ -1060,14 +1140,17 @@ namespace NGIN::Async
             Task m_task;
         };
 
+        /// @brief Non-owning awaiter that also observes a task context's cancellation token.
         class CancellablePropagationAwaiter final
         {
         public:
+            /// @brief Constructs a cancellation-aware awaiter borrowing a task and context.
             CancellablePropagationAwaiter(Task& task, TaskContext& ctx) noexcept
                 : m_task(task), m_ctx(&ctx)
             {
             }
 
+            /// @brief Returns whether the task already completed successfully.
             [[nodiscard]] bool await_ready() const noexcept
             {
                 return m_task.m_handle &&
@@ -1075,6 +1158,7 @@ namespace NGIN::Async
                        m_task.m_handle.promise().IsSucceeded();
             }
 
+            /// @brief Starts the child or cancels the compatible parent when the context is canceled.
             template<typename ParentPromise>
             std::coroutine_handle<> await_suspend(std::coroutine_handle<ParentPromise> awaiting) noexcept
             {
@@ -1096,6 +1180,7 @@ namespace NGIN::Async
                 return m_task.template AwaitSuspend<ParentPromise>(awaiting);
             }
 
+            /// @brief Verifies that the child completed successfully.
             void await_resume() noexcept
             {
                 assert(m_task.m_handle);
@@ -1112,21 +1197,25 @@ namespace NGIN::Async
             std::coroutine_handle<>  m_awaiting {};
         };
 
+        /// @brief Creates a non-owning failure-propagating awaiter for an lvalue task.
         [[nodiscard]] PropagationAwaiter operator co_await() & noexcept
         {
             return PropagationAwaiter {*this};
         }
 
+        /// @brief Creates an owning failure-propagating awaiter for an rvalue task.
         [[nodiscard]] OwnedPropagationAwaiter operator co_await() && noexcept
         {
             return OwnedPropagationAwaiter {std::move(*this)};
         }
 
+        /// @brief Creates a cancellation-aware failure-propagating awaiter.
         [[nodiscard]] CancellablePropagationAwaiter WithCancellation(TaskContext& ctx) noexcept
         {
             return CancellablePropagationAwaiter {*this, ctx};
         }
 
+        /// @brief Creates a value-less task that completes after a cancellation-aware delay.
         template<typename TUnit>
             requires NGIN::Units::QuantityOf<NGIN::Units::TIME, TUnit>
         static Task<void, E> Delay(TaskContext& ctx, const TUnit& duration)
@@ -1139,16 +1228,18 @@ namespace NGIN::Async
         template<typename, typename>
         friend class Operation;
 
+        /// @brief Grants the task-starting helper access to the owned coroutine frame.
         template<typename TValue, typename TError>
         friend Operation<TValue, TError> Spawn(TaskContext&, Task<TValue, TError>&&) noexcept;
 
+        /// @brief Grants the detached-start helper access to the owned coroutine frame.
         template<typename TValue, typename TError>
         friend void Detach(TaskContext&, Task<TValue, TError>&&) noexcept;
 
         [[nodiscard]] handle_type ReleaseForOperation() noexcept
         {
-            auto handle = m_handle;
-            m_handle    = {};
+            handle_type handle = m_handle;
+            m_handle           = {};
             m_started.store(true, std::memory_order_release);
             return handle;
         }
@@ -1166,7 +1257,7 @@ namespace NGIN::Async
                 return std::noop_coroutine();
             }
 
-            auto& child = m_handle.promise();
+            promise_type& child = m_handle.promise();
             if (child.m_finished.load(std::memory_order_acquire))
             {
                 if (child.IsSucceeded())
@@ -1218,12 +1309,12 @@ namespace NGIN::Async
                 return;
             }
 
-            auto handle = m_handle;
-            m_handle    = {};
+            handle_type handle = m_handle;
+            m_handle           = {};
 
-            auto&      promise  = handle.promise();
-            const bool started  = m_started.load(std::memory_order_acquire);
-            const bool finished = promise.m_finished.load(std::memory_order_acquire);
+            promise_type& promise  = handle.promise();
+            const bool    started  = m_started.load(std::memory_order_acquire);
+            const bool    finished = promise.m_finished.load(std::memory_order_acquire);
             if (started && !finished)
             {
                 promise.m_detached.store(true, std::memory_order_release);
@@ -1236,9 +1327,10 @@ namespace NGIN::Async
         template<typename ParentPromise>
         static void PropagateChildCompletion(std::coroutine_handle<> self, std::coroutine_handle<> continuation) noexcept
         {
-            auto  childHandle  = handle_type::from_address(self.address());
-            auto  parentHandle = std::coroutine_handle<ParentPromise>::from_address(continuation.address());
-            auto& child        = childHandle.promise();
+            handle_type                          childHandle = handle_type::from_address(self.address());
+            std::coroutine_handle<ParentPromise> parentHandle =
+                    std::coroutine_handle<ParentPromise>::from_address(continuation.address());
+            promise_type& child = childHandle.promise();
 
             if (parentHandle.promise().m_finished.load(std::memory_order_acquire))
             {
@@ -1266,7 +1358,8 @@ namespace NGIN::Async
 
             if constexpr (requires(ParentPromise& p) { p.SetChildException(ex); })
             {
-                auto typed = std::coroutine_handle<ParentPromise>::from_address(continuation.address());
+                std::coroutine_handle<ParentPromise> typed =
+                        std::coroutine_handle<ParentPromise>::from_address(continuation.address());
                 typed.promise().SetChildException(ex);
             }
         }
@@ -1275,13 +1368,14 @@ namespace NGIN::Async
         template<typename ParentPromise, typename TAwaiter>
         static bool CancelAwaitingContinuation(void* rawAwaiter) noexcept
         {
-            auto* awaiter = static_cast<TAwaiter*>(rawAwaiter);
+            TAwaiter* awaiter = static_cast<TAwaiter*>(rawAwaiter);
             if (awaiter == nullptr || !awaiter->m_awaiting)
             {
                 return false;
             }
 
-            auto parentHandle = std::coroutine_handle<ParentPromise>::from_address(awaiter->m_awaiting.address());
+            std::coroutine_handle<ParentPromise> parentHandle =
+                    std::coroutine_handle<ParentPromise>::from_address(awaiter->m_awaiting.address());
             if (parentHandle.promise().m_finished.load(std::memory_order_acquire))
             {
                 return false;
@@ -1309,13 +1403,16 @@ namespace NGIN::Async
         using Completion  = NGIN::Async::Completion<T, E>;
         using handle_type = typename Task<T, E>::handle_type;
 
+        /// @brief Constructs an invalid operation with no running task.
         Operation() noexcept = default;
 
+        /// @brief Takes ownership of an already-started task coroutine.
         Operation(handle_type handle, NGIN::Execution::ExecutorRef executor) noexcept
             : m_handle(handle), m_executor(executor)
         {
         }
 
+        /// @brief Transfers ownership and result-consumption state from another operation.
         Operation(Operation&& other) noexcept
             : m_handle(other.m_handle), m_executor(other.m_executor), m_resultTaken(other.m_resultTaken)
         {
@@ -1324,6 +1421,7 @@ namespace NGIN::Async
             other.m_resultTaken = false;
         }
 
+        /// @brief Releases this operation and transfers ownership from another operation.
         Operation& operator=(Operation&& other) noexcept
         {
             if (this != &other)
@@ -1340,34 +1438,43 @@ namespace NGIN::Async
             return *this;
         }
 
-        Operation(const Operation&)            = delete;
+        /// @brief Operations are non-copyable because they uniquely own coroutine frames.
+        Operation(const Operation&) = delete;
+        /// @brief Operations are non-copy-assignable because they uniquely own coroutine frames.
         Operation& operator=(const Operation&) = delete;
 
+        /// @brief Detaches unfinished work or destroys a completed coroutine frame.
         ~Operation()
         {
             ReleaseHandle();
         }
 
+        /// @brief Returns whether this object owns a coroutine frame.
         [[nodiscard]] bool IsValid() const noexcept
         {
             return static_cast<bool>(m_handle);
         }
 
+        /// @brief Returns whether the operation has published a terminal completion.
         [[nodiscard]] bool IsCompleted() const noexcept
         {
             return m_handle && m_handle.promise().m_finished.load(std::memory_order_acquire);
         }
 
+        /// @brief Returns whether the operation completed with an unexpected fault.
         [[nodiscard]] bool IsFaulted() const noexcept
         {
             return m_handle && m_handle.promise().m_completion.has_value() && m_handle.promise().m_completion->IsFault();
         }
 
+        /// @brief Returns whether the operation completed through cancellation.
         [[nodiscard]] bool IsCanceled() const noexcept
         {
             return m_handle && m_handle.promise().m_completion.has_value() && m_handle.promise().m_completion->IsCanceled();
         }
 
+        /// @brief Consumes and returns the completion when available and not previously taken.
+        /// @return The completion, or an empty optional while unfinished or after consumption.
         [[nodiscard]] std::optional<Completion> TryTakeResult()
         {
             if (!IsCompleted() || m_resultTaken)
@@ -1379,9 +1486,10 @@ namespace NGIN::Async
             return m_handle.promise().TakeCompletion();
         }
 
+        /// @brief Consumes the completion or returns an invalid-usage fault.
         [[nodiscard]] Completion TakeResult()
         {
-            if (auto result = TryTakeResult())
+            if (std::optional<Completion> result = TryTakeResult())
             {
                 return std::move(*result);
             }
@@ -1389,20 +1497,24 @@ namespace NGIN::Async
             return Completion::Faulted(MakeAsyncFault(AsyncFaultCode::InvalidTaskUsage));
         }
 
+        /// @brief Non-owning awaiter that returns the operation's complete outcome.
         class Awaiter final
         {
         public:
+            /// @brief Constructs an awaiter borrowing an operation.
             explicit Awaiter(Operation& operation) noexcept
                 : m_operation(operation)
             {
             }
 
+            /// @brief Returns whether the operation is absent or already complete.
             [[nodiscard]] bool await_ready() const noexcept
             {
                 return !m_operation.m_handle ||
                        m_operation.m_handle.promise().m_finished.load(std::memory_order_acquire);
             }
 
+            /// @brief Registers the awaiting coroutine as the operation continuation.
             template<typename ParentPromise>
             std::coroutine_handle<> await_suspend(std::coroutine_handle<ParentPromise> awaiting) noexcept
             {
@@ -1411,7 +1523,7 @@ namespace NGIN::Async
                     return awaiting;
                 }
 
-                auto& child = m_operation.m_handle.promise();
+                typename Task<T, E>::promise_type& child = m_operation.m_handle.promise();
                 if (child.m_finished.load(std::memory_order_acquire))
                 {
                     return awaiting;
@@ -1433,6 +1545,7 @@ namespace NGIN::Async
                 return std::noop_coroutine();
             }
 
+            /// @brief Consumes and returns the operation's completion.
             [[nodiscard]] Completion await_resume()
             {
                 return m_operation.TakeResult();
@@ -1442,26 +1555,31 @@ namespace NGIN::Async
             Operation& m_operation;
         };
 
+        /// @brief Owning awaiter for an rvalue operation.
         class OwnedAwaiter final
         {
         public:
+            /// @brief Takes ownership of the awaited operation.
             explicit OwnedAwaiter(Operation&& operation) noexcept
                 : m_operation(std::move(operation))
             {
             }
 
+            /// @brief Returns whether the operation is absent or already complete.
             [[nodiscard]] bool await_ready() const noexcept
             {
                 return !m_operation.m_handle ||
                        m_operation.m_handle.promise().m_finished.load(std::memory_order_acquire);
             }
 
+            /// @brief Registers the awaiting coroutine as the operation continuation.
             template<typename ParentPromise>
             std::coroutine_handle<> await_suspend(std::coroutine_handle<ParentPromise> awaiting) noexcept
             {
                 return Awaiter {m_operation}.await_suspend(awaiting);
             }
 
+            /// @brief Consumes and returns the operation's completion.
             [[nodiscard]] Completion await_resume()
             {
                 return m_operation.TakeResult();
@@ -1471,23 +1589,28 @@ namespace NGIN::Async
             Operation m_operation;
         };
 
+        /// @brief Creates a non-owning awaiter for an lvalue operation.
         [[nodiscard]] Awaiter operator co_await() & noexcept
         {
             return Awaiter {*this};
         }
 
+        /// @brief Creates an owning awaiter for an rvalue operation.
         [[nodiscard]] OwnedAwaiter operator co_await() && noexcept
         {
             return OwnedAwaiter {std::move(*this)};
         }
 
     private:
+        /// @brief Grants the task-starting helper access to operation ownership state.
         template<typename TValue, typename TError>
         friend Operation<TValue, TError> Spawn(TaskContext&, Task<TValue, TError>&&) noexcept;
 
+        /// @brief Grants the detached-start helper access to operation ownership state.
         template<typename TValue, typename TError>
         friend void Detach(TaskContext&, Task<TValue, TError>&&) noexcept;
 
+        /// @brief Grants synchronous waiting access to the operation's completion signal.
         template<typename TValue, typename TError>
         friend NGIN::Async::Completion<TValue, TError> SyncWait(TaskContext&, Task<TValue, TError>&&);
 
@@ -1498,10 +1621,10 @@ namespace NGIN::Async
                 return;
             }
 
-            auto& promise = m_handle.promise();
+            typename Task<T, E>::promise_type& promise = m_handle.promise();
             while (!promise.m_finished.load(std::memory_order_acquire))
             {
-                const auto generation = promise.m_finishedCondition.Load();
+                const UInt32 generation = promise.m_finishedCondition.Load();
                 if (promise.m_finished.load(std::memory_order_acquire))
                 {
                     break;
@@ -1517,10 +1640,10 @@ namespace NGIN::Async
                 return;
             }
 
-            auto handle = m_handle;
-            m_handle    = {};
+            handle_type handle = m_handle;
+            m_handle           = {};
 
-            auto& promise = handle.promise();
+            typename Task<T, E>::promise_type& promise = handle.promise();
             if (!promise.m_finished.load(std::memory_order_acquire))
             {
                 promise.m_detached.store(true, std::memory_order_release);
@@ -1546,13 +1669,16 @@ namespace NGIN::Async
         using Completion  = NGIN::Async::Completion<void, E>;
         using handle_type = typename Task<void, E>::handle_type;
 
+        /// @brief Constructs an invalid operation with no running task.
         Operation() noexcept = default;
 
+        /// @brief Takes ownership of an already-started task coroutine.
         Operation(handle_type handle, NGIN::Execution::ExecutorRef executor) noexcept
             : m_handle(handle), m_executor(executor)
         {
         }
 
+        /// @brief Transfers ownership and result-consumption state from another operation.
         Operation(Operation&& other) noexcept
             : m_handle(other.m_handle), m_executor(other.m_executor), m_resultTaken(other.m_resultTaken)
         {
@@ -1561,6 +1687,7 @@ namespace NGIN::Async
             other.m_resultTaken = false;
         }
 
+        /// @brief Releases this operation and transfers ownership from another operation.
         Operation& operator=(Operation&& other) noexcept
         {
             if (this != &other)
@@ -1577,34 +1704,43 @@ namespace NGIN::Async
             return *this;
         }
 
-        Operation(const Operation&)            = delete;
+        /// @brief Operations are non-copyable because they uniquely own coroutine frames.
+        Operation(const Operation&) = delete;
+        /// @brief Operations are non-copy-assignable because they uniquely own coroutine frames.
         Operation& operator=(const Operation&) = delete;
 
+        /// @brief Detaches unfinished work or destroys a completed coroutine frame.
         ~Operation()
         {
             ReleaseHandle();
         }
 
+        /// @brief Returns whether this object owns a coroutine frame.
         [[nodiscard]] bool IsValid() const noexcept
         {
             return static_cast<bool>(m_handle);
         }
 
+        /// @brief Returns whether the operation has published a terminal completion.
         [[nodiscard]] bool IsCompleted() const noexcept
         {
             return m_handle && m_handle.promise().m_finished.load(std::memory_order_acquire);
         }
 
+        /// @brief Returns whether the operation completed with an unexpected fault.
         [[nodiscard]] bool IsFaulted() const noexcept
         {
             return m_handle && m_handle.promise().m_completion.has_value() && m_handle.promise().m_completion->IsFault();
         }
 
+        /// @brief Returns whether the operation completed through cancellation.
         [[nodiscard]] bool IsCanceled() const noexcept
         {
             return m_handle && m_handle.promise().m_completion.has_value() && m_handle.promise().m_completion->IsCanceled();
         }
 
+        /// @brief Consumes and returns the completion when available and not previously taken.
+        /// @return The completion, or an empty optional while unfinished or after consumption.
         [[nodiscard]] std::optional<Completion> TryTakeResult()
         {
             if (!IsCompleted() || m_resultTaken)
@@ -1616,9 +1752,10 @@ namespace NGIN::Async
             return m_handle.promise().TakeCompletion();
         }
 
+        /// @brief Consumes the completion or returns an invalid-usage fault.
         [[nodiscard]] Completion TakeResult()
         {
-            if (auto result = TryTakeResult())
+            if (std::optional<Completion> result = TryTakeResult())
             {
                 return std::move(*result);
             }
@@ -1626,20 +1763,24 @@ namespace NGIN::Async
             return Completion::Faulted(MakeAsyncFault(AsyncFaultCode::InvalidTaskUsage));
         }
 
+        /// @brief Non-owning awaiter that returns the operation's complete outcome.
         class Awaiter final
         {
         public:
+            /// @brief Constructs an awaiter borrowing an operation.
             explicit Awaiter(Operation& operation) noexcept
                 : m_operation(operation)
             {
             }
 
+            /// @brief Returns whether the operation is absent or already complete.
             [[nodiscard]] bool await_ready() const noexcept
             {
                 return !m_operation.m_handle ||
                        m_operation.m_handle.promise().m_finished.load(std::memory_order_acquire);
             }
 
+            /// @brief Registers the awaiting coroutine as the operation continuation.
             template<typename ParentPromise>
             std::coroutine_handle<> await_suspend(std::coroutine_handle<ParentPromise> awaiting) noexcept
             {
@@ -1648,7 +1789,7 @@ namespace NGIN::Async
                     return awaiting;
                 }
 
-                auto& child = m_operation.m_handle.promise();
+                typename Task<void, E>::promise_type& child = m_operation.m_handle.promise();
                 if (child.m_finished.load(std::memory_order_acquire))
                 {
                     return awaiting;
@@ -1670,6 +1811,7 @@ namespace NGIN::Async
                 return std::noop_coroutine();
             }
 
+            /// @brief Consumes and returns the operation's completion.
             [[nodiscard]] Completion await_resume()
             {
                 return m_operation.TakeResult();
@@ -1679,26 +1821,31 @@ namespace NGIN::Async
             Operation& m_operation;
         };
 
+        /// @brief Owning awaiter for an rvalue operation.
         class OwnedAwaiter final
         {
         public:
+            /// @brief Takes ownership of the awaited operation.
             explicit OwnedAwaiter(Operation&& operation) noexcept
                 : m_operation(std::move(operation))
             {
             }
 
+            /// @brief Returns whether the operation is absent or already complete.
             [[nodiscard]] bool await_ready() const noexcept
             {
                 return !m_operation.m_handle ||
                        m_operation.m_handle.promise().m_finished.load(std::memory_order_acquire);
             }
 
+            /// @brief Registers the awaiting coroutine as the operation continuation.
             template<typename ParentPromise>
             std::coroutine_handle<> await_suspend(std::coroutine_handle<ParentPromise> awaiting) noexcept
             {
                 return Awaiter {m_operation}.await_suspend(awaiting);
             }
 
+            /// @brief Consumes and returns the operation's completion.
             [[nodiscard]] Completion await_resume()
             {
                 return m_operation.TakeResult();
@@ -1708,23 +1855,28 @@ namespace NGIN::Async
             Operation m_operation;
         };
 
+        /// @brief Creates a non-owning awaiter for an lvalue operation.
         [[nodiscard]] Awaiter operator co_await() & noexcept
         {
             return Awaiter {*this};
         }
 
+        /// @brief Creates an owning awaiter for an rvalue operation.
         [[nodiscard]] OwnedAwaiter operator co_await() && noexcept
         {
             return OwnedAwaiter {std::move(*this)};
         }
 
     private:
+        /// @brief Grants the task-starting helper access to operation ownership state.
         template<typename TValue, typename TError>
         friend Operation<TValue, TError> Spawn(TaskContext&, Task<TValue, TError>&&) noexcept;
 
+        /// @brief Grants the detached-start helper access to operation ownership state.
         template<typename TValue, typename TError>
         friend void Detach(TaskContext&, Task<TValue, TError>&&) noexcept;
 
+        /// @brief Grants synchronous waiting access to the operation's completion signal.
         template<typename TValue, typename TError>
         friend NGIN::Async::Completion<TValue, TError> SyncWait(TaskContext&, Task<TValue, TError>&&);
 
@@ -1735,10 +1887,10 @@ namespace NGIN::Async
                 return;
             }
 
-            auto& promise = m_handle.promise();
+            typename Task<void, E>::promise_type& promise = m_handle.promise();
             while (!promise.m_finished.load(std::memory_order_acquire))
             {
-                const auto generation = promise.m_finishedCondition.Load();
+                const UInt32 generation = promise.m_finishedCondition.Load();
                 if (promise.m_finished.load(std::memory_order_acquire))
                 {
                     break;
@@ -1754,10 +1906,10 @@ namespace NGIN::Async
                 return;
             }
 
-            auto handle = m_handle;
-            m_handle    = {};
+            handle_type handle = m_handle;
+            m_handle           = {};
 
-            auto& promise = handle.promise();
+            typename Task<void, E>::promise_type& promise = handle.promise();
             if (!promise.m_finished.load(std::memory_order_acquire))
             {
                 promise.m_detached.store(true, std::memory_order_release);
@@ -1772,19 +1924,21 @@ namespace NGIN::Async
         bool                         m_resultTaken {false};
     };
 
+    /// @brief Starts a cold task on the context executor and returns its running owner.
+    /// @return An invalid operation when the task is empty; otherwise the started operation.
     template<typename T, typename E>
     [[nodiscard]] Operation<T, E> Spawn(TaskContext& ctx, Task<T, E>&& task) noexcept
     {
-        auto            handle = task.ReleaseForOperation();
-        Operation<T, E> operation {handle, ctx.GetExecutor()};
+        typename Task<T, E>::handle_type handle = task.ReleaseForOperation();
+        Operation<T, E>                  operation {handle, ctx.GetExecutor()};
         if (!handle)
         {
             return operation;
         }
 
-        auto& promise      = handle.promise();
-        promise.m_ctx      = &ctx;
-        promise.m_executor = ctx.GetExecutor();
+        typename Task<T, E>::promise_type& promise = handle.promise();
+        promise.m_ctx                              = &ctx;
+        promise.m_executor                         = ctx.GetExecutor();
         if (!promise.m_executor.IsValid())
         {
             promise.SetFault(MakeAsyncFault(AsyncFaultCode::InvalidTaskUsage));
@@ -1796,10 +1950,12 @@ namespace NGIN::Async
         return operation;
     }
 
+    /// @brief Starts a cold task and relinquishes ownership of its eventual completion.
+    /// @note The detached coroutine destroys its own frame after completion.
     template<typename T, typename E>
     void Detach(TaskContext& ctx, Task<T, E>&& task) noexcept
     {
-        auto operation = Spawn(ctx, std::move(task));
+        Operation<T, E> operation = Spawn(ctx, std::move(task));
         if (operation.m_handle && !operation.IsCompleted())
         {
             operation.m_handle.promise().m_detached.store(true, std::memory_order_release);
@@ -1807,10 +1963,12 @@ namespace NGIN::Async
         }
     }
 
+    /// @brief Starts a cold task, blocks until completion, and consumes its complete outcome.
+    /// @warning The caller must avoid blocking an executor thread required by the task.
     template<typename T, typename E>
     [[nodiscard]] Completion<T, E> SyncWait(TaskContext& ctx, Task<T, E>&& task)
     {
-        auto operation = Spawn(ctx, std::move(task));
+        Operation<T, E> operation = Spawn(ctx, std::move(task));
         operation.WaitUntilComplete();
         return operation.TakeResult();
     }

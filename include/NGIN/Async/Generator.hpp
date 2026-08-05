@@ -27,29 +27,35 @@ namespace NGIN::Async
             std::optional<T>   current {};
             std::exception_ptr error {};
 
+            /// @brief Returns the generator that owns this coroutine frame.
             Generator get_return_object() noexcept
             {
                 return Generator(std::coroutine_handle<promise_type>::from_promise(*this));
             }
 
+            /// @brief Suspends before the first value so iteration controls execution.
             std::suspend_always initial_suspend() noexcept
             {
                 return {};
             }
 
+            /// @brief Suspends after completion so the generator can destroy the frame.
             std::suspend_always final_suspend() noexcept
             {
                 return {};
             }
 
+            /// @brief Stores a yielded value and suspends the coroutine.
             std::suspend_always yield_value(T value) noexcept(Meta::TypeTraits<T>::IsNothrowMoveConstructible())
             {
                 current = std::move(value);
                 return {};
             }
 
+            /// @brief Completes a generator that reaches `co_return`.
             void return_void() noexcept {}
 
+            /// @brief Captures an escaping exception, or terminates when exceptions are disabled.
             void unhandled_exception() noexcept
             {
 #if NGIN_ASYNC_HAS_EXCEPTIONS
@@ -60,21 +66,26 @@ namespace NGIN::Async
             }
         };
 
+        /// @brief Coroutine handle type owned by the generator.
         using handle_type = std::coroutine_handle<promise_type>;
 
+        /// @brief Constructs an empty generator.
         Generator() noexcept = default;
 
+        /// @brief Takes ownership of a generator coroutine handle.
         explicit Generator(handle_type handle) noexcept
             : m_handle(handle)
         {
         }
 
+        /// @brief Transfers ownership of a coroutine frame.
         Generator(Generator&& other) noexcept
             : m_handle(other.m_handle)
         {
             other.m_handle = {};
         }
 
+        /// @brief Destroys the current frame and transfers ownership of another frame.
         Generator& operator=(Generator&& other) noexcept
         {
             if (this != &other)
@@ -86,30 +97,37 @@ namespace NGIN::Async
             return *this;
         }
 
-        Generator(const Generator&)            = delete;
+        /// @brief Generators are non-copyable because they uniquely own a coroutine frame.
+        Generator(const Generator&) = delete;
+        /// @brief Generators are non-copy-assignable because they uniquely own a coroutine frame.
         Generator& operator=(const Generator&) = delete;
 
+        /// @brief Destroys the owned coroutine frame.
         ~Generator()
         {
             Reset();
         }
 
+        /// @brief Single-pass iterator that resumes the generator on increment.
         class Iterator final
         {
         public:
             using value_type = T;
             using reference  = const T&;
 
+            /// @brief Constructs an end iterator.
             Iterator() noexcept = default;
 
+            /// @brief Constructs an iterator over a generator coroutine.
             explicit Iterator(handle_type handle) noexcept
                 : m_handle(handle)
             {
             }
 
+            /// @brief Returns the current yielded value and rethrows a captured exception.
             reference operator*() const
             {
-                auto& promise = m_handle.promise();
+                promise_type& promise = m_handle.promise();
                 if (promise.error)
                 {
 #if NGIN_ASYNC_HAS_EXCEPTIONS
@@ -121,12 +139,14 @@ namespace NGIN::Async
                 return *promise.current;
             }
 
+            /// @brief Resumes the generator until its next yield or completion.
             Iterator& operator++()
             {
                 Resume();
                 return *this;
             }
 
+            /// @brief Returns whether iteration has reached completion.
             friend bool operator==(const Iterator& it, std::default_sentinel_t) noexcept
             {
                 return !it.m_handle || it.m_handle.done();
@@ -141,7 +161,7 @@ namespace NGIN::Async
                 }
 
                 m_handle.resume();
-                auto& promise = m_handle.promise();
+                promise_type& promise = m_handle.promise();
                 if (promise.error)
                 {
 #if NGIN_ASYNC_HAS_EXCEPTIONS
@@ -155,6 +175,8 @@ namespace NGIN::Async
             handle_type m_handle {};
         };
 
+        /// @brief Starts or resumes generation and returns the first iterator.
+        /// @details Exceptions raised before the first yield are rethrown here when enabled.
         [[nodiscard]] Iterator begin()
         {
             if (!m_handle)
@@ -167,7 +189,7 @@ namespace NGIN::Async
                 m_handle.resume();
             }
 
-            auto& promise = m_handle.promise();
+            promise_type& promise = m_handle.promise();
             if (promise.error)
             {
 #if NGIN_ASYNC_HAS_EXCEPTIONS
@@ -185,6 +207,7 @@ namespace NGIN::Async
             return Iterator {m_handle};
         }
 
+        /// @brief Returns the default end sentinel.
         [[nodiscard]] std::default_sentinel_t end() const noexcept
         {
             return {};

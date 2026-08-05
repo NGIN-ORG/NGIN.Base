@@ -114,6 +114,8 @@ namespace NGIN::Async
         }
     }// namespace detail::when_any
 
+    /// @brief Awaits the first task to complete and returns its zero-based argument index.
+    /// @details A failure from the winning task is propagated through the returned task.
     template<typename... TTasks>
         requires(sizeof...(TTasks) > 0) && (detail::IsTaskTypeV<TTasks> && ...) &&
                 (std::is_same_v<typename TTasks::ErrorType, typename std::tuple_element_t<0, std::tuple<TTasks...>>::ErrorType> &&

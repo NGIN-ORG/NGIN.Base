@@ -20,12 +20,14 @@ namespace NGIN::Execution
     class CooperativeScheduler final
     {
     public:
+        /// @brief Constructs an empty scheduler with reserved queue storage.
         CooperativeScheduler()
         {
             m_ready.reserve(256);
             m_timers.reserve(256);
         }
 
+        /// @brief Queues a non-empty work item for execution by a future pump call.
         void Execute(WorkItem item) noexcept
         {
             if (!item.IsEmpty())
@@ -34,6 +36,7 @@ namespace NGIN::Execution
             }
         }
 
+        /// @brief Queues a non-empty work item for execution no earlier than a time point.
         void ExecuteAt(WorkItem item, NGIN::Time::TimePoint resumeAt)
         {
             if (item.IsEmpty())
@@ -45,20 +48,24 @@ namespace NGIN::Execution
             std::push_heap(m_timers.begin(), m_timers.end(), &Timer::IsEarlier);
         }
 
+        /// @brief Executes at most one due timer or ready item using the current monotonic time.
+        /// @return `true` when an item was invoked.
         [[nodiscard]] bool RunOne()
         {
             return RunOneAt(NGIN::Time::MonotonicClock::Now());
         }
 
+        /// @brief Executes at most one timer due at `now`, otherwise one ready item.
+        /// @return `true` when an item was invoked.
         [[nodiscard]] bool RunOneAt(NGIN::Time::TimePoint now)
         {
             if (!m_timers.empty())
             {
-                auto& next = m_timers.front();
+                Timer& next = m_timers.front();
                 if (next.resumeAt <= now)
                 {
                     std::pop_heap(m_timers.begin(), m_timers.end(), &Timer::IsEarlier);
-                    auto item = std::move(m_timers.back().item);
+                    WorkItem item = std::move(m_timers.back().item);
                     m_timers.pop_back();
                     item.Invoke();
                     return true;
@@ -67,7 +74,7 @@ namespace NGIN::Execution
 
             if (!m_ready.empty())
             {
-                auto item = std::move(m_ready.back());
+                WorkItem item = std::move(m_ready.back());
                 m_ready.pop_back();
                 item.Invoke();
                 return true;
@@ -76,21 +83,25 @@ namespace NGIN::Execution
             return false;
         }
 
+        /// @brief Runs ready work and currently due timers until no item can execute.
         void RunUntilIdle()
         {
             while (RunOne()) {}
         }
 
+        /// @brief Runs ready work and timers due at a supplied time until idle.
         void RunUntilIdleAt(NGIN::Time::TimePoint now)
         {
             while (RunOneAt(now)) {}
         }
 
+        /// @brief Returns the number of immediately runnable items.
         [[nodiscard]] std::size_t PendingReady() const noexcept
         {
             return m_ready.size();
         }
 
+        /// @brief Returns the number of scheduled timer items.
         [[nodiscard]] std::size_t PendingTimers() const noexcept
         {
             return m_timers.size();
@@ -112,4 +123,3 @@ namespace NGIN::Execution
         std::vector<Timer>    m_timers {};
     };
 }// namespace NGIN::Execution
-

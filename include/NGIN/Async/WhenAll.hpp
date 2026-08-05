@@ -95,6 +95,7 @@ namespace NGIN::Async
         }
     }// namespace detail::when_all
 
+    /// @brief Awaits a non-empty set of `Task<void, E>` operations and propagates the first failure.
     template<typename... TTasks>
         requires(sizeof...(TTasks) > 0) && (detail::IsTaskTypeV<TTasks> && ...) &&
                 (std::is_same_v<typename TTasks::ErrorType, typename std::tuple_element_t<0, std::tuple<TTasks...>>::ErrorType> &&
@@ -130,6 +131,7 @@ namespace NGIN::Async
         co_return;
     }
 
+    /// @brief Awaits non-void tasks with one error type and returns their values in argument order.
     template<typename E, typename... T>
         requires(sizeof...(T) > 0) && (!std::is_void_v<T> && ...)
     [[nodiscard]] inline Task<std::tuple<T...>, E> WhenAll(TaskContext& ctx, Task<T, E>... tasks)

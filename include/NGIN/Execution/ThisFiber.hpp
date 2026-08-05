@@ -19,6 +19,8 @@ namespace NGIN::Execution::ThisFiber
         return NGIN::Execution::Fiber::IsMainFiberInitialized();
     }
 
+    /// @brief Suspends the calling fiber and returns control to its resumer.
+    /// @pre The calling thread is currently inside a running fiber.
     inline void YieldNow() noexcept
     {
         NGIN::Execution::Fiber::YieldNow();

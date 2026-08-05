@@ -5,18 +5,18 @@
 
 #include "WorkItem.hpp"
 #include <NGIN/Execution/Thread.hpp>
-#include <algorithm>
-#include <array>
-#include <cstddef>
-#include <vector>
-#include <mutex>
-#include <atomic>
-#include <utility>
-#include <NGIN/Time/MonotonicClock.hpp>
-#include <NGIN/Time/Sleep.hpp>
 #include <NGIN/Sync/AtomicCondition.hpp>
 #include <NGIN/Sync/SpinLock.hpp>
+#include <NGIN/Time/MonotonicClock.hpp>
+#include <NGIN/Time/Sleep.hpp>
 #include <NGIN/Units.hpp>
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <cstddef>
+#include <mutex>
+#include <utility>
+#include <vector>
 
 namespace NGIN::Execution
 {
@@ -78,6 +78,7 @@ namespace NGIN::Execution
             }
         }
 
+        /// @brief Queues work for a local worker or the shared injection queue.
         void Execute(WorkItem item) noexcept
         {
             if (TryEnqueueToLocal(item))
@@ -89,9 +90,10 @@ namespace NGIN::Execution
             m_workWake.NotifyOne();
         }
 
+        /// @brief Queues work for execution no earlier than a monotonic time point.
         void ExecuteAt(WorkItem item, NGIN::Time::TimePoint resumeAt)
         {
-            const auto now = NGIN::Time::MonotonicClock::Now();
+            const NGIN::Time::TimePoint now = NGIN::Time::MonotonicClock::Now();
             if (resumeAt <= now)
             {
                 Execute(std::move(item));
@@ -105,6 +107,8 @@ namespace NGIN::Execution
             m_timerWake.NotifyOne();
         }
 
+        /// @brief Executes at most one available work item on the calling thread.
+        /// @return `true` when an item was invoked.
         bool RunOne() noexcept
         {
             WorkItem work = TryDequeueAny();
@@ -116,11 +120,13 @@ namespace NGIN::Execution
             return true;
         }
 
+        /// @brief Executes available work on the calling thread until none remains.
         void RunUntilIdle() noexcept
         {
             while (RunOne()) {}
         }
 
+        /// @brief Discards queued and timed work without interrupting running work.
         void CancelAll() noexcept
         {
             ClearAllWork();
@@ -132,20 +138,26 @@ namespace NGIN::Execution
             m_timerWake.NotifyAll();
         }
 
+        /// @brief Stores a priority hint for scheduler policy.
         void SetPriority(int priority) noexcept
         {
             m_priority = priority;
         }
 
+        /// @brief Stores an affinity hint for scheduler policy.
         void SetAffinity(uint64_t affinityMask) noexcept
         {
             m_affinityMask = affinityMask;
             // Optionally: apply affinity to worker threads
         }
 
+        /// @brief Receives a task-start notification; currently no metrics are recorded.
         void OnTaskStart(uint64_t, const char*) noexcept {}
+        /// @brief Receives a task-suspend notification; currently no metrics are recorded.
         void OnTaskSuspend(uint64_t) noexcept {}
+        /// @brief Receives a task-resume notification; currently no metrics are recorded.
         void OnTaskResume(uint64_t) noexcept {}
+        /// @brief Receives a task-complete notification; currently no metrics are recorded.
         void OnTaskComplete(uint64_t) noexcept {}
 
 
@@ -185,16 +197,15 @@ namespace NGIN::Execution
 
         struct WorkerQueue
         {
-            NGIN::Sync::SpinLock lock {};
+            NGIN::Sync::SpinLock  lock {};
             std::vector<WorkItem> items {};
-            size_t head {0};
+            size_t                head {0};
 
-            WorkerQueue()                                = default;
-            WorkerQueue(const WorkerQueue&)              = delete;
-            WorkerQueue& operator=(const WorkerQueue&)   = delete;
+            WorkerQueue()                              = default;
+            WorkerQueue(const WorkerQueue&)            = delete;
+            WorkerQueue& operator=(const WorkerQueue&) = delete;
             WorkerQueue(WorkerQueue&& other) noexcept
-                : items(std::move(other.items))
-                , head(other.head)
+                : items(std::move(other.items)), head(other.head)
             {
                 other.head = 0;
             }
@@ -202,8 +213,8 @@ namespace NGIN::Execution
             {
                 if (this != &other)
                 {
-                    items = std::move(other.items);
-                    head  = other.head;
+                    items      = std::move(other.items);
+                    head       = other.head;
                     other.head = 0;
                 }
                 return *this;
@@ -278,7 +289,7 @@ namespace NGIN::Execution
         };
 
         static inline thread_local ThreadPoolScheduler* s_currentScheduler = nullptr;
-        static inline thread_local size_t s_workerIndex                    = static_cast<size_t>(-1);
+        static inline thread_local size_t               s_workerIndex      = static_cast<size_t>(-1);
 
         void ClearAllWork() noexcept
         {
@@ -362,14 +373,14 @@ namespace NGIN::Execution
         {
             while (!m_stop.load(std::memory_order_acquire))
             {
-                const auto observedWakeGeneration = m_timerWake.Load();
+                const auto            observedWakeGeneration = m_timerWake.Load();
                 std::vector<WorkItem> ready;
                 NGIN::Time::TimePoint nextWakeAt {};
-                bool hasNextWake = false;
+                bool                  hasNextWake = false;
 
                 {
                     std::lock_guard<std::mutex> lock(m_timersMutex);
-                    const auto now = NGIN::Time::MonotonicClock::Now();
+                    const auto                  now = NGIN::Time::MonotonicClock::Now();
                     while (!m_timerHeap.empty() && m_timerHeap.front().first <= now)
                     {
                         std::pop_heap(m_timerHeap.begin(), m_timerHeap.end(), TimerEntryCompare {});
@@ -407,7 +418,7 @@ namespace NGIN::Execution
                 }
 
                 const auto waitNs = nextWakeAt.ToNanoseconds() - now.ToNanoseconds();
-                (void)m_timerWake.WaitFor(observedWakeGeneration, NGIN::Units::Nanoseconds(static_cast<double>(waitNs)));
+                (void) m_timerWake.WaitFor(observedWakeGeneration, NGIN::Units::Nanoseconds(static_cast<double>(waitNs)));
             }
         }
 
@@ -431,7 +442,7 @@ namespace NGIN::Execution
                 }
 
                 const auto observedWakeGeneration = m_workWake.Load();
-                work = TryDequeueAny();
+                work                              = TryDequeueAny();
                 if (!work.IsEmpty())
                 {
                     work.Invoke();
@@ -454,17 +465,17 @@ namespace NGIN::Execution
         std::vector<WorkerQueue> m_workers;
 
         // Injection queue for external producers (and timer thread).
-        WorkerQueue m_injection;
+        WorkerQueue          m_injection;
         NGIN::Sync::SpinLock m_injectionLock {};
 
         NGIN::Sync::AtomicCondition m_workWake;
 
         std::atomic<bool> m_stop;
-        int m_priority {0};
-        uint64_t m_affinityMask {0};
+        int               m_priority {0};
+        uint64_t          m_affinityMask {0};
 
-        std::vector<TimerEntry> m_timerHeap;
-        std::mutex m_timersMutex;
+        std::vector<TimerEntry>     m_timerHeap;
+        std::mutex                  m_timersMutex;
         NGIN::Sync::AtomicCondition m_timerWake;
     };
 

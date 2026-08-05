@@ -2,15 +2,15 @@
 /// @brief Cancellation tokens, registrations, sources, and linked cancellation ownership.
 #pragma once
 
+#include <atomic>
 #include <coroutine>
 #include <initializer_list>
 #include <memory>
 #include <utility>
-#include <atomic>
 #include <vector>
 
-#include <NGIN/Execution/ExecutorRef.hpp>
 #include <NGIN/Async/TaskCanceled.hpp>
+#include <NGIN/Execution/ExecutorRef.hpp>
 #include <NGIN/Memory/SmartPointers.hpp>
 #include <NGIN/Sync/LockGuard.hpp>
 #include <NGIN/Sync/SpinLock.hpp>
@@ -54,7 +54,9 @@ namespace NGIN::Async
             return *this;
         }
 
-        CancellationRegistration(const CancellationRegistration&)            = delete;
+        /// @brief Registrations are non-copyable because one object owns callback removal.
+        CancellationRegistration(const CancellationRegistration&) = delete;
+        /// @brief Registrations are non-copy-assignable because one object owns callback removal.
         CancellationRegistration& operator=(const CancellationRegistration&) = delete;
 
         /// @brief Unregisters the callback when this object is destroyed.
@@ -81,11 +83,11 @@ namespace NGIN::Async
         void MoveFrom(CancellationRegistration&& other) noexcept;
 
         Memory::Shared<detail::CancellationState> m_state {};
-        NGIN::Execution::ExecutorRef               m_exec {};
+        NGIN::Execution::ExecutorRef              m_exec {};
         std::coroutine_handle<>                   m_handle {};
         CancellationCallback                      m_callback {nullptr};
         void*                                     m_callbackCtx {nullptr};
-        UIntSize                               m_index {static_cast<UIntSize>(-1)};
+        UIntSize                                  m_index {static_cast<UIntSize>(-1)};
         std::atomic<bool>                         m_armed {false};
     };
 
@@ -110,17 +112,18 @@ namespace NGIN::Async
         /// @brief Returns whether cancellation has been requested.
         [[nodiscard]] bool IsCancellationRequested() const noexcept;
 
+        /// @brief Returns whether cancellation has been requested.
         [[nodiscard]] explicit operator bool() const noexcept
         {
             return IsCancellationRequested();
         }
 
         /// @brief Registers a callback and optional coroutine continuation for cancellation.
-        void Register(CancellationRegistration& outRegistration,
+        void Register(CancellationRegistration&    outRegistration,
                       NGIN::Execution::ExecutorRef exec,
-                      std::coroutine_handle<> handle,
-                      CancellationCallback callback = nullptr,
-                      void* callbackCtx = nullptr) const noexcept;
+                      std::coroutine_handle<>      handle,
+                      CancellationCallback         callback    = nullptr,
+                      void*                        callbackCtx = nullptr) const noexcept;
 
     private:
         Memory::Shared<detail::CancellationState> m_state {};
@@ -131,8 +134,8 @@ namespace NGIN::Async
     {
         struct CancellationState final
         {
-            std::atomic<bool> canceled {false};
-            NGIN::Sync::SpinLock lock {};
+            std::atomic<bool>                      canceled {false};
+            NGIN::Sync::SpinLock                   lock {};
             std::vector<CancellationRegistration*> registrations {};
 
             CancellationState()
@@ -168,9 +171,9 @@ namespace NGIN::Async
                     const auto lastIndex = registrations.size() - 1;
                     if (registration->m_index != lastIndex)
                     {
-                        auto* moved = registrations[lastIndex];
+                        auto* moved                          = registrations[lastIndex];
                         registrations[registration->m_index] = moved;
-                        moved->m_index = registration->m_index;
+                        moved->m_index                       = registration->m_index;
                     }
                     registrations.pop_back();
                     return;
@@ -183,9 +186,9 @@ namespace NGIN::Async
                         const auto lastIndex = registrations.size() - 1;
                         if (i != lastIndex)
                         {
-                            auto* moved = registrations[lastIndex];
+                            auto* moved      = registrations[lastIndex];
                             registrations[i] = moved;
-                            moved->m_index = i;
+                            moved->m_index   = i;
                         }
                         registrations.pop_back();
                         return;
@@ -293,11 +296,11 @@ namespace NGIN::Async
         return m_state && m_state->canceled.load(std::memory_order_acquire);
     }
 
-    inline void CancellationToken::Register(CancellationRegistration& outRegistration,
+    inline void CancellationToken::Register(CancellationRegistration&    outRegistration,
                                             NGIN::Execution::ExecutorRef exec,
-                                            std::coroutine_handle<> handle,
-                                            CancellationCallback callback,
-                                            void* callbackCtx) const noexcept
+                                            std::coroutine_handle<>      handle,
+                                            CancellationCallback         callback,
+                                            void*                        callbackCtx) const noexcept
     {
         outRegistration.Reset();
         if (!m_state)
@@ -438,12 +441,12 @@ namespace NGIN::Async
 
     inline void CancellationRegistration::MoveFrom(CancellationRegistration&& other) noexcept
     {
-        m_state          = std::move(other.m_state);
-        m_exec           = other.m_exec;
-        m_handle         = other.m_handle;
-        m_callback       = other.m_callback;
-        m_callbackCtx    = other.m_callbackCtx;
-        m_index          = other.m_index;
+        m_state       = std::move(other.m_state);
+        m_exec        = other.m_exec;
+        m_handle      = other.m_handle;
+        m_callback    = other.m_callback;
+        m_callbackCtx = other.m_callbackCtx;
+        m_index       = other.m_index;
         m_armed.store(other.m_armed.exchange(false, std::memory_order_acq_rel), std::memory_order_relaxed);
 
         if (m_state)
@@ -460,7 +463,7 @@ namespace NGIN::Async
                     if (m_state->registrations[i] == &other)
                     {
                         m_state->registrations[i] = this;
-                        m_index = i;
+                        m_index                   = i;
                         break;
                     }
                 }
@@ -483,11 +486,11 @@ namespace NGIN::Async
         m_armed.store(false, std::memory_order_relaxed);
         m_state->Unregister(this);
         m_state.Reset();
-        m_exec           = {};
-        m_handle         = {};
-        m_callback       = nullptr;
-        m_callbackCtx    = nullptr;
-        m_index          = static_cast<UIntSize>(-1);
+        m_exec        = {};
+        m_handle      = {};
+        m_callback    = nullptr;
+        m_callbackCtx = nullptr;
+        m_index       = static_cast<UIntSize>(-1);
     }
 
     inline void CancellationRegistration::Fire() noexcept
@@ -507,4 +510,4 @@ namespace NGIN::Async
             }
         }
     }
-}
+}// namespace NGIN::Async

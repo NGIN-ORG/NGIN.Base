@@ -2,11 +2,11 @@
 /// @brief A schedulable work item: coroutine continuation or job.
 #pragma once
 
-#include <cstddef>
+#include <atomic>
 #include <concepts>
 #include <coroutine>
+#include <cstddef>
 #include <exception>
-#include <atomic>
 #include <memory>
 #include <new>
 #include <stdexcept>
@@ -122,10 +122,14 @@ namespace NGIN::Execution
             {
                 switch (classSize)
                 {
-                    case Class64: return s_head64;
-                    case Class128: return s_head128;
-                    case Class256: return s_head256;
-                    default: return s_head512;
+                    case Class64:
+                        return s_head64;
+                    case Class128:
+                        return s_head128;
+                    case Class256:
+                        return s_head256;
+                    default:
+                        return s_head512;
                 }
             }
 
@@ -156,8 +160,8 @@ namespace NGIN::Execution
             static void Refill(std::size_t classSize)
             {
                 static constexpr std::size_t blocksPerSlab = 64;
-                const auto slabBytes = classSize * blocksPerSlab;
-                auto* slab = static_cast<std::byte*>(::operator new(slabBytes, std::align_val_t(PoolAlignment)));
+                const auto                   slabBytes     = classSize * blocksPerSlab;
+                auto*                        slab          = static_cast<std::byte*>(::operator new(slabBytes, std::align_val_t(PoolAlignment)));
 
                 auto& head = HeadFor(classSize);
                 for (std::size_t i = 0; i < blocksPerSlab; ++i)
@@ -184,6 +188,7 @@ namespace NGIN::Execution
     class WorkItem final
     {
     public:
+        /// @brief Active payload kind.
         enum class Kind : unsigned char
         {
             None,
@@ -191,14 +196,18 @@ namespace NGIN::Execution
             Job,
         };
 
+        /// @brief Constructs an empty work item.
         constexpr WorkItem() noexcept = default;
 
+        /// @brief Constructs a non-owning coroutine continuation work item.
         explicit WorkItem(std::coroutine_handle<> coroutine) noexcept
             : m_kind(Kind::Coroutine)
         {
             m_storage.coroutine = coroutine;
         }
 
+        /// @brief Constructs an owning type-erased job work item.
+        /// @throws std::invalid_argument If `job` is empty.
         explicit WorkItem(NGIN::Utilities::Callable<void()> job)
             : m_kind(Kind::Job)
         {
@@ -210,6 +219,7 @@ namespace NGIN::Execution
             m_storage.job.Init(std::move(job));
         }
 
+        /// @brief Constructs an owning job from an invocable object.
         template<typename F>
             requires(!std::is_same_v<std::remove_cvref_t<F>, WorkItem>) &&
                     (!std::is_same_v<std::remove_cvref_t<F>, NGIN::Utilities::Callable<void()>>) &&
@@ -222,11 +232,13 @@ namespace NGIN::Execution
             m_storage.job.Init(std::forward<F>(job));
         }
 
+        /// @brief Transfers the payload and leaves the source empty.
         WorkItem(WorkItem&& other) noexcept
         {
             MoveFrom(std::move(other));
         }
 
+        /// @brief Resets this item, transfers another payload, and leaves the source empty.
         WorkItem& operator=(WorkItem&& other) noexcept
         {
             if (this != &other)
@@ -237,39 +249,49 @@ namespace NGIN::Execution
             return *this;
         }
 
-        WorkItem(const WorkItem&)            = delete;
+        /// @brief Work items are non-copyable because jobs may be move-only.
+        WorkItem(const WorkItem&) = delete;
+        /// @brief Work items are non-copy-assignable because jobs may be move-only.
         WorkItem& operator=(const WorkItem&) = delete;
 
+        /// @brief Destroys an owned job without invoking it.
         ~WorkItem()
         {
             Reset();
         }
 
+        /// @brief Returns the active payload kind.
         [[nodiscard]] constexpr Kind GetKind() const noexcept
         {
             return m_kind;
         }
 
+        /// @brief Returns whether no payload is stored.
         [[nodiscard]] constexpr bool IsEmpty() const noexcept
         {
             return m_kind == Kind::None;
         }
 
+        /// @brief Returns whether the payload is a coroutine continuation.
         [[nodiscard]] constexpr bool IsCoroutine() const noexcept
         {
             return m_kind == Kind::Coroutine;
         }
 
+        /// @brief Returns whether the payload is an owning job.
         [[nodiscard]] constexpr bool IsJob() const noexcept
         {
             return m_kind == Kind::Job;
         }
 
+        /// @brief Returns the coroutine continuation, or an empty handle for another payload kind.
         [[nodiscard]] std::coroutine_handle<> GetCoroutine() const noexcept
         {
             return (m_kind == Kind::Coroutine) ? m_storage.coroutine : std::coroutine_handle<> {};
         }
 
+        /// @brief Resumes the coroutine or invokes the job without consuming the work item.
+        /// @warning Terminates the process if payload execution throws.
         void Invoke() noexcept
         {
             try
@@ -338,10 +360,10 @@ namespace NGIN::Execution
                 }
                 else
                 {
-                    void* mem = detail::JobPool::Allocate(sizeof(T), alignof(T));
-                    auto* ptr = new (mem) T(std::forward<F>(job));
+                    void* mem                       = detail::JobPool::Allocate(sizeof(T), alignof(T));
+                    auto* ptr                       = new (mem) T(std::forward<F>(job));
                     *static_cast<T**>(StoragePtr()) = ptr;
-                    m_vtable = &GetVTable<T, true>();
+                    m_vtable                        = &GetVTable<T, true>();
                 }
             }
 
@@ -452,7 +474,7 @@ namespace NGIN::Execution
         union Storage
         {
             std::coroutine_handle<> coroutine;
-            JobStorage job;
+            JobStorage              job;
 
             constexpr Storage() noexcept
                 : coroutine(nullptr)
@@ -468,7 +490,7 @@ namespace NGIN::Execution
             {
                 std::destroy_at(std::addressof(m_storage.job));
             }
-            m_kind             = Kind::None;
+            m_kind              = Kind::None;
             m_storage.coroutine = nullptr;
         }
 
@@ -477,7 +499,7 @@ namespace NGIN::Execution
             m_kind = other.m_kind;
             if (m_kind == Kind::Coroutine)
             {
-                m_storage.coroutine = other.m_storage.coroutine;
+                m_storage.coroutine       = other.m_storage.coroutine;
                 other.m_storage.coroutine = nullptr;
                 other.m_kind              = Kind::None;
                 return;
@@ -486,13 +508,13 @@ namespace NGIN::Execution
             {
                 new (&m_storage.job) JobStorage(std::move(other.m_storage.job));
                 std::destroy_at(std::addressof(other.m_storage.job));
-                other.m_kind = Kind::None;
+                other.m_kind              = Kind::None;
                 other.m_storage.coroutine = nullptr;
                 return;
             }
         }
 
-        Kind m_kind {Kind::None};
+        Kind    m_kind {Kind::None};
         Storage m_storage {};
     };
 }// namespace NGIN::Execution

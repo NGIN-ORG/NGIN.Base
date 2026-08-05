@@ -180,39 +180,46 @@ namespace NGIN::Async
         };
 
     public:
+        /// @brief Constructs a context from an executor reference and optional cancellation token.
         explicit TaskContext(NGIN::Execution::ExecutorRef executor, CancellationToken cancellation = {}) noexcept
             : m_executor(executor), m_cancellation(std::move(cancellation))
         {
         }
 
+        /// @brief Constructs a context that borrows a compatible scheduler.
         template<typename TScheduler>
         explicit TaskContext(TScheduler& scheduler, CancellationToken cancellation = {}) noexcept
             : m_executor(NGIN::Execution::ExecutorRef::From(scheduler)), m_cancellation(std::move(cancellation))
         {
         }
 
+        /// @brief Returns whether this context has a usable executor.
         [[nodiscard]] bool HasExecutor() const noexcept
         {
             return m_executor.IsValid();
         }
 
+        /// @brief Rebinds this context to an executor reference.
         void BindExecutor(NGIN::Execution::ExecutorRef executor) noexcept
         {
             m_executor = executor;
         }
 
+        /// @brief Rebinds this context to a borrowed compatible scheduler.
         template<typename TScheduler>
         void BindExecutor(TScheduler& scheduler) noexcept
         {
             m_executor = NGIN::Execution::ExecutorRef::From(scheduler);
         }
 
+        /// @brief Replaces cancellation state and releases any linked-token ownership.
         void BindCancellationToken(CancellationToken cancellation) noexcept
         {
             m_cancellationOwner.reset();
             m_cancellation = std::move(cancellation);
         }
 
+        /// @brief Returns a copy of this context with replacement cancellation state.
         [[nodiscard]] TaskContext WithCancellationToken(CancellationToken cancellation) const noexcept
         {
             TaskContext copy = *this;
@@ -220,6 +227,7 @@ namespace NGIN::Async
             return copy;
         }
 
+        /// @brief Rebinds cancellation to a token canceled when either current or supplied state is canceled.
         void BindLinkedCancellationToken(CancellationToken cancellation) noexcept
         {
             if (!m_cancellation.HasState())
@@ -233,7 +241,8 @@ namespace NGIN::Async
                 return;
             }
 
-            auto linked = std::make_shared<detail::LinkedCancellationState>();
+            std::shared_ptr<detail::LinkedCancellationState> linked =
+                    std::make_shared<detail::LinkedCancellationState>();
             linked->Link({m_cancellation, cancellation});
 
             if (m_cancellationOwner)
@@ -244,10 +253,10 @@ namespace NGIN::Async
                     std::shared_ptr<void> current {};
                 };
 
-                auto chain          = std::make_shared<OwnerChain>();
-                chain->previous     = m_cancellationOwner;
-                chain->current      = linked;
-                m_cancellationOwner = std::move(chain);
+                std::shared_ptr<OwnerChain> chain = std::make_shared<OwnerChain>();
+                chain->previous                   = m_cancellationOwner;
+                chain->current                    = linked;
+                m_cancellationOwner               = std::move(chain);
             }
             else
             {
@@ -257,6 +266,7 @@ namespace NGIN::Async
             m_cancellation = linked->source.GetToken();
         }
 
+        /// @brief Returns a copy whose cancellation observes both the current and supplied tokens.
         [[nodiscard]] TaskContext WithLinkedCancellationToken(CancellationToken cancellation) const noexcept
         {
             TaskContext copy = *this;
@@ -264,31 +274,37 @@ namespace NGIN::Async
             return copy;
         }
 
+        /// @brief Returns the bound executor reference.
         [[nodiscard]] NGIN::Execution::ExecutorRef GetExecutor() const noexcept
         {
             return m_executor;
         }
 
+        /// @brief Returns the bound cancellation token.
         [[nodiscard]] CancellationToken GetCancellationToken() const noexcept
         {
             return m_cancellation;
         }
 
+        /// @brief Returns whether cancellation has been requested.
         [[nodiscard]] bool IsCancellationRequested() const noexcept
         {
             return m_cancellation.IsCancellationRequested();
         }
 
+        /// @brief Returns whether cancellation has been requested.
         [[nodiscard]] bool CheckCancellation() const noexcept
         {
             return m_cancellation.IsCancellationRequested();
         }
 
+        /// @brief Creates an awaiter that reschedules the current task through the bound executor.
         [[nodiscard]] auto YieldNow() const noexcept
         {
             return YieldAwaiter {m_executor, m_cancellation};
         }
 
+        /// @brief Creates a cancellation-aware awaiter for a time-quantity delay.
         template<typename TUnit>
             requires NGIN::Units::QuantityOf<NGIN::Units::TIME, TUnit>
         [[nodiscard]] auto Delay(const TUnit& duration) const noexcept
