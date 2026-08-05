@@ -20,7 +20,7 @@ namespace NGIN::Serialization::JSON
 
     struct WriteDiagnostic
     {
-        WriteErrorCode    code {WriteErrorCode::InvalidValue};
+        WriteErrorCode     code {WriteErrorCode::InvalidValue};
         NGIN::Text::String message {};
     };
 
@@ -34,7 +34,7 @@ namespace NGIN::Serialization::JSON
     };
 
     /// @brief Serializes immutable JSON views with deterministic escaping.
-    class NGIN_BASE_API Writer
+    class NGIN_SERIALIZATION_API Writer
     {
     public:
         [[nodiscard]] static NGIN::Utilities::Expected<std::string, WriteDiagnostic>

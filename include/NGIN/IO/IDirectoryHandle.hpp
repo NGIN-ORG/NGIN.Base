@@ -8,7 +8,7 @@ namespace NGIN::IO
     class FileHandle;
     class DirectoryHandle;
 
-    class NGIN_BASE_API IDirectoryHandle
+    class NGIN_IO_API IDirectoryHandle
     {
     public:
         virtual ~IDirectoryHandle() = default;

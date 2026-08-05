@@ -15,7 +15,7 @@ namespace NGIN::Serialization::JSON
     {
         struct DocumentState;
         struct DocumentAccess;
-    }
+    }// namespace detail
 
     struct NodeId
     {
@@ -46,7 +46,7 @@ namespace NGIN::Serialization::JSON
     class MemberView;
 
     /// @brief Immutable, checked view of one JSON value.
-    class NGIN_BASE_API ValueView
+    class NGIN_SERIALIZATION_API ValueView
     {
     public:
         enum class Type : UInt8
@@ -61,8 +61,8 @@ namespace NGIN::Serialization::JSON
 
         constexpr ValueView() noexcept = default;
 
-        [[nodiscard]] bool      IsValid() const noexcept;
-        [[nodiscard]] ValueKind Kind() const noexcept;
+        [[nodiscard]] bool       IsValid() const noexcept;
+        [[nodiscard]] ValueKind  Kind() const noexcept;
         [[nodiscard]] SourceSpan Span() const noexcept;
 
         [[nodiscard]] bool IsNull() const noexcept;
@@ -111,7 +111,7 @@ namespace NGIN::Serialization::JSON
     };
 
     /// @brief Immutable view of one JSON object member.
-    class NGIN_BASE_API MemberView
+    class NGIN_SERIALIZATION_API MemberView
     {
     public:
         constexpr MemberView() noexcept = default;
@@ -134,7 +134,7 @@ namespace NGIN::Serialization::JSON
     };
 
     /// @brief Immutable contiguous view of a JSON array.
-    class NGIN_BASE_API ArrayView
+    class NGIN_SERIALIZATION_API ArrayView
     {
     public:
         class Iterator
@@ -146,9 +146,9 @@ namespace NGIN::Serialization::JSON
 
             constexpr Iterator() noexcept = default;
 
-            [[nodiscard]] ValueView operator*() const noexcept;
-            Iterator&               operator++() noexcept;
-            Iterator                operator++(int) noexcept;
+            [[nodiscard]] ValueView   operator*() const noexcept;
+            Iterator&                 operator++() noexcept;
+            Iterator                  operator++(int) noexcept;
             [[nodiscard]] friend bool operator==(const Iterator&, const Iterator&) noexcept = default;
 
         private:
@@ -165,12 +165,12 @@ namespace NGIN::Serialization::JSON
 
         constexpr ArrayView() noexcept = default;
 
-        [[nodiscard]] bool      IsValid() const noexcept;
-        [[nodiscard]] UIntSize  Size() const noexcept;
-        [[nodiscard]] bool      Empty() const noexcept { return Size() == 0; }
-        [[nodiscard]] ValueView operator[](UIntSize index) const noexcept;
-        [[nodiscard]] Iterator  begin() const noexcept;
-        [[nodiscard]] Iterator  end() const noexcept;
+        [[nodiscard]] bool       IsValid() const noexcept;
+        [[nodiscard]] UIntSize   Size() const noexcept;
+        [[nodiscard]] bool       Empty() const noexcept { return Size() == 0; }
+        [[nodiscard]] ValueView  operator[](UIntSize index) const noexcept;
+        [[nodiscard]] Iterator   begin() const noexcept;
+        [[nodiscard]] Iterator   end() const noexcept;
         [[nodiscard]] SourceSpan Span() const noexcept;
 
     private:
@@ -189,7 +189,7 @@ namespace NGIN::Serialization::JSON
     };
 
     /// @brief Immutable contiguous view of a JSON object.
-    class NGIN_BASE_API ObjectView
+    class NGIN_SERIALIZATION_API ObjectView
     {
     public:
         class Iterator
@@ -201,9 +201,9 @@ namespace NGIN::Serialization::JSON
 
             constexpr Iterator() noexcept = default;
 
-            [[nodiscard]] MemberView operator*() const noexcept;
-            Iterator&                operator++() noexcept;
-            Iterator                 operator++(int) noexcept;
+            [[nodiscard]] MemberView  operator*() const noexcept;
+            Iterator&                 operator++() noexcept;
+            Iterator                  operator++(int) noexcept;
             [[nodiscard]] friend bool operator==(const Iterator&, const Iterator&) noexcept = default;
 
         private:
@@ -246,7 +246,7 @@ namespace NGIN::Serialization::JSON
     };
 
     /// @brief Self-contained owning JSON document.
-    class NGIN_BASE_API Document
+    class NGIN_SERIALIZATION_API Document
     {
     public:
         Document() noexcept;
@@ -276,7 +276,7 @@ namespace NGIN::Serialization::JSON
     };
 
     /// @brief Explicitly non-owning JSON document tied to a caller-owned source.
-    class NGIN_BASE_API BorrowedDocument
+    class NGIN_SERIALIZATION_API BorrowedDocument
     {
     public:
         BorrowedDocument() noexcept;

@@ -1,14 +1,14 @@
 #pragma once
 
-#include <NGIN/Text/String.hpp>
 #include <NGIN/Defines.hpp>
+#include <NGIN/Text/String.hpp>
 
 #include <string_view>
 
 namespace NGIN::IO
 {
     /// @brief Lightweight path helper with normalization and join utilities.
-    class NGIN_BASE_API Path
+    class NGIN_IO_API Path
     {
     public:
         Path() = default;
@@ -30,7 +30,7 @@ namespace NGIN::IO
         [[nodiscard]] Path             Parent() const;
         [[nodiscard]] bool             IsRoot() const noexcept;
 
-        void Normalize();
+        void               Normalize();
         [[nodiscard]] Path LexicallyNormal() const;
         [[nodiscard]] Path LexicallyRelativeTo(const Path& base) const;
         [[nodiscard]] bool StartsWith(const Path& prefix) const noexcept;
@@ -41,7 +41,7 @@ namespace NGIN::IO
         Path&              ReplaceExtension(std::string_view extension);
         Path&              RemoveFilename();
 
-        [[nodiscard]] static Path FromNative(std::string_view path);
+        [[nodiscard]] static Path        FromNative(std::string_view path);
         [[nodiscard]] NGIN::Text::String ToNative() const;
 
         static constexpr char Separator() noexcept { return '/'; }

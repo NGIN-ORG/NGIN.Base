@@ -7,7 +7,7 @@
 
 namespace NGIN::IO
 {
-    class NGIN_BASE_API DirectoryHandle
+    class NGIN_IO_API DirectoryHandle
     {
     public:
         DirectoryHandle() noexcept = default;

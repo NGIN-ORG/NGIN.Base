@@ -11,7 +11,7 @@ namespace NGIN::Time
 {
     namespace detail
     {
-        NGIN_BASE_API void SleepForNanoseconds(UInt64 nanoseconds) noexcept;
+        NGIN_FOUNDATION_API void SleepForNanoseconds(UInt64 nanoseconds) noexcept;
     }
 
     template<typename TUnit>

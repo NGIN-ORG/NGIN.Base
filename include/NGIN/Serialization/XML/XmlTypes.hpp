@@ -43,7 +43,7 @@ namespace NGIN::Serialization::XML
     class ElementView;
     class AttributeView;
 
-    class NGIN_BASE_API NodeView
+    class NGIN_SERIALIZATION_API NodeView
     {
     public:
         NodeView() noexcept = default;
@@ -67,7 +67,7 @@ namespace NGIN::Serialization::XML
         NodeId                       m_id {};
     };
 
-    class NGIN_BASE_API AttributeView
+    class NGIN_SERIALIZATION_API AttributeView
     {
     public:
         AttributeView() noexcept = default;
@@ -89,7 +89,7 @@ namespace NGIN::Serialization::XML
         UInt32                       m_index {0};
     };
 
-    class NGIN_BASE_API AttributeRange
+    class NGIN_SERIALIZATION_API AttributeRange
     {
     public:
         constexpr AttributeRange() noexcept = default;
@@ -132,7 +132,7 @@ namespace NGIN::Serialization::XML
         UInt32                       m_count {0};
     };
 
-    class NGIN_BASE_API ChildRange
+    class NGIN_SERIALIZATION_API ChildRange
     {
     public:
         constexpr ChildRange() noexcept = default;
@@ -184,7 +184,7 @@ namespace NGIN::Serialization::XML
         UInt32                       m_count {0};
     };
 
-    class NGIN_BASE_API FilteredChildRange
+    class NGIN_SERIALIZATION_API FilteredChildRange
     {
     public:
         class Iterator
@@ -241,7 +241,7 @@ namespace NGIN::Serialization::XML
         std::string_view             m_name {};
     };
 
-    class NGIN_BASE_API ElementView
+    class NGIN_SERIALIZATION_API ElementView
     {
     public:
         ElementView() noexcept = default;
@@ -269,7 +269,7 @@ namespace NGIN::Serialization::XML
         UInt32                       m_index {0};
     };
 
-    class NGIN_BASE_API Document
+    class NGIN_SERIALIZATION_API Document
     {
     public:
         Document() noexcept;
@@ -298,7 +298,7 @@ namespace NGIN::Serialization::XML
         std::unique_ptr<detail::DocumentState> m_state;
     };
 
-    class NGIN_BASE_API BorrowedDocument
+    class NGIN_SERIALIZATION_API BorrowedDocument
     {
     public:
         BorrowedDocument() noexcept;
@@ -344,7 +344,7 @@ namespace NGIN::Serialization::XML
         SourceSpan span {};
     };
 
-    class NGIN_BASE_API SyntaxDocument
+    class NGIN_SERIALIZATION_API SyntaxDocument
     {
     public:
         SyntaxDocument() noexcept;

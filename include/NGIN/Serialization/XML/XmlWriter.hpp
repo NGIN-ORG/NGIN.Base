@@ -22,7 +22,7 @@ namespace NGIN::Serialization::XML
 
     struct WriteDiagnostic
     {
-        WriteErrorCode    code {WriteErrorCode::InvalidDocument};
+        WriteErrorCode     code {WriteErrorCode::InvalidDocument};
         NGIN::Text::String message {};
     };
 
@@ -35,7 +35,7 @@ namespace NGIN::Serialization::XML
         UIntSize maxOutputBytes {64ULL * 1024ULL * 1024ULL};
     };
 
-    class NGIN_BASE_API Writer
+    class NGIN_SERIALIZATION_API Writer
     {
     public:
         [[nodiscard]] static NGIN::Utilities::Expected<std::string, WriteDiagnostic>

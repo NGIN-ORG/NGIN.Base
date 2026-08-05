@@ -96,7 +96,7 @@ namespace NGIN::IO
         bool               outputLimitExceeded {false};
     };
 
-    class NGIN_BASE_API Process final
+    class NGIN_IO_API Process final
     {
     public:
         Process() noexcept;
@@ -122,7 +122,7 @@ namespace NGIN::IO
         std::unique_ptr<Impl> m_implementation {};
     };
 
-    [[nodiscard]] NGIN_BASE_API ProcessExpected<ProcessResult> RunProcess(ProcessOptions options);
-    [[nodiscard]] NGIN_BASE_API                                NGIN::Async::Task<ProcessResult, ProcessError>
-                                                               RunProcessAsync(NGIN::Async::TaskContext& context, ProcessOptions options);
+    [[nodiscard]] NGIN_IO_API ProcessExpected<ProcessResult> RunProcess(ProcessOptions options);
+    [[nodiscard]] NGIN_IO_API                                NGIN::Async::Task<ProcessResult, ProcessError>
+                                                             RunProcessAsync(NGIN::Async::TaskContext& context, ProcessOptions options);
 }// namespace NGIN::IO

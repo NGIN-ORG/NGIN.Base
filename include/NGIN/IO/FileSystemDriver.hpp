@@ -14,11 +14,11 @@ namespace NGIN::IO
     namespace detail
     {
         class NativeFileBackend;
-        NativeFileBackend* GetNativeFileBackend(FileSystemDriver& driver) noexcept;
+        NativeFileBackend*       GetNativeFileBackend(FileSystemDriver& driver) noexcept;
         const NativeFileBackend* GetNativeFileBackend(const FileSystemDriver& driver) noexcept;
-    }
+    }// namespace detail
 
-    class NGIN_BASE_API FileSystemDriver
+    class NGIN_IO_API FileSystemDriver
     {
     public:
         enum class BackendPreference : UInt8
@@ -108,11 +108,11 @@ namespace NGIN::IO
         }
 
     private:
-        friend detail::NativeFileBackend* detail::GetNativeFileBackend(FileSystemDriver&) noexcept;
+        friend detail::NativeFileBackend*       detail::GetNativeFileBackend(FileSystemDriver&) noexcept;
         friend const detail::NativeFileBackend* detail::GetNativeFileBackend(const FileSystemDriver&) noexcept;
 
-        Options                                                m_options {};
-        ActiveBackend                                          m_backend {ActiveBackend::None};
+        Options                                               m_options {};
+        ActiveBackend                                         m_backend {ActiveBackend::None};
         std::shared_ptr<NGIN::Execution::ThreadPoolScheduler> m_scheduler {};
         std::unique_ptr<detail::NativeFileBackend>            m_nativeBackend {};
     };

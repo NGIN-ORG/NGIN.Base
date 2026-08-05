@@ -9,7 +9,7 @@
 namespace NGIN::IO
 {
     /// @brief In-memory implementation of IByteReader.
-    class NGIN_BASE_API MemoryReader final : public IByteReader
+    class NGIN_IO_API MemoryReader final : public IByteReader
     {
     public:
         explicit MemoryReader(std::span<const NGIN::Byte> data) noexcept

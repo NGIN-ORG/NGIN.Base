@@ -2,13 +2,13 @@
 /// @brief Cross-platform fiber abstraction with platform-specific implementations.
 #pragma once
 
-#include <NGIN/Execution/Config.hpp>
 #include <NGIN/Defines.hpp>
+#include <NGIN/Execution/Config.hpp>
 #include <NGIN/Primitives.hpp>
 #include <NGIN/Utilities/Callable.hpp>
 
-#include <exception>
 #include <cstddef>
+#include <exception>
 #include <new>
 #include <type_traits>
 #include <utility>
@@ -30,15 +30,13 @@ namespace NGIN::Execution
     class FiberAllocatorRef final
     {
     public:
-        using AllocateFn   = void* (*)(void*, UIntSize, UIntSize) noexcept;
+        using AllocateFn   = void* (*) (void*, UIntSize, UIntSize) noexcept;
         using DeallocateFn = void (*)(void*, void*, UIntSize, UIntSize) noexcept;
 
         constexpr FiberAllocatorRef() noexcept = default;
 
         constexpr FiberAllocatorRef(void* self, AllocateFn allocate, DeallocateFn deallocate) noexcept
-            : m_self(self)
-            , m_allocate(allocate)
-            , m_deallocate(deallocate)
+            : m_self(self), m_allocate(allocate), m_deallocate(deallocate)
         {
         }
 
@@ -121,8 +119,8 @@ namespace NGIN::Execution
     struct FiberOptions final
     {
         UIntSize          stackSize {DEFAULT_FIBER_STACK_SIZE};
-        bool              guardPages {false}; // best-effort; platform/backend dependent
-        UIntSize          guardSize {0};      // best-effort; platform/backend dependent (0 = backend default)
+        bool              guardPages {false};// best-effort; platform/backend dependent
+        UIntSize          guardSize {0};     // best-effort; platform/backend dependent (0 = backend default)
         FiberAllocatorRef allocator {FiberAllocatorRef::System()};
     };
 
@@ -133,7 +131,7 @@ namespace NGIN::Execution
         Faulted,
     };
 
-    class NGIN_BASE_API Fiber
+    class NGIN_EXECUTION_API Fiber
     {
     public:
         using Job                                    = NGIN::Utilities::Callable<void()>;
@@ -151,12 +149,12 @@ namespace NGIN::Execution
         Fiber(Fiber&& other) noexcept;
         Fiber& operator=(Fiber&& other) noexcept;
 
-        void Assign(Job job);
-        [[nodiscard]] bool TryAssign(Job job) noexcept;
-        [[nodiscard]] FiberResumeResult Resume() noexcept;
+        void                             Assign(Job job);
+        [[nodiscard]] bool               TryAssign(Job job) noexcept;
+        [[nodiscard]] FiberResumeResult  Resume() noexcept;
         [[nodiscard]] std::exception_ptr TakeException() noexcept;
-        [[nodiscard]] bool HasJob() const noexcept;
-        [[nodiscard]] bool IsRunning() const noexcept;
+        [[nodiscard]] bool               HasJob() const noexcept;
+        [[nodiscard]] bool               IsRunning() const noexcept;
 
         static void EnsureMainFiber();
         static bool IsMainFiberInitialized() noexcept;
@@ -167,10 +165,10 @@ namespace NGIN::Execution
         detail::FiberState* m_state {nullptr};
     };
 #else
-    class NGIN_BASE_API Fiber
+    class NGIN_EXECUTION_API Fiber
     {
     public:
-        using Job = NGIN::Utilities::Callable<void()>;
+        using Job                                    = NGIN::Utilities::Callable<void()>;
         constexpr static UIntSize DEFAULT_STACK_SIZE = 0;
 
         Fiber() noexcept { Require(); }
@@ -186,7 +184,7 @@ namespace NGIN::Execution
             return *this;
         }
 
-        void Assign(Job) { Require(); }
+        void        Assign(Job) { Require(); }
         static void EnsureMainFiber() { Require(); }
         static bool IsMainFiberInitialized() noexcept { return false; }
         static bool IsInFiber() noexcept { return false; }

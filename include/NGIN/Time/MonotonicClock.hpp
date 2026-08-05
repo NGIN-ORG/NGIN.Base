@@ -10,6 +10,6 @@ namespace NGIN::Time
     /// @brief Monotonic clock based on platform high-resolution timers.
     struct MonotonicClock final
     {
-        [[nodiscard]] static NGIN_BASE_API TimePoint Now() noexcept;
+        [[nodiscard]] static NGIN_FOUNDATION_API TimePoint Now() noexcept;
     };
 }// namespace NGIN::Time

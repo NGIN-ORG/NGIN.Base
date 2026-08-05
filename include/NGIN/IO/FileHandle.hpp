@@ -6,7 +6,7 @@
 
 namespace NGIN::IO
 {
-    class NGIN_BASE_API FileHandle
+    class NGIN_IO_API FileHandle
     {
     public:
         FileHandle() noexcept = default;

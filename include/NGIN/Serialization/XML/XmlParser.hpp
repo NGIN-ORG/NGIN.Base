@@ -14,7 +14,7 @@
 namespace NGIN::Serialization::XML
 {
     /// @brief Strict XML parser with explicit semantic, syntax, and ownership entry points.
-    class NGIN_BASE_API Parser
+    class NGIN_SERIALIZATION_API Parser
     {
     public:
         [[nodiscard]] static NGIN::Utilities::Expected<Document, ParseDiagnostic>

@@ -16,7 +16,7 @@
 namespace NGIN::IO
 {
     /// @brief Runtime error raised when dynamic library load or symbol resolution fails.
-    class NGIN_BASE_API DynamicLibraryError final : public std::runtime_error
+    class NGIN_IO_API DynamicLibraryError final : public std::runtime_error
     {
     public:
         explicit DynamicLibraryError(const std::string& message)
@@ -34,7 +34,7 @@ namespace NGIN::IO
     /// - Any resolved symbol becomes invalid after `Unload()` or destruction.
     /// - `Resolve<T>()` expects `T` to be the exact object or function pointer type, including ABI.
     /// - Concurrent `Load()`, `Unload()`, and `Resolve()` on the same instance are not synchronized.
-    class NGIN_BASE_API DynamicLibrary
+    class NGIN_IO_API DynamicLibrary
     {
     public:
         enum class LoadMode

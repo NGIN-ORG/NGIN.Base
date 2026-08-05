@@ -43,56 +43,56 @@ namespace NGIN::Serialization::JSON
         CommentPolicy       comments {CommentPolicy::Reject};
         TrailingCommaPolicy trailingCommas {TrailingCommaPolicy::Reject};
         DuplicateKeyPolicy  duplicateKeys {DuplicateKeyPolicy::Reject};
-        Utf8Policy           utf8 {Utf8Policy::Validate};
+        Utf8Policy          utf8 {Utf8Policy::Validate};
     };
 
     /// @brief JSON parser with explicit source-ownership entry points.
-    class NGIN_BASE_API Parser
+    class NGIN_SERIALIZATION_API Parser
     {
     public:
         [[nodiscard]] static NGIN::Utilities::Expected<Document, ParseDiagnostic>
-        Parse(OwnedTextBuffer input,
-              const ParseOptions& options = {},
-              const ParseLimits& limits = {},
+        Parse(OwnedTextBuffer       input,
+              const ParseOptions&   options   = {},
+              const ParseLimits&    limits    = {},
               const ParseResources& resources = {});
 
         [[nodiscard]] static NGIN::Utilities::Expected<Document, ParseDiagnostic>
-        ParseInSitu(MutableTextBuffer input,
-                    const ParseOptions& options = {},
-                    const ParseLimits& limits = {},
+        ParseInSitu(MutableTextBuffer     input,
+                    const ParseOptions&   options   = {},
+                    const ParseLimits&    limits    = {},
                     const ParseResources& resources = {});
 
         [[nodiscard]] static NGIN::Utilities::Expected<BorrowedDocument, ParseDiagnostic>
-        ParseBorrowed(BorrowedTextView input,
-                      ParseScratch& scratch,
-                      const ParseOptions& options = {},
-                      const ParseLimits& limits = {},
+        ParseBorrowed(BorrowedTextView      input,
+                      ParseScratch&         scratch,
+                      const ParseOptions&   options   = {},
+                      const ParseLimits&    limits    = {},
                       const ParseResources& resources = {});
     };
 
     [[nodiscard]] inline NGIN::Utilities::Expected<Document, ParseDiagnostic>
-    Parse(OwnedTextBuffer input,
-          const ParseOptions& options = {},
-          const ParseLimits& limits = {},
+    Parse(OwnedTextBuffer       input,
+          const ParseOptions&   options   = {},
+          const ParseLimits&    limits    = {},
           const ParseResources& resources = {})
     {
         return Parser::Parse(std::move(input), options, limits, resources);
     }
 
     [[nodiscard]] inline NGIN::Utilities::Expected<Document, ParseDiagnostic>
-    ParseInSitu(MutableTextBuffer input,
-                const ParseOptions& options = {},
-                const ParseLimits& limits = {},
+    ParseInSitu(MutableTextBuffer     input,
+                const ParseOptions&   options   = {},
+                const ParseLimits&    limits    = {},
                 const ParseResources& resources = {})
     {
         return Parser::ParseInSitu(std::move(input), options, limits, resources);
     }
 
     [[nodiscard]] inline NGIN::Utilities::Expected<BorrowedDocument, ParseDiagnostic>
-    ParseBorrowed(BorrowedTextView input,
-                  ParseScratch& scratch,
-                  const ParseOptions& options = {},
-                  const ParseLimits& limits = {},
+    ParseBorrowed(BorrowedTextView      input,
+                  ParseScratch&         scratch,
+                  const ParseOptions&   options   = {},
+                  const ParseLimits&    limits    = {},
                   const ParseResources& resources = {})
     {
         return Parser::ParseBorrowed(input, scratch, options, limits, resources);

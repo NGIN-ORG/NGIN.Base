@@ -14,7 +14,7 @@ namespace NGIN::Serialization::JSON
     ///
     /// Reset() retains stack capacity. The destination is never owned and must
     /// outlive the writer.
-    class NGIN_BASE_API StreamWriter
+    class NGIN_SERIALIZATION_API StreamWriter
     {
     public:
         explicit StreamWriter(TextSink sink, const WriteOptions& options = {});
@@ -58,11 +58,11 @@ namespace NGIN::Serialization::JSON
         [[nodiscard]] NGIN::Utilities::Expected<void, WriteDiagnostic> Fail(
                 WriteErrorCode code, std::string_view message) const;
 
-        TextSink          m_sink {};
-        WriteOptions      m_options {};
+        TextSink           m_sink {};
+        WriteOptions       m_options {};
         std::vector<Frame> m_stack {};
-        UIntSize          m_bytesWritten {0};
-        bool              m_hasRoot {false};
-        bool              m_failed {false};
+        UIntSize           m_bytesWritten {0};
+        bool               m_hasRoot {false};
+        bool               m_failed {false};
     };
 }// namespace NGIN::Serialization::JSON

@@ -7,7 +7,7 @@
 
 namespace NGIN::IO
 {
-    class NGIN_BASE_API DirectoryEnumerator
+    class NGIN_IO_API DirectoryEnumerator
     {
     public:
         DirectoryEnumerator() noexcept = default;

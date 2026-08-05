@@ -27,7 +27,7 @@ namespace NGIN::Serialization::JSON
 
     struct BuildDiagnostic
     {
-        BuildErrorCode    code {BuildErrorCode::InvalidHandle};
+        BuildErrorCode     code {BuildErrorCode::InvalidHandle};
         NGIN::Text::String message {};
     };
 
@@ -38,7 +38,7 @@ namespace NGIN::Serialization::JSON
     };
 
     /// @brief Mutable construction facade that freezes into an immutable JSON document.
-    class NGIN_BASE_API Builder
+    class NGIN_SERIALIZATION_API Builder
     {
     public:
         explicit Builder(const ParseLimits& limits = {}, const ParseResources& resources = {});

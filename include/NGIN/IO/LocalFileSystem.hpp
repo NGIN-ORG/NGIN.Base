@@ -8,7 +8,7 @@
 
 namespace NGIN::IO
 {
-    class NGIN_BASE_API LocalFileSystem final : public IFileSystem, public IAsyncFileSystem
+    class NGIN_IO_API LocalFileSystem final : public IFileSystem, public IAsyncFileSystem
     {
     public:
         LocalFileSystem();

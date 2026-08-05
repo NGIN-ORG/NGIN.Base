@@ -1,6 +1,6 @@
 add_executable(CryptoCapabilities main.cpp)
 
-target_link_libraries(CryptoCapabilities PRIVATE NGIN::Base)
+target_link_libraries(CryptoCapabilities PRIVATE NGIN::Base::Crypto)
 if(TARGET NGIN.Base.BuildOptions)
   target_link_libraries(CryptoCapabilities PRIVATE NGIN.Base.BuildOptions)
 endif()

@@ -7,7 +7,7 @@
 
 namespace NGIN::IO
 {
-    class NGIN_BASE_API AsyncDirectoryHandle
+    class NGIN_IO_API AsyncDirectoryHandle
     {
     public:
         using ExistsFn = AsyncTask<bool> (*)(
@@ -29,17 +29,16 @@ namespace NGIN::IO
 
         struct Operations
         {
-            ExistsFn exists {};
-            GetInfoFn getInfo {};
-            OpenFileFn openFile {};
+            ExistsFn        exists {};
+            GetInfoFn       getInfo {};
+            OpenFileFn      openFile {};
             OpenDirectoryFn openDirectory {};
-            ReadSymlinkFn readSymlink {};
+            ReadSymlinkFn   readSymlink {};
         };
 
         AsyncDirectoryHandle() noexcept = default;
         AsyncDirectoryHandle(std::shared_ptr<void> state, const Operations* operations) noexcept
-            : m_state(std::move(state))
-            , m_operations(operations)
+            : m_state(std::move(state)), m_operations(operations)
         {
         }
 

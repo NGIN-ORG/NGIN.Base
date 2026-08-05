@@ -21,10 +21,10 @@ namespace NGIN::Sync
     namespace detail
     {
 #if defined(NGIN_PLATFORM_WINDOWS) || defined(NGIN_PLATFORM_LINUX)
-        NGIN_BASE_API void AtomicConditionWait(UInt32& generation, UInt32 observedGeneration) noexcept;
-        NGIN_BASE_API bool AtomicConditionWaitFor(UInt32& generation, UInt32 observedGeneration, UInt64 nanoseconds) noexcept;
-        NGIN_BASE_API void AtomicConditionNotifyOne(UInt32& generation) noexcept;
-        NGIN_BASE_API void AtomicConditionNotifyAll(UInt32& generation) noexcept;
+        NGIN_FOUNDATION_API void AtomicConditionWait(UInt32& generation, UInt32 observedGeneration) noexcept;
+        NGIN_FOUNDATION_API bool AtomicConditionWaitFor(UInt32& generation, UInt32 observedGeneration, UInt64 nanoseconds) noexcept;
+        NGIN_FOUNDATION_API void AtomicConditionNotifyOne(UInt32& generation) noexcept;
+        NGIN_FOUNDATION_API void AtomicConditionNotifyAll(UInt32& generation) noexcept;
 #endif
     }// namespace detail
 

@@ -10,7 +10,7 @@
 
 namespace NGIN::IO
 {
-    class NGIN_BASE_API IFileSystem
+    class NGIN_IO_API IFileSystem
     {
     public:
         virtual ~IFileSystem() = default;

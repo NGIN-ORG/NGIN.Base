@@ -20,7 +20,7 @@ namespace NGIN::Net::TLS
         class TlsSession;
     }
 
-    class NGIN_BASE_API TlsStream final : public NGIN::Net::Transport::IByteStream
+    class NGIN_NET_API TlsStream final : public NGIN::Net::Transport::IByteStream
     {
     public:
         TlsStream(const TlsStream&)            = delete;

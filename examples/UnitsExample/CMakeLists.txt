@@ -4,7 +4,7 @@
 add_executable(UnitsExample main.cpp)
 
 # Link the NGIN.Base library
-target_link_libraries(UnitsExample PRIVATE NGIN::Base)
+target_link_libraries(UnitsExample PRIVATE NGIN::Base::Foundation)
 if(TARGET NGIN.Base.BuildOptions)
   target_link_libraries(UnitsExample PRIVATE NGIN.Base.BuildOptions)
 endif()

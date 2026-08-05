@@ -18,7 +18,7 @@ namespace NGIN::IO
         bool  allowShadowing {true};
     };
 
-    class NGIN_BASE_API IVirtualMount
+    class NGIN_IO_API IVirtualMount
     {
     public:
         virtual ~IVirtualMount() = default;
@@ -31,7 +31,7 @@ namespace NGIN::IO
         [[nodiscard]] virtual IAsyncFileSystem* GetAsyncFileSystem() noexcept                      = 0;
     };
 
-    class NGIN_BASE_API LocalMount final : public IVirtualMount
+    class NGIN_IO_API LocalMount final : public IVirtualMount
     {
     public:
         LocalMount(Path realRoot, MountPoint mountPoint = {});
@@ -49,7 +49,7 @@ namespace NGIN::IO
         LocalFileSystem m_localFileSystem {};
     };
 
-    class NGIN_BASE_API VirtualFileSystem final : public IFileSystem, public IAsyncFileSystem
+    class NGIN_IO_API VirtualFileSystem final : public IFileSystem, public IAsyncFileSystem
     {
     public:
         void                      AddMount(std::shared_ptr<IVirtualMount> mount);

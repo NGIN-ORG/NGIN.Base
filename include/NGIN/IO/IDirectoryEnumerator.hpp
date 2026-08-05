@@ -5,7 +5,7 @@
 
 namespace NGIN::IO
 {
-    class NGIN_BASE_API IDirectoryEnumerator
+    class NGIN_IO_API IDirectoryEnumerator
     {
     public:
         virtual ~IDirectoryEnumerator() = default;

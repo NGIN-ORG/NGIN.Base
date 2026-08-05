@@ -1,6 +1,6 @@
 add_executable(CryptoCookbook main.cpp)
 
-target_link_libraries(CryptoCookbook PRIVATE NGIN::Base)
+target_link_libraries(CryptoCookbook PRIVATE NGIN::Base::Crypto)
 if(TARGET NGIN.Base.BuildOptions)
   target_link_libraries(CryptoCookbook PRIVATE NGIN.Base.BuildOptions)
 endif()

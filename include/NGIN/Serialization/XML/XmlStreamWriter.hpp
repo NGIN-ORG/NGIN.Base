@@ -11,7 +11,7 @@
 namespace NGIN::Serialization::XML
 {
     /// @brief Stateful XML-profile writer for directly-authored documents.
-    class NGIN_BASE_API StreamWriter
+    class NGIN_SERIALIZATION_API StreamWriter
     {
     public:
         explicit StreamWriter(TextSink sink, const WriteOptions& options = {});
@@ -29,7 +29,7 @@ namespace NGIN::Serialization::XML
         [[nodiscard]] NGIN::Utilities::Expected<void, WriteDiagnostic>
         Comment(std::string_view value);
         [[nodiscard]] NGIN::Utilities::Expected<void, WriteDiagnostic>
-        ProcessingInstruction(std::string_view target, std::string_view value);
+                                                                       ProcessingInstruction(std::string_view target, std::string_view value);
         [[nodiscard]] NGIN::Utilities::Expected<void, WriteDiagnostic> EndElement();
         [[nodiscard]] NGIN::Utilities::Expected<void, WriteDiagnostic> Finish();
 
@@ -38,11 +38,11 @@ namespace NGIN::Serialization::XML
     private:
         struct Frame
         {
-            std::string name {};
+            std::string              name {};
             std::vector<std::string> attributeNames {};
-            bool        startOpen {true};
-            bool        hasContent {false};
-            bool        hasText {false};
+            bool                     startOpen {true};
+            bool                     hasContent {false};
+            bool                     hasText {false};
         };
 
         [[nodiscard]] NGIN::Utilities::Expected<void, WriteDiagnostic> Append(std::string_view value);

@@ -1,71 +1,25 @@
 #-------------------------------------------------------------------------------
-# Internal component boundary metadata
+# Component ownership and dependency graph
 #-------------------------------------------------------------------------------
-# These targets intentionally do not replace the current compatibility aggregate target.
-# They document ownership and dependency direction for the future package split.
-
-function(ngin_base_add_component component_name component_alias)
-  add_library(${component_name} INTERFACE)
-  add_library(${component_alias} ALIAS ${component_name})
-  target_compile_features(${component_name} INTERFACE cxx_std_23)
-  target_include_directories(${component_name}
-    INTERFACE
-      $<BUILD_INTERFACE:${NGIN_BASE_ROOT_DIR}/include>
-      $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-  )
-  set_target_properties(${component_name} PROPERTIES
-    NGIN_BASE_COMPONENT TRUE
-    NGIN_BASE_COMPONENT_SOURCES "${ARGN}"
-  )
-endfunction()
-
-ngin_base_add_component(NGIN.Base.Foundation NGIN::Base::Foundation ${NGIN_BASE_FOUNDATION_SOURCES})
-ngin_base_add_component(NGIN.Base.Execution NGIN::Base::Execution ${NGIN_BASE_EXECUTION_SOURCES})
-ngin_base_add_component(NGIN.Base.IO NGIN::Base::IO ${NGIN_BASE_IO_SOURCES})
-ngin_base_add_component(NGIN.Base.Crypto NGIN::Base::Crypto ${NGIN_BASE_CRYPTO_SOURCES})
-ngin_base_add_component(NGIN.Base.Net NGIN::Base::Net ${NGIN_BASE_NET_SOURCES})
-ngin_base_add_component(NGIN.Base.Serialization NGIN::Base::Serialization ${NGIN_BASE_SERIALIZATION_SOURCES})
-
-set_target_properties(NGIN.Base.Foundation PROPERTIES
-  NGIN_BASE_COMPONENT_PUBLIC_HEADERS "${NGIN_BASE_FOUNDATION_PUBLIC_HEADERS}"
-)
-set_target_properties(NGIN.Base.Execution PROPERTIES
-  NGIN_BASE_COMPONENT_PUBLIC_HEADERS "${NGIN_BASE_EXECUTION_PUBLIC_HEADERS}"
-)
-set_target_properties(NGIN.Base.IO PROPERTIES
-  NGIN_BASE_COMPONENT_PUBLIC_HEADERS "${NGIN_BASE_IO_PUBLIC_HEADERS}"
-)
-set_target_properties(NGIN.Base.Crypto PROPERTIES
-  NGIN_BASE_COMPONENT_PUBLIC_HEADERS "${NGIN_BASE_CRYPTO_PUBLIC_HEADERS}"
-)
-set_target_properties(NGIN.Base.Net PROPERTIES
-  NGIN_BASE_COMPONENT_PUBLIC_HEADERS "${NGIN_BASE_NET_PUBLIC_HEADERS}"
-)
-set_target_properties(NGIN.Base.Serialization PROPERTIES
-  NGIN_BASE_COMPONENT_PUBLIC_HEADERS "${NGIN_BASE_SERIALIZATION_PUBLIC_HEADERS}"
+set(NGIN_BASE_COMPONENTS
+  Foundation
+  Execution
+  IO
+  Serialization
+  Crypto
+  Net
 )
 
-target_link_libraries(NGIN.Base.Execution INTERFACE NGIN.Base.Foundation)
-target_link_libraries(NGIN.Base.IO INTERFACE NGIN.Base.Foundation NGIN.Base.Execution)
-target_link_libraries(NGIN.Base.Crypto INTERFACE NGIN.Base.Foundation NGIN.Base.IO NGIN.Base.Serialization)
-target_link_libraries(NGIN.Base.Net INTERFACE NGIN.Base.Foundation NGIN.Base.IO NGIN.Base.Execution NGIN.Base.Crypto)
-target_link_libraries(NGIN.Base.Serialization INTERFACE NGIN.Base.Foundation NGIN.Base.IO)
+set(NGIN_BASE_FOUNDATION_DEPENDENCIES)
+set(NGIN_BASE_EXECUTION_DEPENDENCIES Foundation)
+set(NGIN_BASE_IO_DEPENDENCIES Foundation Execution)
+set(NGIN_BASE_SERIALIZATION_DEPENDENCIES Foundation IO)
+set(NGIN_BASE_CRYPTO_DEPENDENCIES Foundation IO Serialization)
+set(NGIN_BASE_NET_DEPENDENCIES Foundation Execution IO Crypto)
 
-set_target_properties(NGIN.Base.Foundation PROPERTIES
-  NGIN_BASE_ALLOWED_COMPONENT_DEPENDENCIES ""
-)
-set_target_properties(NGIN.Base.Execution PROPERTIES
-  NGIN_BASE_ALLOWED_COMPONENT_DEPENDENCIES "NGIN.Base.Foundation"
-)
-set_target_properties(NGIN.Base.IO PROPERTIES
-  NGIN_BASE_ALLOWED_COMPONENT_DEPENDENCIES "NGIN.Base.Foundation;NGIN.Base.Execution"
-)
-set_target_properties(NGIN.Base.Crypto PROPERTIES
-  NGIN_BASE_ALLOWED_COMPONENT_DEPENDENCIES "NGIN.Base.Foundation;NGIN.Base.IO;NGIN.Base.Serialization"
-)
-set_target_properties(NGIN.Base.Net PROPERTIES
-  NGIN_BASE_ALLOWED_COMPONENT_DEPENDENCIES "NGIN.Base.Foundation;NGIN.Base.IO;NGIN.Base.Execution;NGIN.Base.Crypto"
-)
-set_target_properties(NGIN.Base.Serialization PROPERTIES
-  NGIN_BASE_ALLOWED_COMPONENT_DEPENDENCIES "NGIN.Base.Foundation;NGIN.Base.IO"
-)
+foreach(_ngin_component IN LISTS NGIN_BASE_COMPONENTS)
+  string(TOUPPER "${_ngin_component}" _ngin_component_upper)
+  if(NOT DEFINED NGIN_BASE_${_ngin_component_upper}_SOURCES)
+    message(FATAL_ERROR "Missing source ownership list for component ${_ngin_component}")
+  endif()
+endforeach()

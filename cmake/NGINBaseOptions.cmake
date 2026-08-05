@@ -33,7 +33,6 @@ option(NGIN_BASE_CRYPTO_WITH_LIBSODIUM "Enable optional libsodium-backed crypto 
 option(NGIN_BASE_CRYPTO_OPENSSL "Enable optional OpenSSL-backed crypto algorithms" OFF)
 option(NGIN_CRYPTO_WITH_OPENSSL "Enable optional OpenSSL-backed crypto algorithms for split Crypto targets" OFF)
 option(NGIN_BASE_TLS_WITH_OPENSSL "Enable the OpenSSL 3 TLS provider" OFF)
-option(NGIN_BASE_BUILD_SPLIT_TARGETS "Create transitional NGIN::Crypto/Net/Serialization targets" ON)
 
 set(NGIN_BASE_CLANG_GCC_TOOLCHAIN "" CACHE PATH "Clang (Linux): GCC toolchain root passed via --gcc-toolchain")
 set(NGIN_BASE_FIBER_BACKEND "default" CACHE STRING "Fiber backend: default/ucontext/winfiber/custom_asm")

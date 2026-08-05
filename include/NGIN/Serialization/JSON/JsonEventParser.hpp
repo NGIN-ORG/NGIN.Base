@@ -60,13 +60,13 @@ namespace NGIN::Serialization::JSON
     {
         using EventCallback = EventAction (*)(void*, const Event&);
 
-        [[nodiscard]] NGIN_BASE_API NGIN::Utilities::Expected<void, ParseDiagnostic>
-                                    ParseEventsContiguous(BorrowedTextView    input,
-                                                          void*               handlerContext,
-                                                          EventCallback       callback,
-                                                          ParseScratch&       scratch,
-                                                          const ParseOptions& options,
-                                                          const ParseLimits&  limits);
+        [[nodiscard]] NGIN_SERIALIZATION_API NGIN::Utilities::Expected<void, ParseDiagnostic>
+                                             ParseEventsContiguous(BorrowedTextView    input,
+                                                                   void*               handlerContext,
+                                                                   EventCallback       callback,
+                                                                   ParseScratch&       scratch,
+                                                                   const ParseOptions& options,
+                                                                   const ParseLimits&  limits);
     }// namespace detail
 
     /// @brief Event delivery over one complete contiguous input.

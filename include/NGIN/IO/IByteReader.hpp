@@ -10,7 +10,7 @@
 namespace NGIN::IO
 {
     /// @brief Minimal byte reader interface for streaming inputs.
-    class NGIN_BASE_API IByteReader
+    class NGIN_IO_API IByteReader
     {
     public:
         virtual ~IByteReader() = default;

@@ -30,6 +30,12 @@ install(
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/NGINBase
 )
 
+export(
+  EXPORT NGINBaseTargets
+  FILE "${CMAKE_CURRENT_BINARY_DIR}/NGINBaseTargets.cmake"
+  NAMESPACE NGIN::
+)
+
 include(CMakePackageConfigHelpers)
 
 write_basic_package_version_file(

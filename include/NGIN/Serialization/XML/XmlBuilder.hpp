@@ -27,7 +27,7 @@ namespace NGIN::Serialization::XML
 
     struct BuildDiagnostic
     {
-        BuildErrorCode    code {BuildErrorCode::InvalidHandle};
+        BuildErrorCode     code {BuildErrorCode::InvalidHandle};
         NGIN::Text::String message {};
     };
 
@@ -37,7 +37,7 @@ namespace NGIN::Serialization::XML
         std::string_view value {};
     };
 
-    class NGIN_BASE_API Builder
+    class NGIN_SERIALIZATION_API Builder
     {
     public:
         explicit Builder(const ParseLimits& limits = {}, const ParseResources& resources = {});
@@ -53,9 +53,9 @@ namespace NGIN::Serialization::XML
         [[nodiscard]] NGIN::Utilities::Expected<NodeId, BuildDiagnostic>
         ProcessingInstruction(std::string_view target, std::string_view value);
         [[nodiscard]] NGIN::Utilities::Expected<NodeId, BuildDiagnostic>
-        Element(std::string_view name,
-                std::span<const Attribute> attributes,
-                std::span<const NodeId> children);
+                                                                           Element(std::string_view           name,
+                                                                                   std::span<const Attribute> attributes,
+                                                                                   std::span<const NodeId>    children);
         [[nodiscard]] NGIN::Utilities::Expected<Document, BuildDiagnostic> Finish(NodeId root);
 
     private:

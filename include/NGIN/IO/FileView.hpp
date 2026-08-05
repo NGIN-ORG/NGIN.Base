@@ -12,7 +12,7 @@
 namespace NGIN::IO
 {
     /// @brief Read-only file mapping with fallback to buffered load.
-    class NGIN_BASE_API FileView
+    class NGIN_IO_API FileView
     {
     public:
         FileView() noexcept                  = default;

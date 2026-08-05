@@ -58,12 +58,12 @@ namespace NGIN::Net
     template<typename T>
     using ResolveExpected = NGIN::Utilities::Expected<T, ResolveError>;
 
-    [[nodiscard]] NGIN_BASE_API ResolveExpected<std::vector<ResolvedAddress>> Resolve(
+    [[nodiscard]] NGIN_NET_API ResolveExpected<std::vector<ResolvedAddress>> Resolve(
             std::string_view      host,
             std::string_view      service,
             const ResolveOptions& options = {});
 
-    class NGIN_BASE_API ResolverDriver final
+    class NGIN_NET_API ResolverDriver final
     {
     public:
         struct Options final
@@ -88,7 +88,7 @@ namespace NGIN::Net
         std::shared_ptr<NGIN::Execution::ThreadPoolScheduler> m_scheduler {};
     };
 
-    [[nodiscard]] NGIN_BASE_API NGIN::Async::Task<std::vector<ResolvedAddress>, ResolveError> ResolveAsync(
+    [[nodiscard]] NGIN_NET_API NGIN::Async::Task<std::vector<ResolvedAddress>, ResolveError> ResolveAsync(
             NGIN::Async::TaskContext&      context,
             ResolverDriver&                driver,
             std::string                    host,

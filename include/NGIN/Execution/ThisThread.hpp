@@ -16,9 +16,9 @@ namespace NGIN::Execution::ThisThread
 {
     using ThreadId = NGIN::UInt64;
 
-    [[nodiscard]] NGIN_BASE_API std::uint32_t HardwareConcurrency() noexcept;
-    [[nodiscard]] NGIN_BASE_API ThreadId      GetId() noexcept;
-    NGIN_BASE_API void                        YieldNow() noexcept;
+    [[nodiscard]] NGIN_EXECUTION_API std::uint32_t HardwareConcurrency() noexcept;
+    [[nodiscard]] NGIN_EXECUTION_API ThreadId      GetId() noexcept;
+    NGIN_EXECUTION_API void                        YieldNow() noexcept;
 
     inline void RelaxCpu() noexcept
     {
@@ -43,7 +43,7 @@ namespace NGIN::Execution::ThisThread
         NGIN::Time::SleepFor(NGIN::Units::Nanoseconds(static_cast<double>(deltaNs)));
     }
 
-    [[nodiscard]] NGIN_BASE_API bool SetName(std::string_view name) noexcept;
-    [[nodiscard]] NGIN_BASE_API bool SetAffinity(UInt64 affinityMask) noexcept;
-    [[nodiscard]] NGIN_BASE_API bool SetPriority(int value) noexcept;
+    [[nodiscard]] NGIN_EXECUTION_API bool SetName(std::string_view name) noexcept;
+    [[nodiscard]] NGIN_EXECUTION_API bool SetAffinity(UInt64 affinityMask) noexcept;
+    [[nodiscard]] NGIN_EXECUTION_API bool SetPriority(int value) noexcept;
 }// namespace NGIN::Execution::ThisThread

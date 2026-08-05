@@ -1,34 +1,54 @@
 # cmake/NGINBaseConfig.cmake.in
 @PACKAGE_INIT@
 
-# Allow downstream to find any dependencies you add in the future
 include(CMakeFindDependencyMacro)
 
-# Bring in the exported targets
+if(@NGIN_BASE_TLS_WITH_OPENSSL@)
+  find_dependency(OpenSSL 3 COMPONENTS SSL Crypto)
+elseif(@NGIN_BASE_CRYPTO_WITH_OPENSSL@)
+  find_dependency(OpenSSL 3 COMPONENTS Crypto)
+endif()
+
 include("${CMAKE_CURRENT_LIST_DIR}/NGINBaseTargets.cmake")
 
-# Provide canonical aliases for consumers
+foreach(_ngin_component IN ITEMS Foundation Execution IO Serialization Crypto Net)
+  if(TARGET NGIN::Base${_ngin_component}Static AND
+     NOT TARGET NGIN::Base::${_ngin_component}::Static)
+    add_library(NGIN::Base::${_ngin_component}::Static ALIAS NGIN::Base${_ngin_component}Static)
+  endif()
+  if(TARGET NGIN::Base${_ngin_component}Shared AND
+     NOT TARGET NGIN::Base::${_ngin_component}::Shared)
+    add_library(NGIN::Base::${_ngin_component}::Shared ALIAS NGIN::Base${_ngin_component}Shared)
+  endif()
+
+  if(TARGET NGIN::Base${_ngin_component}Shared)
+    set(_ngin_component_primary NGIN::Base${_ngin_component}Shared)
+  elseif(TARGET NGIN::Base${_ngin_component}Static)
+    set(_ngin_component_primary NGIN::Base${_ngin_component}Static)
+  else()
+    message(FATAL_ERROR "NGIN.Base component ${_ngin_component} is missing from the package")
+  endif()
+
+  if(NOT TARGET NGIN::Base::${_ngin_component})
+    add_library(NGIN::Base::${_ngin_component} ALIAS ${_ngin_component_primary})
+  endif()
+endforeach()
+
 if(TARGET NGIN::BaseStatic AND NOT TARGET NGIN::Base::Static)
   add_library(NGIN::Base::Static ALIAS NGIN::BaseStatic)
 endif()
-
 if(TARGET NGIN::BaseShared AND NOT TARGET NGIN::Base::Shared)
   add_library(NGIN::Base::Shared ALIAS NGIN::BaseShared)
 endif()
 
-set(_ngin_base_primary_target "")
 if(TARGET NGIN::BaseShared)
   set(_ngin_base_primary_target NGIN::BaseShared)
 elseif(TARGET NGIN::BaseStatic)
   set(_ngin_base_primary_target NGIN::BaseStatic)
+else()
+  message(FATAL_ERROR "NGIN.Base aggregate target is missing from the package")
 endif()
 
-if(_ngin_base_primary_target AND NOT TARGET NGIN::Base)
-  add_library(NGIN::Base ALIAS ${_ngin_base_primary_target})
-endif()
-
-# Sanity check: ensure the primary alias exists
 if(NOT TARGET NGIN::Base)
-  message(FATAL_ERROR "NGIN::Base target not found. "
-                      "Something went wrong with NGIN.Base installation.")
+  add_library(NGIN::Base ALIAS ${_ngin_base_primary_target})
 endif()

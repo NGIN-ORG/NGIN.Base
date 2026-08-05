@@ -4,7 +4,7 @@
 add_executable(Sandbox main.cpp)
 
 # Link the NGIN.Base library
-target_link_libraries(Sandbox PRIVATE NGIN::Base)
+target_link_libraries(Sandbox PRIVATE NGIN::Base::Execution)
 if(TARGET NGIN.Base.BuildOptions)
   target_link_libraries(Sandbox PRIVATE NGIN.Base.BuildOptions)
 endif()

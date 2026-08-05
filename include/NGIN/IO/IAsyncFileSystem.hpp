@@ -8,7 +8,7 @@
 
 namespace NGIN::IO
 {
-    class NGIN_BASE_API IAsyncFileSystem
+    class NGIN_IO_API IAsyncFileSystem
     {
     public:
         virtual ~IAsyncFileSystem() = default;
@@ -17,8 +17,8 @@ namespace NGIN::IO
                 NGIN::Async::TaskContext& ctx, const Path& path, const FileOpenOptions& options) = 0;
         virtual AsyncTask<AsyncDirectoryHandle> OpenDirectoryAsync(
                 NGIN::Async::TaskContext& ctx, const Path& path) = 0;
-        virtual AsyncTask<FileInfo>  GetInfoAsync(
-                NGIN::Async::TaskContext& ctx, const Path& path, const MetadataOptions& options = {}) = 0;
-        virtual AsyncTaskVoid        CopyFileAsync(NGIN::Async::TaskContext& ctx, const Path& from, const Path& to, const CopyOptions& options = {}) = 0;
+        virtual AsyncTask<FileInfo> GetInfoAsync(
+                NGIN::Async::TaskContext& ctx, const Path& path, const MetadataOptions& options = {})                                         = 0;
+        virtual AsyncTaskVoid CopyFileAsync(NGIN::Async::TaskContext& ctx, const Path& from, const Path& to, const CopyOptions& options = {}) = 0;
     };
 }// namespace NGIN::IO

@@ -1,108 +1,122 @@
 #-------------------------------------------------------------------------------
-# Library targets
+# Compiled component and aggregate targets
 #-------------------------------------------------------------------------------
+include(GNUInstallDirs)
+
 set(NGIN_BASE_EXPORT_TARGETS)
-set(ngin_base_primary_target "")
+set(NGIN_BASE_STATIC_COMPONENT_TARGETS)
+set(NGIN_BASE_SHARED_COMPONENT_TARGETS)
 
-if(NGIN_BASE_BUILD_STATIC OR NGIN_BASE_BUILD_SHARED)
-  add_library(NGIN.Base.Object OBJECT ${NGIN_BASE_CORE_SOURCES})
-  target_compile_features(NGIN.Base.Object PRIVATE cxx_std_23)
-  set_target_properties(NGIN.Base.Object PROPERTIES CXX_EXTENSIONS OFF)
-  target_include_directories(NGIN.Base.Object PRIVATE
-    ${NGIN_BASE_ROOT_DIR}/include
-    ${NGIN_BASE_PRIVATE_INCLUDE_DIRECTORIES}
+function(ngin_base_configure_component_target target_name component linkage)
+  string(TOUPPER "${component}" component_upper)
+
+  target_compile_features(${target_name} PUBLIC cxx_std_23)
+  set_target_properties(${target_name} PROPERTIES
+    CXX_EXTENSIONS OFF
+    OUTPUT_NAME "NGINBase${component}"
+    EXPORT_NAME "Base${component}${linkage}"
+    WINDOWS_EXPORT_ALL_SYMBOLS ON
   )
-  target_compile_definitions(NGIN.Base.Object
-    PRIVATE
-      ${NGIN_BASE_PLATFORM_DEFINITIONS}
-      ${NGIN_BASE_PRIVATE_DEFINITIONS}
-  )
-  target_link_libraries(NGIN.Base.Object PRIVATE NGIN.Base.BuildOptions ${NGIN_BASE_PRIVATE_LIBRARIES})
-  ngin_enable_warnings(NGIN.Base.Object)
-endif()
-
-if(NGIN_BASE_BUILD_SHARED AND TARGET NGIN.Base.Object)
-  set_property(TARGET NGIN.Base.Object PROPERTY POSITION_INDEPENDENT_CODE ON)
-endif()
-
-if(NGIN_BASE_BUILD_STATIC)
-  add_library(NGIN.Base.Static STATIC)
-  if(TARGET NGIN.Base.Object)
-    target_sources(NGIN.Base.Static PRIVATE $<TARGET_OBJECTS:NGIN.Base.Object>)
-  endif()
-  target_compile_features(NGIN.Base.Static PUBLIC cxx_std_23)
-  set_target_properties(NGIN.Base.Static PROPERTIES CXX_EXTENSIONS OFF)
-  target_include_directories(NGIN.Base.Static
+  target_include_directories(${target_name}
     PUBLIC
       $<BUILD_INTERFACE:${NGIN_BASE_ROOT_DIR}/include>
       $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     PRIVATE
-      ${NGIN_BASE_PRIVATE_INCLUDE_DIRECTORIES}
+      ${NGIN_BASE_${component_upper}_PRIVATE_INCLUDE_DIRECTORIES}
   )
-  target_compile_definitions(NGIN.Base.Static
+  target_compile_definitions(${target_name}
     PUBLIC
       ${NGIN_BASE_PLATFORM_DEFINITIONS}
+    PRIVATE
+      ${NGIN_BASE_${component_upper}_PRIVATE_DEFINITIONS}
   )
-  set_target_properties(NGIN.Base.Static PROPERTIES
-    OUTPUT_NAME "NGINBase"
-    EXPORT_NAME BaseStatic
+  target_link_libraries(${target_name}
+    PRIVATE
+      NGIN.Base.BuildOptions
+      ${NGIN_BASE_${component_upper}_PRIVATE_LIBRARIES}
   )
-  target_link_libraries(NGIN.Base.Static PRIVATE NGIN.Base.BuildOptions ${NGIN_BASE_PRIVATE_LIBRARIES})
-  ngin_enable_warnings(NGIN.Base.Static)
-  list(APPEND NGIN_BASE_EXPORT_TARGETS NGIN.Base.Static)
+  ngin_enable_warnings(${target_name})
+
+  if(linkage STREQUAL "Shared")
+    set_target_properties(${target_name} PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_compile_definitions(${target_name}
+      PUBLIC NGIN_${component_upper}_SHARED
+      PRIVATE NGIN_${component_upper}_SHARED_BUILD
+    )
+    if(NOT WIN32)
+      set_target_properties(${target_name} PROPERTIES
+        SOVERSION ${PROJECT_VERSION_MAJOR}
+        VERSION ${PROJECT_VERSION}
+      )
+    else()
+      set_target_properties(${target_name} PROPERTIES
+        ARCHIVE_OUTPUT_NAME "NGINBase${component}Shared"
+      )
+    endif()
+  endif()
+endfunction()
+
+foreach(component IN LISTS NGIN_BASE_COMPONENTS)
+  string(TOUPPER "${component}" component_upper)
+
+  if(NGIN_BASE_BUILD_STATIC)
+    set(target_name "NGIN.Base.${component}.Static")
+    add_library(${target_name} STATIC ${NGIN_BASE_${component_upper}_SOURCES})
+    ngin_base_configure_component_target(${target_name} ${component} Static)
+    foreach(dependency IN LISTS NGIN_BASE_${component_upper}_DEPENDENCIES)
+      target_link_libraries(${target_name} PUBLIC NGIN.Base.${dependency}.Static)
+    endforeach()
+    add_library(NGIN::Base::${component}::Static ALIAS ${target_name})
+    list(APPEND NGIN_BASE_STATIC_COMPONENT_TARGETS ${target_name})
+    list(APPEND NGIN_BASE_EXPORT_TARGETS ${target_name})
+  endif()
+
+  if(NGIN_BASE_BUILD_SHARED)
+    set(target_name "NGIN.Base.${component}.Shared")
+    add_library(${target_name} SHARED ${NGIN_BASE_${component_upper}_SOURCES})
+    ngin_base_configure_component_target(${target_name} ${component} Shared)
+    foreach(dependency IN LISTS NGIN_BASE_${component_upper}_DEPENDENCIES)
+      target_link_libraries(${target_name} PUBLIC NGIN.Base.${dependency}.Shared)
+    endforeach()
+    add_library(NGIN::Base::${component}::Shared ALIAS ${target_name})
+    list(APPEND NGIN_BASE_SHARED_COMPONENT_TARGETS ${target_name})
+    list(APPEND NGIN_BASE_EXPORT_TARGETS ${target_name})
+  endif()
+endforeach()
+
+if(NGIN_BASE_BUILD_STATIC)
+  add_library(NGIN.Base.Static INTERFACE)
+  target_link_libraries(NGIN.Base.Static INTERFACE ${NGIN_BASE_STATIC_COMPONENT_TARGETS})
+  set_target_properties(NGIN.Base.Static PROPERTIES EXPORT_NAME BaseStatic)
   add_library(NGIN::Base::Static ALIAS NGIN.Base.Static)
-  set(ngin_base_primary_target NGIN.Base.Static)
+  list(APPEND NGIN_BASE_EXPORT_TARGETS NGIN.Base.Static)
 endif()
 
 if(NGIN_BASE_BUILD_SHARED)
-  add_library(NGIN.Base.Shared SHARED)
-  if(TARGET NGIN.Base.Object)
-    target_sources(NGIN.Base.Shared PRIVATE $<TARGET_OBJECTS:NGIN.Base.Object>)
-  endif()
-  target_compile_features(NGIN.Base.Shared PUBLIC cxx_std_23)
-  set_target_properties(NGIN.Base.Shared PROPERTIES CXX_EXTENSIONS OFF)
-  target_include_directories(NGIN.Base.Shared
-    PUBLIC
-      $<BUILD_INTERFACE:${NGIN_BASE_ROOT_DIR}/include>
-      $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-    PRIVATE
-      ${NGIN_BASE_PRIVATE_INCLUDE_DIRECTORIES}
-  )
-  target_compile_definitions(NGIN.Base.Shared
-    PUBLIC
-      ${NGIN_BASE_PLATFORM_DEFINITIONS}
-      NGIN_BASE_SHARED
-  )
-  target_compile_definitions(NGIN.Base.Shared PRIVATE NGIN_BASE_SHARED_BUILD)
-  set_target_properties(NGIN.Base.Shared PROPERTIES
-    OUTPUT_NAME "NGINBase"
-    EXPORT_NAME BaseShared
-  )
-  if(NOT WIN32)
-    set_target_properties(NGIN.Base.Shared PROPERTIES
-      SOVERSION ${PROJECT_VERSION_MAJOR}
-      VERSION ${PROJECT_VERSION}
-    )
-  endif()
-  target_link_libraries(NGIN.Base.Shared PRIVATE NGIN.Base.BuildOptions ${NGIN_BASE_PRIVATE_LIBRARIES})
-  ngin_enable_warnings(NGIN.Base.Shared)
-  if(WIN32)
-    set_target_properties(NGIN.Base.Shared PROPERTIES ARCHIVE_OUTPUT_NAME "NGINBaseShared")
-  endif()
-  list(APPEND NGIN_BASE_EXPORT_TARGETS NGIN.Base.Shared)
+  add_library(NGIN.Base.Shared INTERFACE)
+  target_link_libraries(NGIN.Base.Shared INTERFACE ${NGIN_BASE_SHARED_COMPONENT_TARGETS})
+  set_target_properties(NGIN.Base.Shared PROPERTIES EXPORT_NAME BaseShared)
   add_library(NGIN::Base::Shared ALIAS NGIN.Base.Shared)
-  set(ngin_base_primary_target NGIN.Base.Shared)
+  list(APPEND NGIN_BASE_EXPORT_TARGETS NGIN.Base.Shared)
 endif()
 
-if(NOT ngin_base_primary_target)
-  message(FATAL_ERROR "No primary NGIN.Base target could be determined.")
+foreach(component IN LISTS NGIN_BASE_COMPONENTS)
+  if(NGIN_BASE_BUILD_SHARED)
+    add_library(NGIN::Base::${component} ALIAS NGIN.Base.${component}.Shared)
+  else()
+    add_library(NGIN::Base::${component} ALIAS NGIN.Base.${component}.Static)
+  endif()
+endforeach()
+
+if(NGIN_BASE_BUILD_SHARED)
+  add_library(NGIN::Base ALIAS NGIN.Base.Shared)
+else()
+  add_library(NGIN::Base ALIAS NGIN.Base.Static)
 endif()
 
 if(NGIN_BASE_BUILD_STATIC AND NGIN_BASE_BUILD_SHARED)
-  message(STATUS "Both static and shared are enabled; NGIN::Base aliases the shared library.")
+  message(STATUS "Both static and shared are enabled; preferred component and aggregate aliases select shared.")
 endif()
-
-add_library(NGIN::Base ALIAS ${ngin_base_primary_target})
 
 ngin_base_apply_lto()
 ngin_base_link_platform_libraries()

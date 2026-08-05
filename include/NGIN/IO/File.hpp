@@ -12,7 +12,7 @@
 namespace NGIN::IO
 {
     /// @brief Low-level file handle wrapper using platform APIs.
-    class NGIN_BASE_API File
+    class NGIN_IO_API File
     {
     public:
         enum class OpenMode : UInt8

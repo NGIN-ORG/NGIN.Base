@@ -46,9 +46,16 @@ the async guide for completion, error, and cancellation handling.
 
 ## CMake targets
 
+- `NGIN::Base::<Component>::Static`
+- `NGIN::Base::<Component>::Shared`
+- `NGIN::Base::<Component>`, which selects the available preferred form
 - `NGIN::Base::Static`
 - `NGIN::Base::Shared`
-- `NGIN::Base`, which selects the available preferred form
+- `NGIN::Base`, the aggregate convenience target
+
+`<Component>` is one of `Foundation`, `Execution`, `IO`, `Serialization`,
+`Crypto`, or `Net`. Prefer the narrowest component that owns the APIs a target
+uses; the aggregate remains available for applications that need several areas.
 
 ## Build and test
 

@@ -7,7 +7,7 @@
 
 namespace NGIN::IO
 {
-    class NGIN_BASE_API AsyncFileHandle
+    class NGIN_IO_API AsyncFileHandle
     {
     public:
         using ReadFn = AsyncTask<UIntSize> (*)(
@@ -26,25 +26,24 @@ namespace NGIN::IO
                 NGIN::Async::TaskContext&    ctx,
                 UInt64                       offset,
                 std::span<const NGIN::Byte>  source);
-        using FlushFn = AsyncTaskVoid (*)(const std::shared_ptr<void>& state, NGIN::Async::TaskContext& ctx);
-        using CloseFn = AsyncTaskVoid (*)(const std::shared_ptr<void>& state, NGIN::Async::TaskContext& ctx);
+        using FlushFn  = AsyncTaskVoid (*)(const std::shared_ptr<void>& state, NGIN::Async::TaskContext& ctx);
+        using CloseFn  = AsyncTaskVoid (*)(const std::shared_ptr<void>& state, NGIN::Async::TaskContext& ctx);
         using IsOpenFn = bool (*)(const std::shared_ptr<void>& state) noexcept;
 
         struct Operations
         {
-            ReadFn   read {};
-            WriteFn  write {};
-            ReadAtFn readAt {};
+            ReadFn    read {};
+            WriteFn   write {};
+            ReadAtFn  readAt {};
             WriteAtFn writeAt {};
-            FlushFn  flush {};
-            CloseFn  close {};
-            IsOpenFn isOpen {};
+            FlushFn   flush {};
+            CloseFn   close {};
+            IsOpenFn  isOpen {};
         };
 
         AsyncFileHandle() noexcept = default;
         AsyncFileHandle(std::shared_ptr<void> state, const Operations* operations) noexcept
-            : m_state(std::move(state))
-            , m_operations(operations)
+            : m_state(std::move(state)), m_operations(operations)
         {
         }
 
@@ -121,7 +120,7 @@ namespace NGIN::IO
             return error;
         }
 
-        std::shared_ptr<void>  m_state {};
-        const Operations*      m_operations {nullptr};
+        std::shared_ptr<void> m_state {};
+        const Operations*     m_operations {nullptr};
     };
 }// namespace NGIN::IO

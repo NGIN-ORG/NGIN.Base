@@ -33,27 +33,70 @@
 #endif
 #endif
 
-#ifndef NGIN_BASE_API
 #if defined(_WIN32) || defined(__CYGWIN__)
-#if defined(NGIN_BASE_SHARED_BUILD)
-#define NGIN_BASE_API __declspec(dllexport)
-#elif defined(NGIN_BASE_SHARED)
-#define NGIN_BASE_API __declspec(dllimport)
-#else
-#define NGIN_BASE_API
-#endif
+#define NGIN_DETAIL_EXPORT_API __declspec(dllexport)
+#define NGIN_DETAIL_IMPORT_API __declspec(dllimport)
 #define NGIN_BASE_LOCAL
 #else
-#if defined(NGIN_BASE_SHARED_BUILD) || defined(NGIN_BASE_SHARED)
-#define NGIN_BASE_API __attribute__((visibility("default")))
-#else
-#define NGIN_BASE_API
-#endif
+#define NGIN_DETAIL_EXPORT_API __attribute__((visibility("default")))
+#define NGIN_DETAIL_IMPORT_API __attribute__((visibility("default")))
 #define NGIN_BASE_LOCAL __attribute__((visibility("hidden")))
 #endif
+
+#if defined(NGIN_BASE_SHARED_BUILD)
+#define NGIN_BASE_API NGIN_DETAIL_EXPORT_API
+#elif defined(NGIN_BASE_SHARED)
+#define NGIN_BASE_API NGIN_DETAIL_IMPORT_API
+#else
+#define NGIN_BASE_API
 #endif
-#ifndef NGIN_BASE_LOCAL
-#define NGIN_BASE_LOCAL
+
+#if defined(NGIN_FOUNDATION_SHARED_BUILD)
+#define NGIN_FOUNDATION_API NGIN_DETAIL_EXPORT_API
+#elif defined(NGIN_FOUNDATION_SHARED)
+#define NGIN_FOUNDATION_API NGIN_DETAIL_IMPORT_API
+#else
+#define NGIN_FOUNDATION_API
+#endif
+
+#if defined(NGIN_EXECUTION_SHARED_BUILD)
+#define NGIN_EXECUTION_API NGIN_DETAIL_EXPORT_API
+#elif defined(NGIN_EXECUTION_SHARED)
+#define NGIN_EXECUTION_API NGIN_DETAIL_IMPORT_API
+#else
+#define NGIN_EXECUTION_API
+#endif
+
+#if defined(NGIN_IO_SHARED_BUILD)
+#define NGIN_IO_API NGIN_DETAIL_EXPORT_API
+#elif defined(NGIN_IO_SHARED)
+#define NGIN_IO_API NGIN_DETAIL_IMPORT_API
+#else
+#define NGIN_IO_API
+#endif
+
+#if defined(NGIN_SERIALIZATION_SHARED_BUILD)
+#define NGIN_SERIALIZATION_API NGIN_DETAIL_EXPORT_API
+#elif defined(NGIN_SERIALIZATION_SHARED)
+#define NGIN_SERIALIZATION_API NGIN_DETAIL_IMPORT_API
+#else
+#define NGIN_SERIALIZATION_API
+#endif
+
+#if defined(NGIN_CRYPTO_SHARED_BUILD)
+#define NGIN_CRYPTO_API NGIN_DETAIL_EXPORT_API
+#elif defined(NGIN_CRYPTO_SHARED)
+#define NGIN_CRYPTO_API NGIN_DETAIL_IMPORT_API
+#else
+#define NGIN_CRYPTO_API
+#endif
+
+#if defined(NGIN_NET_SHARED_BUILD)
+#define NGIN_NET_API NGIN_DETAIL_EXPORT_API
+#elif defined(NGIN_NET_SHARED)
+#define NGIN_NET_API NGIN_DETAIL_IMPORT_API
+#else
+#define NGIN_NET_API
 #endif
 
 #ifndef NGIN_CPU_RELAX
@@ -77,7 +120,10 @@
 #define NGIN_CPU_RELAX() __asm__ __volatile__("yield")
 #endif
 #else
-#define NGIN_CPU_RELAX() do { } while (false)
+#define NGIN_CPU_RELAX() \
+    do                   \
+    {                    \
+    } while (false)
 #endif
 #elif defined(__powerpc__) || defined(__ppc__) || defined(__PPC__)
 #if defined(__GNUC__) || defined(__clang__)
@@ -86,7 +132,10 @@
 #define NGIN_CPU_RELAX() __asm__ __volatile__("or 27,27,27")
 #endif
 #else
-#define NGIN_CPU_RELAX() do { } while (false)
+#define NGIN_CPU_RELAX() \
+    do                   \
+    {                    \
+    } while (false)
 #endif
 #endif
 
@@ -97,10 +146,10 @@ namespace NGIN
     {
         [[noreturn]] inline void Abort([[maybe_unused]] const char* msg) noexcept
         {
-            (void)msg;
+            (void) msg;
             std::abort();
         }
-    }
+    }// namespace detail
 
 // Contract helpers
 #ifndef NGIN_ASSERT

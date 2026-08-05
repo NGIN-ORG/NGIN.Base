@@ -54,9 +54,15 @@ configurations.
 
 ## Linkage and packaging
 
-- The current aggregate static and shared package forms are usable on Linux;
-  an installed shared-library consumer is exercised in CI.
-- Independently compiled component archives/shared libraries, build-tree
-  package exports, and Windows component visibility are pending the explicit
-  component-migration approval gate. Metadata-only component targets are not
-  presented as independently linkable binaries.
+- Foundation, Execution, IO, Serialization, Crypto, and Net are independently
+  compiled in static and shared forms. Aggregate targets are interface-only and
+  do not duplicate component objects.
+- Build-tree and installed package exports provide canonical aggregate and
+  per-component targets. External-consumer matrices link and run all seven
+  preferred targets.
+- Component-specific import/export macros support Windows DLL consumers. The
+  build also enables Windows automatic symbol export as a compatibility bridge
+  for older compiled declarations that predate component-specific annotations.
+- Static-only and shared-only builds are verified on Windows, and a combined
+  static/shared build is verified on Linux. The hosted workflow covers the
+  shared install and consumer matrix on Linux.
