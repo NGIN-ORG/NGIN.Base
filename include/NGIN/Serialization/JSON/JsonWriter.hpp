@@ -9,6 +9,7 @@
 
 namespace NGIN::Serialization::JSON
 {
+    /// @brief Failure category reported while serializing JSON.
     enum class WriteErrorCode : UInt8
     {
         InvalidValue,
@@ -18,12 +19,14 @@ namespace NGIN::Serialization::JSON
         OutOfMemory,
     };
 
+    /// @brief Structured JSON serialization failure.
     struct WriteDiagnostic
     {
         WriteErrorCode     code {WriteErrorCode::InvalidValue};
         NGIN::Text::String message {};
     };
 
+    /// @brief Formatting and resource policy for JSON serialization.
     struct WriteOptions
     {
         bool     pretty {false};
@@ -37,18 +40,22 @@ namespace NGIN::Serialization::JSON
     class NGIN_SERIALIZATION_API Writer
     {
     public:
+        /// @brief Serializes a JSON value using the requested formatting policy.
         [[nodiscard]] static NGIN::Utilities::Expected<std::string, WriteDiagnostic>
         Write(ValueView value, const WriteOptions& options = {});
 
+        /// @brief Serializes the root value of a document.
         [[nodiscard]] static NGIN::Utilities::Expected<std::string, WriteDiagnostic>
         Write(const Document& document, const WriteOptions& options = {})
         {
             return Write(document.Root(), options);
         }
 
+        /// @brief Serializes a value in deterministic canonical form.
         [[nodiscard]] static NGIN::Utilities::Expected<std::string, WriteDiagnostic>
         WriteCanonical(ValueView value);
 
+        /// @brief Escapes decoded UTF-8 text as JSON string contents without surrounding quotes.
         [[nodiscard]] static NGIN::Utilities::Expected<std::string, WriteDiagnostic>
         EscapeString(std::string_view value);
     };

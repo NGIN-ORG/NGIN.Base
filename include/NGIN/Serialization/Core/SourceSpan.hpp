@@ -9,6 +9,7 @@ namespace NGIN::Serialization
     {
         UInt32 value {0};
 
+        /// @brief Compares registered source identifiers.
         [[nodiscard]] friend constexpr bool operator==(SourceId, SourceId) noexcept = default;
     };
 
@@ -19,21 +20,25 @@ namespace NGIN::Serialization
         UIntSize begin {0};
         UIntSize end {0};
 
+        /// @brief Returns the range length, or zero for an inverted range.
         [[nodiscard]] constexpr UIntSize Length() const noexcept
         {
             return end >= begin ? end - begin : 0;
         }
 
+        /// @brief Returns whether the range contains no bytes.
         [[nodiscard]] constexpr bool Empty() const noexcept
         {
             return begin == end;
         }
 
+        /// @brief Returns the sentinel span used when no source location is available.
         [[nodiscard]] static constexpr SourceSpan Unknown() noexcept
         {
             return {};
         }
 
+        /// @brief Compares source identity and range boundaries.
         [[nodiscard]] friend constexpr bool operator==(const SourceSpan&, const SourceSpan&) noexcept = default;
     };
 

@@ -13,23 +13,28 @@ namespace NGIN::Serialization
     class ParseScratch
     {
     public:
+        /// @brief Constructs empty reusable scratch storage.
         ParseScratch() = default;
 
+        /// @brief Clears used bytes while retaining allocated capacity.
         void Reset() noexcept
         {
             m_bytes.Clear();
         }
 
+        /// @brief Ensures capacity for at least @p bytes.
         void Reserve(UIntSize bytes)
         {
             m_bytes.Reserve(bytes);
         }
 
+        /// @brief Appends one byte.
         void Push(char value)
         {
             m_bytes.PushBack(value);
         }
 
+        /// @brief Appends a byte string.
         void Append(std::string_view value)
         {
             if (value.empty())
@@ -62,17 +67,22 @@ namespace NGIN::Serialization
             }
         }
 
+        /// @brief Returns mutable access to used scratch bytes.
+        /// @note The span is invalidated by allocation or Reset().
         [[nodiscard]] std::span<char> MutableSpan() noexcept
         {
             return {m_bytes.data(), m_bytes.Size()};
         }
 
+        /// @brief Returns a read-only view of used scratch bytes.
         [[nodiscard]] std::string_view View() const noexcept
         {
             return {m_bytes.data(), m_bytes.Size()};
         }
 
+        /// @brief Returns the number of used bytes.
         [[nodiscard]] UIntSize Size() const noexcept { return m_bytes.Size(); }
+        /// @brief Returns the retained allocation capacity in bytes.
         [[nodiscard]] UIntSize Capacity() const noexcept { return m_bytes.Capacity(); }
 
     private:

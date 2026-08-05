@@ -20,12 +20,15 @@ namespace NGIN::Serialization
         void*         context {nullptr};
         WriteFunction write {nullptr};
 
+        /// @brief Forwards bytes to the bound destination.
+        /// @return False when no destination is bound or the destination rejects the write.
         [[nodiscard]] bool Write(std::string_view bytes) const noexcept
         {
             return write != nullptr && write(context, bytes);
         }
     };
 
+    /// @brief Creates a sink appending to a string that must outlive the sink.
     [[nodiscard]] inline TextSink MakeTextSink(std::string& output) noexcept
     {
         return TextSink {
@@ -43,6 +46,7 @@ namespace NGIN::Serialization
         };
     }
 
+    /// @brief Creates a sink writing to a stream that must outlive the sink.
     [[nodiscard]] inline TextSink MakeTextSink(std::ostream& output) noexcept
     {
         return TextSink {
@@ -50,7 +54,7 @@ namespace NGIN::Serialization
                 .write   = [](void* context, std::string_view bytes) noexcept {
                     try
                     {
-                        auto& stream = *static_cast<std::ostream*>(context);
+                        std::ostream& stream = *static_cast<std::ostream*>(context);
                         stream.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
                         return static_cast<bool>(stream);
                     } catch (...)

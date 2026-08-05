@@ -12,18 +12,21 @@
 
 namespace NGIN::Serialization::JSON
 {
+    /// @brief Controls acceptance of non-standard JSON comments.
     enum class CommentPolicy : UInt8
     {
         Reject,
         Allow,
     };
 
+    /// @brief Controls acceptance of trailing commas in arrays and objects.
     enum class TrailingCommaPolicy : UInt8
     {
         Reject,
         Allow,
     };
 
+    /// @brief Controls validation and normalization of duplicate object keys.
     enum class DuplicateKeyPolicy : UInt8
     {
         Reject,
@@ -32,12 +35,14 @@ namespace NGIN::Serialization::JSON
         KeepLast,
     };
 
+    /// @brief Controls whether parser input is validated as UTF-8.
     enum class Utf8Policy : UInt8
     {
         Validate,
         AssumeValid,
     };
 
+    /// @brief JSON syntax and normalization policy.
     struct ParseOptions
     {
         CommentPolicy       comments {CommentPolicy::Reject};
@@ -50,18 +55,22 @@ namespace NGIN::Serialization::JSON
     class NGIN_SERIALIZATION_API Parser
     {
     public:
+        /// @brief Parses owned UTF-8 input into a self-contained immutable document.
         [[nodiscard]] static NGIN::Utilities::Expected<Document, ParseDiagnostic>
         Parse(OwnedTextBuffer       input,
               const ParseOptions&   options   = {},
               const ParseLimits&    limits    = {},
               const ParseResources& resources = {});
 
+        /// @brief Parses mutable owned input, permitting in-situ decoding optimizations.
         [[nodiscard]] static NGIN::Utilities::Expected<Document, ParseDiagnostic>
         ParseInSitu(MutableTextBuffer     input,
                     const ParseOptions&   options   = {},
                     const ParseLimits&    limits    = {},
                     const ParseResources& resources = {});
 
+        /// @brief Parses caller-owned input using reusable scratch storage.
+        /// @note The input and scratch storage must outlive the returned document and its views.
         [[nodiscard]] static NGIN::Utilities::Expected<BorrowedDocument, ParseDiagnostic>
         ParseBorrowed(BorrowedTextView      input,
                       ParseScratch&         scratch,
@@ -70,6 +79,7 @@ namespace NGIN::Serialization::JSON
                       const ParseResources& resources = {});
     };
 
+    /// @brief Parses owned UTF-8 input into a self-contained immutable document.
     [[nodiscard]] inline NGIN::Utilities::Expected<Document, ParseDiagnostic>
     Parse(OwnedTextBuffer       input,
           const ParseOptions&   options   = {},
@@ -79,6 +89,7 @@ namespace NGIN::Serialization::JSON
         return Parser::Parse(std::move(input), options, limits, resources);
     }
 
+    /// @brief Parses mutable owned input, permitting in-situ decoding optimizations.
     [[nodiscard]] inline NGIN::Utilities::Expected<Document, ParseDiagnostic>
     ParseInSitu(MutableTextBuffer     input,
                 const ParseOptions&   options   = {},
@@ -88,6 +99,7 @@ namespace NGIN::Serialization::JSON
         return Parser::ParseInSitu(std::move(input), options, limits, resources);
     }
 
+    /// @brief Parses caller-owned input using reusable scratch storage.
     [[nodiscard]] inline NGIN::Utilities::Expected<BorrowedDocument, ParseDiagnostic>
     ParseBorrowed(BorrowedTextView      input,
                   ParseScratch&         scratch,

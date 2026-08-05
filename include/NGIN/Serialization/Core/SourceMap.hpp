@@ -11,16 +11,18 @@ namespace NGIN::Serialization
     class SourceMap
     {
     public:
+        /// @brief Borrows source text and associates it with a source identifier.
         constexpr explicit SourceMap(std::string_view source, SourceId sourceId = {}) noexcept
             : m_source(source), m_sourceId(sourceId)
         {
         }
 
+        /// @brief Converts a byte offset to a clamped one-based line and column location.
         [[nodiscard]] SourceLocation Locate(UIntSize offset) const noexcept
         {
             SourceLocation result {
                     .source = m_sourceId,
-                    .offset = (std::min)(offset, m_source.size()),
+                    .offset = (std::min) (offset, m_source.size()),
                     .line   = 1,
                     .column = 1,
             };
@@ -32,14 +34,14 @@ namespace NGIN::Serialization
                 if (value == '\r')
                 {
                     ++result.line;
-                    result.column = 1;
+                    result.column             = 1;
                     previousWasCarriageReturn = true;
                 }
                 else if (value == '\n')
                 {
                     if (!previousWasCarriageReturn)
                         ++result.line;
-                    result.column = 1;
+                    result.column             = 1;
                     previousWasCarriageReturn = false;
                 }
                 else

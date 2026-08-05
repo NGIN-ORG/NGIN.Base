@@ -9,6 +9,7 @@
 
 namespace NGIN::Serialization::XML
 {
+    /// @brief Failure category reported while serializing XML.
     enum class WriteErrorCode : UInt8
     {
         InvalidDocument,
@@ -20,12 +21,14 @@ namespace NGIN::Serialization::XML
         OutOfMemory,
     };
 
+    /// @brief Structured XML serialization failure.
     struct WriteDiagnostic
     {
         WriteErrorCode     code {WriteErrorCode::InvalidDocument};
         NGIN::Text::String message {};
     };
 
+    /// @brief Formatting and resource policy for XML serialization.
     struct WriteOptions
     {
         bool     pretty {false};
@@ -35,12 +38,15 @@ namespace NGIN::Serialization::XML
         UIntSize maxOutputBytes {64ULL * 1024ULL * 1024ULL};
     };
 
+    /// @brief Serializes semantic or syntax-preserving XML documents.
     class NGIN_SERIALIZATION_API Writer
     {
     public:
+        /// @brief Serializes a semantic root element using the requested formatting policy.
         [[nodiscard]] static NGIN::Utilities::Expected<std::string, WriteDiagnostic>
         Write(ElementView root, const WriteOptions& options = {});
 
+        /// @brief Serializes the semantic root of a document.
         [[nodiscard]] static NGIN::Utilities::Expected<std::string, WriteDiagnostic>
         Write(const Document& document, const WriteOptions& options = {})
         {
@@ -51,6 +57,7 @@ namespace NGIN::Serialization::XML
         [[nodiscard]] static NGIN::Utilities::Expected<std::string, WriteDiagnostic>
         Write(const SyntaxDocument& document);
 
+        /// @brief Escapes decoded text for use inside a quoted XML attribute.
         [[nodiscard]] static NGIN::Utilities::Expected<std::string, WriteDiagnostic>
         EscapeAttribute(std::string_view value);
     };

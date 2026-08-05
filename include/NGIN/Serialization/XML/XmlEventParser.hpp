@@ -13,6 +13,7 @@
 
 namespace NGIN::Serialization::XML
 {
+    /// @brief Kind of one XML streaming parse event.
     enum class EventKind : UInt8
     {
         StartElement,
@@ -24,6 +25,7 @@ namespace NGIN::Serialization::XML
         EndElement,
     };
 
+    /// @brief One XML parse event with source range and decoded name/value payload.
     struct Event
     {
         EventKind        kind {EventKind::Text};
@@ -32,12 +34,15 @@ namespace NGIN::Serialization::XML
         std::string_view value {};
     };
 
+    /// @brief Handler response controlling whether event delivery continues.
     struct EventAction
     {
         bool   continueParsing {true};
         UInt64 consumerContext {0};
 
+        /// @brief Requests continued event delivery.
         [[nodiscard]] static constexpr EventAction Continue() noexcept { return {}; }
+        /// @brief Stops parsing and records optional consumer context in the diagnostic.
         [[nodiscard]] static constexpr EventAction Stop(UInt64 context = 0) noexcept
         {
             return {.continueParsing = false, .consumerContext = context};
@@ -70,6 +75,8 @@ namespace NGIN::Serialization::XML
     class EventParser
     {
     public:
+        /// @brief Parses one complete borrowed input and synchronously delivers events.
+        /// @note Decoded event views are valid only for the handler invocation.
         template<EventHandler Handler>
         [[nodiscard]] static NGIN::Utilities::Expected<void, ParseDiagnostic>
         ParseContiguous(BorrowedTextView    input,
@@ -97,6 +104,8 @@ namespace NGIN::Serialization::XML
     class IncrementalEventParser
     {
     public:
+        /// @brief Binds a handler, reusable scratch storage, parse policy, and source identity.
+        /// @note The handler and scratch storage must outlive this parser.
         IncrementalEventParser(
                 Handler&            handler,
                 ParseScratch&       scratch,
@@ -107,6 +116,7 @@ namespace NGIN::Serialization::XML
         {
         }
 
+        /// @brief Appends a UTF-8 chunk for the current document.
         [[nodiscard]] IncrementalParseResult Feed(const std::string_view chunk)
         {
             if (m_complete || m_error)
@@ -124,11 +134,13 @@ namespace NGIN::Serialization::XML
             return {.status = IncrementalParseStatus::NeedMoreInput};
         }
 
+        /// @brief Appends a byte chunk for the current document.
         [[nodiscard]] IncrementalParseResult Feed(const std::span<const Byte> chunk)
         {
             return Feed(std::string_view {reinterpret_cast<const char*>(chunk.data()), chunk.size()});
         }
 
+        /// @brief Validates the accumulated document and emits its events exactly once.
         [[nodiscard]] IncrementalParseResult Finish()
         {
             if (m_complete)
@@ -138,6 +150,7 @@ namespace NGIN::Serialization::XML
             return TryComplete();
         }
 
+        /// @brief Clears document state while retaining buffer capacity and parser bindings.
         void Reset() noexcept
         {
             m_buffer.clear();
@@ -146,8 +159,10 @@ namespace NGIN::Serialization::XML
             m_diagnostic.reset();
         }
 
+        /// @brief Returns the number of accumulated input bytes.
         [[nodiscard]] UIntSize TotalBytes() const noexcept { return m_buffer.size(); }
-        [[nodiscard]] bool     IsComplete() const noexcept { return m_complete; }
+        /// @brief Returns whether the current document completed successfully.
+        [[nodiscard]] bool IsComplete() const noexcept { return m_complete; }
 
     private:
         [[nodiscard]] ParseDiagnostic MakeDiagnostic(const ParseErrorCode code, const std::string_view message) const
@@ -174,10 +189,11 @@ namespace NGIN::Serialization::XML
 
         [[nodiscard]] IncrementalParseResult TryComplete()
         {
-            const auto input            = BorrowedTextView {m_buffer, m_source};
-            auto       completionLimits = m_limits;
+            const BorrowedTextView input            = BorrowedTextView {m_buffer, m_source};
+            ParseLimits            completionLimits = m_limits;
             completionLimits.maxTotalMemoryBytes -= m_buffer.size();
-            auto validated = ParseBorrowed(input, *m_scratch, m_options, completionLimits);
+            NGIN::Utilities::Expected<BorrowedDocument, ParseDiagnostic> validated =
+                    ParseBorrowed(input, *m_scratch, m_options, completionLimits);
             if (!validated)
                 return Fail(std::move(validated.Error()));
 
@@ -186,7 +202,7 @@ namespace NGIN::Serialization::XML
                 ++eventCount;
                 return (*m_handler)(event);
             };
-            auto emitted = EventParser::ParseContiguous(
+            NGIN::Utilities::Expected<void, ParseDiagnostic> emitted = EventParser::ParseContiguous(
                     input, forwarding, *m_scratch, m_options, completionLimits);
             if (!emitted)
                 return Fail(std::move(emitted.Error()));

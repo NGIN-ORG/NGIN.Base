@@ -1,9 +1,9 @@
 #pragma once
 
-#include <NGIN/Text/String.hpp>
 #include <NGIN/Defines.hpp>
 #include <NGIN/Primitives.hpp>
 #include <NGIN/Serialization/Core/SourceSpan.hpp>
+#include <NGIN/Text/String.hpp>
 
 #include <optional>
 
@@ -41,6 +41,7 @@ namespace NGIN::Serialization
         UIntSize line {0};
         UIntSize column {0};
 
+        /// @brief Returns the sentinel location used when no source position is available.
         [[nodiscard]] static constexpr ParseLocation Unknown() noexcept
         {
             return ParseLocation {};
@@ -50,12 +51,12 @@ namespace NGIN::Serialization
     /// @brief Parsing error payload with code, location, and message.
     struct ParseError
     {
-        ParseErrorCode code {ParseErrorCode::None};
-        ParseLocation  location {};
-        SourceSpan     span {};
+        ParseErrorCode            code {ParseErrorCode::None};
+        ParseLocation             location {};
+        SourceSpan                span {};
         std::optional<SourceSpan> related {};
-        UInt64         consumerContext {0};
-        String         message {};
+        UInt64                    consumerContext {0};
+        String                    message {};
     };
 
     using ParseDiagnostic = ParseError;

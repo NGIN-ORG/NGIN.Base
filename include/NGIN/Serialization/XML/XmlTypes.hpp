@@ -19,18 +19,22 @@ namespace NGIN::Serialization::XML
         struct SyntaxState;
     }// namespace detail
 
+    /// @brief Stable index identifying a node inside one XML document state.
     struct NodeId
     {
         UInt32 value {static_cast<UInt32>(-1)};
 
+        /// @brief Returns whether the identifier refers to a document node.
         [[nodiscard]] constexpr bool IsValid() const noexcept
         {
             return value != static_cast<UInt32>(-1);
         }
 
+        /// @brief Compares node identifiers by stored index.
         [[nodiscard]] friend constexpr bool operator==(NodeId, NodeId) noexcept = default;
     };
 
+    /// @brief Semantic kind of an XML document node.
     enum class NodeKind : UInt8
     {
         Element,
@@ -43,16 +47,24 @@ namespace NGIN::Serialization::XML
     class ElementView;
     class AttributeView;
 
+    /// @brief Immutable borrowed view of one XML node.
     class NGIN_SERIALIZATION_API NodeView
     {
     public:
+        /// @brief Constructs an invalid node view.
         NodeView() noexcept = default;
 
-        [[nodiscard]] bool                            IsValid() const noexcept;
-        [[nodiscard]] NodeKind                        Kind() const noexcept;
-        [[nodiscard]] SourceSpan                      Span() const noexcept;
-        [[nodiscard]] std::string_view                Name() const noexcept;
-        [[nodiscard]] std::optional<ElementView>      TryElement() const noexcept;
+        /// @brief Returns whether this view refers to a live document node.
+        [[nodiscard]] bool IsValid() const noexcept;
+        /// @brief Returns the node's semantic kind.
+        [[nodiscard]] NodeKind Kind() const noexcept;
+        /// @brief Returns the source range covering the node.
+        [[nodiscard]] SourceSpan Span() const noexcept;
+        /// @brief Returns the element or processing-instruction name when applicable.
+        [[nodiscard]] std::string_view Name() const noexcept;
+        /// @brief Returns an element view when this node is an element.
+        [[nodiscard]] std::optional<ElementView> TryElement() const noexcept;
+        /// @brief Returns borrowed text for text-like node kinds.
         [[nodiscard]] std::optional<std::string_view> TryText() const noexcept;
 
     private:
@@ -67,17 +79,25 @@ namespace NGIN::Serialization::XML
         NodeId                       m_id {};
     };
 
+    /// @brief Immutable borrowed view of one XML attribute.
     class NGIN_SERIALIZATION_API AttributeView
     {
     public:
+        /// @brief Constructs an invalid attribute view.
         AttributeView() noexcept = default;
 
-        [[nodiscard]] bool             IsValid() const noexcept;
+        /// @brief Returns whether this view refers to a live attribute.
+        [[nodiscard]] bool IsValid() const noexcept;
+        /// @brief Returns the decoded attribute name.
         [[nodiscard]] std::string_view Name() const noexcept;
+        /// @brief Returns the decoded attribute value.
         [[nodiscard]] std::string_view Value() const noexcept;
-        [[nodiscard]] SourceSpan       Span() const noexcept;
-        [[nodiscard]] SourceSpan       NameSpan() const noexcept;
-        [[nodiscard]] SourceSpan       ValueSpan() const noexcept;
+        /// @brief Returns the source range covering the complete attribute.
+        [[nodiscard]] SourceSpan Span() const noexcept;
+        /// @brief Returns the source range covering the attribute name.
+        [[nodiscard]] SourceSpan NameSpan() const noexcept;
+        /// @brief Returns the source range covering the attribute value.
+        [[nodiscard]] SourceSpan ValueSpan() const noexcept;
 
     private:
         friend class ElementView;
@@ -89,9 +109,11 @@ namespace NGIN::Serialization::XML
         UInt32                       m_index {0};
     };
 
+    /// @brief Immutable contiguous range of attributes in source order.
     class NGIN_SERIALIZATION_API AttributeRange
     {
     public:
+        /// @brief Constructs an empty invalid range.
         constexpr AttributeRange() noexcept = default;
 
         class NGIN_SERIALIZATION_API Iterator
@@ -101,9 +123,12 @@ namespace NGIN::Serialization::XML
             using value_type        = AttributeView;
             using difference_type   = std::ptrdiff_t;
 
+            /// @brief Returns the attribute at the current position.
             [[nodiscard]] AttributeView operator*() const noexcept;
-            Iterator&                   operator++() noexcept;
-            [[nodiscard]] friend bool   operator==(const Iterator&, const Iterator&) noexcept = default;
+            /// @brief Advances to the next attribute.
+            Iterator& operator++() noexcept;
+            /// @brief Compares iterator document and position state.
+            [[nodiscard]] friend bool operator==(const Iterator&, const Iterator&) noexcept = default;
 
         private:
             friend class AttributeRange;
@@ -115,11 +140,17 @@ namespace NGIN::Serialization::XML
             UInt32                       m_index {0};
         };
 
-        [[nodiscard]] UIntSize      Size() const noexcept { return m_count; }
-        [[nodiscard]] bool          Empty() const noexcept { return m_count == 0; }
+        /// @brief Returns the number of attributes.
+        [[nodiscard]] UIntSize Size() const noexcept { return m_count; }
+        /// @brief Returns whether the range contains no attributes.
+        [[nodiscard]] bool Empty() const noexcept { return m_count == 0; }
+        /// @brief Returns the attribute at @p index.
+        /// @pre @p index is less than Size().
         [[nodiscard]] AttributeView operator[](UIntSize index) const noexcept;
-        [[nodiscard]] Iterator      begin() const noexcept { return Iterator {m_state, m_begin}; }
-        [[nodiscard]] Iterator      end() const noexcept { return Iterator {m_state, m_begin + m_count}; }
+        /// @brief Returns an iterator to the first attribute.
+        [[nodiscard]] Iterator begin() const noexcept { return Iterator {m_state, m_begin}; }
+        /// @brief Returns the past-the-end iterator.
+        [[nodiscard]] Iterator end() const noexcept { return Iterator {m_state, m_begin + m_count}; }
 
     private:
         friend class ElementView;
@@ -132,9 +163,11 @@ namespace NGIN::Serialization::XML
         UInt32                       m_count {0};
     };
 
+    /// @brief Immutable range of direct child nodes in source order.
     class NGIN_SERIALIZATION_API ChildRange
     {
     public:
+        /// @brief Constructs an empty invalid range.
         constexpr ChildRange() noexcept = default;
 
         class NGIN_SERIALIZATION_API Iterator
@@ -144,8 +177,11 @@ namespace NGIN::Serialization::XML
             using value_type        = NodeView;
             using difference_type   = std::ptrdiff_t;
 
-            [[nodiscard]] NodeView    operator*() const noexcept;
-            Iterator&                 operator++() noexcept;
+            /// @brief Returns the node at the current child position.
+            [[nodiscard]] NodeView operator*() const noexcept;
+            /// @brief Advances to the next sibling node.
+            Iterator& operator++() noexcept;
+            /// @brief Compares iterator document and position state.
             [[nodiscard]] friend bool operator==(const Iterator&, const Iterator&) noexcept = default;
 
         private:
@@ -158,9 +194,14 @@ namespace NGIN::Serialization::XML
             UInt32                       m_index {0};
         };
 
+        /// @brief Returns the number of direct child nodes.
         [[nodiscard]] UIntSize Size() const noexcept { return m_count; }
-        [[nodiscard]] bool     Empty() const noexcept { return m_count == 0; }
+        /// @brief Returns whether the range contains no child nodes.
+        [[nodiscard]] bool Empty() const noexcept { return m_count == 0; }
+        /// @brief Returns the child node at @p index.
+        /// @pre @p index is less than Size().
         [[nodiscard]] NodeView operator[](UIntSize index) const noexcept;
+        /// @brief Returns an iterator to the first child node.
         [[nodiscard]] Iterator begin() const noexcept
         {
             return Iterator {
@@ -168,6 +209,7 @@ namespace NGIN::Serialization::XML
                     m_count == 0 ? static_cast<UInt32>(-1) : m_begin,
             };
         }
+        /// @brief Returns the past-the-end iterator.
         [[nodiscard]] Iterator end() const noexcept
         {
             return Iterator {m_state, static_cast<UInt32>(-1)};
@@ -184,6 +226,7 @@ namespace NGIN::Serialization::XML
         UInt32                       m_count {0};
     };
 
+    /// @brief Lazy range of direct child elements matching a decoded name.
     class NGIN_SERIALIZATION_API FilteredChildRange
     {
     public:
@@ -194,8 +237,11 @@ namespace NGIN::Serialization::XML
             using value_type        = ElementView;
             using difference_type   = std::ptrdiff_t;
 
+            /// @brief Returns the matching element at the current position.
             [[nodiscard]] ElementView operator*() const noexcept;
-            Iterator&                 operator++() noexcept;
+            /// @brief Advances to the next matching child element.
+            Iterator& operator++() noexcept;
+            /// @brief Compares iterator document and position state.
             [[nodiscard]] friend bool operator==(const Iterator&, const Iterator&) noexcept = default;
 
         private:
@@ -212,11 +258,16 @@ namespace NGIN::Serialization::XML
             std::string_view             m_name {};
         };
 
-        [[nodiscard]] UIntSize                   Size() const noexcept;
-        [[nodiscard]] bool                       Empty() const noexcept;
+        /// @brief Counts matching direct child elements.
+        [[nodiscard]] UIntSize Size() const noexcept;
+        /// @brief Returns whether no direct child element matches.
+        [[nodiscard]] bool Empty() const noexcept;
+        /// @brief Returns the first matching child element, if any.
         [[nodiscard]] std::optional<ElementView> First() const noexcept;
-        [[nodiscard]] Iterator                   begin() const noexcept { return Iterator {m_state, m_begin, m_end, m_name}; }
-        [[nodiscard]] Iterator                   end() const noexcept
+        /// @brief Returns an iterator to the first matching child element.
+        [[nodiscard]] Iterator begin() const noexcept { return Iterator {m_state, m_begin, m_end, m_name}; }
+        /// @brief Returns the past-the-end iterator.
+        [[nodiscard]] Iterator end() const noexcept
         {
             return Iterator {
                     m_state,
@@ -241,19 +292,30 @@ namespace NGIN::Serialization::XML
         std::string_view             m_name {};
     };
 
+    /// @brief Immutable borrowed view of one XML element.
     class NGIN_SERIALIZATION_API ElementView
     {
     public:
+        /// @brief Constructs an invalid element view.
         ElementView() noexcept = default;
 
-        [[nodiscard]] bool                            IsValid() const noexcept;
-        [[nodiscard]] std::string_view                Name() const noexcept;
-        [[nodiscard]] SourceSpan                      Span() const noexcept;
-        [[nodiscard]] AttributeRange                  Attributes() const noexcept;
-        [[nodiscard]] std::optional<AttributeView>    Attribute(std::string_view attributeName) const noexcept;
-        [[nodiscard]] ChildRange                      Children() const noexcept;
-        [[nodiscard]] FilteredChildRange              Children(std::string_view elementName) const noexcept;
-        [[nodiscard]] std::optional<ElementView>      FirstChild(std::string_view elementName) const noexcept;
+        /// @brief Returns whether this view refers to a live element.
+        [[nodiscard]] bool IsValid() const noexcept;
+        /// @brief Returns the decoded element name.
+        [[nodiscard]] std::string_view Name() const noexcept;
+        /// @brief Returns the source range covering the complete element.
+        [[nodiscard]] SourceSpan Span() const noexcept;
+        /// @brief Returns the element attributes in source order.
+        [[nodiscard]] AttributeRange Attributes() const noexcept;
+        /// @brief Finds an attribute by decoded name.
+        [[nodiscard]] std::optional<AttributeView> Attribute(std::string_view attributeName) const noexcept;
+        /// @brief Returns all direct child nodes in source order.
+        [[nodiscard]] ChildRange Children() const noexcept;
+        /// @brief Returns direct child elements matching a decoded name.
+        [[nodiscard]] FilteredChildRange Children(std::string_view elementName) const noexcept;
+        /// @brief Returns the first direct child element matching a decoded name.
+        [[nodiscard]] std::optional<ElementView> FirstChild(std::string_view elementName) const noexcept;
+        /// @brief Returns the first direct text-like child value, if any.
         [[nodiscard]] std::optional<std::string_view> FirstText() const noexcept;
 
     private:
@@ -269,26 +331,43 @@ namespace NGIN::Serialization::XML
         UInt32                       m_index {0};
     };
 
+    /// @brief Self-contained owning XML semantic document.
     class NGIN_SERIALIZATION_API Document
     {
     public:
+        /// @brief Constructs an empty document.
         Document() noexcept;
+        /// @brief Releases source text, semantic nodes, and arena storage.
         ~Document();
+        /// @brief Transfers ownership from another document.
         Document(Document&&) noexcept;
+        /// @brief Replaces this document with another document's state.
         Document& operator=(Document&&) noexcept;
-        Document(const Document&)            = delete;
+        /// @brief Documents are non-copyable because views refer directly to owned state.
+        Document(const Document&) = delete;
+        /// @brief Documents are non-copy-assignable because views refer directly to owned state.
         Document& operator=(const Document&) = delete;
 
-        [[nodiscard]] bool             IsValid() const noexcept;
-        [[nodiscard]] ElementView      Root() const noexcept;
+        /// @brief Returns whether the document contains parsed state.
+        [[nodiscard]] bool IsValid() const noexcept;
+        /// @brief Returns the root element, valid while this document remains alive and unmoved-from.
+        [[nodiscard]] ElementView Root() const noexcept;
+        /// @brief Returns the owned source text used to create the document.
         [[nodiscard]] std::string_view SourceText() const noexcept;
-        [[nodiscard]] UIntSize         MemoryUsed() const noexcept;
-        [[nodiscard]] UIntSize         MemoryCommitted() const noexcept;
-        [[nodiscard]] UIntSize         PeakMemoryCommitted() const noexcept;
-        [[nodiscard]] UIntSize         AllocationCount() const noexcept;
-        [[nodiscard]] UIntSize         NodeCount() const noexcept;
-        [[nodiscard]] UIntSize         ElementCount() const noexcept;
-        [[nodiscard]] UIntSize         AttributeCount() const noexcept;
+        /// @brief Returns bytes currently used by document arenas.
+        [[nodiscard]] UIntSize MemoryUsed() const noexcept;
+        /// @brief Returns bytes currently committed by document arenas.
+        [[nodiscard]] UIntSize MemoryCommitted() const noexcept;
+        /// @brief Returns the peak committed arena size observed while parsing or building.
+        [[nodiscard]] UIntSize PeakMemoryCommitted() const noexcept;
+        /// @brief Returns the number of arena allocation operations.
+        [[nodiscard]] UIntSize AllocationCount() const noexcept;
+        /// @brief Returns the number of stored semantic nodes.
+        [[nodiscard]] UIntSize NodeCount() const noexcept;
+        /// @brief Returns the number of stored elements.
+        [[nodiscard]] UIntSize ElementCount() const noexcept;
+        /// @brief Returns the number of stored attributes.
+        [[nodiscard]] UIntSize AttributeCount() const noexcept;
 
     private:
         friend class Parser;
@@ -298,26 +377,44 @@ namespace NGIN::Serialization::XML
         std::unique_ptr<detail::DocumentState> m_state;
     };
 
+    /// @brief XML semantic document whose source storage remains owned by the caller.
     class NGIN_SERIALIZATION_API BorrowedDocument
     {
     public:
+        /// @brief Constructs an empty borrowed document.
         BorrowedDocument() noexcept;
+        /// @brief Releases parsed state without releasing caller-owned source storage.
         ~BorrowedDocument();
+        /// @brief Transfers parsed state and its source borrowing relationship.
         BorrowedDocument(BorrowedDocument&&) noexcept;
+        /// @brief Replaces this state with another borrowed document's state.
         BorrowedDocument& operator=(BorrowedDocument&&) noexcept;
-        BorrowedDocument(const BorrowedDocument&)            = delete;
+        /// @brief Borrowed documents are non-copyable because views refer directly to state.
+        BorrowedDocument(const BorrowedDocument&) = delete;
+        /// @brief Borrowed documents are non-copy-assignable because views refer directly to state.
         BorrowedDocument& operator=(const BorrowedDocument&) = delete;
 
-        [[nodiscard]] bool             IsValid() const noexcept;
-        [[nodiscard]] ElementView      Root() const noexcept;
+        /// @brief Returns whether the document contains parsed state.
+        [[nodiscard]] bool IsValid() const noexcept;
+        /// @brief Returns the root element.
+        /// @note The caller-owned source and this document must outlive every returned view.
+        [[nodiscard]] ElementView Root() const noexcept;
+        /// @brief Returns a view of the caller-owned source text.
         [[nodiscard]] std::string_view SourceText() const noexcept;
-        [[nodiscard]] UIntSize         MemoryUsed() const noexcept;
-        [[nodiscard]] UIntSize         MemoryCommitted() const noexcept;
-        [[nodiscard]] UIntSize         PeakMemoryCommitted() const noexcept;
-        [[nodiscard]] UIntSize         AllocationCount() const noexcept;
-        [[nodiscard]] UIntSize         NodeCount() const noexcept;
-        [[nodiscard]] UIntSize         ElementCount() const noexcept;
-        [[nodiscard]] UIntSize         AttributeCount() const noexcept;
+        /// @brief Returns bytes currently used by document arenas.
+        [[nodiscard]] UIntSize MemoryUsed() const noexcept;
+        /// @brief Returns bytes currently committed by document arenas.
+        [[nodiscard]] UIntSize MemoryCommitted() const noexcept;
+        /// @brief Returns the peak committed arena size observed while parsing.
+        [[nodiscard]] UIntSize PeakMemoryCommitted() const noexcept;
+        /// @brief Returns the number of arena allocation operations.
+        [[nodiscard]] UIntSize AllocationCount() const noexcept;
+        /// @brief Returns the number of stored semantic nodes.
+        [[nodiscard]] UIntSize NodeCount() const noexcept;
+        /// @brief Returns the number of stored elements.
+        [[nodiscard]] UIntSize ElementCount() const noexcept;
+        /// @brief Returns the number of stored attributes.
+        [[nodiscard]] UIntSize AttributeCount() const noexcept;
 
     private:
         friend class Parser;
@@ -326,6 +423,7 @@ namespace NGIN::Serialization::XML
         std::unique_ptr<detail::DocumentState> m_state;
     };
 
+    /// @brief Kind of one source-preserving XML syntax token.
     enum class SyntaxKind : UInt8
     {
         XmlDeclaration,
@@ -338,24 +436,36 @@ namespace NGIN::Serialization::XML
         Doctype,
     };
 
+    /// @brief Source range and kind of one XML syntax construct.
     struct SyntaxToken
     {
         SyntaxKind kind {SyntaxKind::Text};
         SourceSpan span {};
     };
 
+    /// @brief Owning source-preserving XML document represented as syntax tokens.
     class NGIN_SERIALIZATION_API SyntaxDocument
     {
     public:
+        /// @brief Constructs an empty syntax document.
         SyntaxDocument() noexcept;
+        /// @brief Releases owned source and syntax-token storage.
         ~SyntaxDocument();
+        /// @brief Transfers ownership from another syntax document.
         SyntaxDocument(SyntaxDocument&&) noexcept;
+        /// @brief Replaces this syntax document with another document's state.
         SyntaxDocument& operator=(SyntaxDocument&&) noexcept;
-        SyntaxDocument(const SyntaxDocument&)            = delete;
+        /// @brief Syntax documents are non-copyable because token spans refer to owned source.
+        SyntaxDocument(const SyntaxDocument&) = delete;
+        /// @brief Syntax documents are non-copy-assignable because token spans refer to owned source.
         SyntaxDocument& operator=(const SyntaxDocument&) = delete;
 
-        [[nodiscard]] bool                         IsValid() const noexcept;
-        [[nodiscard]] std::string_view             SourceText() const noexcept;
+        /// @brief Returns whether the document contains parsed syntax state.
+        [[nodiscard]] bool IsValid() const noexcept;
+        /// @brief Returns the owned source text.
+        [[nodiscard]] std::string_view SourceText() const noexcept;
+        /// @brief Returns syntax tokens in source order.
+        /// @note The span remains valid only while this document is alive and unmoved-from.
         [[nodiscard]] std::span<const SyntaxToken> Tokens() const noexcept;
 
     private:

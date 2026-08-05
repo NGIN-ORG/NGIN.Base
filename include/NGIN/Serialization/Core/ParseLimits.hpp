@@ -16,9 +16,10 @@ namespace NGIN::Serialization
         UIntSize maxDecodedStringBytes {64ULL * 1024ULL * 1024ULL};
         UIntSize maxTotalMemoryBytes {256ULL * 1024ULL * 1024ULL};
 
+        /// @brief Returns a policy with every resource limit disabled.
         [[nodiscard]] static constexpr ParseLimits Unlimited() noexcept
         {
-            constexpr auto unlimited = (std::numeric_limits<UIntSize>::max)();
+            constexpr UIntSize unlimited = (std::numeric_limits<UIntSize>::max)();
             return {
                     .maxInputBytes         = unlimited,
                     .maxDepth              = unlimited,

@@ -13,6 +13,7 @@
 
 namespace NGIN::Serialization::JSON
 {
+    /// @brief Kind of one JSON streaming parse event.
     enum class EventKind : UInt8
     {
         Null,
@@ -28,6 +29,7 @@ namespace NGIN::Serialization::JSON
         EndObject,
     };
 
+    /// @brief One JSON parse event with source range and kind-specific payload.
     struct Event
     {
         EventKind        kind {EventKind::Null};
@@ -39,12 +41,15 @@ namespace NGIN::Serialization::JSON
         F64              doubleValue {0};
     };
 
+    /// @brief Handler response controlling whether event delivery continues.
     struct EventAction
     {
         bool   continueParsing {true};
         UInt64 consumerContext {0};
 
+        /// @brief Requests continued event delivery.
         [[nodiscard]] static constexpr EventAction Continue() noexcept { return {}; }
+        /// @brief Stops parsing and records optional consumer context in the diagnostic.
         [[nodiscard]] static constexpr EventAction Stop(UInt64 context = 0) noexcept
         {
             return {.continueParsing = false, .consumerContext = context};
@@ -78,6 +83,8 @@ namespace NGIN::Serialization::JSON
     class EventParser
     {
     public:
+        /// @brief Parses one complete borrowed input and synchronously delivers events.
+        /// @note Event text views are valid only for the handler invocation.
         template<EventHandler Handler>
         [[nodiscard]] static NGIN::Utilities::Expected<void, ParseDiagnostic>
         ParseContiguous(BorrowedTextView    input,
@@ -92,7 +99,8 @@ namespace NGIN::Serialization::JSON
             // allocation-light direct parser.
             if (options.duplicateKeys == DuplicateKeyPolicy::KeepLast)
             {
-                auto parsed = ParseBorrowed(input, scratch, options, limits);
+                NGIN::Utilities::Expected<BorrowedDocument, ParseDiagnostic> parsed =
+                        ParseBorrowed(input, scratch, options, limits);
                 if (!parsed)
                     return NGIN::Utilities::Unexpected<ParseDiagnostic>(std::move(parsed.Error()));
                 return Emit(parsed.Value().Root(), handler);
@@ -157,14 +165,14 @@ namespace NGIN::Serialization::JSON
                     event.text = *value.TryString();
                     return Deliver(event, handler);
                 case ValueKind::Array: {
-                    event.kind     = EventKind::StartArray;
-                    auto delivered = Deliver(event, handler);
+                    event.kind                                                 = EventKind::StartArray;
+                    NGIN::Utilities::Expected<void, ParseDiagnostic> delivered = Deliver(event, handler);
                     if (!delivered)
                         return delivered;
-                    const auto array = value.TryArray();
+                    const std::optional<ArrayView> array = value.TryArray();
                     for (const ValueView child: *array)
                     {
-                        auto result = Emit(child, handler);
+                        NGIN::Utilities::Expected<void, ParseDiagnostic> result = Emit(child, handler);
                         if (!result)
                             return result;
                     }
@@ -172,20 +180,20 @@ namespace NGIN::Serialization::JSON
                     return Deliver(event, handler);
                 }
                 case ValueKind::Object: {
-                    event.kind     = EventKind::StartObject;
-                    auto delivered = Deliver(event, handler);
+                    event.kind                                                 = EventKind::StartObject;
+                    NGIN::Utilities::Expected<void, ParseDiagnostic> delivered = Deliver(event, handler);
                     if (!delivered)
                         return delivered;
-                    const auto object = value.TryObject();
+                    const std::optional<ObjectView> object = value.TryObject();
                     for (const MemberView member: *object)
                     {
-                        Event key {.kind = EventKind::Key,
-                                   .span = member.Span(),
-                                   .text = member.Key()};
-                        auto  keyResult = Deliver(key, handler);
+                        Event                                            key {.kind = EventKind::Key,
+                                                                              .span = member.Span(),
+                                                                              .text = member.Key()};
+                        NGIN::Utilities::Expected<void, ParseDiagnostic> keyResult = Deliver(key, handler);
                         if (!keyResult)
                             return keyResult;
-                        auto result = Emit(member.Value(), handler);
+                        NGIN::Utilities::Expected<void, ParseDiagnostic> result = Emit(member.Value(), handler);
                         if (!result)
                             return result;
                     }
@@ -208,6 +216,8 @@ namespace NGIN::Serialization::JSON
     class IncrementalEventParser
     {
     public:
+        /// @brief Binds a handler, reusable scratch storage, parse policy, and source identity.
+        /// @note The handler and scratch storage must outlive this parser.
         IncrementalEventParser(
                 Handler&            handler,
                 ParseScratch&       scratch,
@@ -218,6 +228,7 @@ namespace NGIN::Serialization::JSON
         {
         }
 
+        /// @brief Appends a UTF-8 chunk for the current document.
         [[nodiscard]] IncrementalParseResult Feed(const std::string_view chunk)
         {
             if (m_complete || m_error)
@@ -236,11 +247,13 @@ namespace NGIN::Serialization::JSON
             return {.status = IncrementalParseStatus::NeedMoreInput};
         }
 
+        /// @brief Appends a byte chunk for the current document.
         [[nodiscard]] IncrementalParseResult Feed(const std::span<const Byte> chunk)
         {
             return Feed(std::string_view {reinterpret_cast<const char*>(chunk.data()), chunk.size()});
         }
 
+        /// @brief Validates the accumulated document and emits its events exactly once.
         [[nodiscard]] IncrementalParseResult Finish()
         {
             if (m_complete)
@@ -250,6 +263,7 @@ namespace NGIN::Serialization::JSON
             return TryComplete();
         }
 
+        /// @brief Clears document state while retaining buffer capacity and parser bindings.
         void Reset() noexcept
         {
             m_buffer.clear();
@@ -258,8 +272,10 @@ namespace NGIN::Serialization::JSON
             m_diagnostic.reset();
         }
 
+        /// @brief Returns the number of accumulated input bytes.
         [[nodiscard]] UIntSize TotalBytes() const noexcept { return m_buffer.size(); }
-        [[nodiscard]] bool     IsComplete() const noexcept { return m_complete; }
+        /// @brief Returns whether the current document completed successfully.
+        [[nodiscard]] bool IsComplete() const noexcept { return m_complete; }
 
     private:
         [[nodiscard]] ParseDiagnostic MakeDiagnostic(const ParseErrorCode code, const std::string_view message) const
@@ -286,10 +302,11 @@ namespace NGIN::Serialization::JSON
 
         [[nodiscard]] IncrementalParseResult TryComplete()
         {
-            const auto input            = BorrowedTextView {m_buffer, m_source};
-            auto       completionLimits = m_limits;
+            const BorrowedTextView input            = BorrowedTextView {m_buffer, m_source};
+            ParseLimits            completionLimits = m_limits;
             completionLimits.maxTotalMemoryBytes -= m_buffer.size();
-            auto validated = ParseBorrowed(input, *m_scratch, m_options, completionLimits);
+            NGIN::Utilities::Expected<BorrowedDocument, ParseDiagnostic> validated =
+                    ParseBorrowed(input, *m_scratch, m_options, completionLimits);
             if (!validated)
                 return Fail(std::move(validated.Error()));
 
@@ -298,7 +315,7 @@ namespace NGIN::Serialization::JSON
                 ++eventCount;
                 return (*m_handler)(event);
             };
-            auto emitted = EventParser::ParseContiguous(
+            NGIN::Utilities::Expected<void, ParseDiagnostic> emitted = EventParser::ParseContiguous(
                     input, forwarding, *m_scratch, m_options, completionLimits);
             if (!emitted)
                 return Fail(std::move(emitted.Error()));
