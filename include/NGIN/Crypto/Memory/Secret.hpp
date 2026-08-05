@@ -45,26 +45,32 @@ namespace NGIN::Crypto::Memory
     public:
         using ValueType = T;
 
+        /// @brief Constructs a default-initialized secret value.
         Secret() noexcept(std::is_nothrow_default_constructible_v<T>)
             requires std::is_default_constructible_v<T>
             : m_value {}
         {
         }
 
+        /// @brief Moves a value into secret storage.
         explicit Secret(T value) noexcept(std::is_nothrow_move_constructible_v<T>)
             : m_value {std::move(value)}
         {
         }
 
-        Secret(const Secret&)            = delete;
+        /// @brief Secrets are non-copyable to prevent implicit duplication.
+        Secret(const Secret&) = delete;
+        /// @brief Secrets are non-copy-assignable to prevent implicit duplication.
         Secret& operator=(const Secret&) = delete;
 
+        /// @brief Transfers the value and wipes the moved-from secret.
         Secret(Secret&& other) noexcept(std::is_nothrow_move_constructible_v<T>)
             : m_value {std::move(other.m_value)}
         {
             other.Wipe();
         }
 
+        /// @brief Wipes the current value, transfers another value, and wipes the source.
         Secret& operator=(Secret&& other) noexcept(std::is_nothrow_move_assignable_v<T>)
         {
             if (this != &other)
@@ -77,6 +83,7 @@ namespace NGIN::Crypto::Memory
             return *this;
         }
 
+        /// @brief Wipes the stored object representation.
         ~Secret()
         {
             Wipe();
@@ -92,8 +99,8 @@ namespace NGIN::Crypto::Memory
         [[nodiscard]] static CryptoExpected<Secret> Generate() noexcept
             requires(detail::FixedBytesTraits<T>::IsFixedBytes)
         {
-            T    value {};
-            auto result = NGIN::Crypto::Random::Fill(ByteSpan {value.data(), value.size()});
+            T                    value {};
+            CryptoExpected<void> result = NGIN::Crypto::Random::Fill(ByteSpan {value.data(), value.size()});
             if (!result.HasValue())
             {
                 return result.Error();

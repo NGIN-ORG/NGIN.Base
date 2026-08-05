@@ -1,3 +1,5 @@
+/// @file KeyDerivation.hpp
+/// @brief Algorithm-tagged HKDF, PBKDF2, and Argon2id derivation parameters.
 #pragma once
 
 #include <NGIN/Crypto/Backend/CryptoContext.hpp>
@@ -38,41 +40,49 @@ namespace NGIN::Crypto::Kdf
     class KeyDerivationParameters
     {
     public:
+        /// @brief Selects HKDF-SHA-256 with borrowed parameters.
         constexpr explicit KeyDerivationParameters(const HkdfParameters& parameters) noexcept
             : m_algorithm {KdfAlgorithm::HkdfSha256}, m_hkdf {&parameters}
         {
         }
 
+        /// @brief Selects an HKDF algorithm with borrowed parameters.
         constexpr KeyDerivationParameters(KdfAlgorithm algorithm, const HkdfParameters& parameters) noexcept
             : m_algorithm {algorithm}, m_hkdf {&parameters}
         {
         }
 
+        /// @brief Selects a PBKDF2 algorithm with borrowed parameters.
         constexpr KeyDerivationParameters(KdfAlgorithm algorithm, const Pbkdf2Parameters& parameters) noexcept
             : m_algorithm {algorithm}, m_pbkdf2 {&parameters}
         {
         }
 
+        /// @brief Selects Argon2id with borrowed parameters.
         constexpr explicit KeyDerivationParameters(const Argon2idParameters& parameters) noexcept
             : m_algorithm {KdfAlgorithm::Argon2id}, m_argon2id {&parameters}
         {
         }
 
+        /// @brief Returns the selected derivation algorithm.
         [[nodiscard]] constexpr KdfAlgorithm Algorithm() const noexcept
         {
             return m_algorithm;
         }
 
+        /// @brief Returns HKDF parameters, or `nullptr` for another parameter kind.
         [[nodiscard]] constexpr const HkdfParameters* Hkdf() const noexcept
         {
             return m_hkdf;
         }
 
+        /// @brief Returns PBKDF2 parameters, or `nullptr` for another parameter kind.
         [[nodiscard]] constexpr const Pbkdf2Parameters* Pbkdf2() const noexcept
         {
             return m_pbkdf2;
         }
 
+        /// @brief Returns Argon2id parameters, or `nullptr` for another parameter kind.
         [[nodiscard]] constexpr const Argon2idParameters* Argon2id() const noexcept
         {
             return m_argon2id;
@@ -103,8 +113,8 @@ namespace NGIN::Crypto::Kdf
             const NGIN::Crypto::Backend::CryptoContext& context,
             const KeyDerivationParameters&              parameters)
     {
-        auto output = NGIN::Crypto::Memory::FixedSecret<Size> {};
-        auto result = DeriveKeyInto(context, parameters, output.UnsafeMutableBytes());
+        NGIN::Crypto::Memory::FixedSecret<Size> output {};
+        CryptoExpected<void>                    result = DeriveKeyInto(context, parameters, output.UnsafeMutableBytes());
         if (!result.HasValue())
         {
             return result.Error();

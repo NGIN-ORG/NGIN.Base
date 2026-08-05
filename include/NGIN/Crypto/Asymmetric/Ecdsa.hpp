@@ -173,6 +173,7 @@ namespace NGIN::Crypto::Asymmetric
         return signature;
     }
 
+    /// @brief Signs a message into fixed raw P-256 `r || s` signature storage.
     [[nodiscard]] inline CryptoExpected<void> SignEcdsaP256Sha256Into(
             const NGIN::Crypto::Backend::CryptoContext& context,
             const EcdsaP256PrivateKey&                  privateKey,
@@ -189,6 +190,7 @@ namespace NGIN::Crypto::Asymmetric
                 ByteSpan {signature.data(), signature.size()});
     }
 
+    /// @brief Signs a message and returns a fixed raw P-256 `r || s` signature.
     [[nodiscard]] inline CryptoExpected<EcdsaP256Sha256Signature> SignEcdsaP256Sha256(
             const NGIN::Crypto::Backend::CryptoContext& context,
             const EcdsaP256PrivateKey&                  privateKey,
@@ -204,6 +206,7 @@ namespace NGIN::Crypto::Asymmetric
         return signature;
     }
 
+    /// @brief Verifies a fixed raw P-256 `r || s` signature for a message.
     [[nodiscard]] inline CryptoExpected<void> VerifyEcdsaP256Sha256(
             const NGIN::Crypto::Backend::CryptoContext& context,
             const EcdsaP256PublicKey&                   publicKey,

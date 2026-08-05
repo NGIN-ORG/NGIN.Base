@@ -69,6 +69,7 @@ namespace NGIN::Crypto::Keys
         ConstByteSpan label;
     };
 
+    /// @brief Signs a message using an algorithm-compatible parsed private-key envelope.
     [[nodiscard]] inline CryptoExpected<ByteBuffer> SignPrivateKeyInfo(
             const NGIN::Crypto::Backend::CryptoContext& context,
             SignatureAlgorithm                          algorithm,
@@ -146,6 +147,7 @@ namespace NGIN::Crypto::Keys
         return detail::KeyOperationUnsupportedAlgorithm();
     }
 
+    /// @brief Verifies a signature using an algorithm-compatible parsed public-key envelope.
     [[nodiscard]] inline CryptoExpected<void> VerifySubjectPublicKeyInfo(
             const NGIN::Crypto::Backend::CryptoContext& context,
             SignatureAlgorithm                          algorithm,
@@ -222,6 +224,7 @@ namespace NGIN::Crypto::Keys
         return detail::KeyOperationUnsupportedAlgorithm();
     }
 
+    /// @brief Encrypts plaintext with an RSA SubjectPublicKeyInfo using OAEP SHA-256.
     [[nodiscard]] inline CryptoExpected<ByteBuffer> EncryptSubjectPublicKeyInfoRsaOaepSha256(
             const NGIN::Crypto::Backend::CryptoContext&    context,
             const SubjectPublicKeyInfo&                    publicKeyInfo,
@@ -249,6 +252,7 @@ namespace NGIN::Crypto::Keys
                 });
     }
 
+    /// @brief Decrypts ciphertext with an RSA PrivateKeyInfo using OAEP SHA-256.
     [[nodiscard]] inline CryptoExpected<ByteBuffer> DecryptPrivateKeyInfoRsaOaepSha256(
             const NGIN::Crypto::Backend::CryptoContext& context,
             const PrivateKeyInfo&                       privateKeyInfo,
@@ -277,6 +281,7 @@ namespace NGIN::Crypto::Keys
                 });
     }
 
+    /// @brief Derives an X25519 shared secret from compatible parsed key envelopes.
     [[nodiscard]] inline CryptoExpected<NGIN::Crypto::Asymmetric::X25519SharedSecret> DeriveX25519SharedSecret(
             const NGIN::Crypto::Backend::CryptoContext& context,
             const PrivateKeyInfo&                       privateKeyInfo,

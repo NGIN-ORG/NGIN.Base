@@ -1,3 +1,5 @@
+/// @file BackendCapabilities.hpp
+/// @brief Compact set of algorithms supported by a crypto backend.
 #pragma once
 
 #include <NGIN/Crypto/Algorithm.hpp>
@@ -9,90 +11,107 @@ namespace NGIN::Crypto::Backend
     class BackendCapabilities
     {
     public:
+        /// @brief Constructs an empty capability set.
         constexpr BackendCapabilities() noexcept = default;
 
+        /// @brief Returns whether secure random generation is enabled.
         [[nodiscard]] constexpr bool SupportsRandom() const noexcept
         {
             return m_supportsRandom;
         }
 
+        /// @brief Returns whether a hash algorithm is enabled.
         [[nodiscard]] constexpr bool Supports(HashAlgorithm algorithm) const noexcept
         {
             return HasBit(m_hashAlgorithms, algorithm);
         }
 
+        /// @brief Returns whether a message-authentication algorithm is enabled.
         [[nodiscard]] constexpr bool Supports(MacAlgorithm algorithm) const noexcept
         {
             return HasBit(m_macAlgorithms, algorithm);
         }
 
+        /// @brief Returns whether a key-derivation algorithm is enabled.
         [[nodiscard]] constexpr bool Supports(KdfAlgorithm algorithm) const noexcept
         {
             return HasBit(m_kdfAlgorithms, algorithm);
         }
 
+        /// @brief Returns whether an authenticated-encryption algorithm is enabled.
         [[nodiscard]] constexpr bool Supports(AeadAlgorithm algorithm) const noexcept
         {
             return HasBit(m_aeadAlgorithms, algorithm);
         }
 
+        /// @brief Returns whether a key-agreement algorithm is enabled.
         [[nodiscard]] constexpr bool Supports(KeyAgreementAlgorithm algorithm) const noexcept
         {
             return HasBit(m_keyAgreementAlgorithms, algorithm);
         }
 
+        /// @brief Returns whether an asymmetric-encryption algorithm is enabled.
         [[nodiscard]] constexpr bool Supports(AsymmetricEncryptionAlgorithm algorithm) const noexcept
         {
             return HasBit(m_asymmetricEncryptionAlgorithms, algorithm);
         }
 
+        /// @brief Returns whether a signature algorithm is enabled.
         [[nodiscard]] constexpr bool Supports(SignatureAlgorithm algorithm) const noexcept
         {
             return HasBit(m_signatureAlgorithms, algorithm);
         }
 
+        /// @brief Enables secure random generation and returns this set.
         constexpr BackendCapabilities& EnableRandom() noexcept
         {
             m_supportsRandom = true;
             return *this;
         }
 
+        /// @brief Enables a hash algorithm and returns this set.
         constexpr BackendCapabilities& Enable(HashAlgorithm algorithm) noexcept
         {
             SetBit(m_hashAlgorithms, algorithm);
             return *this;
         }
 
+        /// @brief Enables a message-authentication algorithm and returns this set.
         constexpr BackendCapabilities& Enable(MacAlgorithm algorithm) noexcept
         {
             SetBit(m_macAlgorithms, algorithm);
             return *this;
         }
 
+        /// @brief Enables a key-derivation algorithm and returns this set.
         constexpr BackendCapabilities& Enable(KdfAlgorithm algorithm) noexcept
         {
             SetBit(m_kdfAlgorithms, algorithm);
             return *this;
         }
 
+        /// @brief Enables an authenticated-encryption algorithm and returns this set.
         constexpr BackendCapabilities& Enable(AeadAlgorithm algorithm) noexcept
         {
             SetBit(m_aeadAlgorithms, algorithm);
             return *this;
         }
 
+        /// @brief Enables a key-agreement algorithm and returns this set.
         constexpr BackendCapabilities& Enable(KeyAgreementAlgorithm algorithm) noexcept
         {
             SetBit(m_keyAgreementAlgorithms, algorithm);
             return *this;
         }
 
+        /// @brief Enables an asymmetric-encryption algorithm and returns this set.
         constexpr BackendCapabilities& Enable(AsymmetricEncryptionAlgorithm algorithm) noexcept
         {
             SetBit(m_asymmetricEncryptionAlgorithms, algorithm);
             return *this;
         }
 
+        /// @brief Enables a signature algorithm and returns this set.
         constexpr BackendCapabilities& Enable(SignatureAlgorithm algorithm) noexcept
         {
             SetBit(m_signatureAlgorithms, algorithm);

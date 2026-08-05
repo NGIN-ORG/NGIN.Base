@@ -1,3 +1,5 @@
+/// @file Der.hpp
+/// @brief Strict ASN.1 DER element parsing and encoding primitives.
 #pragma once
 
 #include <NGIN/Containers/Vector.hpp>
@@ -36,6 +38,7 @@ namespace NGIN::Crypto::Encoding
         bool         constructed {false};
         NGIN::UInt32 number {0};
 
+        /// @brief Compares the tag class, constructed flag, and numeric tag.
         [[nodiscard]] constexpr bool operator==(const DerTag&) const noexcept = default;
     };
 
@@ -65,13 +68,19 @@ namespace NGIN::Crypto::Encoding
     class NGIN_CRYPTO_API DerReader
     {
     public:
+        /// @brief Constructs a reader over borrowed DER input.
+        /// @warning The input bytes must outlive the reader and all returned element views.
         explicit DerReader(ConstByteSpan input, DerReadOptions options = {}) noexcept;
 
-        [[nodiscard]] bool           IsAtEnd() const noexcept;
+        /// @brief Returns whether the input has been consumed exactly.
+        [[nodiscard]] bool IsAtEnd() const noexcept;
+        /// @brief Returns the number of unread bytes.
         [[nodiscard]] NGIN::UIntSize Remaining() const noexcept;
 
+        /// @brief Reads and validates the next complete DER TLV element.
         [[nodiscard]] CryptoExpected<DerElement> ReadElement() noexcept;
-        [[nodiscard]] CryptoExpected<DerReader>  EnterConstructed(const DerElement& element) const noexcept;
+        /// @brief Creates a nested reader over a constructed element's value bytes.
+        [[nodiscard]] CryptoExpected<DerReader> EnterConstructed(const DerElement& element) const noexcept;
 
     private:
         DerReader(ConstByteSpan input, DerReadOptions options, NGIN::UIntSize depth) noexcept;
@@ -82,6 +91,7 @@ namespace NGIN::Crypto::Encoding
         NGIN::UIntSize m_depth {0};
     };
 
+    /// @brief Creates a universal-class DER tag.
     [[nodiscard]] constexpr DerTag MakeDerUniversalTag(DerUniversalTag tag, bool constructed = false) noexcept
     {
         return DerTag {
@@ -91,26 +101,40 @@ namespace NGIN::Crypto::Encoding
         };
     }
 
+    /// @brief Returns whether an element has the requested universal tag and constructed state.
     [[nodiscard]] NGIN_CRYPTO_API bool IsDerUniversalElement(
             const DerElement& element, DerUniversalTag tag, bool constructed = false) noexcept;
 
+    /// @brief Validates a DER INTEGER and returns its canonical signed big-endian bytes.
     [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<ConstByteSpan> ReadDerInteger(const DerElement& element) noexcept;
-    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<DerBitString>  ReadDerBitString(const DerElement& element) noexcept;
+    /// @brief Validates and returns the contents of a DER BIT STRING.
+    [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<DerBitString> ReadDerBitString(const DerElement& element) noexcept;
+    /// @brief Validates a DER OCTET STRING and returns its value bytes.
     [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<ConstByteSpan> ReadDerOctetString(const DerElement& element) noexcept;
+    /// @brief Decodes a DER OBJECT IDENTIFIER into its numeric arcs.
     [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<NGIN::Containers::Vector<NGIN::UInt32>> ReadDerObjectIdentifier(
             const DerElement& element);
+    /// @brief Creates a nested reader for a DER SEQUENCE element.
     [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<DerReader> ReadDerSequence(
             const DerReader& parent, const DerElement& element) noexcept;
+    /// @brief Creates a nested reader for a DER SET element.
     [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<DerReader> ReadDerSet(
             const DerReader& parent, const DerElement& element) noexcept;
 
+    /// @brief Encodes a complete DER TLV element.
     [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<ByteBuffer> EncodeDerElement(DerTag tag, ConstByteSpan value);
+    /// @brief Encodes canonical signed big-endian bytes as a DER INTEGER.
     [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<ByteBuffer> EncodeDerInteger(ConstByteSpan value);
+    /// @brief Encodes bytes and an unused-bit count as a DER BIT STRING.
     [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<ByteBuffer> EncodeDerBitString(
             NGIN::UInt8 unusedBitCount, ConstByteSpan bytes);
+    /// @brief Encodes bytes as a DER OCTET STRING.
     [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<ByteBuffer> EncodeDerOctetString(ConstByteSpan value);
+    /// @brief Encodes numeric arcs as a DER OBJECT IDENTIFIER.
     [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<ByteBuffer> EncodeDerObjectIdentifier(
             std::span<const NGIN::UInt32> arcs);
+    /// @brief Wraps concatenated encoded child elements in a DER SEQUENCE.
     [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<ByteBuffer> EncodeDerSequence(ConstByteSpan encodedChildren);
+    /// @brief Wraps concatenated encoded child elements in a DER SET.
     [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<ByteBuffer> EncodeDerSet(ConstByteSpan encodedChildren);
 }// namespace NGIN::Crypto::Encoding

@@ -1,3 +1,5 @@
+/// @file PrivateKeyInfo.hpp
+/// @brief PKCS#8 private-key envelope parsing, writing, encryption, and typed import.
 #pragma once
 
 #include <NGIN/Crypto/Asymmetric/Ecdsa.hpp>
@@ -49,31 +51,42 @@ namespace NGIN::Crypto::Keys
         NGIN::UIntSize maxPlaintextBytes {1u << 20};
     };
 
+    /// @brief Parses a DER PKCS#8 PrivateKeyInfo envelope.
     [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<PrivateKeyInfo> ParsePrivateKeyInfo(ConstByteSpan der);
+    /// @brief Writes raw private-key bytes into a DER PKCS#8 PrivateKeyInfo envelope.
     [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<ByteBuffer> WritePrivateKeyInfo(
             KeyAlgorithm algorithm, ConstByteSpan privateKey);
 
+    /// @brief Parses a DER PKCS#8 EncryptedPrivateKeyInfo envelope without decrypting it.
     [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<EncryptedPrivateKeyInfo> ParseEncryptedPrivateKeyInfo(ConstByteSpan der);
+    /// @brief Writes an encrypted payload and algorithm identifier as EncryptedPrivateKeyInfo DER.
     [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<ByteBuffer> WriteEncryptedPrivateKeyInfo(
             const EncryptedPrivateKeyAlgorithmIdentifier& encryptionAlgorithm,
-            ConstByteSpan encryptedData);
+            ConstByteSpan                                 encryptedData);
+    /// @brief Decrypts a supported PBES2 EncryptedPrivateKeyInfo and parses its plaintext envelope.
     [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<PrivateKeyInfo> DecryptEncryptedPrivateKeyInfo(
             const NGIN::Crypto::Backend::CryptoContext& context,
             const EncryptedPrivateKeyInfo&              encryptedPrivateKeyInfo,
             NGIN::Crypto::Memory::SecretView            password,
-            const EncryptedPrivateKeyDecryptOptions&     options = {});
+            const EncryptedPrivateKeyDecryptOptions&    options = {});
 
+    /// @brief Imports an Ed25519 private key from a matching PKCS#8 envelope.
     [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<NGIN::Crypto::Asymmetric::Ed25519PrivateKey> ImportEd25519PrivateKey(
             const PrivateKeyInfo& privateKeyInfo) noexcept;
+    /// @brief Imports an X25519 private key from a matching PKCS#8 envelope.
     [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<NGIN::Crypto::Asymmetric::X25519PrivateKey> ImportX25519PrivateKey(
             const PrivateKeyInfo& privateKeyInfo) noexcept;
+    /// @brief Imports an ECDSA P-256 private key from a matching PKCS#8 envelope.
     [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<NGIN::Crypto::Asymmetric::EcdsaP256PrivateKey> ImportEcdsaP256PrivateKey(
             const PrivateKeyInfo& privateKeyInfo) noexcept;
 
+    /// @brief Exports an Ed25519 private key as an in-memory PKCS#8 representation.
     [[nodiscard]] NGIN_CRYPTO_API PrivateKeyInfo ExportPrivateKeyInfo(
             const NGIN::Crypto::Asymmetric::Ed25519PrivateKey& privateKey);
+    /// @brief Exports an X25519 private key as an in-memory PKCS#8 representation.
     [[nodiscard]] NGIN_CRYPTO_API PrivateKeyInfo ExportPrivateKeyInfo(
             const NGIN::Crypto::Asymmetric::X25519PrivateKey& privateKey);
+    /// @brief Exports an ECDSA P-256 private key as an in-memory PKCS#8 representation.
     [[nodiscard]] NGIN_CRYPTO_API PrivateKeyInfo ExportPrivateKeyInfo(
             const NGIN::Crypto::Asymmetric::EcdsaP256PrivateKey& privateKey);
 }// namespace NGIN::Crypto::Keys

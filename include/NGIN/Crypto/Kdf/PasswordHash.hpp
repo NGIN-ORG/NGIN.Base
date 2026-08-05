@@ -1,3 +1,5 @@
+/// @file PasswordHash.hpp
+/// @brief Argon2id password hashing and PHC-string verification.
 #pragma once
 
 #include <NGIN/Crypto/Backend/CryptoContext.hpp>
@@ -22,23 +24,28 @@ namespace NGIN::Crypto::Kdf
     class PasswordHashString
     {
     public:
+        /// @brief Constructs an empty encoded hash.
         PasswordHashString() = default;
 
+        /// @brief Takes ownership of a PHC-style encoded hash.
         explicit PasswordHashString(std::string value) noexcept
             : m_value {std::move(value)}
         {
         }
 
+        /// @brief Returns a view of the encoded hash.
         [[nodiscard]] std::string_view Value() const noexcept
         {
             return m_value;
         }
 
+        /// @brief Returns the owned encoded hash string.
         [[nodiscard]] const std::string& String() const noexcept
         {
             return m_value;
         }
 
+        /// @brief Returns whether the encoded hash is empty.
         [[nodiscard]] bool Empty() const noexcept
         {
             return m_value.empty();

@@ -1,3 +1,5 @@
+/// @file AlgorithmSet.hpp
+/// @brief Declarative crypto requirements used during backend selection.
 #pragma once
 
 #include <NGIN/Crypto/Backend/BackendCapabilities.hpp>
@@ -8,96 +10,114 @@ namespace NGIN::Crypto::Backend
     class AlgorithmSet
     {
     public:
+        /// @brief Constructs an empty requirement set.
         constexpr AlgorithmSet() noexcept = default;
 
+        /// @brief Adds secure random generation to the requirement set.
         constexpr AlgorithmSet& RequireRandom() noexcept
         {
             m_requiresRandom = true;
             return *this;
         }
 
+        /// @brief Requires a hash algorithm.
         constexpr AlgorithmSet& Require(HashAlgorithm algorithm) noexcept
         {
             m_required.Enable(algorithm);
             return *this;
         }
 
+        /// @brief Requires a message-authentication algorithm.
         constexpr AlgorithmSet& Require(MacAlgorithm algorithm) noexcept
         {
             m_required.Enable(algorithm);
             return *this;
         }
 
+        /// @brief Requires a key-derivation algorithm.
         constexpr AlgorithmSet& Require(KdfAlgorithm algorithm) noexcept
         {
             m_required.Enable(algorithm);
             return *this;
         }
 
+        /// @brief Requires an authenticated-encryption algorithm.
         constexpr AlgorithmSet& Require(AeadAlgorithm algorithm) noexcept
         {
             m_required.Enable(algorithm);
             return *this;
         }
 
+        /// @brief Requires a key-agreement algorithm.
         constexpr AlgorithmSet& Require(KeyAgreementAlgorithm algorithm) noexcept
         {
             m_required.Enable(algorithm);
             return *this;
         }
 
+        /// @brief Requires an asymmetric-encryption algorithm.
         constexpr AlgorithmSet& Require(AsymmetricEncryptionAlgorithm algorithm) noexcept
         {
             m_required.Enable(algorithm);
             return *this;
         }
 
+        /// @brief Requires a signature algorithm.
         constexpr AlgorithmSet& Require(SignatureAlgorithm algorithm) noexcept
         {
             m_required.Enable(algorithm);
             return *this;
         }
 
+        /// @brief Returns whether secure random generation is required.
         [[nodiscard]] constexpr bool RequiresRandom() const noexcept
         {
             return m_requiresRandom;
         }
 
+        /// @brief Returns whether a hash algorithm is required.
         [[nodiscard]] constexpr bool Requires(HashAlgorithm algorithm) const noexcept
         {
             return m_required.Supports(algorithm);
         }
 
+        /// @brief Returns whether a message-authentication algorithm is required.
         [[nodiscard]] constexpr bool Requires(MacAlgorithm algorithm) const noexcept
         {
             return m_required.Supports(algorithm);
         }
 
+        /// @brief Returns whether a key-derivation algorithm is required.
         [[nodiscard]] constexpr bool Requires(KdfAlgorithm algorithm) const noexcept
         {
             return m_required.Supports(algorithm);
         }
 
+        /// @brief Returns whether an authenticated-encryption algorithm is required.
         [[nodiscard]] constexpr bool Requires(AeadAlgorithm algorithm) const noexcept
         {
             return m_required.Supports(algorithm);
         }
 
+        /// @brief Returns whether a key-agreement algorithm is required.
         [[nodiscard]] constexpr bool Requires(KeyAgreementAlgorithm algorithm) const noexcept
         {
             return m_required.Supports(algorithm);
         }
 
+        /// @brief Returns whether an asymmetric-encryption algorithm is required.
         [[nodiscard]] constexpr bool Requires(AsymmetricEncryptionAlgorithm algorithm) const noexcept
         {
             return m_required.Supports(algorithm);
         }
 
+        /// @brief Returns whether a signature algorithm is required.
         [[nodiscard]] constexpr bool Requires(SignatureAlgorithm algorithm) const noexcept
         {
             return m_required.Supports(algorithm);
         }
 
+        /// @brief Returns whether a backend capability set satisfies every requirement.
         [[nodiscard]] constexpr bool IsSatisfiedBy(const BackendCapabilities& capabilities) const noexcept
         {
             return (!m_requiresRandom || capabilities.SupportsRandom()) &&

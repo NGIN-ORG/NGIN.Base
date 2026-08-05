@@ -1,3 +1,5 @@
+/// @file KeyFormat.hpp
+/// @brief Mappings between DER key algorithms and operation algorithms.
 #pragma once
 
 #include <NGIN/Containers/Vector.hpp>
@@ -26,12 +28,16 @@ namespace NGIN::Crypto::Keys
         bool                                   hasParameters {false};
     };
 
+    /// @brief Maps a key algorithm to its signature operation algorithm.
     [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<SignatureAlgorithm> ToSignatureAlgorithm(
             KeyAlgorithm algorithm) noexcept;
+    /// @brief Maps a key algorithm to its key-agreement operation algorithm.
     [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<KeyAgreementAlgorithm> ToKeyAgreementAlgorithm(
             KeyAlgorithm algorithm) noexcept;
+    /// @brief Maps a signature operation algorithm to its key algorithm.
     [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<KeyAlgorithm> FromSignatureAlgorithm(
             SignatureAlgorithm algorithm) noexcept;
+    /// @brief Maps a key-agreement operation algorithm to its key algorithm.
     [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<KeyAlgorithm> FromKeyAgreementAlgorithm(
             KeyAgreementAlgorithm algorithm) noexcept;
 }// namespace NGIN::Crypto::Keys

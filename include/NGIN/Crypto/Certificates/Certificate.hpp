@@ -1,3 +1,5 @@
+/// @file Certificate.hpp
+/// @brief Parsed X.509 certificate representation and signature verification.
 #pragma once
 
 #include <NGIN/Containers/Vector.hpp>
@@ -95,8 +97,10 @@ namespace NGIN::Crypto::Certificates
         bool                                                             hasAuthorityKeyIdentifier {false};
     };
 
+    /// @brief Parses a strict DER X.509 certificate into owned fields.
     [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<Certificate> ParseX509Certificate(ConstByteSpan der);
 
+    /// @brief Verifies a certificate's signature using its issuer's public key information.
     [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<void> VerifyCertificateSignature(
             const NGIN::Crypto::Backend::CryptoContext&     context,
             const Certificate&                              certificate,

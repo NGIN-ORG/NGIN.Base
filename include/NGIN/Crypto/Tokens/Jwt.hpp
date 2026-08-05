@@ -1,3 +1,5 @@
+/// @file Jwt.hpp
+/// @brief Compact JWT parsing, claim access, signature verification, and policy validation.
 #pragma once
 
 #include <NGIN/Containers/Vector.hpp>
@@ -77,19 +79,25 @@ namespace NGIN::Crypto::Tokens
         JwtParseOptions                         parseOptions {};
     };
 
+    /// @brief Parses a compact JWT without authenticating its signature or claims.
     [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<JwtCompactToken> ParseJwtCompact(
             std::string_view token,
             JwtParseOptions  options = {});
 
+    /// @brief Returns whether a parsed token contains a named top-level claim.
     [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<bool> HasJwtClaim(
             const JwtCompactToken& token, std::string_view name);
+    /// @brief Reads a named string claim.
     [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<std::string> GetJwtStringClaim(
             const JwtCompactToken& token, std::string_view name);
+    /// @brief Reads a named signed-integer claim.
     [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<NGIN::Int64> GetJwtInt64Claim(
             const JwtCompactToken& token, std::string_view name);
+    /// @brief Reads a named boolean claim.
     [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<bool> GetJwtBoolClaim(
             const JwtCompactToken& token, std::string_view name);
 
+    /// @brief Parses and authenticates a compact JWT, then enforces its validation policy.
     [[nodiscard]] NGIN_CRYPTO_API CryptoExpected<JwtCompactToken> ValidateJwt(
             const NGIN::Crypto::Backend::CryptoContext& context,
             std::string_view                            token,

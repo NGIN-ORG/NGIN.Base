@@ -63,16 +63,19 @@ namespace NGIN::Crypto::Symmetric
         return {};
     }
 
+    /// @brief Returns the required key size for an AEAD algorithm.
     [[nodiscard]] constexpr NGIN::UIntSize AeadKeySize(AeadAlgorithm algorithm) noexcept
     {
         return GetAeadSizes(algorithm).keySize;
     }
 
+    /// @brief Returns the required nonce size for an AEAD algorithm.
     [[nodiscard]] constexpr NGIN::UIntSize AeadNonceSize(AeadAlgorithm algorithm) noexcept
     {
         return GetAeadSizes(algorithm).nonceSize;
     }
 
+    /// @brief Returns the required authentication-tag size for an AEAD algorithm.
     [[nodiscard]] constexpr NGIN::UIntSize AeadTagSize(AeadAlgorithm algorithm) noexcept
     {
         return GetAeadSizes(algorithm).tagSize;
