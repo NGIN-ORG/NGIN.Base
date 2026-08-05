@@ -2,28 +2,56 @@
 /// @brief Safe construction/destruction helpers built atop AllocatorConcept.
 #pragma once
 
-#include <new>
+#include <algorithm>
+#include <cassert>
 #include <cstddef>
+#include <cstring>
+#include <limits>
+#include <new>
+#include <stdexcept>
 #include <type_traits>
 #include <utility>
-#include <stdexcept>
-#include <cassert>
-#include <limits>
 
 #include <NGIN/Memory/AllocatorConcept.hpp>
 
 namespace NGIN::Memory
 {
+    /// @brief Strong-guarantee byte reallocation convenience for NGIN allocators.
+    /// @details On allocation failure the original block remains owned by the caller.
+    template<AllocatorConcept A>
+    [[nodiscard]] void* Reallocate(
+            A&                allocator,
+            void*             pointer,
+            const std::size_t oldSize,
+            const std::size_t newSize,
+            const std::size_t alignment)
+    {
+        if (newSize == 0)
+        {
+            allocator.Deallocate(pointer, oldSize, alignment);
+            return nullptr;
+        }
+        if (!pointer)
+            return allocator.Allocate(newSize, alignment);
+
+        void* replacement = allocator.Allocate(newSize, alignment);
+        if (!replacement)
+            return nullptr;
+        std::memcpy(replacement, pointer, (std::min) (oldSize, newSize));
+        allocator.Deallocate(pointer, oldSize, alignment);
+        return replacement;
+    }
+
     namespace detail
     {
         struct ArrayHeader
         {
-            void*         rawBase {nullptr};      // pointer returned by allocator (must be deallocated)
-            std::size_t   rawSizeInBytes {0};     // bytes passed to Allocate for rawBase
-            std::size_t   rawAlignmentInBytes {0};// alignment passed to Allocate for rawBase
-            std::size_t   count {0};              // number of elements
-            std::uint32_t magic {0};              // sentinel for verification
-            static constexpr std::uint32_t MAGIC = 0xA11A0C42u;// 'A','ll','oc' stylized
+            void*                          rawBase {nullptr};      // pointer returned by allocator (must be deallocated)
+            std::size_t                    rawSizeInBytes {0};     // bytes passed to Allocate for rawBase
+            std::size_t                    rawAlignmentInBytes {0};// alignment passed to Allocate for rawBase
+            std::size_t                    count {0};              // number of elements
+            std::uint32_t                  magic {0};              // sentinel for verification
+            static constexpr std::uint32_t MAGIC = 0xA11A0C42u;    // 'A','ll','oc' stylized
         };
     }// namespace detail
 
@@ -76,16 +104,16 @@ namespace NGIN::Memory
         void*             raw            = alloc.Allocate(rawSizeInBytes, AAlign);
         if (!raw)
             throw std::bad_alloc();
-        std::byte* base            = static_cast<std::byte*>(raw);
-        std::uintptr_t afterHeader = reinterpret_cast<std::uintptr_t>(base + sizeof(detail::ArrayHeader));
-        std::uintptr_t alignedAddr = (afterHeader + (AAlign - 1)) & ~(static_cast<std::uintptr_t>(AAlign) - 1);
-        T* arr                     = reinterpret_cast<T*>(alignedAddr);
-        auto* header               = reinterpret_cast<detail::ArrayHeader*>(arr) - 1;// header lives immediately before array
-        header->rawBase            = raw;
-        header->rawSizeInBytes     = rawSizeInBytes;
+        std::byte*     base         = static_cast<std::byte*>(raw);
+        std::uintptr_t afterHeader  = reinterpret_cast<std::uintptr_t>(base + sizeof(detail::ArrayHeader));
+        std::uintptr_t alignedAddr  = (afterHeader + (AAlign - 1)) & ~(static_cast<std::uintptr_t>(AAlign) - 1);
+        T*             arr          = reinterpret_cast<T*>(alignedAddr);
+        auto*          header       = reinterpret_cast<detail::ArrayHeader*>(arr) - 1;// header lives immediately before array
+        header->rawBase             = raw;
+        header->rawSizeInBytes      = rawSizeInBytes;
         header->rawAlignmentInBytes = AAlign;
-        header->count              = count;
-        header->magic              = detail::ArrayHeader::MAGIC;
+        header->count               = count;
+        header->magic               = detail::ArrayHeader::MAGIC;
         return arr;
     }
 

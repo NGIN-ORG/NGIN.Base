@@ -186,7 +186,7 @@ namespace NGIN
             requires Units::QuantityOf<TIME, DesiredUnit>
         [[nodiscard]] BenchmarkResult<DesiredUnit> Run()
         {
-            assert(("Run() called but m_callable is empty", m_callable));
+            assert(m_callable && "Run() called but m_callable is empty");
 
             BenchmarkResult<DesiredUnit> result;
             result.name          = name;

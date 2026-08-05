@@ -3,7 +3,9 @@
 #include <NGIN/Utilities/Expected.hpp>
 
 #include <algorithm>
+#include <array>
 #include <new>
+#include <vector>
 
 namespace NGIN::IO
 {
@@ -34,21 +36,24 @@ namespace NGIN::IO
                 const FileSystemCapabilities& lhs, const FileSystemCapabilities& rhs) noexcept
         {
             FileSystemCapabilities out;
-            out.symlinks             = lhs.symlinks && rhs.symlinks;
-            out.hardLinks            = lhs.hardLinks && rhs.hardLinks;
-            out.blockDevices         = lhs.blockDevices && rhs.blockDevices;
-            out.characterDevices     = lhs.characterDevices && rhs.characterDevices;
-            out.fifos                = lhs.fifos && rhs.fifos;
-            out.sockets              = lhs.sockets && rhs.sockets;
-            out.posixModeBits        = lhs.posixModeBits && rhs.posixModeBits;
-            out.ownership            = lhs.ownership && rhs.ownership;
-            out.setIdBits            = lhs.setIdBits && rhs.setIdBits;
-            out.stickyBit            = lhs.stickyBit && rhs.stickyBit;
-            out.fileIdentity         = lhs.fileIdentity && rhs.fileIdentity;
-            out.hardLinkCount        = lhs.hardLinkCount && rhs.hardLinkCount;
-            out.memoryMappedFiles    = lhs.memoryMappedFiles && rhs.memoryMappedFiles;
-            out.nanosecondTimestamps = lhs.nanosecondTimestamps && rhs.nanosecondTimestamps;
-            out.metadataNoFollow     = lhs.metadataNoFollow && rhs.metadataNoFollow;
+            out.symlinks              = lhs.symlinks && rhs.symlinks;
+            out.hardLinks             = lhs.hardLinks && rhs.hardLinks;
+            out.blockDevices          = lhs.blockDevices && rhs.blockDevices;
+            out.characterDevices      = lhs.characterDevices && rhs.characterDevices;
+            out.fifos                 = lhs.fifos && rhs.fifos;
+            out.sockets               = lhs.sockets && rhs.sockets;
+            out.posixModeBits         = lhs.posixModeBits && rhs.posixModeBits;
+            out.ownership             = lhs.ownership && rhs.ownership;
+            out.setIdBits             = lhs.setIdBits && rhs.setIdBits;
+            out.stickyBit             = lhs.stickyBit && rhs.stickyBit;
+            out.fileIdentity          = lhs.fileIdentity && rhs.fileIdentity;
+            out.hardLinkCount         = lhs.hardLinkCount && rhs.hardLinkCount;
+            out.memoryMappedFiles     = lhs.memoryMappedFiles && rhs.memoryMappedFiles;
+            out.nanosecondTimestamps  = lhs.nanosecondTimestamps && rhs.nanosecondTimestamps;
+            out.metadataNoFollow      = lhs.metadataNoFollow && rhs.metadataNoFollow;
+            out.atomicRenameNoReplace = lhs.atomicRenameNoReplace && rhs.atomicRenameNoReplace;
+            out.atomicReplace         = lhs.atomicReplace && rhs.atomicReplace;
+            out.durableReplace        = lhs.durableReplace && rhs.durableReplace;
             return out;
         }
 
@@ -79,6 +84,275 @@ namespace NGIN::IO
             Path joined = base.Join(relativePath.View());
             joined.Normalize();
             return joined;
+        }
+
+        ResultVoid RemoveCopiedPath(IFileSystem& fileSystem, const Path& path) noexcept
+        {
+            auto info = fileSystem.GetInfo(path, MetadataOptions {.symlinkMode = SymlinkMode::DoNotFollow});
+            if (!info.HasValue())
+                return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(info.Error())));
+            if (!info.Value().exists)
+                return {};
+            if (info.Value().type == EntryType::Directory)
+                return fileSystem.RemoveDirectory(path, RemoveOptions {.recursive = true, .ignoreMissing = true});
+            return fileSystem.RemoveFile(path, RemoveOptions {.ignoreMissing = true});
+        }
+
+        struct CopyCleanup
+        {
+            IFileSystem* system {nullptr};
+            Path         path {};
+            bool         active {false};
+
+            ~CopyCleanup()
+            {
+                if (active && system != nullptr)
+                    (void) RemoveCopiedPath(*system, path);
+            }
+
+            void Release() noexcept { active = false; }
+        };
+
+        ResultVoid CopyAcrossFileSystems(
+                IFileSystem&               sourceSystem,
+                const Path&                sourcePath,
+                IFileSystem&               destinationSystem,
+                const Path&                destinationPath,
+                const CopyOptions&         options,
+                std::vector<FileIdentity>& activeDirectories)
+        {
+            auto sourceInfo = sourceSystem.GetInfo(sourcePath, MetadataOptions {.symlinkMode = SymlinkMode::DoNotFollow});
+            if (!sourceInfo.HasValue())
+                return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(sourceInfo.Error())));
+            if (!sourceInfo.Value().exists)
+            {
+                return ResultVoid(NGIN::Utilities::Unexpected<IOError>(
+                        MakeError(IOErrorCode::NotFound, "cross-mount copy source not found", sourcePath, destinationPath)));
+            }
+
+            const bool isSymlink = sourceInfo.Value().type == EntryType::Symlink;
+            if (isSymlink && options.symlinks == CopySymlinkMode::Reject)
+            {
+                return ResultVoid(NGIN::Utilities::Unexpected<IOError>(
+                        MakeError(IOErrorCode::NotSupported, "cross-mount copy rejected a symbolic link", sourcePath, destinationPath)));
+            }
+
+            auto destinationInfo = destinationSystem.GetInfo(
+                    destinationPath, MetadataOptions {.symlinkMode = SymlinkMode::DoNotFollow});
+            if (!destinationInfo.HasValue())
+                return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(destinationInfo.Error())));
+
+            if (isSymlink && options.symlinks == CopySymlinkMode::Preserve)
+            {
+                if (destinationInfo.Value().exists)
+                {
+                    if (!options.overwriteExisting)
+                    {
+                        return ResultVoid(NGIN::Utilities::Unexpected<IOError>(
+                                MakeError(IOErrorCode::AlreadyExists, "destination exists", destinationPath, sourcePath)));
+                    }
+                    auto removed = RemoveCopiedPath(destinationSystem, destinationPath);
+                    if (!removed.HasValue())
+                        return removed;
+                }
+
+                auto target = sourceSystem.ReadSymlink(sourcePath);
+                if (!target.HasValue())
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(target.Error())));
+                return destinationSystem.CreateSymlink(target.Value(), destinationPath);
+            }
+
+            if (isSymlink)
+            {
+                sourceInfo = sourceSystem.GetInfo(sourcePath, MetadataOptions {.symlinkMode = SymlinkMode::Follow});
+                if (!sourceInfo.HasValue())
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(sourceInfo.Error())));
+                if (!sourceInfo.Value().exists || sourceInfo.Value().type == EntryType::Symlink)
+                {
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(
+                            MakeError(IOErrorCode::NotFound, "symbolic-link target does not exist", sourcePath, destinationPath)));
+                }
+            }
+
+            if (sourceInfo.Value().type == EntryType::Directory)
+            {
+                if (!options.recursive)
+                {
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(
+                            MakeError(IOErrorCode::NotSupported, "directory copy requires recursive option", sourcePath, destinationPath)));
+                }
+
+                if (sourceInfo.Value().identity.valid)
+                {
+                    const auto duplicate = std::find_if(activeDirectories.begin(), activeDirectories.end(), [&](const FileIdentity& identity) {
+                        return identity.device == sourceInfo.Value().identity.device && identity.inode == sourceInfo.Value().identity.inode;
+                    });
+                    if (duplicate != activeDirectories.end())
+                    {
+                        return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeError(
+                                IOErrorCode::InvalidPath,
+                                "symbolic-link cycle detected during cross-mount copy",
+                                sourcePath,
+                                destinationPath)));
+                    }
+                    activeDirectories.push_back(sourceInfo.Value().identity);
+                }
+
+                bool createdDestination = false;
+                if (destinationInfo.Value().exists && destinationInfo.Value().type != EntryType::Directory)
+                {
+                    if (!options.overwriteExisting)
+                    {
+                        return ResultVoid(NGIN::Utilities::Unexpected<IOError>(
+                                MakeError(IOErrorCode::AlreadyExists, "destination exists", destinationPath, sourcePath)));
+                    }
+                    auto removed = RemoveCopiedPath(destinationSystem, destinationPath);
+                    if (!removed.HasValue())
+                        return removed;
+                    destinationInfo.Value().exists = false;
+                }
+                if (!destinationInfo.Value().exists)
+                {
+                    auto created = destinationSystem.CreateDirectory(
+                            destinationPath, DirectoryCreateOptions {.recursive = false, .ignoreIfExists = false});
+                    if (!created.HasValue())
+                        return created;
+                    createdDestination = true;
+                }
+
+                auto enumerator = sourceSystem.Enumerate(
+                        sourcePath,
+                        EnumerateOptions {
+                                .recursive          = false,
+                                .includeFiles       = true,
+                                .includeDirectories = true,
+                                .includeSymlinks    = true,
+                        });
+                ResultVoid copied {};
+                if (!enumerator.HasValue())
+                {
+                    copied = ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(enumerator.Error())));
+                }
+                else
+                {
+                    for (;;)
+                    {
+                        auto next = enumerator.Value().Next();
+                        if (!next.HasValue())
+                        {
+                            copied = ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(next.Error())));
+                            break;
+                        }
+                        if (!next.Value().HasEntry())
+                            break;
+                        const auto& entry = next.Value().Entry();
+                        copied            = CopyAcrossFileSystems(
+                                sourceSystem,
+                                entry.path,
+                                destinationSystem,
+                                destinationPath.Join(entry.name.View()),
+                                options,
+                                activeDirectories);
+                        if (!copied.HasValue())
+                            break;
+                    }
+                }
+
+                if (sourceInfo.Value().identity.valid)
+                    activeDirectories.pop_back();
+                if (!copied.HasValue())
+                {
+                    const IOError error = std::move(copied.Error());
+                    if (createdDestination && options.cleanupOnFailure)
+                        (void) RemoveCopiedPath(destinationSystem, destinationPath);
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(error)));
+                }
+
+                if (options.preservePermissions)
+                {
+                    auto permissions = destinationSystem.SetPermissions(
+                            destinationPath, sourceInfo.Value().permissions, SymlinkMode::Follow);
+                    if (!permissions.HasValue())
+                    {
+                        const IOError error = std::move(permissions.Error());
+                        if (createdDestination && options.cleanupOnFailure)
+                            (void) RemoveCopiedPath(destinationSystem, destinationPath);
+                        return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(error)));
+                    }
+                }
+                return {};
+            }
+
+            if (sourceInfo.Value().type != EntryType::File)
+            {
+                return ResultVoid(NGIN::Utilities::Unexpected<IOError>(
+                        MakeError(IOErrorCode::NotSupported, "cross-mount copy is unsupported for this entry type", sourcePath, destinationPath)));
+            }
+
+            FileOpenOptions sourceOpen;
+            sourceOpen.access      = FileAccess::Read;
+            sourceOpen.share       = FileShare::Read;
+            sourceOpen.disposition = FileCreateDisposition::OpenExisting;
+            auto source            = sourceSystem.OpenFile(sourcePath, sourceOpen);
+            if (!source.HasValue())
+                return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(source.Error())));
+
+            FileOpenOptions destinationOpen;
+            destinationOpen.access        = FileAccess::Write;
+            destinationOpen.share         = FileShare::Read;
+            destinationOpen.disposition   = options.overwriteExisting ? FileCreateDisposition::CreateAlways : FileCreateDisposition::CreateNew;
+            const bool destinationExisted = destinationInfo.Value().exists;
+            auto       destination        = destinationSystem.OpenFile(destinationPath, destinationOpen);
+            if (!destination.HasValue())
+                return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(destination.Error())));
+
+            std::array<Byte, 64 * 1024> buffer {};
+            ResultVoid                  copied {};
+            for (;;)
+            {
+                auto read = source.Value().Read(buffer);
+                if (!read.HasValue())
+                {
+                    copied = ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(read.Error())));
+                    break;
+                }
+                if (read.Value() == 0)
+                    break;
+
+                UIntSize written = 0;
+                while (written < read.Value())
+                {
+                    auto write = destination.Value().Write(
+                            std::span<const Byte>(buffer.data() + written, read.Value() - written));
+                    if (!write.HasValue())
+                    {
+                        copied = ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(write.Error())));
+                        break;
+                    }
+                    if (write.Value() == 0)
+                    {
+                        copied = ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeError(
+                                IOErrorCode::EndOfStream, "zero-byte write during cross-mount copy", sourcePath, destinationPath)));
+                        break;
+                    }
+                    written += write.Value();
+                }
+                if (!copied.HasValue())
+                    break;
+            }
+            source.Value().Close();
+            destination.Value().Close();
+
+            if (!copied.HasValue())
+            {
+                const IOError error = std::move(copied.Error());
+                if (!destinationExisted && options.cleanupOnFailure)
+                    (void) RemoveCopiedPath(destinationSystem, destinationPath);
+                return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(error)));
+            }
+            if (options.preservePermissions)
+                return destinationSystem.SetPermissions(destinationPath, sourceInfo.Value().permissions, SymlinkMode::Follow);
+            return {};
         }
 
         class VirtualDirectoryHandle final : public IDirectoryHandle
@@ -568,7 +842,27 @@ namespace NGIN::IO
         return fromResolved.Value().mount->GetFileSystem().Rename(fromResolved.Value().translatedPath, toResolved.Value().translatedPath);
     }
 
-    ResultVoid VirtualFileSystem::ReplaceFile(const Path& source, const Path& destination) noexcept
+    ResultVoid VirtualFileSystem::RenameNoReplace(const Path& from, const Path& to) noexcept
+    {
+        auto fromResolved = ResolvePath(from);
+        if (!fromResolved.HasValue())
+            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(fromResolved.Error())));
+        auto toResolved = ResolvePath(to);
+        if (!toResolved.HasValue())
+            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(toResolved.Error())));
+        if (fromResolved.Value().mount != toResolved.Value().mount)
+        {
+            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(
+                    MakeError(IOErrorCode::CrossDevice, "cross-mount no-replace rename is not supported", from, to)));
+        }
+        if (toResolved.Value().mount->GetMountPoint().readOnly)
+            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::PermissionDenied, "mount is read-only", from, to)));
+        return fromResolved.Value().mount->GetFileSystem().RenameNoReplace(
+                fromResolved.Value().translatedPath, toResolved.Value().translatedPath);
+    }
+
+    ResultVoid VirtualFileSystem::ReplaceFile(
+            const Path& source, const Path& destination, const ReplaceOptions& options) noexcept
     {
         auto sourceResolved = ResolvePath(source);
         if (!sourceResolved.HasValue())
@@ -587,7 +881,7 @@ namespace NGIN::IO
                     MakeError(IOErrorCode::PermissionDenied, "destination mount is read-only", source, destination)));
         }
         return sourceResolved.Value().mount->GetFileSystem().ReplaceFile(
-                sourceResolved.Value().translatedPath, destinationResolved.Value().translatedPath);
+                sourceResolved.Value().translatedPath, destinationResolved.Value().translatedPath, options);
     }
 
     ResultVoid VirtualFileSystem::CopyFile(const Path& from, const Path& to, const CopyOptions& options) noexcept
@@ -604,7 +898,21 @@ namespace NGIN::IO
         {
             return fromResolved.Value().mount->GetFileSystem().CopyFile(fromResolved.Value().translatedPath, toResolved.Value().translatedPath, options);
         }
-        return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::CrossDevice, "cross-mount copy not implemented in v1", from, to)));
+        try
+        {
+            std::vector<FileIdentity> activeDirectories;
+            return CopyAcrossFileSystems(
+                    fromResolved.Value().mount->GetFileSystem(),
+                    fromResolved.Value().translatedPath,
+                    toResolved.Value().mount->GetFileSystem(),
+                    toResolved.Value().translatedPath,
+                    options,
+                    activeDirectories);
+        } catch (const std::bad_alloc&)
+        {
+            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(
+                    MakeError(IOErrorCode::SystemError, "allocation failed during cross-mount copy", from, to)));
+        }
     }
 
     ResultVoid VirtualFileSystem::Move(const Path& from, const Path& to, const CopyOptions& options) noexcept
@@ -617,9 +925,25 @@ namespace NGIN::IO
             return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(toResolved.Error())));
         if (toResolved.Value().mount->GetMountPoint().readOnly)
             return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::PermissionDenied, "destination mount is read-only", from, to)));
-        if (fromResolved.Value().mount != toResolved.Value().mount)
-            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::CrossDevice, "cross-mount move not implemented in v1", from, to)));
-        return fromResolved.Value().mount->GetFileSystem().Move(fromResolved.Value().translatedPath, toResolved.Value().translatedPath, options);
+        if (fromResolved.Value().mount == toResolved.Value().mount)
+            return fromResolved.Value().mount->GetFileSystem().Move(fromResolved.Value().translatedPath, toResolved.Value().translatedPath, options);
+        if (fromResolved.Value().mount->GetMountPoint().readOnly)
+            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::PermissionDenied, "source mount is read-only", from, to)));
+
+        auto copied = CopyFile(from, to, options);
+        if (!copied.HasValue())
+            return copied;
+
+        auto sourceInfo = fromResolved.Value().mount->GetFileSystem().GetInfo(
+                fromResolved.Value().translatedPath, MetadataOptions {.symlinkMode = SymlinkMode::DoNotFollow});
+        if (!sourceInfo.HasValue())
+            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(sourceInfo.Error())));
+        if (sourceInfo.Value().type == EntryType::Directory)
+        {
+            return fromResolved.Value().mount->GetFileSystem().RemoveDirectory(
+                    fromResolved.Value().translatedPath, RemoveOptions {.recursive = true});
+        }
+        return fromResolved.Value().mount->GetFileSystem().RemoveFile(fromResolved.Value().translatedPath);
     }
 
     Result<FileHandle> VirtualFileSystem::OpenFile(const Path& path, const FileOpenOptions& options) noexcept
@@ -811,18 +1135,229 @@ namespace NGIN::IO
             co_await NGIN::Async::DomainFailure(std::move(toResolved).TakeError());
             co_return;
         }
-        if (fromResolved.Value().mount != toResolved.Value().mount)
+        if (toResolved.Value().mount->GetMountPoint().readOnly)
         {
-            co_await NGIN::Async::DomainFailure(MakeError(IOErrorCode::CrossDevice, "cross-mount async copy not implemented", from, to));
+            co_await NGIN::Async::DomainFailure(MakeError(IOErrorCode::PermissionDenied, "destination mount is read-only", from, to));
             co_return;
         }
-        auto* asyncFs = fromResolved.Value().mount->GetAsyncFileSystem();
-        if (!asyncFs)
+        if (fromResolved.Value().mount == toResolved.Value().mount)
         {
-            co_await NGIN::Async::DomainFailure(MakeError(IOErrorCode::Unsupported, "mount has no async filesystem", from, to));
+            auto* asyncFs = fromResolved.Value().mount->GetAsyncFileSystem();
+            if (!asyncFs)
+            {
+                co_await NGIN::Async::DomainFailure(MakeError(IOErrorCode::Unsupported, "mount has no async filesystem", from, to));
+                co_return;
+            }
+            co_await asyncFs->CopyFileAsync(ctx, fromResolved.Value().translatedPath, toResolved.Value().translatedPath, options);
             co_return;
         }
-        co_await asyncFs->CopyFileAsync(ctx, fromResolved.Value().translatedPath, toResolved.Value().translatedPath, options);
+
+        auto* sourceAsync      = fromResolved.Value().mount->GetAsyncFileSystem();
+        auto* destinationAsync = toResolved.Value().mount->GetAsyncFileSystem();
+        if (!sourceAsync || !destinationAsync)
+        {
+            co_await NGIN::Async::DomainFailure(MakeError(IOErrorCode::Unsupported, "cross-mount copy requires async filesystems", from, to));
+            co_return;
+        }
+
+        auto& sourceSystem      = fromResolved.Value().mount->GetFileSystem();
+        auto& destinationSystem = toResolved.Value().mount->GetFileSystem();
+        auto  sourceInfo        = sourceSystem.GetInfo(
+                fromResolved.Value().translatedPath, MetadataOptions {.symlinkMode = SymlinkMode::DoNotFollow});
+        if (!sourceInfo.HasValue())
+        {
+            co_await NGIN::Async::DomainFailure(std::move(sourceInfo.Error()));
+            co_return;
+        }
+        if (!sourceInfo.Value().exists)
+        {
+            co_await NGIN::Async::DomainFailure(MakeError(IOErrorCode::NotFound, "source not found", from, to));
+            co_return;
+        }
+        if (ctx.IsCancellationRequested())
+        {
+            co_await NGIN::Async::Canceled();
+            co_return;
+        }
+
+        if (sourceInfo.Value().type == EntryType::Symlink)
+        {
+            auto copied = CopyFile(from, to, options);
+            if (!copied.HasValue())
+            {
+                co_await NGIN::Async::DomainFailure(std::move(copied.Error()));
+                co_return;
+            }
+            co_return;
+        }
+
+        auto destinationInfo = destinationSystem.GetInfo(
+                toResolved.Value().translatedPath, MetadataOptions {.symlinkMode = SymlinkMode::DoNotFollow});
+        if (!destinationInfo.HasValue())
+        {
+            co_await NGIN::Async::DomainFailure(std::move(destinationInfo.Error()));
+            co_return;
+        }
+
+        if (sourceInfo.Value().type == EntryType::Directory)
+        {
+            if (!options.recursive)
+            {
+                co_await NGIN::Async::DomainFailure(
+                        MakeError(IOErrorCode::NotSupported, "directory copy requires recursive option", from, to));
+                co_return;
+            }
+
+            if (destinationInfo.Value().exists && destinationInfo.Value().type != EntryType::Directory)
+            {
+                if (!options.overwriteExisting)
+                {
+                    co_await NGIN::Async::DomainFailure(MakeError(IOErrorCode::AlreadyExists, "destination exists", from, to));
+                    co_return;
+                }
+                auto removed = RemoveCopiedPath(destinationSystem, toResolved.Value().translatedPath);
+                if (!removed.HasValue())
+                {
+                    co_await NGIN::Async::DomainFailure(std::move(removed.Error()));
+                    co_return;
+                }
+                destinationInfo.Value().exists = false;
+            }
+
+            CopyCleanup cleanup {
+                    .system = &destinationSystem,
+                    .path   = toResolved.Value().translatedPath,
+                    .active = !destinationInfo.Value().exists && options.cleanupOnFailure,
+            };
+            if (!destinationInfo.Value().exists)
+            {
+                auto created = destinationSystem.CreateDirectory(
+                        toResolved.Value().translatedPath, DirectoryCreateOptions {.ignoreIfExists = false});
+                if (!created.HasValue())
+                {
+                    co_await NGIN::Async::DomainFailure(std::move(created.Error()));
+                    co_return;
+                }
+            }
+
+            auto enumerator = sourceSystem.Enumerate(
+                    fromResolved.Value().translatedPath,
+                    EnumerateOptions {
+                            .includeFiles       = true,
+                            .includeDirectories = true,
+                            .includeSymlinks    = true,
+                    });
+            if (!enumerator.HasValue())
+            {
+                co_await NGIN::Async::DomainFailure(std::move(enumerator.Error()));
+                co_return;
+            }
+            for (;;)
+            {
+                if (ctx.IsCancellationRequested())
+                {
+                    co_await NGIN::Async::Canceled();
+                    co_return;
+                }
+                auto next = enumerator.Value().Next();
+                if (!next.HasValue())
+                {
+                    co_await NGIN::Async::DomainFailure(std::move(next.Error()));
+                    co_return;
+                }
+                if (!next.Value().HasEntry())
+                    break;
+                const auto name = next.Value().Entry().name;
+                co_await CopyFileAsync(ctx, from.Join(name.View()), to.Join(name.View()), options);
+            }
+
+            if (options.preservePermissions)
+            {
+                auto permissions = destinationSystem.SetPermissions(
+                        toResolved.Value().translatedPath, sourceInfo.Value().permissions, SymlinkMode::Follow);
+                if (!permissions.HasValue())
+                {
+                    co_await NGIN::Async::DomainFailure(std::move(permissions.Error()));
+                    co_return;
+                }
+            }
+            cleanup.Release();
+            co_return;
+        }
+
+        if (sourceInfo.Value().type != EntryType::File)
+        {
+            co_await NGIN::Async::DomainFailure(
+                    MakeError(IOErrorCode::NotSupported, "cross-mount async copy is unsupported for this entry type", from, to));
+            co_return;
+        }
+
+        FileOpenOptions sourceOptions;
+        sourceOptions.access      = FileAccess::Read;
+        sourceOptions.share       = FileShare::Read;
+        sourceOptions.disposition = FileCreateDisposition::OpenExisting;
+
+        FileOpenOptions destinationOptions;
+        destinationOptions.access      = FileAccess::Write;
+        destinationOptions.share       = FileShare::Read;
+        destinationOptions.disposition = options.overwriteExisting ? FileCreateDisposition::CreateAlways : FileCreateDisposition::CreateNew;
+
+        auto ioContext   = ctx.WithCancellationToken({});
+        auto source      = co_await sourceAsync->OpenFileAsync(ioContext, fromResolved.Value().translatedPath, sourceOptions);
+        auto destination = co_await destinationAsync->OpenFileAsync(
+                ioContext, toResolved.Value().translatedPath, destinationOptions);
+        CopyCleanup cleanup {
+                .system = &destinationSystem,
+                .path   = toResolved.Value().translatedPath,
+                .active = !destinationInfo.Value().exists && options.cleanupOnFailure,
+        };
+
+        std::array<Byte, 64 * 1024> buffer {};
+        for (;;)
+        {
+            if (ctx.IsCancellationRequested())
+            {
+                auto closeSource      = source.CloseAsync(ioContext);
+                auto closeDestination = destination.CloseAsync(ioContext);
+                co_await closeSource;
+                co_await closeDestination;
+                co_await NGIN::Async::Canceled();
+                co_return;
+            }
+
+            const auto read = co_await source.ReadAsync(ioContext, buffer);
+            if (read == 0)
+                break;
+            UIntSize written = 0;
+            while (written < read)
+            {
+                const auto count = co_await destination.WriteAsync(
+                        ioContext, std::span<const Byte>(buffer.data() + written, read - written));
+                if (count == 0)
+                {
+                    co_await NGIN::Async::DomainFailure(
+                            MakeError(IOErrorCode::EndOfStream, "zero-byte write during cross-mount async copy", from, to));
+                    co_return;
+                }
+                written += count;
+            }
+        }
+
+        auto closeSource      = source.CloseAsync(ioContext);
+        auto closeDestination = destination.CloseAsync(ioContext);
+        co_await closeSource;
+        co_await closeDestination;
+        if (options.preservePermissions)
+        {
+            auto permissions = destinationSystem.SetPermissions(
+                    toResolved.Value().translatedPath, sourceInfo.Value().permissions, SymlinkMode::Follow);
+            if (!permissions.HasValue())
+            {
+                co_await NGIN::Async::DomainFailure(std::move(permissions.Error()));
+                co_return;
+            }
+        }
+        cleanup.Release();
         co_return;
     }
 }// namespace NGIN::IO

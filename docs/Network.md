@@ -57,6 +57,10 @@ You probably do not need it when:
   - use `UdpSocket`
 - Need coroutine-based socket async:
   - use a `NetworkDriver` plus the async socket methods
+- Need to parse a numeric address or endpoint:
+  - use `IpAddress::Parse` or `Endpoint::Parse`
+- Need to resolve a hostname or service:
+  - use `Resolve` synchronously or `ResolveAsync` with an owned `ResolverDriver`
 - Need byte-stream semantics on top of TCP:
   - use `TcpByteStream`
 - Need framed messages:
@@ -73,6 +77,43 @@ That means:
 - async socket operations require a `NetworkDriver`
 
 If you forget to run or poll the `NetworkDriver`, async network tasks will not make progress.
+
+## Addresses and endpoints
+
+`IpAddress::Parse` accepts strict decimal IPv4 and RFC-style IPv6 text. IPv4
+components with leading zeroes are rejected so they cannot be mistaken for
+octal notation. IPv6 formatting follows the usual lowercase, longest-zero-run
+canonical form. IPv4-mapped IPv6 addresses format as
+`::ffff:192.0.2.1`.
+
+`Endpoint::Parse` accepts `192.0.2.1:443` for IPv4 and `[2001:db8::1]:443`
+for IPv6. IPv6 endpoints must be bracketed. A numeric IPv6 scope identifier is
+written inside the brackets, for example `[fe80::1%7]:443`, and is propagated
+to the native socket scope field. Interface-name scopes are intentionally not
+accepted because resolving names to indices is an operating-system lookup.
+
+Both values provide allocation-free `TryFormat`, allocating `ToString`, value
+comparison, and explicit hash functors.
+
+## Name resolution
+
+`Resolve` wraps the platform resolver and returns endpoints plus socket type,
+protocol, and canonical-name metadata when requested. Family and socket-type
+filters are explicit. Numeric host and service flags make offline validation
+deterministic. Result order is the platform resolver's order and is not a
+portable sorting guarantee; duplicate equivalent records are removed while
+preserving the first occurrence.
+
+`ResolveError` retains the mapped `NetError`, the original resolver status,
+and its diagnostic text. Synchronous resolution cannot portably interrupt an
+in-flight `getaddrinfo` call; a positive timeout in `ResolveOptions` is honored
+by `ResolveAsync`.
+
+`ResolveAsync` requires both a caller `TaskContext` and an explicitly owned
+`ResolverDriver`. Blocking resolver calls run on the driver's worker pool and
+completion resumes on the caller executor. Cancellation and timeout can return
+before the operating-system lookup finishes; the driver remains responsible
+for its worker until that lookup exits. There is no global resolver pool.
 
 ## Smallest Useful Examples
 

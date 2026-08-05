@@ -314,10 +314,15 @@ namespace NGIN::Net::detail
             return true;
         }
 
+        if (!endpoint.address.IsV6())
+        {
+            return false;
+        }
         sockaddr_in6 addr6 {};
-        addr6.sin6_family = AF_INET6;
-        addr6.sin6_port   = htons(endpoint.port);
-        auto bytes        = endpoint.address.Bytes();
+        addr6.sin6_family   = AF_INET6;
+        addr6.sin6_port     = htons(endpoint.port);
+        addr6.sin6_scope_id = endpoint.scopeId;
+        auto bytes          = endpoint.address.Bytes();
         std::memcpy(&addr6.sin6_addr, bytes.data(), bytes.size());
         std::memcpy(&storage, &addr6, sizeof(addr6));
         length = static_cast<socklen_t>(sizeof(sockaddr_in6));
@@ -344,6 +349,7 @@ namespace NGIN::Net::detail
         std::memcpy(bytes.data(), &addr6.sin6_addr, IpAddress::V6Size);
         endpoint.address = IpAddress(AddressFamily::V6, bytes);
         endpoint.port    = ntohs(addr6.sin6_port);
+        endpoint.scopeId = addr6.sin6_scope_id;
         return endpoint;
     }
 

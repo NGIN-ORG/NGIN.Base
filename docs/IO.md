@@ -250,6 +250,33 @@ options.sortOrder = NGIN::IO::DirectorySortOrder::LexicalPath;
 `LexicalPath` sorts by path. `LexicalName` sorts by name and then by path to keep recursive enumeration deterministic
 when different directories contain entries with the same name.
 
+### Choose rename, replacement, and copy semantics explicitly
+
+`Rename` keeps the platform's replacement-oriented rename behavior. Use `RenameNoReplace` when the destination must
+not already exist. The no-replace check and rename are one atomic operation on supported local filesystems; query
+`FileSystemCapabilities::atomicRenameNoReplace` before depending on that guarantee. Cross-mount rename is never
+atomic and returns `CrossDevice`.
+
+`ReplaceFile` atomically changes the destination name to refer to the source on the same filesystem when
+`atomicReplace` is reported. `ReplaceOptions::flushSource` flushes the source contents before the name change.
+`flushParentDirectory` additionally flushes the destination directory after the name change and is available only
+when `durableReplace` is reported. A failure from the post-replacement directory flush means the rename happened but
+its crash durability could not be confirmed. Windows rejects `flushParentDirectory` before changing either path.
+
+`CopyOptions` makes the remaining policies explicit:
+
+- `overwriteExisting` controls destination conflicts; it defaults to `false`.
+- `recursive` is required for directory trees.
+- `symlinks` can `Preserve`, `Follow`, or `Reject` links and defaults to `Preserve`.
+- `preservePermissions` copies POSIX mode bits or the supported Windows attribute subset.
+- `cleanupOnFailure` removes destination entries created by the failed operation. Existing destinations that were
+  merged into or overwritten cannot be rolled back.
+
+`VirtualFileSystem` supports these policies across mounts. Cross-mount `Move` first completes the copy, then removes
+the source. A copy failure leaves the source untouched. If source deletion fails after a successful copy, both paths
+remain and the deletion error is returned. Async cross-mount copies use async file handles for byte transfer, check
+cancellation between chunks and directory entries, and clean newly created output when canceled.
+
 ### Use atomic writes for replacement-sensitive files
 
 `WriteAllTextAtomic` and `WriteAllBytesAtomic` are overwrite-oriented helpers. They create a temporary file in the
@@ -262,12 +289,11 @@ options.createParentDirectories = true;
 auto wrote = NGIN::IO::WriteAllTextAtomic(fs, NGIN::IO::Path {"cache/state.json"}, text, options);
 ```
 
-These helpers do not offer no-replace semantics. A future filesystem primitive such as `RenameNoReplace` or
-`ReplaceFileOptions` is needed for a race-free no-overwrite operation.
+These helpers are overwrite-oriented. For a race-free create-only publication flow, write the temporary file and
+publish it with `RenameNoReplace`.
 
-`bestEffortDurable` flushes file data through `FileHandle::Flush()` before replacement. Full crash durability of the
-directory entry after replacement is backend- and platform-dependent until the filesystem API can express directory
-sync support.
+`bestEffortDurable` flushes file data through `FileHandle::Flush()` before replacement. For explicit replacement
+durability, call `ReplaceFile` with `ReplaceOptions` and check the backend capabilities described above.
 
 ### Use async only when it fits the rest of your program
 

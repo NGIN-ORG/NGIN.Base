@@ -14,7 +14,7 @@ namespace NGIN::IO
         LocalFileSystem();
         explicit LocalFileSystem(std::shared_ptr<FileSystemDriver> asyncDriver);
 
-        void BindAsyncDriver(std::shared_ptr<FileSystemDriver> asyncDriver) noexcept;
+        void                                                   BindAsyncDriver(std::shared_ptr<FileSystemDriver> asyncDriver) noexcept;
         [[nodiscard]] const std::shared_ptr<FileSystemDriver>& GetAsyncDriver() const noexcept { return m_asyncDriver; }
 
         [[nodiscard]] FileSystemCapabilities GetCapabilities() const noexcept override;
@@ -36,7 +36,8 @@ namespace NGIN::IO
         Result<UInt64> RemoveAll(const Path& path, const RemoveOptions& options = {}) noexcept override;
 
         ResultVoid Rename(const Path& from, const Path& to) noexcept override;
-        ResultVoid ReplaceFile(const Path& source, const Path& destination) noexcept override;
+        ResultVoid RenameNoReplace(const Path& from, const Path& to) noexcept override;
+        ResultVoid ReplaceFile(const Path& source, const Path& destination, const ReplaceOptions& options = {}) noexcept override;
         ResultVoid CopyFile(const Path& from, const Path& to, const CopyOptions& options = {}) noexcept override;
         ResultVoid Move(const Path& from, const Path& to, const CopyOptions& options = {}) noexcept override;
 

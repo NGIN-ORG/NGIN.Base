@@ -134,6 +134,106 @@ TEST_CASE("IO.LocalFileSystem basic read write enumerate", "[IO][LocalFileSystem
     RemoveTempDir(fs, root);
 }
 
+TEST_CASE("IO.LocalFileSystem no-replace rename preserves conflicts", "[IO][LocalFileSystem]")
+{
+    NGIN::IO::LocalFileSystem fs;
+    const auto                root        = MakeTempDir(fs);
+    const auto                source      = root.Join("source.txt");
+    const auto                destination = root.Join("destination.txt");
+    const auto                renamed     = root.Join("renamed.txt");
+    REQUIRE(NGIN::IO::WriteAllText(fs, source, "source").HasValue());
+    REQUIRE(NGIN::IO::WriteAllText(fs, destination, "destination").HasValue());
+
+    REQUIRE(fs.GetCapabilities().atomicRenameNoReplace);
+    auto conflict = fs.RenameNoReplace(source, destination);
+    REQUIRE_FALSE(conflict.HasValue());
+    REQUIRE(conflict.Error().code == NGIN::IO::IOErrorCode::AlreadyExists);
+    REQUIRE(fs.Exists(source).Value());
+    auto destinationText = NGIN::IO::ReadAllText(fs, destination);
+    REQUIRE(destinationText.HasValue());
+    REQUIRE(std::string(destinationText.Value().Data(), destinationText.Value().Size()) == "destination");
+
+    REQUIRE(fs.RenameNoReplace(source, renamed).HasValue());
+    REQUIRE_FALSE(fs.Exists(source).Value());
+    REQUIRE(fs.Exists(renamed).Value());
+    RemoveTempDir(fs, root);
+}
+
+TEST_CASE("IO.LocalFileSystem reports and applies replacement durability", "[IO][LocalFileSystem]")
+{
+    NGIN::IO::LocalFileSystem fs;
+    const auto                root        = MakeTempDir(fs);
+    const auto                source      = root.Join("replacement.txt");
+    const auto                destination = root.Join("current.txt");
+    REQUIRE(NGIN::IO::WriteAllText(fs, source, "new").HasValue());
+    REQUIRE(NGIN::IO::WriteAllText(fs, destination, "old").HasValue());
+    REQUIRE(fs.GetCapabilities().atomicReplace);
+
+    NGIN::IO::ReplaceOptions options;
+    options.flushSource          = true;
+    options.flushParentDirectory = true;
+    auto replaced                = fs.ReplaceFile(source, destination, options);
+#if defined(_WIN32)
+    REQUIRE_FALSE(fs.GetCapabilities().durableReplace);
+    REQUIRE_FALSE(replaced.HasValue());
+    REQUIRE(replaced.Error().code == NGIN::IO::IOErrorCode::Unsupported);
+    REQUIRE(fs.Exists(source).Value());
+    auto current = NGIN::IO::ReadAllText(fs, destination);
+    REQUIRE(current.HasValue());
+    REQUIRE(std::string(current.Value().Data(), current.Value().Size()) == "old");
+#else
+    REQUIRE(fs.GetCapabilities().durableReplace);
+    REQUIRE(replaced.HasValue());
+    REQUIRE_FALSE(fs.Exists(source).Value());
+    auto current = NGIN::IO::ReadAllText(fs, destination);
+    REQUIRE(current.HasValue());
+    REQUIRE(std::string(current.Value().Data(), current.Value().Size()) == "new");
+#endif
+
+    RemoveTempDir(fs, root);
+}
+
+TEST_CASE("IO.LocalFileSystem recursive copy applies symlink and cleanup policies", "[IO][LocalFileSystem]")
+{
+    NGIN::IO::LocalFileSystem fs;
+    const auto                root        = MakeTempDir(fs);
+    const auto                source      = root.Join("source");
+    const auto                destination = root.Join("destination");
+    REQUIRE(fs.CreateDirectories(source.Join("nested")).HasValue());
+    REQUIRE(NGIN::IO::WriteAllText(fs, source.Join("nested/data.txt"), "payload").HasValue());
+    REQUIRE(fs.CreateSymlink(NGIN::IO::Path {"nested/data.txt"}, source.Join("data.sym")).HasValue());
+    REQUIRE(fs.CreateSymlink(NGIN::IO::Path {"missing.txt"}, source.Join("dangling.sym")).HasValue());
+
+    NGIN::IO::CopyOptions recursive;
+    recursive.recursive = true;
+    REQUIRE(fs.CopyFile(source, destination, recursive).HasValue());
+    auto target = fs.ReadSymlink(destination.Join("data.sym"));
+    REQUIRE(target.HasValue());
+    REQUIRE(target.Value().View() == "nested/data.txt");
+    auto danglingTarget = fs.ReadSymlink(destination.Join("dangling.sym"));
+    REQUIRE(danglingTarget.HasValue());
+    REQUIRE(danglingTarget.Value().View() == "missing.txt");
+
+    NGIN::IO::CopyOptions follow;
+    follow.symlinks = NGIN::IO::CopySymlinkMode::Follow;
+    REQUIRE(fs.CopyFile(source.Join("data.sym"), root.Join("followed.txt"), follow).HasValue());
+    auto followed = NGIN::IO::ReadAllText(fs, root.Join("followed.txt"));
+    REQUIRE(followed.HasValue());
+    REQUIRE(std::string(followed.Value().Data(), followed.Value().Size()) == "payload");
+    auto danglingFollow = fs.CopyFile(source.Join("dangling.sym"), root.Join("dangling-followed.txt"), follow);
+    REQUIRE_FALSE(danglingFollow.HasValue());
+    REQUIRE_FALSE(fs.Exists(root.Join("dangling-followed.txt")).Value());
+
+    NGIN::IO::CopyOptions reject;
+    reject.recursive = true;
+    reject.symlinks  = NGIN::IO::CopySymlinkMode::Reject;
+    auto rejected    = fs.CopyFile(source, root.Join("rejected"), reject);
+    REQUIRE_FALSE(rejected.HasValue());
+    REQUIRE_FALSE(fs.Exists(root.Join("rejected")).Value());
+
+    RemoveTempDir(fs, root);
+}
+
 TEST_CASE("IO.LocalFileSystem enumeration supports no-info and deterministic sorting", "[IO][LocalFileSystem]")
 {
     NGIN::IO::LocalFileSystem fs;

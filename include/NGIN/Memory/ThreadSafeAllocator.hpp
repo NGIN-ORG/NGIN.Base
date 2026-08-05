@@ -1,7 +1,7 @@
 #pragma once
 
-#include <utility>
 #include <mutex>
+#include <utility>
 
 #include <NGIN/Memory/AllocatorConcept.hpp>
 namespace NGIN::Memory
@@ -12,7 +12,7 @@ namespace NGIN::Memory
     public:
         ThreadSafeAllocator() = default;
         explicit ThreadSafeAllocator(Inner inner) : m_inner(std::move(inner)) {}
-        [[nodiscard]] void* Allocate(std::size_t n, std::size_t a) noexcept
+        [[nodiscard]] void* Allocate(std::size_t n, std::size_t a)
         {
             std::lock_guard lock(m_lock);
             return m_inner.Allocate(n, a);
@@ -55,7 +55,7 @@ namespace NGIN::Memory
         }
 
     private:
-        mutable Lockable m_lock {};
+        mutable Lockable            m_lock {};
         [[no_unique_address]] Inner m_inner {};
     };
 }// namespace NGIN::Memory

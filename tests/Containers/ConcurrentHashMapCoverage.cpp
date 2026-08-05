@@ -6,7 +6,10 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <atomic>
+#include <chrono>
 #include <cstddef>
+#include <memory>
+#include <thread>
 
 namespace
 {
@@ -49,6 +52,76 @@ namespace
     template<NGIN::Containers::ReclamationPolicy Policy>
     using CountingMap =
             NGIN::Containers::ConcurrentHashMap<int, int, std::hash<int>, std::equal_to<int>, CountingAllocator, Policy, 4>;
+
+    template<NGIN::Containers::ReclamationPolicy Policy>
+    void VerifyPinnedReaderDefersReclamation()
+    {
+        CountingAllocatorStats stats;
+        CountingAllocator      allocator {stats};
+        CountingMap<Policy>    map(8, {}, {}, allocator);
+        REQUIRE(map.Insert(1, 10));
+
+        std::atomic<bool> readerPinned {false};
+        std::atomic<bool> releaseReader {false};
+        std::thread       reader([&]() {
+            map.ForEach([&](const int&, const int&) {
+                readerPinned.store(true, std::memory_order_release);
+                while (!releaseReader.load(std::memory_order_acquire))
+                    std::this_thread::yield();
+            });
+        });
+
+        while (!readerPinned.load(std::memory_order_acquire))
+            std::this_thread::yield();
+        CHECK(map.ActiveReaders() == 1);
+        const auto reclaimedBefore = map.ReclaimedRetired();
+        CHECK_FALSE(map.InsertOrAssign(1, 20));
+        CHECK(map.PendingRetired() > 0);
+        CHECK(map.ReclaimedRetired() == reclaimedBefore);
+        map.Reserve(256);
+        CHECK(map.PendingRetired() > 0);
+
+        releaseReader.store(true, std::memory_order_release);
+        reader.join();
+        CHECK(map.ActiveReaders() == 0);
+        map.Quiesce();
+        CHECK(map.PendingRetired() == 0);
+        CHECK(map.ReclaimedRetired() > reclaimedBefore);
+        CHECK(map.Get(1) == 20);
+    }
+
+    template<NGIN::Containers::ReclamationPolicy Policy>
+    void VerifyDestructionWaitsForReader()
+    {
+        using Map = CountingMap<Policy>;
+        auto map  = std::make_unique<Map>(8);
+        REQUIRE(map->Insert(7, 70));
+        Map* raw = map.get();
+
+        std::atomic<bool> readerPinned {false};
+        std::atomic<bool> releaseReader {false};
+        std::atomic<bool> destroyed {false};
+        std::thread       reader([&]() {
+            raw->ForEach([&](const int&, const int&) {
+                readerPinned.store(true, std::memory_order_release);
+                while (!releaseReader.load(std::memory_order_acquire))
+                    std::this_thread::yield();
+            });
+        });
+        while (!readerPinned.load(std::memory_order_acquire))
+            std::this_thread::yield();
+
+        std::thread destructor([&]() {
+            map.reset();
+            destroyed.store(true, std::memory_order_release);
+        });
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        CHECK_FALSE(destroyed.load(std::memory_order_acquire));
+        releaseReader.store(true, std::memory_order_release);
+        reader.join();
+        destructor.join();
+        CHECK(destroyed.load(std::memory_order_acquire));
+    }
 }// namespace
 
 TEST_CASE("ConcurrentHashMap manual quiesce defers reclamation", "[Containers][ConcurrentHashMap][Coverage]")
@@ -93,7 +166,7 @@ TEST_CASE("ConcurrentHashMap manual quiesce defers clear reclamation", "[Contain
     CHECK(stats.deallocations.load(std::memory_order_relaxed) > deallocationsBeforeClear);
 }
 
-TEST_CASE("ConcurrentHashMap automatic scaffold policies reclaim opportunistically", "[Containers][ConcurrentHashMap][Coverage]")
+TEST_CASE("ConcurrentHashMap automatic policies reclaim opportunistically", "[Containers][ConcurrentHashMap][Coverage]")
 {
     SECTION("LocalEpoch")
     {
@@ -119,6 +192,30 @@ TEST_CASE("ConcurrentHashMap automatic scaffold policies reclaim opportunistical
 
         CHECK_FALSE(map.Insert(1, 20));
         CHECK(stats.deallocations.load(std::memory_order_relaxed) > deallocationsAfterInsert);
+    }
+}
+
+TEST_CASE("ConcurrentHashMap automatic policies defer storage held by pinned readers", "[Containers][ConcurrentHashMap][Coverage]")
+{
+    SECTION("LocalEpoch")
+    {
+        VerifyPinnedReaderDefersReclamation<NGIN::Containers::ReclamationPolicy::LocalEpoch>();
+    }
+    SECTION("HazardPointers")
+    {
+        VerifyPinnedReaderDefersReclamation<NGIN::Containers::ReclamationPolicy::HazardPointers>();
+    }
+}
+
+TEST_CASE("ConcurrentHashMap automatic policy destruction waits for readers", "[Containers][ConcurrentHashMap][Coverage]")
+{
+    SECTION("LocalEpoch")
+    {
+        VerifyDestructionWaitsForReader<NGIN::Containers::ReclamationPolicy::LocalEpoch>();
+    }
+    SECTION("HazardPointers")
+    {
+        VerifyDestructionWaitsForReader<NGIN::Containers::ReclamationPolicy::HazardPointers>();
     }
 }
 

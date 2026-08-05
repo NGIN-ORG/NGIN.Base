@@ -13,32 +13,32 @@ namespace NGIN::Sync
         Mutex& operator=(const Mutex&) = delete;
         ~Mutex()                       = default;
 
-        void Lock()
+        void Lock() noexcept(noexcept(m_mutex.lock()))
         {
             m_mutex.lock();
         }
 
-        void Unlock()
+        void Unlock() noexcept(noexcept(m_mutex.unlock()))
         {
             m_mutex.unlock();
         }
 
-        [[nodiscard]] bool TryLock() noexcept
+        [[nodiscard]] bool TryLock() noexcept(noexcept(m_mutex.try_lock()))
         {
             return m_mutex.try_lock();
         }
 
-        void lock()
+        void lock() noexcept(noexcept(Lock()))
         {
             Lock();
         }
 
-        void unlock()
+        void unlock() noexcept(noexcept(Unlock()))
         {
             Unlock();
         }
 
-        [[nodiscard]] bool try_lock() noexcept
+        [[nodiscard]] bool try_lock() noexcept(noexcept(TryLock()))
         {
             return TryLock();
         }

@@ -1,9 +1,15 @@
 #pragma once
 
+#include <NGIN/Serialization/Core/IncrementalParse.hpp>
 #include <NGIN/Serialization/JSON/JsonParser.hpp>
 
+#include <algorithm>
 #include <concepts>
+#include <new>
+#include <span>
+#include <string>
 #include <string_view>
+#include <utility>
 
 namespace NGIN::Serialization::JSON
 {
@@ -155,7 +161,8 @@ namespace NGIN::Serialization::JSON
                     auto delivered = Deliver(event, handler);
                     if (!delivered)
                         return delivered;
-                    for (const auto child: *value.TryArray())
+                    const auto array = value.TryArray();
+                    for (const auto child: *array)
                     {
                         auto result = Emit(child, handler);
                         if (!result)
@@ -169,7 +176,8 @@ namespace NGIN::Serialization::JSON
                     auto delivered = Deliver(event, handler);
                     if (!delivered)
                         return delivered;
-                    for (const auto member: *value.TryObject())
+                    const auto object = value.TryObject();
+                    for (const auto member: *object)
                     {
                         Event key {.kind = EventKind::Key,
                                    .span = member.Span(),
@@ -190,5 +198,122 @@ namespace NGIN::Serialization::JSON
             diagnostic.message = "Unknown JSON event value";
             return NGIN::Utilities::Unexpected<ParseDiagnostic>(std::move(diagnostic));
         }
+    };
+
+    /// @brief Chunk-fed JSON event parser with stable global limits and source offsets.
+    /// @details Input is retained until a complete document validates, then events are
+    /// emitted exactly once through the contiguous parser. Event text views are valid
+    /// only for the handler invocation and must be copied if retained.
+    template<EventHandler Handler>
+    class IncrementalEventParser
+    {
+    public:
+        IncrementalEventParser(
+                Handler&            handler,
+                ParseScratch&       scratch,
+                const ParseOptions& options = {},
+                const ParseLimits&  limits  = {},
+                const SourceId      source  = {})
+            : m_handler(&handler), m_scratch(&scratch), m_options(options), m_limits(limits), m_source(source)
+        {
+        }
+
+        [[nodiscard]] IncrementalParseResult Feed(const std::string_view chunk)
+        {
+            if (m_complete || m_error)
+                return InvalidState("JSON incremental parser requires Reset before another document");
+            const UIntSize effectiveLimit = (std::min) (m_limits.maxInputBytes, m_limits.maxTotalMemoryBytes);
+            if (chunk.size() > effectiveLimit || m_buffer.size() > effectiveLimit - chunk.size())
+                return Fail(MakeDiagnostic(ParseErrorCode::LimitExceeded, "JSON incremental input limit exceeded"));
+
+            try
+            {
+                m_buffer.append(chunk);
+            } catch (const std::bad_alloc&)
+            {
+                return Fail(MakeDiagnostic(ParseErrorCode::OutOfMemory, "JSON incremental input allocation failed"));
+            }
+            return {.status = IncrementalParseStatus::NeedMoreInput};
+        }
+
+        [[nodiscard]] IncrementalParseResult Feed(const std::span<const Byte> chunk)
+        {
+            return Feed(std::string_view {reinterpret_cast<const char*>(chunk.data()), chunk.size()});
+        }
+
+        [[nodiscard]] IncrementalParseResult Finish()
+        {
+            if (m_complete)
+                return {.status = IncrementalParseStatus::Complete};
+            if (m_error)
+                return {.status = IncrementalParseStatus::Error, .diagnostic = m_diagnostic};
+            return TryComplete();
+        }
+
+        void Reset() noexcept
+        {
+            m_buffer.clear();
+            m_complete = false;
+            m_error    = false;
+            m_diagnostic.reset();
+        }
+
+        [[nodiscard]] UIntSize TotalBytes() const noexcept { return m_buffer.size(); }
+        [[nodiscard]] bool     IsComplete() const noexcept { return m_complete; }
+
+    private:
+        [[nodiscard]] ParseDiagnostic MakeDiagnostic(const ParseErrorCode code, const std::string_view message) const
+        {
+            ParseDiagnostic diagnostic;
+            diagnostic.code            = code;
+            diagnostic.location.offset = m_buffer.size();
+            diagnostic.span            = {.source = m_source, .begin = m_buffer.size(), .end = m_buffer.size()};
+            diagnostic.message         = message;
+            return diagnostic;
+        }
+
+        [[nodiscard]] IncrementalParseResult InvalidState(const std::string_view message)
+        {
+            return Fail(MakeDiagnostic(ParseErrorCode::InvalidDocumentStructure, message));
+        }
+
+        [[nodiscard]] IncrementalParseResult Fail(ParseDiagnostic diagnostic)
+        {
+            m_error      = true;
+            m_diagnostic = std::move(diagnostic);
+            return {.status = IncrementalParseStatus::Error, .diagnostic = m_diagnostic};
+        }
+
+        [[nodiscard]] IncrementalParseResult TryComplete()
+        {
+            const auto input            = BorrowedTextView {m_buffer, m_source};
+            auto       completionLimits = m_limits;
+            completionLimits.maxTotalMemoryBytes -= m_buffer.size();
+            auto validated = ParseBorrowed(input, *m_scratch, m_options, completionLimits);
+            if (!validated)
+                return Fail(std::move(validated.Error()));
+
+            UIntSize eventCount = 0;
+            auto     forwarding = [this, &eventCount](const Event& event) {
+                ++eventCount;
+                return (*m_handler)(event);
+            };
+            auto emitted = EventParser::ParseContiguous(
+                    input, forwarding, *m_scratch, m_options, completionLimits);
+            if (!emitted)
+                return Fail(std::move(emitted.Error()));
+            m_complete = true;
+            return {.status = IncrementalParseStatus::Complete, .eventsProduced = eventCount};
+        }
+
+        Handler*                       m_handler {nullptr};
+        ParseScratch*                  m_scratch {nullptr};
+        ParseOptions                   m_options {};
+        ParseLimits                    m_limits {};
+        SourceId                       m_source {};
+        std::string                    m_buffer {};
+        bool                           m_complete {false};
+        bool                           m_error {false};
+        std::optional<ParseDiagnostic> m_diagnostic {};
     };
 }// namespace NGIN::Serialization::JSON

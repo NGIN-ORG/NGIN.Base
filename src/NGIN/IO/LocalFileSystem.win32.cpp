@@ -8,6 +8,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <winioctl.h>
 
 // Avoid Win32 A/W macro aliases rewriting NGIN API method names below.
 #ifdef CreateDirectory
@@ -29,6 +30,7 @@
 #include <NGIN/Utilities/Expected.hpp>
 
 #include <algorithm>
+#include <array>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -138,6 +140,128 @@ namespace NGIN::IO
             return path;
         }
 
+        struct ReparseDataBuffer
+        {
+            ULONG  tag;
+            USHORT dataLength;
+            USHORT reserved;
+            union
+            {
+                struct
+                {
+                    USHORT substituteNameOffset;
+                    USHORT substituteNameLength;
+                    USHORT printNameOffset;
+                    USHORT printNameLength;
+                    ULONG  flags;
+                    WCHAR  pathBuffer[1];
+                } symbolicLink;
+                struct
+                {
+                    USHORT substituteNameOffset;
+                    USHORT substituteNameLength;
+                    USHORT printNameOffset;
+                    USHORT printNameLength;
+                    WCHAR  pathBuffer[1];
+                } mountPoint;
+            } value;
+        };
+
+        [[nodiscard]] std::wstring NormalizeReparseTarget(std::wstring target)
+        {
+            constexpr std::wstring_view UncPrefix {L"\\??\\UNC\\"};
+            constexpr std::wstring_view DevicePrefix {L"\\??\\"};
+            if (target.starts_with(UncPrefix))
+                return L"\\\\" + target.substr(UncPrefix.size());
+            if (target.starts_with(DevicePrefix))
+                return target.substr(DevicePrefix.size());
+            return target;
+        }
+
+        [[nodiscard]] Result<Path> ReadReparseTarget(const Path& path) noexcept
+        {
+            const HANDLE handle = CreateFileW(
+                    ToNativePath(path).c_str(),
+                    0,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                    nullptr,
+                    OPEN_EXISTING,
+                    FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS,
+                    nullptr);
+            if (handle == INVALID_HANDLE_VALUE)
+                return Result<Path>(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "open reparse point failed", path)));
+
+            alignas(ReparseDataBuffer) std::array<Byte, MAXIMUM_REPARSE_DATA_BUFFER_SIZE> storage {};
+            DWORD                                                                         returned = 0;
+            if (!DeviceIoControl(
+                        handle,
+                        FSCTL_GET_REPARSE_POINT,
+                        nullptr,
+                        0,
+                        storage.data(),
+                        static_cast<DWORD>(storage.size()),
+                        &returned,
+                        nullptr))
+            {
+                const DWORD error = GetLastError();
+                CloseHandle(handle);
+                return Result<Path>(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(error, "read reparse point failed", path)));
+            }
+            CloseHandle(handle);
+
+            if (returned < 8)
+            {
+                return Result<Path>(NGIN::Utilities::Unexpected<IOError>(
+                        MakeError(IOErrorCode::CorruptData, "reparse point data is truncated", path)));
+            }
+            const auto*  data               = reinterpret_cast<const ReparseDataBuffer*>(storage.data());
+            const WCHAR* buffer             = nullptr;
+            USHORT       offsetBytes        = 0;
+            USHORT       lengthBytes        = 0;
+            std::size_t  pathBytesAvailable = 0;
+            if (data->tag == IO_REPARSE_TAG_SYMLINK)
+            {
+                if (data->dataLength < 12)
+                    return Result<Path>(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::CorruptData, "symbolic-link data is truncated", path)));
+                buffer             = data->value.symbolicLink.pathBuffer;
+                offsetBytes        = data->value.symbolicLink.printNameLength == 0
+                                             ? data->value.symbolicLink.substituteNameOffset
+                                             : data->value.symbolicLink.printNameOffset;
+                lengthBytes        = data->value.symbolicLink.printNameLength == 0
+                                             ? data->value.symbolicLink.substituteNameLength
+                                             : data->value.symbolicLink.printNameLength;
+                pathBytesAvailable = data->dataLength - 12u;
+            }
+            else if (data->tag == IO_REPARSE_TAG_MOUNT_POINT)
+            {
+                if (data->dataLength < 8)
+                    return Result<Path>(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::CorruptData, "mount-point data is truncated", path)));
+                buffer             = data->value.mountPoint.pathBuffer;
+                offsetBytes        = data->value.mountPoint.printNameLength == 0
+                                             ? data->value.mountPoint.substituteNameOffset
+                                             : data->value.mountPoint.printNameOffset;
+                lengthBytes        = data->value.mountPoint.printNameLength == 0
+                                             ? data->value.mountPoint.substituteNameLength
+                                             : data->value.mountPoint.printNameLength;
+                pathBytesAvailable = data->dataLength - 8u;
+            }
+            else
+            {
+                return Result<Path>(NGIN::Utilities::Unexpected<IOError>(
+                        MakeError(IOErrorCode::NotSupported, "reparse point is not a symbolic link", path)));
+            }
+
+            if ((offsetBytes % sizeof(WCHAR)) != 0 || (lengthBytes % sizeof(WCHAR)) != 0 ||
+                static_cast<std::size_t>(offsetBytes) + lengthBytes > pathBytesAvailable)
+            {
+                return Result<Path>(NGIN::Utilities::Unexpected<IOError>(
+                        MakeError(IOErrorCode::CorruptData, "reparse point target range is invalid", path)));
+            }
+            const auto offset = static_cast<std::size_t>(offsetBytes / sizeof(WCHAR));
+            const auto length = static_cast<std::size_t>(lengthBytes / sizeof(WCHAR));
+            return Result<Path>(FromNativePath(NormalizeReparseTarget(std::wstring(buffer + offset, length))));
+        }
+
         [[nodiscard]] FileTime ToFileTime(const FILETIME& fileTime) noexcept
         {
             ULARGE_INTEGER value {};
@@ -234,9 +358,9 @@ namespace NGIN::IO
                 return Result<FileInfo>(std::move(info));
             }
 
-            const DWORD flags = FILE_FLAG_BACKUP_SEMANTICS |
-                                (options.symlinkMode == SymlinkMode::DoNotFollow ? FILE_FLAG_OPEN_REPARSE_POINT : 0);
-            HANDLE handle = CreateFileW(
+            const DWORD flags  = FILE_FLAG_BACKUP_SEMANTICS |
+                                 (options.symlinkMode == SymlinkMode::DoNotFollow ? FILE_FLAG_OPEN_REPARSE_POINT : 0);
+            HANDLE      handle = CreateFileW(
                     nativePath.c_str(),
                     FILE_READ_ATTRIBUTES,
                     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
@@ -990,16 +1114,195 @@ namespace NGIN::IO
                 return {};
             return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(error, "RemoveDirectoryW failed", path)));
         }
+
+        ResultVoid CopyPathNative(
+                const Path&                from,
+                const Path&                to,
+                const CopyOptions&         options,
+                std::vector<FileIdentity>& activeDirectories) noexcept
+        {
+            auto sourceInfo = BuildFileInfo(from, MetadataOptions {.symlinkMode = SymlinkMode::DoNotFollow});
+            if (!sourceInfo.HasValue())
+                return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(sourceInfo.Error())));
+            if (!sourceInfo.Value().exists)
+                return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::NotFound, "source not found", from, to)));
+
+            const bool sourceIsSymlink = sourceInfo.Value().type == EntryType::Symlink;
+            if (sourceIsSymlink && options.symlinks == CopySymlinkMode::Reject)
+            {
+                return ResultVoid(NGIN::Utilities::Unexpected<IOError>(
+                        MakeError(IOErrorCode::NotSupported, "copy rejected a symbolic link", from, to)));
+            }
+
+            if (sourceIsSymlink && options.symlinks == CopySymlinkMode::Preserve)
+            {
+                auto existing = BuildFileInfo(to, MetadataOptions {.symlinkMode = SymlinkMode::DoNotFollow});
+                if (!existing.HasValue())
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(existing.Error())));
+                if (existing.Value().exists)
+                {
+                    if (!options.overwriteExisting)
+                        return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::AlreadyExists, "destination exists", to, from)));
+                    auto removed = RemoveAllNative(to, RemoveOptions {.recursive = true, .ignoreMissing = true});
+                    if (!removed.HasValue())
+                        return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(removed.Error())));
+                }
+
+                auto target = ReadReparseTarget(from);
+                if (!target.HasValue())
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(target.Error())));
+                const DWORD attributes = GetFileAttributesW(ToNativePath(from).c_str());
+                DWORD       flags      = attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0
+                                                 ? SYMBOLIC_LINK_FLAG_DIRECTORY
+                                                 : 0;
+#if defined(SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE)
+                flags |= SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE;
+#endif
+                if (CreateSymbolicLinkW(ToNativePath(to).c_str(), ToNativePath(target.Value()).c_str(), flags) != 0)
+                    return {};
+                return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "symbolic-link copy failed", to, from)));
+            }
+
+            if (sourceIsSymlink)
+            {
+                sourceInfo = BuildFileInfo(from, MetadataOptions {.symlinkMode = SymlinkMode::Follow});
+                if (!sourceInfo.HasValue())
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(sourceInfo.Error())));
+                if (!sourceInfo.Value().exists || sourceInfo.Value().type == EntryType::Symlink)
+                {
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(
+                            MakeError(IOErrorCode::NotFound, "symbolic-link target does not exist", from, to)));
+                }
+            }
+
+            if (sourceInfo.Value().type == EntryType::Directory)
+            {
+                if (!options.recursive)
+                {
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(
+                            MakeError(IOErrorCode::NotSupported, "directory copy requires recursive option", from, to)));
+                }
+
+                if (sourceInfo.Value().identity.valid)
+                {
+                    const auto duplicate = std::find_if(activeDirectories.begin(), activeDirectories.end(), [&](const FileIdentity& identity) {
+                        return identity.device == sourceInfo.Value().identity.device && identity.inode == sourceInfo.Value().identity.inode;
+                    });
+                    if (duplicate != activeDirectories.end())
+                    {
+                        return ResultVoid(NGIN::Utilities::Unexpected<IOError>(
+                                MakeError(IOErrorCode::InvalidPath, "symbolic-link cycle detected during copy", from, to)));
+                    }
+                    activeDirectories.push_back(sourceInfo.Value().identity);
+                }
+
+                auto destinationInfo = BuildFileInfo(to, MetadataOptions {.symlinkMode = SymlinkMode::DoNotFollow});
+                if (!destinationInfo.HasValue())
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(destinationInfo.Error())));
+                bool createdDestination = false;
+                if (destinationInfo.Value().exists && destinationInfo.Value().type != EntryType::Directory)
+                {
+                    if (!options.overwriteExisting)
+                        return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::AlreadyExists, "destination exists", to, from)));
+                    auto removed = RemoveAllNative(to, RemoveOptions {.recursive = true, .ignoreMissing = true});
+                    if (!removed.HasValue())
+                        return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(removed.Error())));
+                    destinationInfo.Value().exists = false;
+                }
+                if (!destinationInfo.Value().exists)
+                {
+                    auto created = CreateDirectoryNative(to, DirectoryCreateOptions {.recursive = false, .ignoreIfExists = false});
+                    if (!created.HasValue())
+                        return created;
+                    createdDestination = true;
+                }
+
+                auto entries = EnumerateEntries(
+                        from,
+                        EnumerateOptions {
+                                .recursive          = false,
+                                .includeFiles       = true,
+                                .includeDirectories = true,
+                                .includeSymlinks    = true,
+                        });
+                if (entries.HasValue())
+                {
+                    for (const auto& entry: entries.Value())
+                    {
+                        auto copied = CopyPathNative(entry.path, to.Join(entry.name.View()), options, activeDirectories);
+                        if (!copied.HasValue())
+                        {
+                            entries = Result<std::vector<DirectoryEntry>>(
+                                    NGIN::Utilities::Unexpected<IOError>(std::move(copied.Error())));
+                            break;
+                        }
+                    }
+                }
+
+                if (sourceInfo.Value().identity.valid)
+                    activeDirectories.pop_back();
+                if (!entries.HasValue())
+                {
+                    const IOError error = std::move(entries.Error());
+                    if (createdDestination && options.cleanupOnFailure)
+                        (void) RemoveAllNative(to, RemoveOptions {.recursive = true, .ignoreMissing = true});
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(error)));
+                }
+
+                if (options.preservePermissions)
+                {
+                    const DWORD sourceAttributes = GetFileAttributesW(ToNativePath(from).c_str());
+                    if (sourceAttributes != INVALID_FILE_ATTRIBUTES)
+                    {
+                        constexpr DWORD CopiedAttributes = FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_HIDDEN |
+                                                           FILE_ATTRIBUTE_SYSTEM | FILE_ATTRIBUTE_ARCHIVE |
+                                                           FILE_ATTRIBUTE_NOT_CONTENT_INDEXED;
+                        (void) SetFileAttributesW(ToNativePath(to).c_str(), sourceAttributes & CopiedAttributes);
+                    }
+                }
+                return {};
+            }
+
+            if (sourceInfo.Value().type != EntryType::File)
+            {
+                return ResultVoid(NGIN::Utilities::Unexpected<IOError>(
+                        MakeError(IOErrorCode::NotSupported, "copy is unsupported for this entry type", from, to)));
+            }
+
+            auto destinationInfo = BuildFileInfo(to, MetadataOptions {.symlinkMode = SymlinkMode::DoNotFollow});
+            if (!destinationInfo.HasValue())
+                return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(destinationInfo.Error())));
+            const bool destinationExisted = destinationInfo.Value().exists;
+            const BOOL failIfExists       = options.overwriteExisting ? FALSE : TRUE;
+            if (CopyFileW(ToNativePath(from).c_str(), ToNativePath(to).c_str(), failIfExists) != 0)
+            {
+                if (!options.preservePermissions)
+                {
+                    DWORD attributes = GetFileAttributesW(ToNativePath(to).c_str());
+                    if (attributes != INVALID_FILE_ATTRIBUTES)
+                        (void) SetFileAttributesW(ToNativePath(to).c_str(), attributes & ~FILE_ATTRIBUTE_READONLY);
+                }
+                return {};
+            }
+
+            const DWORD error = GetLastError();
+            if (!destinationExisted && options.cleanupOnFailure)
+                (void) DeleteFileW(ToNativePath(to).c_str());
+            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(error, "CopyFileW failed", from, to)));
+        }
     }// namespace
 
     FileSystemCapabilities LocalFileSystem::GetCapabilities() const noexcept
     {
         FileSystemCapabilities capabilities;
-        capabilities.symlinks             = true;
-        capabilities.hardLinks            = true;
-        capabilities.memoryMappedFiles    = true;
-        capabilities.nanosecondTimestamps = true;
-        capabilities.metadataNoFollow     = true;
+        capabilities.symlinks              = true;
+        capabilities.hardLinks             = true;
+        capabilities.memoryMappedFiles     = true;
+        capabilities.nanosecondTimestamps  = true;
+        capabilities.metadataNoFollow      = true;
+        capabilities.atomicRenameNoReplace = true;
+        capabilities.atomicReplace         = true;
+        capabilities.durableReplace        = false;
         return capabilities;
     }
 
@@ -1053,8 +1356,7 @@ namespace NGIN::IO
 
     Result<Path> LocalFileSystem::ReadSymlink(const Path& path) noexcept
     {
-        return Result<Path>(
-                NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::Unsupported, "read symlink is not implemented on Windows", path)));
+        return ReadReparseTarget(path);
     }
 
     ResultVoid LocalFileSystem::CreateDirectory(const Path& path, const DirectoryCreateOptions& options) noexcept
@@ -1126,8 +1428,46 @@ namespace NGIN::IO
         return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "MoveFileExW failed", from, to)));
     }
 
-    ResultVoid LocalFileSystem::ReplaceFile(const Path& source, const Path& destination) noexcept
+    ResultVoid LocalFileSystem::RenameNoReplace(const Path& from, const Path& to) noexcept
     {
+        if (MoveFileExW(ToNativePath(from).c_str(), ToNativePath(to).c_str(), 0) != 0)
+            return {};
+        return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "MoveFileExW no-replace failed", from, to)));
+    }
+
+    ResultVoid LocalFileSystem::ReplaceFile(
+            const Path& source, const Path& destination, const ReplaceOptions& options) noexcept
+    {
+        if (options.flushParentDirectory)
+        {
+            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeError(
+                    IOErrorCode::Unsupported,
+                    "durable parent-directory replacement is unsupported on Windows",
+                    source,
+                    destination)));
+        }
+
+        if (options.flushSource)
+        {
+            const HANDLE sourceHandle = CreateFileW(
+                    ToNativePath(source).c_str(),
+                    GENERIC_READ,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                    nullptr,
+                    OPEN_EXISTING,
+                    0,
+                    nullptr);
+            if (sourceHandle == INVALID_HANDLE_VALUE)
+                return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "open source for flush failed", source)));
+            if (!FlushFileBuffers(sourceHandle))
+            {
+                const DWORD error = GetLastError();
+                CloseHandle(sourceHandle);
+                return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(error, "FlushFileBuffers failed", source)));
+            }
+            CloseHandle(sourceHandle);
+        }
+
         if (MoveFileExW(ToNativePath(source).c_str(), ToNativePath(destination).c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0)
             return {};
         return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "MoveFileExW replace failed", source, destination)));
@@ -1135,14 +1475,8 @@ namespace NGIN::IO
 
     ResultVoid LocalFileSystem::CopyFile(const Path& from, const Path& to, const CopyOptions& options) noexcept
     {
-        if (!options.recursive)
-        {
-            const BOOL failIfExists = options.overwriteExisting ? FALSE : TRUE;
-            if (CopyFileW(ToNativePath(from).c_str(), ToNativePath(to).c_str(), failIfExists) != 0)
-                return {};
-        }
-        return ResultVoid(
-                NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::NotSupported, "native recursive copy not implemented on Windows", from, to)));
+        std::vector<FileIdentity> activeDirectories;
+        return CopyPathNative(from, to, options, activeDirectories);
     }
 
     Result<FileHandle> LocalFileSystem::OpenFile(const Path& path, const FileOpenOptions& options) noexcept
@@ -1608,11 +1942,11 @@ namespace NGIN::IO
                         *backend,
                         ctx,
                         detail::NativeFileRequest {
-                                      .kind        = detail::NativeFileOperationKind::Read,
-                                      .handleValue = reinterpret_cast<std::uintptr_t>(state->handle),
-                                      .offset      = offset,
-                                      .buffer      = destination.data(),
-                                      .size        = static_cast<UInt32>(destination.size()),
+                                .kind        = detail::NativeFileOperationKind::Read,
+                                .handleValue = reinterpret_cast<std::uintptr_t>(state->handle),
+                                .offset      = offset,
+                                .buffer      = destination.data(),
+                                .size        = static_cast<UInt32>(destination.size()),
                         });
                 if (completion.status == NativeWindowsFileCompletion::Status::Canceled)
                 {
@@ -1665,11 +1999,11 @@ namespace NGIN::IO
                         *backend,
                         ctx,
                         detail::NativeFileRequest {
-                                      .kind        = detail::NativeFileOperationKind::Write,
-                                      .handleValue = reinterpret_cast<std::uintptr_t>(state->handle),
-                                      .offset      = offset,
-                                      .buffer      = const_cast<NGIN::Byte*>(source.data()),
-                                      .size        = static_cast<UInt32>(source.size()),
+                                .kind        = detail::NativeFileOperationKind::Write,
+                                .handleValue = reinterpret_cast<std::uintptr_t>(state->handle),
+                                .offset      = offset,
+                                .buffer      = const_cast<NGIN::Byte*>(source.data()),
+                                .size        = static_cast<UInt32>(source.size()),
                         });
                 if (completion.status == NativeWindowsFileCompletion::Status::Canceled)
                 {

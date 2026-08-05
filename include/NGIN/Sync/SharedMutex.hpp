@@ -13,59 +13,59 @@ namespace NGIN::Sync
         SharedMutex& operator=(const SharedMutex&) = delete;
 
         // Exclusive locking
-        void Lock() noexcept
+        void Lock() noexcept(noexcept(mutex.lock()))
         {
             mutex.lock();
         }
-        bool TryLock() noexcept
+        [[nodiscard]] bool TryLock() noexcept(noexcept(mutex.try_lock()))
         {
             return mutex.try_lock();
         }
-        void Unlock() noexcept
+        void Unlock() noexcept(noexcept(mutex.unlock()))
         {
             mutex.unlock();
         }
 
         // Shared locking
-        void LockShared() noexcept
+        void LockShared() noexcept(noexcept(mutex.lock_shared()))
         {
             mutex.lock_shared();
         }
-        bool TryLockShared() noexcept
+        [[nodiscard]] bool TryLockShared() noexcept(noexcept(mutex.try_lock_shared()))
         {
             return mutex.try_lock_shared();
         }
-        void UnlockShared() noexcept
+        void UnlockShared() noexcept(noexcept(mutex.unlock_shared()))
         {
             mutex.unlock_shared();
         }
 
-        void lock() noexcept
+        void lock() noexcept(noexcept(Lock()))
         {
             Lock();
         }
 
-        void unlock() noexcept
+        void unlock() noexcept(noexcept(Unlock()))
         {
             Unlock();
         }
 
-        [[nodiscard]] bool try_lock() noexcept
+        [[nodiscard]] bool try_lock() noexcept(noexcept(TryLock()))
         {
             return TryLock();
         }
 
-        void lock_shared() noexcept
+        void lock_shared() noexcept(noexcept(LockShared()))
         {
             LockShared();
         }
 
-        void unlock_shared() noexcept
+        void unlock_shared() noexcept(noexcept(UnlockShared()))
         {
             UnlockShared();
         }
 
-        [[nodiscard]] bool try_lock_shared() noexcept
+        [[nodiscard]] bool try_lock_shared() noexcept(noexcept(TryLockShared()))
         {
             return TryLockShared();
         }

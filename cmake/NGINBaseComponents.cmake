@@ -26,6 +26,25 @@ ngin_base_add_component(NGIN.Base.Crypto NGIN::Base::Crypto ${NGIN_BASE_CRYPTO_S
 ngin_base_add_component(NGIN.Base.Net NGIN::Base::Net ${NGIN_BASE_NET_SOURCES})
 ngin_base_add_component(NGIN.Base.Serialization NGIN::Base::Serialization ${NGIN_BASE_SERIALIZATION_SOURCES})
 
+set_target_properties(NGIN.Base.Foundation PROPERTIES
+  NGIN_BASE_COMPONENT_PUBLIC_HEADERS "${NGIN_BASE_FOUNDATION_PUBLIC_HEADERS}"
+)
+set_target_properties(NGIN.Base.Execution PROPERTIES
+  NGIN_BASE_COMPONENT_PUBLIC_HEADERS "${NGIN_BASE_EXECUTION_PUBLIC_HEADERS}"
+)
+set_target_properties(NGIN.Base.IO PROPERTIES
+  NGIN_BASE_COMPONENT_PUBLIC_HEADERS "${NGIN_BASE_IO_PUBLIC_HEADERS}"
+)
+set_target_properties(NGIN.Base.Crypto PROPERTIES
+  NGIN_BASE_COMPONENT_PUBLIC_HEADERS "${NGIN_BASE_CRYPTO_PUBLIC_HEADERS}"
+)
+set_target_properties(NGIN.Base.Net PROPERTIES
+  NGIN_BASE_COMPONENT_PUBLIC_HEADERS "${NGIN_BASE_NET_PUBLIC_HEADERS}"
+)
+set_target_properties(NGIN.Base.Serialization PROPERTIES
+  NGIN_BASE_COMPONENT_PUBLIC_HEADERS "${NGIN_BASE_SERIALIZATION_PUBLIC_HEADERS}"
+)
+
 target_link_libraries(NGIN.Base.Execution INTERFACE NGIN.Base.Foundation)
 target_link_libraries(NGIN.Base.IO INTERFACE NGIN.Base.Foundation NGIN.Base.Execution)
 target_link_libraries(NGIN.Base.Crypto INTERFACE NGIN.Base.Foundation NGIN.Base.IO NGIN.Base.Serialization)

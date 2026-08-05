@@ -106,10 +106,28 @@ namespace NGIN::IO
         FileOpenFlags         flags {FileOpenFlags::None};
     };
 
+    enum class CopySymlinkMode : UInt8
+    {
+        Preserve,
+        Follow,
+        Reject,
+    };
+
     struct CopyOptions
     {
-        bool overwriteExisting {false};
-        bool recursive {false};
+        bool            overwriteExisting {false};
+        bool            recursive {false};
+        CopySymlinkMode symlinks {CopySymlinkMode::Preserve};
+        bool            preservePermissions {true};
+        bool            cleanupOnFailure {true};
+    };
+
+    struct ReplaceOptions
+    {
+        /// Flush the source file contents before the atomic name replacement.
+        bool flushSource {false};
+        /// Flush the destination parent directory after replacement.
+        bool flushParentDirectory {false};
     };
 
     struct RemoveOptions
@@ -265,5 +283,8 @@ namespace NGIN::IO
         bool memoryMappedFiles {false};
         bool nanosecondTimestamps {false};
         bool metadataNoFollow {false};
+        bool atomicRenameNoReplace {false};
+        bool atomicReplace {false};
+        bool durableReplace {false};
     };
 }// namespace NGIN::IO

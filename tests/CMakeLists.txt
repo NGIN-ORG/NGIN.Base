@@ -51,7 +51,42 @@ if(TARGET NGIN.Base.BuildOptions)
 endif()
 target_compile_features(ngin_base_test_config INTERFACE cxx_std_23)
 
+# Compile every public header in an otherwise empty translation unit. Keeping
+# the units independent catches missing direct includes that aggregate include
+# tests cannot detect.
+set(NGIN_BASE_PUBLIC_HEADER_CHECK_SOURCES)
+set(NGIN_BASE_PUBLIC_HEADER_CHECK_DIR "${CMAKE_CURRENT_BINARY_DIR}/PublicHeaderChecks")
+foreach(public_header IN LISTS NGIN_BASE_PUBLIC_CONTRACT_HEADERS)
+  file(RELATIVE_PATH relative_header "${_base_root_dir}/include" "${public_header}")
+  string(REPLACE "\\" "/" relative_header "${relative_header}")
+  string(MAKE_C_IDENTIFIER "${relative_header}" header_identifier)
+  set(check_source "${NGIN_BASE_PUBLIC_HEADER_CHECK_DIR}/${header_identifier}.cpp")
+  file(GENERATE OUTPUT "${check_source}" CONTENT "#include <${relative_header}>\n")
+  list(APPEND NGIN_BASE_PUBLIC_HEADER_CHECK_SOURCES "${check_source}")
+endforeach()
+
+add_library(NGINBasePublicHeaderChecks OBJECT ${NGIN_BASE_PUBLIC_HEADER_CHECK_SOURCES})
+target_link_libraries(NGINBasePublicHeaderChecks PRIVATE ngin_base_test_config NGIN::Base)
+set_target_properties(NGINBasePublicHeaderChecks PROPERTIES
+  FOLDER "Tests/Include"
+  LABELS "Base.Include"
+)
+if(MSVC)
+  target_compile_options(NGINBasePublicHeaderChecks PRIVATE /W4 /permissive-)
+else()
+  target_compile_options(NGINBasePublicHeaderChecks PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 set(NGIN_BASE_DYNAMIC_LIBRARY_TEST_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/IO")
+
+add_executable(NGINBaseProcessFixture
+  ${CMAKE_CURRENT_SOURCE_DIR}/IO/fixtures/ProcessFixture.cpp
+)
+target_compile_features(NGINBaseProcessFixture PRIVATE cxx_std_23)
+set_target_properties(NGINBaseProcessFixture PROPERTIES
+  FOLDER "Tests"
+  RUNTIME_OUTPUT_DIRECTORY "${NGIN_BASE_DYNAMIC_LIBRARY_TEST_OUTPUT_DIR}"
+)
 
 add_library(NGINBaseDynamicLibraryFixture SHARED
   ${CMAKE_CURRENT_SOURCE_DIR}/IO/fixtures/DynamicLibraryFixture.cpp
@@ -172,8 +207,10 @@ if(NGIN_BASE_BUILD_FUZZERS)
   set(NGIN_BASE_SERIALIZATION_FUZZERS
     Serialization/Fuzz/JsonDomFuzzer.cpp
     Serialization/Fuzz/JsonEventFuzzer.cpp
+    Serialization/Fuzz/JsonIncrementalFuzzer.cpp
     Serialization/Fuzz/XmlSemanticFuzzer.cpp
     Serialization/Fuzz/XmlSyntaxFuzzer.cpp
+    Serialization/Fuzz/XmlIncrementalFuzzer.cpp
     Serialization/Fuzz/EscapeEntityFuzzer.cpp
   )
 
@@ -196,4 +233,14 @@ if(NGIN_BASE_BUILD_FUZZERS)
       PROPERTIES LABELS "Serialization.Fuzz"
     )
   endforeach()
+endif()
+
+if(TARGET IO_ProcessTests)
+  add_dependencies(IO_ProcessTests NGINBaseProcessFixture)
+  set_target_properties(IO_ProcessTests PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${NGIN_BASE_DYNAMIC_LIBRARY_TEST_OUTPUT_DIR}"
+  )
+  target_compile_definitions(IO_ProcessTests PRIVATE
+    NGIN_BASE_TEST_PROCESS_FIXTURE_FILENAME="$<TARGET_FILE_NAME:NGINBaseProcessFixture>"
+  )
 endif()

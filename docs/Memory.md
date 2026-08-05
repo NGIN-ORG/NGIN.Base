@@ -89,6 +89,10 @@ Use this as a starting point:
 |------|-------------|
 | General-purpose heap allocations | `SystemAllocator` |
 | Fast temporary allocations with bulk reset | `LinearAllocator` |
+| Fixed-size allocations with bounded capacity | `FixedBlockAllocator` |
+| Mixed small allocations with bounded capacity | `SegregatedPoolAllocator` |
+| Canary, poisoning, and invalid-free diagnostics | `DebugAllocator<Inner>` |
+| Fixed-capacity typed construction | `ObjectPool<T, Capacity>` |
 | “Try A then B” without relying on `Owns()` | `TaggedFallbackAllocator` |
 | “Try A then B” where both can reliably `Owns()` | `FallbackAllocator` |
 | Instrumentation (bytes/counts/peaks) | `Tracking<Inner>` |
@@ -131,6 +135,34 @@ Use cases:
 - frame allocators
 - scratch allocators
 - arena-backed container builds (e.g. build a vector, then discard the arena)
+
+### `FixedBlockAllocator<BlockSize, BlockCount, Alignment, Upstream>`
+
+`FixedBlockAllocator` obtains one slab from its upstream allocator during construction and divides it into a LIFO
+freelist. It accepts requests no larger than `BlockSize` and no more aligned than `Alignment`; exhaustion returns
+`nullptr` and never falls through to an implicit heap. `AvailableBlocks`, `Remaining`, and `InvalidDeallocations`
+provide deterministic diagnostics. The allocator validates slab ownership, block boundaries, and immediate double
+frees. It is deliberately not thread-safe.
+
+### `SegregatedPoolAllocator<BlocksPerClass, Upstream>`
+
+`SegregatedPoolAllocator` owns one slab partitioned into 16, 32, 64, 128, 256, and 512-byte classes. A request uses
+the smallest available fitting class and can spill into a larger class when its preferred freelist is exhausted.
+Requests above 512 bytes or above `alignof(std::max_align_t)` return `nullptr`. There is no hidden system-allocation
+fallback. Wrap the pool in `ThreadSafeAllocator` when multiple threads share it.
+
+### `DebugAllocator<Inner>`
+
+`DebugAllocator` is an opt-in decorator. It writes a header and trailing canary, fills new payloads with `0xCD`,
+fills released payloads with `0xDD`, and tracks live returned pointers so an invalid free can be rejected without
+dereferencing an arbitrary address. `GetStats` reports live, invalid, and corrupted allocation counts. Tracking uses
+a system-backed vector and is not intended for allocation-free hot paths; wrap it explicitly for shared use.
+
+### `ObjectPool<T, Capacity, Upstream>`
+
+`ObjectPool` is the typed layer over `FixedBlockAllocator`. `Create` returns `nullptr` on capacity exhaustion and
+returns the slot to the freelist if a constructor throws. `Destroy` runs the destructor and recycles the slot. The
+pool must outlive all of its objects.
 
 ## Decorator Allocators
 
@@ -216,6 +248,10 @@ This is intentionally a “slow path” compared to templated allocators.
 ## Allocation Helpers
 
 `NGIN::Memory::AllocationHelpers` provides safe object/array construction on top of `AllocatorConcept`.
+
+`Reallocate` provides a byte-oriented strong guarantee: it allocates and copies first, releases the original only on
+success, and leaves the original allocation untouched when the new request cannot be served. Passing a new size of
+zero releases the original and returns `nullptr`.
 
 ### Objects
 
@@ -381,3 +417,31 @@ In release builds, prefer the simplest allocator that meets your requirements (o
 - Using `FallbackAllocator` with allocators that can’t reliably answer `Owns()`. Prefer `TaggedFallbackAllocator`.
 - Assuming erase in a flat hash map only affects the erased element (backward-shift deletion can relocate neighbors).
 - Using a non-thread-safe allocator from multiple threads without a wrapper.
+
+## ConcurrentHashMap reclamation
+
+`ConcurrentHashMap` owns one reclamation domain per shard; it does not use a process-global epoch or hazard registry.
+Reader registrations are scoped to the internal read guard used by `Contains`, `TryGet`, `GetOptional`, and
+`ForEach`. Nested reads therefore create independent registrations, and normal guard destruction deregisters the
+reader.
+
+Choose the reclamation policy according to the synchronization contract:
+
+- `ManualQuiesce` never reclaims retired chains or tables from a writer operation. The caller must invoke `Quiesce`
+  only at an externally established point where no read can be active or start concurrently. Debug builds assert
+  this precondition for readers already active in the map.
+- `LocalEpoch` tags retired storage with a shard-local epoch. A reader pins its entry epoch, so one stalled reader
+  delays every later retirement in that shard. `Poll` advances the epoch and reclaims records older than every active
+  reader.
+- `HazardPointers` publishes two hazards per read: the current table and the immutable bucket-chain head. A stalled
+  reader delays only records matching those hazards; unrelated retired records remain reclaimable.
+
+`Quiesce` on either automatic policy waits for current readers and drains retired storage. Map destruction does the
+same, but object lifetime still requires callers to prevent new operations from starting once destruction begins.
+An abandoned reader guard can therefore stall quiescence indefinitely; the library does not time out and reclaim
+potentially observed storage.
+
+`PendingRetired`, `ReclaimedRetired`, and `ActiveReaders` are deterministic diagnostic counters for tests and
+operational inspection. Counts refer to reclamation records (a record may own an entire cloned chain or table), not
+individual nodes. User nodes and tables use the map's allocator; small reclamation metadata records use the system
+heap so their lifetime is independent of allocator state during deferred destruction.

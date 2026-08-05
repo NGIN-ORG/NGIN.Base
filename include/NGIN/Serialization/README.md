@@ -98,6 +98,32 @@ first duplicate name. Event-handler aborts retain the handler's numeric
 `XML::EventParser::ParseContiguous` deliver typed events from one complete
 contiguous input. Their names intentionally do not claim chunked input.
 
+`JSON::IncrementalEventParser` and `XML::IncrementalEventParser` accept an
+arbitrary sequence of `Feed()` chunks followed by `Finish()`. Their state
+machine is deliberately transactional:
+
+- accepting: `Feed()` retains bytes and returns `NeedMoreInput` without calling
+  the handler
+- finishing: `Finish()` validates the complete retained document, then emits
+  its events exactly once and returns `Complete` with `eventsProduced`
+- complete: repeated `Finish()` is idempotent; a new document requires
+  `Reset()`
+- failed: the diagnostic remains stable until `Reset()`
+
+Validation-before-emission means a token split across chunks cannot cause a
+duplicate callback when more bytes arrive. It also preserves the contiguous
+parser's duplicate-key, trivia, namespace, `DOCTYPE`, UTF-8, escape, entity,
+and diagnostic behavior. The common result enum reserves `EventProduced` for
+future parsers that can safely commit partial events; these transactional
+parsers complete emission during `Finish()`.
+
+The retained source counts against `maxTotalMemoryBytes`, and
+`maxInputBytes`/total-memory accounting spans all feeds. Byte offsets and
+`SourceId` values are relative to the whole accumulated source. Event values
+are callback-scoped—including values assembled from multiple chunks—and must
+be copied if retained. `Reset()` keeps source and scratch capacity, making one
+parser reusable for complete JSONL records.
+
 Handlers are concepts rather than virtual interfaces and return
 `EventAction`. Borrowed unescaped values follow input lifetime; decoded values
 are valid only for the current handler invocation and must be copied if
@@ -116,8 +142,10 @@ spans cover either `/>` or `</name>`. Text values are entity-decoded and
 line-ending-normalized; comments and processing instructions inside elements
 are emitted only when `TriviaPolicy::Preserve` is selected.
 
-JSONL consumers should keep one `ParseScratch` per stream and call
-`JSON::ParseBorrowed` for each complete line.
+JSONL consumers may keep one incremental parser and `ParseScratch` per stream,
+call `Finish()` for each complete line, and `Reset()` before the next record.
+When line framing already provides contiguous records, `JSON::ParseBorrowed`
+remains the lower-overhead path.
 
 ## Building and writing
 

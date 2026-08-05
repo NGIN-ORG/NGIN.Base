@@ -1,6 +1,5 @@
 #pragma once
 
-#include <shared_mutex>
 #include <NGIN/Sync/SharedMutex.hpp>
 
 namespace NGIN::Sync
@@ -19,72 +18,72 @@ namespace NGIN::Sync
 
         /// @brief Acquires a shared read lock, blocking if necessary
         /// @note Multiple threads can hold read locks simultaneously
-        void StartRead() noexcept
+        void StartRead() noexcept(noexcept(LockShared()))
         {
             LockShared();
         }
 
         /// @brief Releases a previously acquired read lock
-        void EndRead() noexcept
+        void EndRead() noexcept(noexcept(UnlockShared()))
         {
             UnlockShared();
         }
 
         /// @brief Attempts to acquire a shared read lock without blocking
-        /// @note Returns immediately if the lock cannot be acquired
-        void TryStartRead() noexcept
+        /// @return true if the read lock was acquired; otherwise false.
+        [[nodiscard]] bool TryStartRead() noexcept(noexcept(TryLockShared()))
         {
-            TryLockShared();
+            return TryLockShared();
         }
 
         /// @brief Acquires an exclusive write lock, blocking if necessary
         /// @note Only one thread can hold a write lock at a time
-        void StartWrite() noexcept
+        void StartWrite() noexcept(noexcept(Lock()))
         {
             Lock();
         }
 
         /// @brief Releases a previously acquired write lock
-        void EndWrite() noexcept
+        void EndWrite() noexcept(noexcept(Unlock()))
         {
             Unlock();
         }
 
         /// @brief Attempts to acquire an exclusive write lock without blocking
-        /// @note Returns immediately if the lock cannot be acquired
-        void TryStartWrite() noexcept
-        {
-            TryLock();
-        }
-
-        void lock() noexcept
-        {
-            StartWrite();
-        }
-
-        void unlock() noexcept
-        {
-            EndWrite();
-        }
-
-        void lock_shared() noexcept
-        {
-            StartRead();
-        }
-
-        void unlock_shared() noexcept
-        {
-            EndRead();
-        }
-
-        [[nodiscard]] bool try_lock() noexcept
+        /// @return true if the write lock was acquired; otherwise false.
+        [[nodiscard]] bool TryStartWrite() noexcept(noexcept(TryLock()))
         {
             return TryLock();
         }
 
-        [[nodiscard]] bool try_lock_shared() noexcept
+        void lock() noexcept(noexcept(StartWrite()))
         {
-            return TryLockShared();
+            StartWrite();
+        }
+
+        void unlock() noexcept(noexcept(EndWrite()))
+        {
+            EndWrite();
+        }
+
+        void lock_shared() noexcept(noexcept(StartRead()))
+        {
+            StartRead();
+        }
+
+        void unlock_shared() noexcept(noexcept(EndRead()))
+        {
+            EndRead();
+        }
+
+        [[nodiscard]] bool try_lock() noexcept(noexcept(TryStartWrite()))
+        {
+            return TryStartWrite();
+        }
+
+        [[nodiscard]] bool try_lock_shared() noexcept(noexcept(TryStartRead()))
+        {
+            return TryStartRead();
         }
     };
 }// namespace NGIN::Sync

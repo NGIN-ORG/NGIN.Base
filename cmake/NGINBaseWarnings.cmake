@@ -27,7 +27,11 @@ endfunction()
 add_library(NGIN.Base.BuildOptions INTERFACE)
 add_library(NGIN::Base::BuildOptions ALIAS NGIN.Base.BuildOptions)
 
-if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+if(MSVC)
+  # Visual Studio can launch several compiler processes inside one project even
+  # when MSBuild itself is single-threaded. Serialize writes to the target PDB.
+  target_compile_options(NGIN.Base.BuildOptions INTERFACE $<BUILD_INTERFACE:/FS>)
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   if(NGIN_BASE_ENABLE_ASAN)
     target_compile_options(NGIN.Base.BuildOptions INTERFACE
       $<BUILD_INTERFACE:-fsanitize=address,undefined>

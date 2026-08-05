@@ -13,32 +13,32 @@ namespace NGIN::Sync
         RecursiveMutex& operator=(const RecursiveMutex&) = delete;
         ~RecursiveMutex()                                = default;
 
-        void Lock() noexcept
+        void Lock() noexcept(noexcept(m_recursiveMutex.lock()))
         {
             m_recursiveMutex.lock();
         }
 
-        void Unlock() noexcept
+        void Unlock() noexcept(noexcept(m_recursiveMutex.unlock()))
         {
             m_recursiveMutex.unlock();
         }
 
-        [[nodiscard]] bool TryLock() noexcept
+        [[nodiscard]] bool TryLock() noexcept(noexcept(m_recursiveMutex.try_lock()))
         {
             return m_recursiveMutex.try_lock();
         }
 
-        void lock() noexcept
+        void lock() noexcept(noexcept(Lock()))
         {
             Lock();
         }
 
-        void unlock() noexcept
+        void unlock() noexcept(noexcept(Unlock()))
         {
             Unlock();
         }
 
-        [[nodiscard]] bool try_lock() noexcept
+        [[nodiscard]] bool try_lock() noexcept(noexcept(TryLock()))
         {
             return TryLock();
         }

@@ -17,6 +17,7 @@ set(NGIN_BASE_EXECUTION_SOURCES
 
 set(NGIN_BASE_IO_SOURCES
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/Path.cpp
+  ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/Process.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/VirtualFileSystem.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/FileSystemDriver.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/FileSystemUtilities.cpp
@@ -53,6 +54,9 @@ set(NGIN_BASE_CRYPTO_SOURCES
 )
 
 set(NGIN_BASE_NET_SOURCES
+  ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/Endpoint.cpp
+  ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/IpAddress.cpp
+  ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/Resolver.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/TcpListener.cpp
 )
 

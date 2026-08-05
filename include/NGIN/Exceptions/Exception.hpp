@@ -1,8 +1,9 @@
 #pragma once
 
-#include <stacktrace>
-#include <optional>
 #include <exception>
+#include <optional>
+#include <stacktrace>
+#include <stdexcept>
 
 #include <NGIN/Text/String.hpp>
 
@@ -18,20 +19,35 @@ namespace NGIN::Exceptions
     class Exception : public std::runtime_error
     {
     public:
+        /// @brief Constructs an exception with an empty message.
+        Exception()
+            : std::runtime_error("")
+        {
+        }
+
         /// @brief Constructor.
-        Exception(const char* message) noexcept : std::runtime_error(message) {}
+        explicit Exception(const char* message)
+            : std::runtime_error(message ? message : "")
+        {
+        }
+
+        /// @brief Constructs an exception by copying an NGIN string message.
+        explicit Exception(const NGIN::Text::String& message)
+            : std::runtime_error(message.CStr())
+        {
+        }
 
         /// @brief Destructor.
         virtual ~Exception() noexcept = default;
 
         /// @brief Returns the exception message.
         /// @return A string containing the exception message.
-        const char* GetMessage() const noexcept { return this->what(); };
+        [[nodiscard]] const char* GetMessage() const noexcept { return this->what(); }
 
         /// @brief Returns the stacktrace of the exception.
         /// @details The stacktrace is lazily initialized and only computed when this method is called.
         /// @return A `std::stacktrace` reference containing the stacktrace of the exception.
-        inline const std::stacktrace& GetStacktrace() const
+        [[nodiscard]] const std::stacktrace& GetStacktrace() const
         {
             if (!stacktrace.has_value())
                 stacktrace = std::stacktrace::current();

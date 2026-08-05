@@ -3,6 +3,13 @@
 #include <NGIN/Crypto/Errors/CryptoError.hpp>
 #include <NGIN/Crypto/Memory/ZeroMemory.hpp>
 
+// The shared OpenSSL-compatible backend retains the low-level EC construction
+// path required by BoringSSL. OpenSSL 3 marks that compatible path deprecated;
+// suppress only its declaration attributes until the providers are split.
+#if !defined(NGIN_BASE_CRYPTO_HAS_BORINGSSL)
+#define OPENSSL_SUPPRESS_DEPRECATED
+#endif
+
 #include <openssl/bn.h>
 #include <openssl/crypto.h>
 #include <openssl/ec.h>
@@ -16,7 +23,7 @@
 #include <openssl/rsa.h>
 #include <openssl/x509.h>
 #if defined(OPENSSL_IS_BORINGSSL)
-#    include <openssl/aead.h>
+#include <openssl/aead.h>
 #endif
 
 #include <cstring>
@@ -199,12 +206,12 @@ namespace NGIN::Crypto::Backend::detail
                            : InternalError();
         }
 
-        using BnPtr        = std::unique_ptr<BIGNUM, decltype(&BN_free)>;
-        using BnContextPtr = std::unique_ptr<BN_CTX, decltype(&BN_CTX_free)>;
-        using EcKeyPtr     = std::unique_ptr<EC_KEY, decltype(&EC_KEY_free)>;
-        using EcPointPtr   = std::unique_ptr<EC_POINT, decltype(&EC_POINT_free)>;
-        using EcdsaSigPtr  = std::unique_ptr<ECDSA_SIG, decltype(&ECDSA_SIG_free)>;
-        using EvpPkeyPtr   = std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)>;
+        using BnPtr         = std::unique_ptr<BIGNUM, decltype(&BN_free)>;
+        using BnContextPtr  = std::unique_ptr<BN_CTX, decltype(&BN_CTX_free)>;
+        using EcKeyPtr      = std::unique_ptr<EC_KEY, decltype(&EC_KEY_free)>;
+        using EcPointPtr    = std::unique_ptr<EC_POINT, decltype(&EC_POINT_free)>;
+        using EcdsaSigPtr   = std::unique_ptr<ECDSA_SIG, decltype(&ECDSA_SIG_free)>;
+        using EvpPkeyPtr    = std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)>;
         using EvpPkeyCtxPtr = std::unique_ptr<EVP_PKEY_CTX, decltype(&EVP_PKEY_CTX_free)>;
 
         [[nodiscard]] CryptoExpected<FixedBytes<32>> Sha256DigestOpenSsl(ConstByteSpan input) noexcept

@@ -33,10 +33,11 @@ namespace NGIN::IO
         virtual ResultVoid     RemoveDirectory(const Path& path, const RemoveOptions& options = {}) noexcept                                                      = 0;
         virtual Result<UInt64> RemoveAll(const Path& path, const RemoveOptions& options = {}) noexcept                                                            = 0;
 
-        virtual ResultVoid Rename(const Path& from, const Path& to) noexcept                                    = 0;
-        virtual ResultVoid ReplaceFile(const Path& source, const Path& destination) noexcept                    = 0;
-        virtual ResultVoid CopyFile(const Path& from, const Path& to, const CopyOptions& options = {}) noexcept = 0;
-        virtual ResultVoid Move(const Path& from, const Path& to, const CopyOptions& options = {}) noexcept     = 0;
+        virtual ResultVoid Rename(const Path& from, const Path& to) noexcept                                                     = 0;
+        virtual ResultVoid RenameNoReplace(const Path& from, const Path& to) noexcept                                            = 0;
+        virtual ResultVoid ReplaceFile(const Path& source, const Path& destination, const ReplaceOptions& options = {}) noexcept = 0;
+        virtual ResultVoid CopyFile(const Path& from, const Path& to, const CopyOptions& options = {}) noexcept                  = 0;
+        virtual ResultVoid Move(const Path& from, const Path& to, const CopyOptions& options = {}) noexcept                      = 0;
 
         virtual Result<FileHandle>          OpenFile(const Path& path, const FileOpenOptions& options) noexcept        = 0;
         virtual Result<DirectoryHandle>     OpenDirectory(const Path& path) noexcept                                   = 0;

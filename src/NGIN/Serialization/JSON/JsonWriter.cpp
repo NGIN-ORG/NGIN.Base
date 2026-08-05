@@ -61,18 +61,33 @@ namespace NGIN::Serialization::JSON
             UIntSize runStart = 0;
             for (UIntSize index = 0; index < value.size(); ++index)
             {
-                const auto byte = static_cast<unsigned char>(value[index]);
+                const auto       byte = static_cast<unsigned char>(value[index]);
                 std::string_view escape;
                 switch (value[index])
                 {
-                    case '"': escape = "\\\""; break;
-                    case '\\': escape = "\\\\"; break;
-                    case '\b': escape = "\\b"; break;
-                    case '\f': escape = "\\f"; break;
-                    case '\n': escape = "\\n"; break;
-                    case '\r': escape = "\\r"; break;
-                    case '\t': escape = "\\t"; break;
-                    default: break;
+                    case '"':
+                        escape = "\\\"";
+                        break;
+                    case '\\':
+                        escape = "\\\\";
+                        break;
+                    case '\b':
+                        escape = "\\b";
+                        break;
+                    case '\f':
+                        escape = "\\f";
+                        break;
+                    case '\n':
+                        escape = "\\n";
+                        break;
+                    case '\r':
+                        escape = "\\r";
+                        break;
+                    case '\t':
+                        escape = "\\t";
+                        break;
+                    default:
+                        break;
                 }
                 if (!escape.empty() || byte < 0x20)
                 {
@@ -162,7 +177,7 @@ namespace NGIN::Serialization::JSON
                     return {};
                 }
                 case ValueKind::Object: {
-                    const auto object = *value.TryObject();
+                    const auto              object = *value.TryObject();
                     std::vector<MemberView> members;
                     try
                     {
@@ -210,8 +225,8 @@ namespace NGIN::Serialization::JSON
     {
         try
         {
-            WriteContext context {.options = options};
-            auto result = WriteValue(context, value, 0);
+            WriteContext context {.output = {}, .options = options};
+            auto         result = WriteValue(context, value, 0);
             if (!result)
                 return NGIN::Utilities::Unexpected<WriteDiagnostic>(std::move(result.Error()));
             return std::move(context.output);

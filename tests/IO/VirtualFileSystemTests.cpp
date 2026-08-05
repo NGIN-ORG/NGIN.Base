@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <NGIN/Async/Cancellation.hpp>
 #include <NGIN/IO/FileSystemDriver.hpp>
 #include <NGIN/IO/FileSystemUtilities.hpp>
 #include <NGIN/IO/LocalFileSystem.hpp>
@@ -75,13 +76,8 @@ TEST_CASE("IO.VirtualFileSystem forwards path-returning operations", "[IO][Virtu
     REQUIRE(weaklyCanonical.Value().View() == virtualRoot.Join("missing/child.txt").LexicallyNormal().View());
 
     auto symlinkTarget = vfs.ReadSymlink(virtualLink);
-#if defined(_WIN32)
-    REQUIRE_FALSE(symlinkTarget.HasValue());
-    REQUIRE(symlinkTarget.Error().code == NGIN::IO::IOErrorCode::Unsupported);
-#else
     REQUIRE(symlinkTarget.HasValue());
     REQUIRE(symlinkTarget.Value().View() == virtualFile.View());
-#endif
 
     auto sameFile = vfs.SameFile(virtualFile, virtualHard);
     REQUIRE(sameFile.HasValue());
@@ -101,6 +97,57 @@ TEST_CASE("IO.VirtualFileSystem forwards path-returning operations", "[IO][Virtu
     REQUIRE(std::string(text.Value().Data(), text.Value().Size()) == "replacement");
 
     RemoveTempDir(backingFs, realRoot);
+}
+
+TEST_CASE("IO.VirtualFileSystem copies and moves across mounts", "[IO][VirtualFileSystem]")
+{
+    NGIN::IO::LocalFileSystem backingFs;
+    const auto                root       = MakeTempDir(backingFs);
+    const auto                sourceRoot = root.Join("source");
+    const auto                targetRoot = root.Join("target");
+    REQUIRE(backingFs.CreateDirectories(sourceRoot).HasValue());
+    REQUIRE(backingFs.CreateDirectories(targetRoot).HasValue());
+
+    NGIN::IO::VirtualFileSystem vfs;
+    vfs.AddMount(std::make_shared<NGIN::IO::LocalMount>(
+            sourceRoot, NGIN::IO::MountPoint {.virtualPrefix = NGIN::IO::Path {"/source"}}));
+    vfs.AddMount(std::make_shared<NGIN::IO::LocalMount>(
+            targetRoot, NGIN::IO::MountPoint {.virtualPrefix = NGIN::IO::Path {"/target"}}));
+
+    const NGIN::IO::Path sourceDirectory {"/source/tree"};
+    const NGIN::IO::Path copiedDirectory {"/target/copied"};
+    REQUIRE(vfs.CreateDirectories(sourceDirectory.Join("nested")).HasValue());
+    REQUIRE(NGIN::IO::WriteAllText(vfs, sourceDirectory.Join("nested/data.txt"), "cross-mount").HasValue());
+    REQUIRE(vfs.CreateSymlink(NGIN::IO::Path {"nested/data.txt"}, sourceDirectory.Join("data.sym")).HasValue());
+
+    NGIN::IO::CopyOptions recursive;
+    recursive.recursive = true;
+    REQUIRE(vfs.CopyFile(sourceDirectory, copiedDirectory, recursive).HasValue());
+    auto copied = NGIN::IO::ReadAllText(vfs, copiedDirectory.Join("nested/data.txt"));
+    REQUIRE(copied.HasValue());
+    REQUIRE(std::string(copied.Value().Data(), copied.Value().Size()) == "cross-mount");
+    auto copiedTarget = vfs.ReadSymlink(copiedDirectory.Join("data.sym"));
+    REQUIRE(copiedTarget.HasValue());
+    REQUIRE(copiedTarget.Value().View() == "nested/data.txt");
+
+    const NGIN::IO::Path moveSource {"/source/move.txt"};
+    const NGIN::IO::Path moveTarget {"/target/move.txt"};
+    REQUIRE(NGIN::IO::WriteAllText(vfs, moveSource, "source").HasValue());
+    REQUIRE(NGIN::IO::WriteAllText(vfs, moveTarget, "conflict").HasValue());
+    auto conflict = vfs.Move(moveSource, moveTarget);
+    REQUIRE_FALSE(conflict.HasValue());
+    REQUIRE(conflict.Error().code == NGIN::IO::IOErrorCode::AlreadyExists);
+    REQUIRE(vfs.Exists(moveSource).Value());
+
+    NGIN::IO::CopyOptions overwrite;
+    overwrite.overwriteExisting = true;
+    REQUIRE(vfs.Move(moveSource, moveTarget, overwrite).HasValue());
+    REQUIRE_FALSE(vfs.Exists(moveSource).Value());
+    auto moved = NGIN::IO::ReadAllText(vfs, moveTarget);
+    REQUIRE(moved.HasValue());
+    REQUIRE(std::string(moved.Value().Data(), moved.Value().Size()) == "source");
+
+    RemoveTempDir(backingFs, root);
 }
 
 TEST_CASE("IO.VirtualFileSystem directory handles scope relative operations", "[IO][VirtualFileSystem]")
@@ -263,4 +310,49 @@ TEST_CASE("IO.VirtualFileSystem async directory handles stay mount scoped", "[IO
     REQUIRE(closeResult.Succeeded());
 
     RemoveTempDir(backingFs, realRoot);
+}
+
+TEST_CASE("IO.VirtualFileSystem async copy crosses mounts and cleans canceled destinations", "[IO][VirtualFileSystem][Async]")
+{
+    NGIN::IO::LocalFileSystem backingFs;
+    const auto                root       = MakeTempDir(backingFs);
+    const auto                sourceRoot = root.Join("async-source");
+    const auto                targetRoot = root.Join("async-target");
+    REQUIRE(backingFs.CreateDirectories(sourceRoot).HasValue());
+    REQUIRE(backingFs.CreateDirectories(targetRoot).HasValue());
+
+    NGIN::IO::VirtualFileSystem vfs;
+    vfs.AddMount(std::make_shared<NGIN::IO::LocalMount>(
+            sourceRoot, NGIN::IO::MountPoint {.virtualPrefix = NGIN::IO::Path {"/source"}}));
+    vfs.AddMount(std::make_shared<NGIN::IO::LocalMount>(
+            targetRoot, NGIN::IO::MountPoint {.virtualPrefix = NGIN::IO::Path {"/target"}}));
+
+    REQUIRE(vfs.CreateDirectories(NGIN::IO::Path {"/source/tree/nested"}).HasValue());
+    REQUIRE(NGIN::IO::WriteAllText(vfs, NGIN::IO::Path {"/source/tree/nested/data.txt"}, "async-cross-mount").HasValue());
+
+    NGIN::IO::FileSystemDriver driver;
+    auto                       ctx = driver.MakeTaskContext();
+    NGIN::IO::CopyOptions      recursive;
+    recursive.recursive = true;
+    auto copyTask       = vfs.CopyFileAsync(
+            ctx, NGIN::IO::Path {"/source/tree"}, NGIN::IO::Path {"/target/tree"}, recursive);
+    auto copied = RunAsyncTask(copyTask, ctx);
+    REQUIRE(copied.Succeeded());
+    auto text = NGIN::IO::ReadAllText(vfs, NGIN::IO::Path {"/target/tree/nested/data.txt"});
+    REQUIRE(text.HasValue());
+    REQUIRE(std::string(text.Value().Data(), text.Value().Size()) == "async-cross-mount");
+
+    NGIN::Async::CancellationSource cancellation;
+    cancellation.Cancel();
+    auto canceledContext = driver.MakeTaskContext(cancellation.GetToken());
+    auto canceledTask    = vfs.CopyFileAsync(
+            canceledContext,
+            NGIN::IO::Path {"/source/tree"},
+            NGIN::IO::Path {"/target/canceled"},
+            recursive);
+    auto canceled = RunAsyncTask(canceledTask, canceledContext);
+    REQUIRE(canceled.IsCanceled());
+    REQUIRE_FALSE(vfs.Exists(NGIN::IO::Path {"/target/canceled"}).Value());
+
+    RemoveTempDir(backingFs, root);
 }

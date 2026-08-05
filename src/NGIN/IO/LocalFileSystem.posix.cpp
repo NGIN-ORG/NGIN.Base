@@ -17,6 +17,9 @@
 #include <string_view>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
+#if defined(__linux__)
+#include <sys/syscall.h>
+#endif
 #include <sys/types.h>
 #include <unistd.h>
 #include <vector>
@@ -1155,6 +1158,30 @@ namespace NGIN::IO
             }
         }
 
+        ResultVoid FlushPath(const Path& path, const bool directory) noexcept
+        {
+            int flags = O_RDONLY;
+#if defined(O_DIRECTORY)
+            if (directory)
+                flags |= O_DIRECTORY;
+#else
+            (void) directory;
+#endif
+            const int descriptor = ::open(ToNativePath(path).CStr(), flags);
+            if (descriptor < 0)
+                return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeErrnoError(errno, "open for durability flush failed", path)));
+
+            if (::fsync(descriptor) != 0)
+            {
+                const int error = errno;
+                ::close(descriptor);
+                return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeErrnoError(error, "fsync failed", path)));
+            }
+            if (::close(descriptor) != 0)
+                return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeErrnoError(errno, "close after fsync failed", path)));
+            return {};
+        }
+
         ResultVoid CopyRegularFile(const Path& from, const Path& to, const CopyOptions& options) noexcept
         {
             MetadataOptions metadataOptions;
@@ -1173,10 +1200,14 @@ namespace NGIN::IO
             else
                 destinationFlags |= O_EXCL;
 
-            const int destinationFd = ::open(
+            struct stat destinationStat {};
+            const bool  destinationExisted = ::lstat(ToNativePath(to).CStr(), &destinationStat) == 0;
+            const int   destinationFd      = ::open(
                     ToNativePath(to).CStr(),
                     destinationFlags,
-                    static_cast<mode_t>(sourceInfo.Value().permissions.nativeBits & 0777u));
+                    options.preservePermissions
+                            ? static_cast<mode_t>(sourceInfo.Value().permissions.nativeBits & 07777u)
+                            : static_cast<mode_t>(0666));
             if (destinationFd < 0)
             {
                 const int error = errno;
@@ -1198,6 +1229,8 @@ namespace NGIN::IO
                     const int error = errno;
                     ::close(destinationFd);
                     ::close(sourceFd);
+                    if (!destinationExisted && options.cleanupOnFailure)
+                        (void) ::unlink(ToNativePath(to).CStr());
                     return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeErrnoError(error, "read failed during copy", from, to)));
                 }
                 if (readCount == 0)
@@ -1217,6 +1250,8 @@ namespace NGIN::IO
                         const int error = errno;
                         ::close(destinationFd);
                         ::close(sourceFd);
+                        if (!destinationExisted && options.cleanupOnFailure)
+                            (void) ::unlink(ToNativePath(to).CStr());
                         return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeErrnoError(error, "write failed during copy", to, from)));
                     }
                     writtenTotal += writeCount;
@@ -1228,7 +1263,11 @@ namespace NGIN::IO
             return {};
         }
 
-        ResultVoid CopyPathNative(const Path& from, const Path& to, const CopyOptions& options) noexcept
+        ResultVoid CopyPathNative(
+                const Path&                from,
+                const Path&                to,
+                const CopyOptions&         options,
+                std::vector<FileIdentity>& activeDirectories) noexcept
         {
             MetadataOptions metadataOptions;
             metadataOptions.symlinkMode = SymlinkMode::DoNotFollow;
@@ -1236,11 +1275,29 @@ namespace NGIN::IO
             if (!sourceInfo.HasValue())
                 return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(sourceInfo.Error())));
 
-            const auto& info = sourceInfo.Value();
+            auto& info = sourceInfo.Value();
             if (!info.exists)
                 return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::NotFound, "source not found", from, to)));
 
-            if (info.type == EntryType::Directory)
+            if (info.type == EntryType::Symlink && options.symlinks == CopySymlinkMode::Reject)
+            {
+                return ResultVoid(NGIN::Utilities::Unexpected<IOError>(
+                        MakeError(IOErrorCode::NotSupported, "copy rejected a symbolic link", from, to)));
+            }
+
+            if (info.type == EntryType::Symlink && options.symlinks == CopySymlinkMode::Follow)
+            {
+                sourceInfo = BuildFileInfo(from, MetadataOptions {.symlinkMode = SymlinkMode::Follow});
+                if (!sourceInfo.HasValue())
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(sourceInfo.Error())));
+                if (!sourceInfo.Value().exists || sourceInfo.Value().type == EntryType::Symlink)
+                {
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(
+                            MakeError(IOErrorCode::NotFound, "symbolic-link target does not exist", from, to)));
+                }
+            }
+
+            if (sourceInfo.Value().type == EntryType::Directory)
             {
                 if (!options.recursive)
                 {
@@ -1248,11 +1305,39 @@ namespace NGIN::IO
                             NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::NotSupported, "directory copy requires recursive option", from, to)));
                 }
 
-                DirectoryCreateOptions directoryOptions;
-                directoryOptions.ignoreIfExists = true;
-                auto createResult               = CreateDirectoryNative(to, directoryOptions);
-                if (!createResult.HasValue())
-                    return createResult;
+                if (sourceInfo.Value().identity.valid)
+                {
+                    const auto duplicate = std::find_if(activeDirectories.begin(), activeDirectories.end(), [&](const FileIdentity& identity) {
+                        return identity.device == sourceInfo.Value().identity.device && identity.inode == sourceInfo.Value().identity.inode;
+                    });
+                    if (duplicate != activeDirectories.end())
+                    {
+                        return ResultVoid(NGIN::Utilities::Unexpected<IOError>(
+                                MakeError(IOErrorCode::InvalidPath, "symbolic-link cycle detected during copy", from, to)));
+                    }
+                    activeDirectories.push_back(sourceInfo.Value().identity);
+                }
+
+                auto destinationInfo = BuildFileInfo(to, MetadataOptions {.symlinkMode = SymlinkMode::DoNotFollow});
+                if (!destinationInfo.HasValue())
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(destinationInfo.Error())));
+                bool createdDestination = false;
+                if (destinationInfo.Value().exists && destinationInfo.Value().type != EntryType::Directory)
+                {
+                    if (!options.overwriteExisting)
+                        return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::AlreadyExists, "destination exists", to, from)));
+                    auto removed = RemoveAllNative(to, RemoveOptions {.recursive = true, .ignoreMissing = true});
+                    if (!removed.HasValue())
+                        return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(removed.Error())));
+                    destinationInfo.Value().exists = false;
+                }
+                if (!destinationInfo.Value().exists)
+                {
+                    auto createResult = CreateDirectoryNative(to, DirectoryCreateOptions {.ignoreIfExists = false});
+                    if (!createResult.HasValue())
+                        return createResult;
+                    createdDestination = true;
+                }
 
                 const auto nativePath = ToNativePath(from);
                 DIR*       directory  = ::opendir(nativePath.CStr());
@@ -1265,21 +1350,35 @@ namespace NGIN::IO
                     if (nameView == "." || nameView == "..")
                         continue;
 
-                    auto childCopy = CopyPathNative(from.Join(nameView), to.Join(nameView), options);
+                    auto childCopy = CopyPathNative(from.Join(nameView), to.Join(nameView), options, activeDirectories);
                     if (!childCopy.HasValue())
                     {
                         const IOError error = std::move(childCopy.Error());
                         ::closedir(directory);
+                        if (sourceInfo.Value().identity.valid)
+                            activeDirectories.pop_back();
+                        if (createdDestination && options.cleanupOnFailure)
+                            (void) RemoveAllNative(to, RemoveOptions {.recursive = true, .ignoreMissing = true});
                         return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(error)));
                     }
                 }
 
                 if (::closedir(directory) != 0)
                     return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeErrnoError(errno, "closedir failed during copy", from, to)));
+                if (sourceInfo.Value().identity.valid)
+                    activeDirectories.pop_back();
+                if (options.preservePermissions &&
+                    ::chmod(ToNativePath(to).CStr(), static_cast<mode_t>(sourceInfo.Value().permissions.nativeBits & 07777u)) != 0)
+                {
+                    const int error = errno;
+                    if (createdDestination && options.cleanupOnFailure)
+                        (void) RemoveAllNative(to, RemoveOptions {.recursive = true, .ignoreMissing = true});
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeErrnoError(error, "chmod after copy failed", to, from)));
+                }
                 return {};
             }
 
-            if (info.type == EntryType::Symlink)
+            if (sourceInfo.Value().type == EntryType::Symlink)
             {
                 auto targetResult = ReadSymlinkTargetString(from);
                 if (!targetResult.HasValue())
@@ -1300,10 +1399,16 @@ namespace NGIN::IO
                 return {};
             }
 
-            if (info.type != EntryType::File)
+            if (sourceInfo.Value().type != EntryType::File)
                 return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::NotSupported, "copy not supported for entry type", from, to)));
 
             return CopyRegularFile(from, to, options);
+        }
+
+        ResultVoid CopyPathNative(const Path& from, const Path& to, const CopyOptions& options) noexcept
+        {
+            std::vector<FileIdentity> activeDirectories;
+            return CopyPathNative(from, to, options, activeDirectories);
         }
     }// namespace
 
@@ -1325,6 +1430,11 @@ namespace NGIN::IO
         capabilities.memoryMappedFiles    = true;
         capabilities.nanosecondTimestamps = true;
         capabilities.metadataNoFollow     = true;
+#if defined(__linux__) || defined(__APPLE__)
+        capabilities.atomicRenameNoReplace = true;
+#endif
+        capabilities.atomicReplace  = true;
+        capabilities.durableReplace = true;
         return capabilities;
     }
 
@@ -1458,9 +1568,47 @@ namespace NGIN::IO
         return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeErrnoError(errno, "rename failed", from, to)));
     }
 
-    ResultVoid LocalFileSystem::ReplaceFile(const Path& source, const Path& destination) noexcept
+    ResultVoid LocalFileSystem::RenameNoReplace(const Path& from, const Path& to) noexcept
     {
-        return Rename(source, destination);
+#if defined(__linux__) && defined(SYS_renameat2)
+        constexpr unsigned int RenameNoReplaceFlag = 1u;
+        if (::syscall(
+                    SYS_renameat2,
+                    AT_FDCWD,
+                    ToNativePath(from).CStr(),
+                    AT_FDCWD,
+                    ToNativePath(to).CStr(),
+                    RenameNoReplaceFlag) == 0)
+            return {};
+        return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeErrnoError(errno, "renameat2 no-replace failed", from, to)));
+#elif defined(__APPLE__) && defined(RENAME_EXCL)
+        if (::renamex_np(ToNativePath(from).CStr(), ToNativePath(to).CStr(), RENAME_EXCL) == 0)
+            return {};
+        return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeErrnoError(errno, "renamex_np no-replace failed", from, to)));
+#else
+        return ResultVoid(NGIN::Utilities::Unexpected<IOError>(
+                MakeError(IOErrorCode::Unsupported, "atomic no-replace rename is unsupported on this platform", from, to)));
+#endif
+    }
+
+    ResultVoid LocalFileSystem::ReplaceFile(
+            const Path& source, const Path& destination, const ReplaceOptions& options) noexcept
+    {
+        if (options.flushSource)
+        {
+            auto flushed = FlushPath(source, false);
+            if (!flushed.HasValue())
+                return flushed;
+        }
+
+        auto replaced = Rename(source, destination);
+        if (!replaced.HasValue() || !options.flushParentDirectory)
+            return replaced;
+
+        Path parent = destination.Parent();
+        if (parent.IsEmpty())
+            parent = Path {"."};
+        return FlushPath(parent, true);
     }
 
     ResultVoid LocalFileSystem::CopyFile(const Path& from, const Path& to, const CopyOptions& options) noexcept

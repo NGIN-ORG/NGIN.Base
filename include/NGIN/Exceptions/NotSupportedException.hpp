@@ -17,46 +17,46 @@ namespace NGIN::Exceptions
     {
     public:
         /// @brief Default constructor.
-        NotSupportedException() noexcept = default;
+        NotSupportedException() = default;
 
         /// @brief Constructor with a C-style string message.
         /// @param message The exception message.
-        NotSupportedException(const char* message) noexcept
+        explicit NotSupportedException(const char* message)
             : Exception(message)
         {
         }
 
         /// @brief Constructor with a String message.
         /// @param message The exception message.
-        NotSupportedException(const NGIN::Text::String& message) noexcept
+        explicit NotSupportedException(const NGIN::Text::String& message)
             : Exception(message)
         {
         }
 
         /// @brief Constructor with an rvalue-ref String message.
         /// @param message The exception message.
-        NotSupportedException(NGIN::Text::String&& message) noexcept
-            : Exception(std::move(message))
+        explicit NotSupportedException(NGIN::Text::String&& message)
+            : Exception(message)
         {
         }
 
         /// @brief Copy constructor.
         /// @param other Another NotSupportedException to copy from.
-        NotSupportedException(const NotSupportedException& other) noexcept = default;
+        NotSupportedException(const NotSupportedException& other) = default;
 
         /// @brief Move constructor.
         /// @param other Another NotSupportedException to move from.
-        NotSupportedException(NotSupportedException&& other) noexcept = default;
+        NotSupportedException(NotSupportedException&& other) = default;
 
         /// @brief Copy assignment operator.
         /// @param other Another NotSupportedException to copy assign from.
         /// @return A reference to this.
-        NotSupportedException& operator=(const NotSupportedException& other) noexcept = default;
+        NotSupportedException& operator=(const NotSupportedException& other) = default;
 
         /// @brief Move assignment operator.
         /// @param other Another NotSupportedException to move assign from.
         /// @return A reference to this.
-        NotSupportedException& operator=(NotSupportedException&& other) noexcept = default;
+        NotSupportedException& operator=(NotSupportedException&& other) = default;
 
         /// @brief Destructor.
         virtual ~NotSupportedException() noexcept = default;

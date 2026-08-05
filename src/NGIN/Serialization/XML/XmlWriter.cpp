@@ -56,9 +56,15 @@ namespace NGIN::Serialization::XML
                 std::string_view replacement;
                 switch (value[index])
                 {
-                    case '&': replacement = "&amp;"; break;
-                    case '<': replacement = "&lt;"; break;
-                    case '>': replacement = "&gt;"; break;
+                    case '&':
+                        replacement = "&amp;";
+                        break;
+                    case '<':
+                        replacement = "&lt;";
+                        break;
+                    case '>':
+                        replacement = "&gt;";
+                        break;
                     case '"':
                         if (attribute)
                             replacement = "&quot;";
@@ -67,7 +73,8 @@ namespace NGIN::Serialization::XML
                         if (attribute)
                             replacement = "&apos;";
                         break;
-                    default: break;
+                    default:
+                        break;
                 }
                 if (!replacement.empty())
                 {
@@ -137,7 +144,7 @@ namespace NGIN::Serialization::XML
                     case NodeKind::CData: {
                         if (!Append(context, "<![CDATA["))
                             return Failure<void>(WriteErrorCode::OutputLimitExceeded, "XML output limit exceeded");
-                        auto value = *child.TryText();
+                        auto     value = *child.TryText();
                         UIntSize begin = 0;
                         while (true)
                         {
@@ -187,7 +194,7 @@ namespace NGIN::Serialization::XML
     {
         try
         {
-            Context context {.options = options};
+            Context context {.output = {}, .options = options};
             if (options.includeDeclaration && !Append(context, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"))
                 return Failure<std::string>(WriteErrorCode::OutputLimitExceeded, "XML output limit exceeded");
             auto result = WriteElement(context, root, 0);

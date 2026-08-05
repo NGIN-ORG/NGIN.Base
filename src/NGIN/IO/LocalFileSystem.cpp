@@ -29,7 +29,7 @@ namespace NGIN::IO
 
     ResultVoid LocalFileSystem::Move(const Path& from, const Path& to, const CopyOptions& options) noexcept
     {
-        auto renamed = Rename(from, to);
+        auto renamed = options.overwriteExisting ? Rename(from, to) : RenameNoReplace(from, to);
         if (renamed.HasValue())
             return renamed;
         if (renamed.Error().code != IOErrorCode::CrossDevice)

@@ -1,214 +1,201 @@
 #include <NGIN/Benchmark.hpp>
 #include <NGIN/Containers/ConcurrentHashMap.hpp>
-#include <random>
-#include <vector>
-#include <thread>
-#include <string>
-#include <iostream>
-#include <unordered_map>
-#include <mutex>
-#include <cstdlib>// (left intentionally; remove if no other file uses getenv)
-#include <cstddef>
-#include <atomic>
 #include <NGIN/Units.hpp>
 
-// Diagnostics instrumentation removed.
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <iostream>
+#include <random>
+#include <string>
+#include <thread>
+#include <vector>
 
 #ifdef NGIN_HAVE_TBB
 #include <tbb/concurrent_unordered_map.h>
 #endif
 
-using namespace NGIN;
-
 namespace
 {
+    using NGIN::Containers::ConcurrentHashMap;
+    using NGIN::Containers::ReclamationPolicy;
+
     struct WorkloadConfig
     {
         int threads;
         int keyCount;
-        int opsPerThread;
+        int operationsPerThread;
     };
 
-    std::vector<int> MakeKeys(int n)
+    enum class Workload
     {
-        std::vector<int> v(n);
-        for (int i = 0; i < n; ++i)
-            v[i] = i;
-        return v;
-    }
-}// namespace
-
-int main() noexcept
-{
-    using Map = NGIN::Containers::ConcurrentHashMap<int, int>;
-
-    const std::vector<WorkloadConfig> configs = {
-            {1, 1000, 5000},
-            {4, 5000, 5000},
-            {8, 10000, 5000},
-            {16, 10000, 5000},
-            {64, 10000, 5000},
+        ReadHeavy,
+        WriteHeavy,
+        Mixed,
+        ReclamationHeavy,
     };
 
-    // Diagnostics aggregation removed.
+    constexpr WorkloadConfig CONFIGS[] {
+            {1, 1'024, 500},
+            {4, 4'096, 500},
+    };
 
-    // Variant A: Mixed workload WITHOUT erase (portable to maps lacking safe concurrent erase)
-    for (auto cfg: configs)
+    [[nodiscard]] constexpr const char* PolicyName(ReclamationPolicy policy) noexcept
     {
-        Benchmark::Register([cfg](BenchmarkContext& ctx) {
-            Map          map(1024);
-            const size_t reserveSize = static_cast<size_t>(cfg.keyCount) * 2ull;
-            map.Reserve(reserveSize);
-            ctx.start();
-            std::vector<std::thread> ts;
-            ts.reserve(static_cast<size_t>(cfg.threads));
-            for (int t = 0; t < cfg.threads; ++t)
-            {
-                ts.emplace_back([&] {
-                    std::mt19937                       rng(1111u + t);
-                    std::uniform_int_distribution<int> dist(0, cfg.keyCount - 1);
-                    for (int i = 0; i < cfg.opsPerThread; ++i)
-                    {
-                        const int k = dist(rng);
-                        if ((i & 3) == 0)
-                        {// 1/4 inserts (updates)
-                            map.Insert(k, k);
-                        }
-                        else
-                        {// 3/4 lookups
-                            int out;
-                            (void) map.TryGet(k, out);
-                        }
-                    }
-                });
-            }
-            for (auto& th: ts)
-                th.join();
-            ctx.stop();
-            // Diagnostics printing removed.
-        },
-                            "NGIN.ConcurrentHashMap MixedNoErase t=" + std::to_string(cfg.threads));
+        switch (policy)
+        {
+            case ReclamationPolicy::ManualQuiesce:
+                return "ManualQuiesce";
+            case ReclamationPolicy::HazardPointers:
+                return "HazardPointers";
+            case ReclamationPolicy::LocalEpoch:
+                return "LocalEpoch";
+        }
+        return "Unknown";
     }
 
-    // Baseline: std::unordered_map protected by a single mutex (coarse grained lock)
-    for (auto cfg: configs)
+    [[nodiscard]] constexpr const char* WorkloadName(Workload workload) noexcept
     {
-        Benchmark::Register([cfg](BenchmarkContext& ctx) {
-            std::unordered_map<int, int> map;
-            map.reserve(static_cast<size_t>(cfg.keyCount) * 2ull);
-            std::mutex mtx;
-            ctx.start();
-            std::vector<std::thread> ts;
-            ts.reserve(static_cast<size_t>(cfg.threads));
-            for (int t = 0; t < cfg.threads; ++t)
-            {
-                ts.emplace_back([&] {
-                    std::mt19937                       rng(2222u + t);
-                    std::uniform_int_distribution<int> dist(0, cfg.keyCount - 1);
-                    for (int i = 0; i < cfg.opsPerThread; ++i)
-                    {
-                        const int k = dist(rng);
-                        if ((i & 3) == 0)
-                        {
-                            std::lock_guard<std::mutex> lg(mtx);
-                            map[k] = k;// insert or assign
-                        }
-                        else
-                        {
-                            std::lock_guard<std::mutex> lg(mtx);
-                            auto                        it = map.find(k);
-                            (void) it;
-                        }
-                    }
-                });
-            }
-            for (auto& th: ts)
-                th.join();
-            ctx.stop();
-        },
-                            "Std.UnorderedMapMutex MixedNoErase t=" + std::to_string(cfg.threads));
+        switch (workload)
+        {
+            case Workload::ReadHeavy:
+                return "ReadHeavy95";
+            case Workload::WriteHeavy:
+                return "WriteHeavy75";
+            case Workload::Mixed:
+                return "Mixed75Read";
+            case Workload::ReclamationHeavy:
+                return "ReclamationHeavy";
+        }
+        return "Unknown";
     }
 
+    template<ReclamationPolicy Policy>
+    void RegisterWorkload(const Workload workload, const WorkloadConfig config)
+    {
+        using Map = ConcurrentHashMap<int, int, std::hash<int>, std::equal_to<int>,
+                                      NGIN::Memory::SystemAllocator, Policy>;
+
+        const std::string name = std::string {"NGIN.ConcurrentHashMap."} + PolicyName(Policy) + "." +
+                                 WorkloadName(workload) + ".t=" + std::to_string(config.threads);
+        NGIN::Benchmark::Register(
+                [workload, config](NGIN::BenchmarkContext& context) {
+                    Map map {static_cast<std::size_t>(config.keyCount * 2)};
+                    for (int key = 0; key < config.keyCount; ++key)
+                        map.Insert(key, key);
+
+                    std::atomic<std::uint64_t> checksum {0};
+                    context.start();
+                    std::vector<std::thread> threads;
+                    threads.reserve(static_cast<std::size_t>(config.threads));
+                    for (int threadIndex = 0; threadIndex < config.threads; ++threadIndex)
+                    {
+                        threads.emplace_back([&, threadIndex] {
+                            std::mt19937                       random {0x4E47494EU + static_cast<unsigned>(threadIndex)};
+                            std::uniform_int_distribution<int> keys {0, config.keyCount - 1};
+                            std::uint64_t                      localChecksum = 0;
+                            for (int operation = 0; operation < config.operationsPerThread; ++operation)
+                            {
+                                const int key      = keys(random);
+                                const int selector = operation % 20;
+                                int       value    = 0;
+                                switch (workload)
+                                {
+                                    case Workload::ReadHeavy:
+                                        if (selector == 0)
+                                            map.InsertOrAssign(key, operation);
+                                        else if (map.TryGet(key, value))
+                                            localChecksum += static_cast<std::uint64_t>(value);
+                                        break;
+                                    case Workload::WriteHeavy:
+                                        if (selector < 15)
+                                            map.InsertOrAssign(key, operation);
+                                        else if (map.TryGet(key, value))
+                                            localChecksum += static_cast<std::uint64_t>(value);
+                                        break;
+                                    case Workload::Mixed:
+                                        if (selector < 5)
+                                            map.InsertOrAssign(key, operation);
+                                        else if (map.TryGet(key, value))
+                                            localChecksum += static_cast<std::uint64_t>(value);
+                                        break;
+                                    case Workload::ReclamationHeavy:
+                                        if ((operation & 1) == 0)
+                                            map.Remove(key);
+                                        else
+                                            map.InsertOrAssign(key, operation);
+                                        break;
+                                }
+                            }
+                            checksum.fetch_add(localChecksum, std::memory_order_relaxed);
+                        });
+                    }
+                    for (auto& thread: threads)
+                        thread.join();
+                    if constexpr (Policy == ReclamationPolicy::ManualQuiesce)
+                        map.Quiesce();
+                    context.stop();
+                    if (checksum.load(std::memory_order_relaxed) == UINT64_MAX)
+                        std::cerr << "unreachable checksum\n";
+                },
+                name);
+    }
 
 #ifdef NGIN_HAVE_TBB
-    using TbbMap = tbb::concurrent_unordered_map<int, int>;
-    for (auto cfg: configs)
+    void RegisterTbbMixed(const WorkloadConfig config)
     {
-        Benchmark::Register([cfg](BenchmarkContext& ctx) {
-            TbbMap map;
-            map.reserve(static_cast<size_t>(cfg.keyCount) * 2ull);
-            ctx.start();
-            std::vector<std::thread> ts;
-            ts.reserve(static_cast<size_t>(cfg.threads));
-            for (int t = 0; t < cfg.threads; ++t)
-            {
-                ts.emplace_back([&] {
-                    std::mt19937                       rng(5678u + t);
-                    std::uniform_int_distribution<int> dist(0, cfg.keyCount - 1);
-                    for (int i = 0; i < cfg.opsPerThread; ++i)
+        const std::string name = "TBB.concurrent_unordered_map.Mixed75Read.t=" +
+                                 std::to_string(config.threads);
+        NGIN::Benchmark::Register(
+                [config](NGIN::BenchmarkContext& context) {
+                    tbb::concurrent_unordered_map<int, int> map;
+                    for (int key = 0; key < config.keyCount; ++key)
+                        map.emplace(key, key);
+                    context.start();
+                    std::vector<std::thread> threads;
+                    threads.reserve(static_cast<std::size_t>(config.threads));
+                    for (int threadIndex = 0; threadIndex < config.threads; ++threadIndex)
                     {
-                        const int k = dist(rng);
-                        if ((i & 3) == 0)
-                        {
-                            map.emplace(k, k);
-                        }
-                        else
-                        {
-                            auto it = map.find(k);
-                            (void) it;
-                        }
+                        threads.emplace_back([&, threadIndex] {
+                            std::mt19937                       random {0x54424221U + static_cast<unsigned>(threadIndex)};
+                            std::uniform_int_distribution<int> keys {0, config.keyCount - 1};
+                            for (int operation = 0; operation < config.operationsPerThread; ++operation)
+                            {
+                                const int key = keys(random);
+                                if ((operation % 4) == 0)
+                                    map.insert_or_assign(key, operation);
+                                else
+                                    (void) map.find(key);
+                            }
+                        });
                     }
-                });
-            }
-            for (auto& th: ts)
-                th.join();
-            ctx.stop();
-        },
-                            "TBB.concurrent_unordered_map MixedNoErase t=" + std::to_string(cfg.threads));
+                    for (auto& thread: threads)
+                        thread.join();
+                    context.stop();
+                },
+                name);
     }
 #endif
+}// namespace
 
-#ifdef NGIN_HAVE_FOLLY
-#include <folly/container/F14Map.h>
-    using F14Map = folly::F14FastMap<int, int>;// NOTE: F14FastMap is NOT thread-safe; this is illustrative only.
-    for (auto cfg: configs)
+int main()
+{
+    for (const auto config: CONFIGS)
     {
-        Benchmark::Register([cfg](BenchmarkContext& ctx) {
-            F14Map map;
-            map.reserve(cfg.keyCount * 2);
-            ctx.start();
-            std::vector<std::thread> ts;
-            for (int t = 0; t < cfg.threads; ++t)
-            {
-                ts.emplace_back([&] {
-                    std::mt19937                       rng(9142u + t);
-                    std::uniform_int_distribution<int> dist(0, cfg.keyCount - 1);
-                    for (int i = 0; i < cfg.opsPerThread; ++i)
-                    {
-                        int k = dist(rng);
-                        if ((i & 3) == 0)
-                        {
-                            map.emplace(k, k);
-                        }
-                        else
-                        {
-                            auto it = map.find(k);
-                            (void) it;
-                        }
-                    }
-                });
-            }
-            for (auto& th: ts)
-                th.join();
-            ctx.stop();
-        },
-                            "Folly.F14FastMap MixedNoErase (NOT thread-safe) t=" + std::to_string(cfg.threads));
-    }
+        RegisterWorkload<ReclamationPolicy::LocalEpoch>(Workload::ReadHeavy, config);
+        RegisterWorkload<ReclamationPolicy::LocalEpoch>(Workload::WriteHeavy, config);
+        RegisterWorkload<ReclamationPolicy::LocalEpoch>(Workload::Mixed, config);
+        RegisterWorkload<ReclamationPolicy::LocalEpoch>(Workload::ReclamationHeavy, config);
+        RegisterWorkload<ReclamationPolicy::HazardPointers>(Workload::ReclamationHeavy, config);
+        RegisterWorkload<ReclamationPolicy::ManualQuiesce>(Workload::ReclamationHeavy, config);
+#ifdef NGIN_HAVE_TBB
+        RegisterTbbMixed(config);
 #endif
-    Benchmark::defaultConfig.iterations       = 5;
-    Benchmark::defaultConfig.warmupIterations = 2;
-    auto results                              = Benchmark::RunAll<Units::Milliseconds>();
-    Benchmark::PrintSummaryTable(std::cout, results);
-    // Aggregated diagnostics output removed.
+    }
+
+    NGIN::Benchmark::defaultConfig.iterations       = 2;
+    NGIN::Benchmark::defaultConfig.warmupIterations = 1;
+    const auto results                              = NGIN::Benchmark::RunAll<NGIN::Units::Milliseconds>();
+    NGIN::Benchmark::PrintSummaryTable(std::cout, results);
     return 0;
 }

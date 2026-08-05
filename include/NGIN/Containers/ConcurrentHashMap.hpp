@@ -36,14 +36,7 @@ namespace NGIN::Containers
 namespace NGIN::Containers
 {
 
-    /// @brief Concurrent hash map scaffold with sharded writer locks and pinned lock-free reads.
-    ///
-    /// Current state:
-    /// - Shared core architecture is in place.
-    /// - `ManualQuiesce` now has a dedicated deferred-reclamation backend.
-    /// - `LocalEpoch` and `HazardPointers` still compile through the same scaffolded pinned-reader contract.
-    /// - Automatic policies currently use the same safe retirement path until dedicated epoch and hazard
-    ///   implementations land.
+    /// @brief Sharded concurrent hash map with policy-specific lock-free reader reclamation.
     template<class Key,
              class Value,
              class Hash                          = std::hash<Key>,
@@ -232,7 +225,7 @@ namespace NGIN::Containers
             const Shard&       shard = ShardForHash(hash);
             auto               guard = shard.reclaimer.Enter();
             const Table* const table = shard.reclaimer.Protect(shard.table, guard);
-            return FindNodeInTable(table, key, hash) != nullptr;
+            return FindNodeInTable(shard, table, key, hash, guard) != nullptr;
         }
 
         auto Get(const Key& key) const -> Value
@@ -250,7 +243,7 @@ namespace NGIN::Containers
             const Shard&       shard = ShardForHash(hash);
             auto               guard = shard.reclaimer.Enter();
             const Table* const table = shard.reclaimer.Protect(shard.table, guard);
-            if (const Node* node = FindNodeInTable(table, key, hash))
+            if (const Node* node = FindNodeInTable(shard, table, key, hash, guard))
             {
                 outValue = node->value;
                 return true;
@@ -264,7 +257,7 @@ namespace NGIN::Containers
             const Shard&       shard = ShardForHash(hash);
             auto               guard = shard.reclaimer.Enter();
             const Table* const table = shard.reclaimer.Protect(shard.table, guard);
-            if (const Node* node = FindNodeInTable(table, key, hash))
+            if (const Node* node = FindNodeInTable(shard, table, key, hash, guard))
             {
                 return node->value;
             }
@@ -323,7 +316,7 @@ namespace NGIN::Containers
 
                 for (size_type bucketIndex = 0; bucketIndex < table->bucketCount; ++bucketIndex)
                 {
-                    const Node* node = table->buckets[bucketIndex].load(std::memory_order_acquire);
+                    const Node* node = shard.reclaimer.Protect(table->buckets[bucketIndex], guard);
                     while (node)
                     {
                         callback(node->key, node->value);
@@ -346,6 +339,33 @@ namespace NGIN::Containers
                 std::lock_guard<Sync::SpinLock> lock(shard.writeLock);
                 shard.reclaimer.Quiesce();
             }
+        }
+
+        /// @brief Number of retired reclamation records awaiting a safe point.
+        [[nodiscard]] auto PendingRetired() const noexcept -> size_type
+        {
+            size_type pending = 0;
+            for (const auto& shard: m_shards)
+                pending += shard.reclaimer.PendingRetired();
+            return pending;
+        }
+
+        /// @brief Number of reclamation records destroyed by this map's domains.
+        [[nodiscard]] auto ReclaimedRetired() const noexcept -> size_type
+        {
+            size_type reclaimed = 0;
+            for (const auto& shard: m_shards)
+                reclaimed += shard.reclaimer.ReclaimedRetired();
+            return reclaimed;
+        }
+
+        /// @brief Number of active reader registrations across all shards.
+        [[nodiscard]] auto ActiveReaders() const noexcept -> size_type
+        {
+            size_type readers = 0;
+            for (const auto& shard: m_shards)
+                readers += shard.reclaimer.ActiveReaders();
+            return readers;
         }
 
     private:
@@ -382,7 +402,13 @@ namespace NGIN::Containers
             return nullptr;
         }
 
-        [[nodiscard]] auto FindNodeInTable(const Table* table, const Key& key, const std::size_t hash) const -> const Node*
+        template<class Guard>
+        [[nodiscard]] auto FindNodeInTable(
+                const Shard&      shard,
+                const Table*      table,
+                const Key&        key,
+                const std::size_t hash,
+                Guard&            guard) const -> const Node*
         {
             if (!table || table->bucketCount == 0)
             {
@@ -390,7 +416,8 @@ namespace NGIN::Containers
             }
 
             const size_type bucketIndex = BucketIndex(hash, table->bucketCount);
-            return FindNodeInChain(table->buckets[bucketIndex].load(std::memory_order_acquire), key, hash);
+            const Node*     head        = shard.reclaimer.Protect(table->buckets[bucketIndex], guard);
+            return FindNodeInChain(head, key, hash);
         }
 
         [[nodiscard]] auto ShardIndex(const std::size_t hash) const noexcept -> size_type
@@ -399,7 +426,10 @@ namespace NGIN::Containers
             {
                 return hash & (ShardCount - 1);
             }
-            return hash % ShardCount;
+            else
+            {
+                return hash % ShardCount;
+            }
         }
 
         [[nodiscard]] auto ShardForHash(const std::size_t hash) noexcept -> Shard&

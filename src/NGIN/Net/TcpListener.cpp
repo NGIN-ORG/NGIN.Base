@@ -65,7 +65,7 @@ namespace NGIN::Net
             return NGIN::Utilities::Unexpected(detail::LastError());
         }
 
-        TcpSocket socket(std::move(detail::FromNative(sock)), true);
+        TcpSocket socket(detail::FromNative(sock), true);
         (void) detail::SetNonBlocking(socket.Handle(), true);
         return socket;
     }

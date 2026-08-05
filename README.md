@@ -11,13 +11,19 @@ low-level building blocks that can also be adopted independently.
 
 | Area | Start here |
 | --- | --- |
+| Foundation and utilities | [Foundation](docs/Foundation.md) |
 | Async tasks and cancellation | [Async](docs/Async.md) |
+| Threads, fibers, and schedulers | [Execution](docs/Execution.md) |
+| Synchronization | [Sync](docs/Sync.md) |
+| SIMD | [SIMD](docs/SIMD.md) |
 | Paths and files | [I/O](docs/IO.md) |
 | Sockets and async networking | [Network](docs/Network.md) |
-| Allocators and containers | [Memory](docs/Memory.md) |
+| Allocators | [Memory](docs/Memory.md) |
+| Containers | [Containers](docs/Containers.md) |
 | JSON and XML | [Serialization](include/NGIN/Serialization/README.md) |
 | Cryptography and secure tokens | [Crypto](docs/Crypto.md) |
 | Text | [Text](docs/Text.md) |
+| Math and units | [Math and units](docs/MathAndUnits.md) |
 
 The design favors explicit runtimes, typed results, deterministic ownership,
 and allocator control. There is no hidden global scheduler or required

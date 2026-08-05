@@ -2,10 +2,15 @@
 #pragma once
 
 #include <NGIN/Defines.hpp>
-#include <atomic>
-#include <cstdint>
 #include <NGIN/Primitives.hpp>// Assumes UInt32 is defined here
 #include <NGIN/Units.hpp>
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cmath>
+#include <cstdint>
+#include <limits>
+#include <thread>
 
 #ifdef _DEBUG
 #include <cassert>
@@ -89,8 +94,8 @@ namespace NGIN::Sync
 #endif
             const UInt32 gen = Load();
 
-            const auto nsDouble = NGIN::Units::UnitCast<NGIN::Units::Nanoseconds>(duration).GetValue();
-            if (nsDouble <= 0.0)
+            const auto nanoseconds = ToWaitNanoseconds(duration);
+            if (nanoseconds == 0)
             {
 #ifdef _DEBUG
                 m_waitingThreads.fetch_sub(1, std::memory_order_relaxed);
@@ -98,21 +103,18 @@ namespace NGIN::Sync
                 return false;
             }
 
-            const auto nsTruncated = static_cast<UInt64>(nsDouble);
-            const auto ns          = (static_cast<double>(nsTruncated) < nsDouble) ? (nsTruncated + 1ull) : nsTruncated;
-
 #if defined(NGIN_PLATFORM_WINDOWS) || defined(NGIN_PLATFORM_LINUX)
-            const bool ok = detail::AtomicConditionWaitFor(m_generation, gen, ns);
+            const bool ok = detail::AtomicConditionWaitFor(m_generation, gen, nanoseconds);
 #ifdef _DEBUG
             m_waitingThreads.fetch_sub(1, std::memory_order_relaxed);
 #endif
             return ok;
 #else
-            Wait(gen);
+            const bool notified = WaitFor(gen, duration);
 #ifdef _DEBUG
             m_waitingThreads.fetch_sub(1, std::memory_order_relaxed);
 #endif
-            return true;
+            return notified;
 #endif
         }
 
@@ -120,20 +122,41 @@ namespace NGIN::Sync
             requires NGIN::Units::QuantityOf<NGIN::Units::TIME, TUnit>
         [[nodiscard]] bool WaitFor(UInt32 observedGeneration, const TUnit& duration) noexcept
         {
-            const auto nsDouble = NGIN::Units::UnitCast<NGIN::Units::Nanoseconds>(duration).GetValue();
-            if (nsDouble <= 0.0)
+            const auto nanoseconds = ToWaitNanoseconds(duration);
+            if (nanoseconds == 0)
             {
                 return false;
             }
 
-            const auto nsTruncated = static_cast<UInt64>(nsDouble);
-            const auto ns          = (static_cast<double>(nsTruncated) < nsDouble) ? (nsTruncated + 1ull) : nsTruncated;
-
 #if defined(NGIN_PLATFORM_WINDOWS) || defined(NGIN_PLATFORM_LINUX)
-            return detail::AtomicConditionWaitFor(m_generation, observedGeneration, ns);
+            return detail::AtomicConditionWaitFor(m_generation, observedGeneration, nanoseconds);
 #else
-            (void)duration;
-            Wait(observedGeneration);
+            using Nanoseconds = std::chrono::nanoseconds;
+            using Rep         = Nanoseconds::rep;
+
+            const auto clampedNanoseconds =
+                    (std::min) (nanoseconds, static_cast<UInt64>((std::numeric_limits<Rep>::max)()));
+            const auto timeout = Nanoseconds {static_cast<Rep>(clampedNanoseconds)};
+            const auto started = std::chrono::steady_clock::now();
+
+            while (Load() == observedGeneration)
+            {
+                const auto now = std::chrono::steady_clock::now();
+                if (now - started >= timeout)
+                {
+                    return false;
+                }
+
+                const auto remaining = timeout - (now - started);
+                if (remaining > std::chrono::milliseconds {1})
+                {
+                    std::this_thread::sleep_for(std::chrono::milliseconds {1});
+                }
+                else
+                {
+                    std::this_thread::yield();
+                }
+            }
             return true;
 #endif
         }
@@ -191,6 +214,26 @@ namespace NGIN::Sync
 #endif
 
     private:
+        template<typename TUnit>
+            requires NGIN::Units::QuantityOf<NGIN::Units::TIME, TUnit>
+        [[nodiscard]] static UInt64 ToWaitNanoseconds(const TUnit& duration) noexcept
+        {
+            const auto value = NGIN::Units::UnitCast<NGIN::Units::Nanoseconds>(duration).GetValue();
+            if (!(value > 0.0))
+            {
+                return 0;
+            }
+
+            constexpr auto maximum = (std::numeric_limits<UInt64>::max)();
+            if (!std::isfinite(value) || value >= static_cast<double>(maximum))
+            {
+                return maximum;
+            }
+
+            const auto truncated = static_cast<UInt64>(value);
+            return (static_cast<double>(truncated) < value) ? truncated + 1ull : truncated;
+        }
+
         [[nodiscard]] std::atomic_ref<UInt32> Generation() noexcept
         {
             return std::atomic_ref<UInt32>(m_generation);

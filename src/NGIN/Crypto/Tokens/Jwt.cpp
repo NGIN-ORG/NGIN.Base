@@ -153,7 +153,8 @@ namespace NGIN::Crypto::Tokens
                 }
                 else if (value->IsArray())
                 {
-                    for (const auto item: *value->TryArray())
+                    const auto audiences = value->TryArray();
+                    for (const auto item: *audiences)
                     {
                         if (!item.IsString())
                         {

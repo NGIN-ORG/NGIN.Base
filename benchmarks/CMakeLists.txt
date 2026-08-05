@@ -37,6 +37,7 @@ ngin_add_benchmark(ExampleBenchmark ExampleBenchmark.cpp)
 ngin_add_benchmark(SchedulerBenchmarks SchedulerBenchmarks.cpp)
 ngin_add_benchmark(StringBenchmarks StringBenchmarks.cpp)
 ngin_add_benchmark(VectorBenchmarks VectorBenchmarks.cpp)
+ngin_add_benchmark(AllocatorBenchmarks AllocatorBenchmarks.cpp)
 ngin_add_benchmark(CallableBenchmarks CallableBenchmarks.cpp)
 ngin_add_benchmark(FiberBenchmarks FiberBenchmarks.cpp)
 ngin_add_benchmark(SIMDFastMathBench SIMDFastMathBench.cpp)
@@ -173,44 +174,47 @@ if(NGIN_BENCH_USE_TINYXML2)
 endif()
 
 # ---------------------------------------------------------------------------
-# Optional concurrent map comparison benchmarks (TBB via system or CPM)
+# Concurrent-map benchmarks, with optional TBB comparison.
 # ---------------------------------------------------------------------------
+option(NGIN_BASE_BENCHMARK_WITH_TBB "Add the optional TBB concurrent-map comparison" OFF)
 option(NGIN_TBB_STATIC "Prefer static TBB build via CPM" ON)
 
 set(_have_tbb OFF)
-find_package(TBB QUIET)
-if(TBB_FOUND)
-  set(_have_tbb ON)
-else()
-  if(NGIN_TBB_STATIC)
-    set(_tbb_opts
-      "TBB_TEST OFF"
-      "TBB_STRICT OFF"
-      "BUILD_SHARED_LIBS OFF"
-      "TBB_INSTALL OFF"
-    )
-  else()
-    set(_tbb_opts
-      "TBB_TEST OFF"
-      "TBB_STRICT OFF"
-      "TBB_INSTALL OFF"
-    )
-  endif()
-
-  CPMAddPackage(
-    NAME TBB
-    GITHUB_REPOSITORY oneapi-src/oneTBB
-    GIT_TAG v2022.2.0
-    OPTIONS ${_tbb_opts}
-  )
-  if(TBB_ADDED)
+if(NGIN_BASE_BENCHMARK_WITH_TBB)
+  find_package(TBB QUIET)
+  if(TBB_FOUND)
     set(_have_tbb ON)
+  else()
+    if(NGIN_TBB_STATIC)
+      set(_tbb_opts
+        "TBB_TEST OFF"
+        "TBB_STRICT OFF"
+        "BUILD_SHARED_LIBS OFF"
+        "TBB_INSTALL OFF"
+      )
+    else()
+      set(_tbb_opts
+        "TBB_TEST OFF"
+        "TBB_STRICT OFF"
+        "TBB_INSTALL OFF"
+      )
+    endif()
+
+    CPMAddPackage(
+      NAME TBB
+      GITHUB_REPOSITORY oneapi-src/oneTBB
+      GIT_TAG v2022.2.0
+      OPTIONS ${_tbb_opts}
+    )
+    if(TBB_ADDED)
+      set(_have_tbb ON)
+    endif()
   endif()
 endif()
 
+ngin_add_benchmark(ConcurrentMapBench ConcurrentMapBench.cpp)
 if(_have_tbb)
-  message(STATUS "TBB available (system or CPM); enabling ConcurrentMapBench")
-  ngin_add_benchmark(ConcurrentMapBench ConcurrentMapBench.cpp)
+  message(STATUS "TBB available (system or CPM); enabling the ConcurrentMapBench comparison")
   if(TARGET TBB::tbb)
     target_link_libraries(ConcurrentMapBench PRIVATE TBB::tbb)
   elseif(TARGET tbb)
@@ -235,6 +239,4 @@ if(_have_tbb)
         $<TARGET_FILE_DIR:ConcurrentMapBench>
     )
   endif()
-else()
-  message(STATUS "TBB not available; ConcurrentMapBench disabled")
 endif()

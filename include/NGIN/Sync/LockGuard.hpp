@@ -12,7 +12,7 @@ namespace NGIN::Sync
     class LockGuard final
     {
     public:
-        explicit LockGuard(TLockable& lockable)
+        explicit LockGuard(TLockable& lockable) noexcept(noexcept(lockable.lock()))
             : m_lockable(lockable)
         {
             m_lockable.lock();
@@ -22,15 +22,14 @@ namespace NGIN::Sync
         LockGuard& operator=(const LockGuard&) = delete;
 
         LockGuard(LockGuard&& other) noexcept
-            : m_lockable(other.m_lockable)
-            , m_owns(other.m_owns)
+            : m_lockable(other.m_lockable), m_owns(other.m_owns)
         {
             other.m_owns = false;
         }
 
         LockGuard& operator=(LockGuard&&) = delete;
 
-        ~LockGuard()
+        ~LockGuard() noexcept(noexcept(m_lockable.unlock()))
         {
             if (m_owns)
             {
@@ -47,7 +46,7 @@ namespace NGIN::Sync
     class SharedLockGuard final
     {
     public:
-        explicit SharedLockGuard(TLockable& lockable)
+        explicit SharedLockGuard(TLockable& lockable) noexcept(noexcept(lockable.lock_shared()))
             : m_lockable(lockable)
         {
             m_lockable.lock_shared();
@@ -57,15 +56,14 @@ namespace NGIN::Sync
         SharedLockGuard& operator=(const SharedLockGuard&) = delete;
 
         SharedLockGuard(SharedLockGuard&& other) noexcept
-            : m_lockable(other.m_lockable)
-            , m_owns(other.m_owns)
+            : m_lockable(other.m_lockable), m_owns(other.m_owns)
         {
             other.m_owns = false;
         }
 
         SharedLockGuard& operator=(SharedLockGuard&&) = delete;
 
-        ~SharedLockGuard()
+        ~SharedLockGuard() noexcept(noexcept(m_lockable.unlock_shared()))
         {
             if (m_owns)
             {
@@ -78,4 +76,3 @@ namespace NGIN::Sync
         bool       m_owns {true};
     };
 }// namespace NGIN::Sync
-
