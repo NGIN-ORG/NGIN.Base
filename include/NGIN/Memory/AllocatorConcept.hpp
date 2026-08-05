@@ -2,11 +2,11 @@
 /// @brief Core allocator concepts and traits for the modern NGIN memory system.
 #pragma once
 
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
-#include <type_traits>
-#include <concepts>
 #include <limits>
+#include <type_traits>
 
 namespace NGIN::Memory
 {
@@ -42,6 +42,7 @@ namespace NGIN::Memory
         /// @brief Optional implementation-defined value for routing, validation, or diagnostics.
         std::uintptr_t Cookie {0};
 
+        /// @brief Constructs an empty allocation result.
         MemoryBlock() = default;
 
         /// @brief Creates a reported allocation block.
@@ -114,11 +115,11 @@ namespace NGIN::Memory
     struct AllocatorTraits
     {
         /// @brief True when @p A provides @c Owns(const void*).
-        static constexpr bool HasOwnsPointerCapability        = AllocatorOwnsPointer<A>;
+        static constexpr bool HasOwnsPointerCapability = AllocatorOwnsPointer<A>;
         /// @brief True when @p A provides @c MaxSize().
-        static constexpr bool HasMaxSizeCapability            = AllocatorReportsMaxSize<A>;
+        static constexpr bool HasMaxSizeCapability = AllocatorReportsMaxSize<A>;
         /// @brief True when @p A provides @c Remaining().
-        static constexpr bool HasRemainingBytesCapability     = AllocatorReportsRemainingBytes<A>;
+        static constexpr bool HasRemainingBytesCapability = AllocatorReportsRemainingBytes<A>;
         /// @brief True when @p A provides @c AllocateEx(size, alignment).
         static constexpr bool HasExtendedAllocationCapability = ExtendedAllocatorConcept<A>;
 
@@ -208,7 +209,7 @@ namespace NGIN::Memory
         /// @brief Whether allocator-aware types should move-assign the allocator.
         static constexpr bool PropagateOnMoveAssignment = true;
         /// @brief Whether allocator-aware types should swap allocator instances.
-        static constexpr bool PropagateOnSwap           = true;
+        static constexpr bool PropagateOnSwap = true;
 
         /// @brief Whether all instances of @p A can deallocate each other's allocations.
         static constexpr bool IsAlwaysEqual = std::is_empty_v<A>;

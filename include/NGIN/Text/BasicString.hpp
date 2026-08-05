@@ -30,10 +30,12 @@
 
 namespace NGIN::Text
 {
+    /// @brief Default capacity policy using powers of two for small strings and 1.5x growth thereafter.
     struct DefaultGrowthPolicy
     {
         static constexpr UIntSize smallCapThreshold = 64;
 
+        /// @brief Returns the smallest power of two that is at least @p value.
         static constexpr UIntSize NextPow2(UIntSize value) noexcept
         {
             if (value <= 1)
@@ -51,6 +53,7 @@ namespace NGIN::Text
             return value + 1;
         }
 
+        /// @brief Chooses a capacity that can hold @p required code units.
         static constexpr UIntSize Grow(UIntSize oldCap, UIntSize required) noexcept
         {
             if (oldCap < smallCapThreshold)
@@ -63,6 +66,12 @@ namespace NGIN::Text
         }
     };
 
+    /// @brief Allocator-backed contiguous string with inline small-string storage.
+    /// @tparam CharT Trivial code-unit type.
+    /// @tparam SBOBytes Bytes reserved inside the object for small-string storage.
+    /// @tparam Alloc Allocator used when the string exceeds inline storage.
+    /// @tparam Growth Capacity growth policy.
+    /// @tparam Traits Character operations used for comparison and movement.
     template<class CharT,
              UIntSize                       SBOBytes,
              NGIN::Memory::AllocatorConcept Alloc = NGIN::Memory::SystemAllocator,
@@ -120,24 +129,28 @@ namespace NGIN::Text
                       "SBO capacity must fit in the packed size field.");
 
     public:
+        /// @brief Constructs an empty string with a default-constructed allocator.
         BasicString() noexcept(std::is_nothrow_default_constructible_v<Alloc>)
             : m_allocator()
         {
             BecomeEmptySmallAfterHeapReleased();
         }
 
+        /// @brief Constructs an empty string using a copy of @p alloc.
         explicit BasicString(const Alloc& alloc) noexcept
             : m_allocator(alloc)
         {
             BecomeEmptySmallAfterHeapReleased();
         }
 
+        /// @brief Constructs an empty string by moving @p alloc.
         explicit BasicString(Alloc&& alloc) noexcept(std::is_nothrow_move_constructible_v<Alloc>)
             : m_allocator(std::move(alloc))
         {
             BecomeEmptySmallAfterHeapReleased();
         }
 
+        /// @brief Copies a null-terminated string, treating a null pointer as empty.
         BasicString(const CharT* cstr, const Alloc& alloc = Alloc())
             : m_allocator(alloc)
         {
@@ -146,6 +159,8 @@ namespace NGIN::Text
                 InitFromView(view_type {cstr, static_cast<size_type>(traits_type::length(cstr))});
         }
 
+        /// @brief Copies exactly @p count code units from @p data.
+        /// @throws std::invalid_argument when @p data is null and @p count is nonzero.
         BasicString(const CharT* data, size_type count, const Alloc& alloc = Alloc())
             : m_allocator(alloc)
         {
@@ -153,6 +168,7 @@ namespace NGIN::Text
             InitFromView(MakeBoundedView(data, count, "BasicString constructor"));
         }
 
+        /// @brief Copies the code units in @p sv.
         BasicString(view_type sv, const Alloc& alloc = Alloc())
             : m_allocator(alloc)
         {
@@ -160,6 +176,7 @@ namespace NGIN::Text
             InitFromView(sv);
         }
 
+        /// @brief Constructs a string containing @p count copies of @p ch.
         BasicString(size_type count, CharT ch, const Alloc& alloc = Alloc())
             : m_allocator(alloc)
         {
@@ -167,6 +184,7 @@ namespace NGIN::Text
             InitFilled(count, ch);
         }
 
+        /// @brief Copies @p other and its allocator state.
         BasicString(const ThisType& other)
             : m_allocator(other.m_allocator)
         {
@@ -174,6 +192,7 @@ namespace NGIN::Text
             CopyConstructFrom(other);
         }
 
+        /// @brief Moves @p other, leaving it valid and empty.
         BasicString(ThisType&& other) noexcept(std::is_nothrow_move_constructible_v<Alloc>)
             : m_allocator(std::move(other.m_allocator))
         {
@@ -181,11 +200,13 @@ namespace NGIN::Text
             MoveConstructFrom(std::move(other));
         }
 
+        /// @brief Releases owned heap storage, if any.
         ~BasicString()
         {
             DestroyHeapIfAny();
         }
 
+        /// @brief Replaces this string with a copy of @p other.
         ThisType& operator=(const ThisType& other)
         {
             if (this == &other)
@@ -195,6 +216,7 @@ namespace NGIN::Text
             return *this;
         }
 
+        /// @brief Replaces this string by moving @p other according to allocator propagation rules.
         ThisType& operator=(ThisType&& other) noexcept(
                 (NGIN::Memory::AllocatorPropagationTraits<Alloc>::PropagateOnMoveAssignment &&
                  std::is_nothrow_move_assignable_v<Alloc>) ||
@@ -207,12 +229,14 @@ namespace NGIN::Text
             return *this;
         }
 
+        /// @brief Replaces the contents with @p sv.
         ThisType& operator=(view_type sv)
         {
             Assign(sv);
             return *this;
         }
 
+        /// @brief Replaces the contents with a null-terminated string, or empties it for null.
         ThisType& operator=(const CharT* cstr)
         {
             Assign(cstr != nullptr ? view_type {cstr, static_cast<size_type>(traits_type::length(cstr))}
@@ -222,25 +246,35 @@ namespace NGIN::Text
 
         /// @brief Returns the number of stored code units, not Unicode scalar values.
         [[nodiscard]] size_type Size() const noexcept { return RawSize(); }
-        [[nodiscard]] bool      Empty() const noexcept { return RawSize() == 0; }
+        /// @brief Returns whether the string contains no code units.
+        [[nodiscard]] bool Empty() const noexcept { return RawSize() == 0; }
+        /// @brief Returns the number of code units that fit without allocating.
         [[nodiscard]] size_type Capacity() const noexcept { return RawCapacity(); }
 
+        /// @brief Returns a null-terminated read-only pointer valid until the next mutation.
         [[nodiscard]] const CharT* c_str() const noexcept { return Data(); }
+        /// @brief Returns the same null-terminated pointer as c_str().
         [[nodiscard]] const CharT* CStr() const noexcept { return c_str(); }
+        /// @brief Returns the allocator used for owned storage.
         [[nodiscard]] const Alloc& GetAllocator() const noexcept { return m_allocator; }
-        [[nodiscard]] view_type    View() const noexcept { return view_type {Data(), Size()}; }
+        /// @brief Returns a non-owning view invalidated by mutation or destruction.
+        [[nodiscard]] view_type View() const noexcept { return view_type {Data(), Size()}; }
 
+        /// @brief Returns read-only contiguous code-unit storage, always null-terminated.
         [[nodiscard]] const CharT* Data() const noexcept
         {
             return IsSmall() ? SmallData() : HeapData();
         }
 
+        /// @brief Returns mutable contiguous code-unit storage, invalidated by reallocation.
         [[nodiscard]] CharT* Data() noexcept
         {
             return IsSmall() ? SmallData() : HeapData();
         }
 
+        /// @brief Compatibility spelling of Size().
         [[nodiscard]] UIntSize GetSize() const noexcept { return Size(); }
+        /// @brief Compatibility spelling of Capacity().
         [[nodiscard]] UIntSize GetCapacity() const noexcept { return Capacity(); }
 
         /// @brief Returns the code unit at @p index without bounds checking.
@@ -248,6 +282,8 @@ namespace NGIN::Text
         /// @brief Returns the code unit at @p index without bounds checking.
         CharT& operator[](size_type index) noexcept { return Data()[index]; }
 
+        /// @brief Returns the code unit at @p index with bounds checking.
+        /// @throws std::out_of_range when @p index is not less than Size().
         const CharT& At(size_type index) const
         {
             if (index >= Size())
@@ -255,6 +291,8 @@ namespace NGIN::Text
             return Data()[index];
         }
 
+        /// @brief Returns mutable access to the code unit at @p index with bounds checking.
+        /// @throws std::out_of_range when @p index is not less than Size().
         CharT& At(size_type index)
         {
             if (index >= Size())
@@ -262,32 +300,51 @@ namespace NGIN::Text
             return Data()[index];
         }
 
+        /// @brief Returns the first code unit with bounds checking.
         const CharT& Front() const { return At(0); }
-        CharT&       Front() { return At(0); }
+        /// @brief Returns mutable access to the first code unit with bounds checking.
+        CharT& Front() { return At(0); }
 
+        /// @brief Returns the last code unit with bounds checking.
         const CharT& Back() const { return At(Size() - 1); }
-        CharT&       Back() { return At(Size() - 1); }
+        /// @brief Returns mutable access to the last code unit with bounds checking.
+        CharT& Back() { return At(Size() - 1); }
 
+        /// @brief Converts explicitly to a non-owning view invalidated by mutation.
         explicit operator view_type() const noexcept { return View(); }
 
-        [[nodiscard]] iterator               begin() noexcept { return Data(); }
-        [[nodiscard]] iterator               end() noexcept { return Data() + Size(); }
-        [[nodiscard]] const_iterator         begin() const noexcept { return Data(); }
-        [[nodiscard]] const_iterator         end() const noexcept { return Data() + Size(); }
-        [[nodiscard]] const_iterator         cbegin() const noexcept { return begin(); }
-        [[nodiscard]] const_iterator         cend() const noexcept { return end(); }
-        [[nodiscard]] reverse_iterator       rbegin() noexcept { return reverse_iterator(end()); }
-        [[nodiscard]] reverse_iterator       rend() noexcept { return reverse_iterator(begin()); }
+        /// @brief Returns an iterator to the first mutable code unit.
+        [[nodiscard]] iterator begin() noexcept { return Data(); }
+        /// @brief Returns an iterator one past the last mutable code unit.
+        [[nodiscard]] iterator end() noexcept { return Data() + Size(); }
+        /// @brief Returns an iterator to the first code unit.
+        [[nodiscard]] const_iterator begin() const noexcept { return Data(); }
+        /// @brief Returns an iterator one past the last code unit.
+        [[nodiscard]] const_iterator end() const noexcept { return Data() + Size(); }
+        /// @brief Returns a const iterator to the first code unit.
+        [[nodiscard]] const_iterator cbegin() const noexcept { return begin(); }
+        /// @brief Returns a const iterator one past the last code unit.
+        [[nodiscard]] const_iterator cend() const noexcept { return end(); }
+        /// @brief Returns a reverse iterator to the last mutable code unit.
+        [[nodiscard]] reverse_iterator rbegin() noexcept { return reverse_iterator(end()); }
+        /// @brief Returns a reverse iterator before the first mutable code unit.
+        [[nodiscard]] reverse_iterator rend() noexcept { return reverse_iterator(begin()); }
+        /// @brief Returns a reverse iterator to the last code unit.
         [[nodiscard]] const_reverse_iterator rbegin() const noexcept { return const_reverse_iterator(end()); }
+        /// @brief Returns a reverse iterator before the first code unit.
         [[nodiscard]] const_reverse_iterator rend() const noexcept { return const_reverse_iterator(begin()); }
+        /// @brief Returns a const reverse iterator to the last code unit.
         [[nodiscard]] const_reverse_iterator crbegin() const noexcept { return const_reverse_iterator(cend()); }
+        /// @brief Returns a const reverse iterator before the first code unit.
         [[nodiscard]] const_reverse_iterator crend() const noexcept { return const_reverse_iterator(cbegin()); }
 
+        /// @brief Removes all code units while retaining allocated capacity.
         void Clear() noexcept
         {
             SetSize(0);
         }
 
+        /// @brief Ensures capacity for at least @p newCap code units using the growth policy.
         void Reserve(size_type newCap)
         {
             if (newCap <= Capacity())
@@ -295,6 +352,7 @@ namespace NGIN::Text
             ReallocateTo(CheckedGrow(Capacity(), newCap));
         }
 
+        /// @brief Ensures capacity for at least @p newCap code units without growth-policy rounding.
         void ReserveExact(size_type newCap)
         {
             if (newCap <= Capacity())
@@ -302,6 +360,7 @@ namespace NGIN::Text
             ReallocateTo(newCap);
         }
 
+        /// @brief Releases excess capacity and returns to small storage when possible.
         void ShrinkToFit()
         {
             if (IsSmall())
@@ -320,11 +379,13 @@ namespace NGIN::Text
                 ReallocateTo(RawSize());
         }
 
+        /// @brief Resizes to @p count, value-initializing added code units.
         void Resize(size_type count)
         {
             Resize(count, CharT());
         }
 
+        /// @brief Resizes to @p count and fills added positions with @p ch.
         void Resize(size_type count, CharT ch)
         {
             if (count <= RawSize())
@@ -341,6 +402,7 @@ namespace NGIN::Text
             SetSize(count);
         }
 
+        /// @brief Appends @p ch, reallocating when capacity is exhausted.
         void PushBack(CharT ch)
         {
             if (RawSize() == Capacity())
@@ -351,6 +413,7 @@ namespace NGIN::Text
             SetSize(RawSize() + 1);
         }
 
+        /// @brief Removes the last code unit; does nothing when empty.
         void PopBack()
         {
             if (RawSize() == 0)
@@ -358,6 +421,7 @@ namespace NGIN::Text
             SetSize(RawSize() - 1);
         }
 
+        /// @brief Replaces the contents with @p sv, including safely overlapping views.
         void Assign(view_type sv)
         {
             const size_type count  = sv.size();
@@ -387,22 +451,28 @@ namespace NGIN::Text
             CommitHeap(newData, newCapacity, count);
         }
 
+        /// @brief Replaces the contents with exactly @p count code units from @p data.
         void Assign(const CharT* data, size_type count)
         {
             Assign(MakeBoundedView(data, count, "BasicString::Assign"));
         }
 
+        /// @brief Appends all code units from @p other.
         void Append(const ThisType& other) { AppendView(other.View()); }
+        /// @brief Appends all code units from @p sv.
         void Append(view_type sv) { AppendView(sv); }
+        /// @brief Appends a null-terminated string; a null pointer appends nothing.
         void Append(const CharT* cstr)
         {
             AppendView(cstr != nullptr ? view_type {cstr, static_cast<size_type>(traits_type::length(cstr))}
                                        : view_type {});
         }
+        /// @brief Appends exactly @p count code units from @p data, supporting overlap.
         void Append(const CharT* data, size_type count)
         {
             AppendView(MakeBoundedView(data, count, "BasicString::Append"));
         }
+        /// @brief Appends @p count copies of @p ch.
         void Append(size_type count, CharT ch)
         {
             if (count == 0)
@@ -416,8 +486,11 @@ namespace NGIN::Text
             FillChars(Data() + oldSize, count, ch);
             SetSize(newSize);
         }
+        /// @brief Appends one code unit.
         void Append(CharT ch) { PushBack(ch); }
 
+        /// @brief Gives @p op writable storage for @p count code units and commits the size it reports.
+        /// @throws std::length_error when @p op reports more than @p count code units.
         template<class TOp>
             requires requires(TOp&& op, CharT* buffer, size_type writableCount) {
                 { std::invoke(std::forward<TOp>(op), buffer, writableCount) } -> std::convertible_to<size_type>;
@@ -446,6 +519,8 @@ namespace NGIN::Text
             }
         }
 
+        /// @brief Gives @p op writable tail storage and appends the number of code units it reports.
+        /// @throws std::length_error when @p op reports more than @p count code units.
         template<class TOp>
             requires requires(TOp&& op, CharT* buffer, size_type writableCount) {
                 { std::invoke(std::forward<TOp>(op), buffer, writableCount) } -> std::convertible_to<size_type>;
@@ -485,12 +560,15 @@ namespace NGIN::Text
             return ThisType(view_type {Data() + pos, actualCount}, m_allocator);
         }
 
+        /// @brief Inserts @p value before @p pos.
+        /// @throws std::out_of_range when @p pos is greater than Size().
         ThisType& Insert(size_type pos, view_type value)
         {
             Replace(pos, 0, value);
             return *this;
         }
 
+        /// @brief Inserts a null-terminated string before @p pos; null inserts nothing.
         ThisType& Insert(size_type pos, const CharT* cstr)
         {
             Replace(pos,
@@ -500,6 +578,7 @@ namespace NGIN::Text
             return *this;
         }
 
+        /// @brief Inserts @p count copies of @p ch before @p pos.
         ThisType& Insert(size_type pos, size_type count, CharT ch)
         {
             if (count == 0)
@@ -510,12 +589,15 @@ namespace NGIN::Text
             return *this;
         }
 
+        /// @brief Erases up to @p count code units beginning at @p pos.
         ThisType& Erase(size_type pos, size_type count = npos)
         {
             Replace(pos, count, view_type {});
             return *this;
         }
 
+        /// @brief Removes exactly @p count leading code units.
+        /// @throws std::out_of_range when @p count exceeds Size().
         ThisType& RemovePrefix(size_type count)
         {
             if (count > Size())
@@ -525,6 +607,8 @@ namespace NGIN::Text
             return *this;
         }
 
+        /// @brief Removes exactly @p count trailing code units.
+        /// @throws std::out_of_range when @p count exceeds Size().
         ThisType& RemoveSuffix(size_type count)
         {
             if (count > Size())
@@ -534,6 +618,8 @@ namespace NGIN::Text
             return *this;
         }
 
+        /// @brief Replaces up to @p count code units at @p pos with @p replacement.
+        /// @throws std::out_of_range when @p pos is greater than Size().
         ThisType& Replace(size_type pos, size_type count, view_type replacement)
         {
             if (pos > Size())
@@ -553,6 +639,7 @@ namespace NGIN::Text
             return *this;
         }
 
+        /// @brief Replaces a range with a null-terminated string; null means an empty replacement.
         ThisType& Replace(size_type pos, size_type count, const CharT* cstr)
         {
             Replace(pos,
@@ -562,30 +649,35 @@ namespace NGIN::Text
             return *this;
         }
 
+        /// @brief Appends @p other and returns this string.
         ThisType& operator+=(const ThisType& other)
         {
             Append(other);
             return *this;
         }
 
+        /// @brief Appends @p sv and returns this string.
         ThisType& operator+=(view_type sv)
         {
             Append(sv);
             return *this;
         }
 
+        /// @brief Appends a null-terminated string and returns this string.
         ThisType& operator+=(const CharT* cstr)
         {
             Append(cstr);
             return *this;
         }
 
+        /// @brief Appends @p ch and returns this string.
         ThisType& operator+=(CharT ch)
         {
             Append(ch);
             return *this;
         }
 
+        /// @brief Exchanges contents with @p other according to allocator propagation rules.
         void Swap(ThisType& other) noexcept(
                 (!NGIN::Memory::AllocatorPropagationTraits<Alloc>::PropagateOnSwap &&
                  NGIN::Memory::AllocatorPropagationTraits<Alloc>::IsAlwaysEqual) ||
@@ -617,6 +709,8 @@ namespace NGIN::Text
             }
         }
 
+        /// @brief Lexicographically compares code units with @p rhs.
+        /// @return A negative value, zero, or a positive value when this string is less, equal, or greater.
         [[nodiscard]] int Compare(view_type rhs) const noexcept
         {
             const size_type common = std::min(Size(), rhs.size());
@@ -634,22 +728,26 @@ namespace NGIN::Text
             return 0;
         }
 
+        /// @brief Returns whether the string begins with @p prefix.
         [[nodiscard]] bool StartsWith(view_type prefix) const noexcept
         {
             return prefix.size() <= Size() &&
                    (prefix.empty() || traits_type::compare(Data(), prefix.data(), prefix.size()) == 0);
         }
 
+        /// @brief Returns whether the string begins with the non-null null-terminated string.
         [[nodiscard]] bool StartsWith(const CharT* cstr) const noexcept
         {
             return cstr != nullptr && StartsWith(view_type {cstr, static_cast<size_type>(traits_type::length(cstr))});
         }
 
+        /// @brief Returns whether the first code unit equals @p ch.
         [[nodiscard]] bool StartsWith(CharT ch) const noexcept
         {
             return !Empty() && traits_type::compare(Data(), &ch, 1) == 0;
         }
 
+        /// @brief Returns whether the string ends with @p suffix.
         [[nodiscard]] bool EndsWith(view_type suffix) const noexcept
         {
             if (suffix.size() > Size())
@@ -661,26 +759,31 @@ namespace NGIN::Text
             return traits_type::compare(Data() + (Size() - suffix.size()), suffix.data(), suffix.size()) == 0;
         }
 
+        /// @brief Returns whether the string ends with the non-null null-terminated string.
         [[nodiscard]] bool EndsWith(const CharT* cstr) const noexcept
         {
             return cstr != nullptr && EndsWith(view_type {cstr, static_cast<size_type>(traits_type::length(cstr))});
         }
 
+        /// @brief Returns whether the last code unit equals @p ch.
         [[nodiscard]] bool EndsWith(CharT ch) const noexcept
         {
             return !Empty() && traits_type::compare(Data() + (Size() - 1), &ch, 1) == 0;
         }
 
+        /// @brief Returns whether @p value occurs in the string.
         [[nodiscard]] bool Contains(view_type value) const noexcept
         {
             return Find(value) != npos;
         }
 
+        /// @brief Finds @p ch at or after @p pos, returning npos when absent.
         [[nodiscard]] size_type Find(CharT ch, size_type pos = 0) const noexcept
         {
             return Find(view_type {std::addressof(ch), 1}, pos);
         }
 
+        /// @brief Finds a non-null null-terminated string at or after @p pos.
         [[nodiscard]] size_type Find(const CharT* cstr, size_type pos = 0) const noexcept
         {
             return cstr != nullptr ? Find(view_type {cstr, static_cast<size_type>(traits_type::length(cstr))}, pos)
@@ -719,11 +822,13 @@ namespace NGIN::Text
             return npos;
         }
 
+        /// @brief Finds the last @p ch at or before @p pos, returning npos when absent.
         [[nodiscard]] size_type RFind(CharT ch, size_type pos = npos) const noexcept
         {
             return RFind(view_type {std::addressof(ch), 1}, pos);
         }
 
+        /// @brief Reverse-finds a non-null null-terminated string at or before @p pos.
         [[nodiscard]] size_type RFind(const CharT* cstr, size_type pos = npos) const noexcept
         {
             return cstr != nullptr ? RFind(view_type {cstr, static_cast<size_type>(traits_type::length(cstr))}, pos)
@@ -764,11 +869,13 @@ namespace NGIN::Text
             return npos;
         }
 
+        /// @brief Finds @p ch at or after @p pos.
         [[nodiscard]] size_type FindFirstOf(CharT ch, size_type pos = 0) const noexcept
         {
             return Find(ch, pos);
         }
 
+        /// @brief Finds the first code unit belonging to a null-terminated set.
         [[nodiscard]] size_type FindFirstOf(const CharT* cstr, size_type pos = 0) const noexcept
         {
             return cstr != nullptr
@@ -776,6 +883,7 @@ namespace NGIN::Text
                            : npos;
         }
 
+        /// @brief Finds the first code unit at or after @p pos that belongs to @p values.
         [[nodiscard]] size_type FindFirstOf(view_type values, size_type pos = 0) const noexcept
         {
             const view_type haystack = View();
@@ -809,11 +917,13 @@ namespace NGIN::Text
             return npos;
         }
 
+        /// @brief Finds the last @p ch at or before @p pos.
         [[nodiscard]] size_type FindLastOf(CharT ch, size_type pos = npos) const noexcept
         {
             return RFind(ch, pos);
         }
 
+        /// @brief Finds the last code unit belonging to a null-terminated set.
         [[nodiscard]] size_type FindLastOf(const CharT* cstr, size_type pos = npos) const noexcept
         {
             return cstr != nullptr
@@ -821,6 +931,7 @@ namespace NGIN::Text
                            : npos;
         }
 
+        /// @brief Finds the last code unit at or before @p pos that belongs to @p values.
         [[nodiscard]] size_type FindLastOf(view_type values, size_type pos = npos) const noexcept
         {
             const view_type haystack = View();
@@ -863,11 +974,13 @@ namespace NGIN::Text
             return npos;
         }
 
+        /// @brief Finds the first code unit at or after @p pos that differs from @p ch.
         [[nodiscard]] size_type FindFirstNotOf(CharT ch, size_type pos = 0) const noexcept
         {
             return FindFirstNotOf(view_type {std::addressof(ch), 1}, pos);
         }
 
+        /// @brief Finds the first code unit not belonging to a null-terminated set.
         [[nodiscard]] size_type FindFirstNotOf(const CharT* cstr, size_type pos = 0) const noexcept
         {
             return cstr != nullptr
@@ -875,6 +988,7 @@ namespace NGIN::Text
                            : npos;
         }
 
+        /// @brief Finds the first code unit at or after @p pos that is absent from @p values.
         [[nodiscard]] size_type FindFirstNotOf(view_type values, size_type pos = 0) const noexcept
         {
             const view_type haystack = View();
@@ -908,11 +1022,13 @@ namespace NGIN::Text
             return npos;
         }
 
+        /// @brief Finds the last code unit at or before @p pos that differs from @p ch.
         [[nodiscard]] size_type FindLastNotOf(CharT ch, size_type pos = npos) const noexcept
         {
             return FindLastNotOf(view_type {std::addressof(ch), 1}, pos);
         }
 
+        /// @brief Finds the last code unit not belonging to a null-terminated set.
         [[nodiscard]] size_type FindLastNotOf(const CharT* cstr, size_type pos = npos) const noexcept
         {
             return cstr != nullptr
@@ -920,6 +1036,7 @@ namespace NGIN::Text
                            : npos;
         }
 
+        /// @brief Finds the last code unit at or before @p pos that is absent from @p values.
         [[nodiscard]] size_type FindLastNotOf(view_type values, size_type pos = npos) const noexcept
         {
             const view_type haystack = View();
@@ -962,82 +1079,98 @@ namespace NGIN::Text
             return npos;
         }
 
+        /// @brief Returns whether @p left and @p right contain identical code units.
         friend bool operator==(const ThisType& left, view_type right) noexcept
         {
             return left.Size() == right.size() &&
                    (left.Size() == 0 || traits_type::compare(left.Data(), right.data(), left.Size()) == 0);
         }
 
+        /// @brief Returns whether @p left and @p right contain identical code units.
         friend bool operator==(view_type left, const ThisType& right) noexcept
         {
             return right == left;
         }
 
+        /// @brief Returns whether both strings contain identical code units.
         friend bool operator==(const ThisType& left, const ThisType& right) noexcept
         {
             return left == right.View();
         }
 
+        /// @brief Returns whether the strings differ.
         friend bool operator!=(const ThisType& left, const ThisType& right) noexcept
         {
             return !(left == right);
         }
 
+        /// @brief Performs lexicographic less-than comparison.
         friend bool operator<(const ThisType& left, view_type right) noexcept
         {
             return left.Compare(right) < 0;
         }
 
+        /// @brief Performs lexicographic less-than comparison.
         friend bool operator<(view_type left, const ThisType& right) noexcept
         {
             return right.Compare(left) > 0;
         }
 
+        /// @brief Performs lexicographic less-than comparison.
         friend bool operator<(const ThisType& left, const ThisType& right) noexcept
         {
             return left < right.View();
         }
 
+        /// @brief Performs lexicographic less-than-or-equal comparison.
         friend bool operator<=(const ThisType& left, view_type right) noexcept
         {
             return left.Compare(right) <= 0;
         }
 
+        /// @brief Performs lexicographic less-than-or-equal comparison.
         friend bool operator<=(view_type left, const ThisType& right) noexcept
         {
             return right.Compare(left) >= 0;
         }
 
+        /// @brief Performs lexicographic less-than-or-equal comparison.
         friend bool operator<=(const ThisType& left, const ThisType& right) noexcept
         {
             return left <= right.View();
         }
 
+        /// @brief Performs lexicographic greater-than comparison.
         friend bool operator>(const ThisType& left, view_type right) noexcept
         {
             return left.Compare(right) > 0;
         }
 
+        /// @brief Performs lexicographic greater-than comparison.
         friend bool operator>(view_type left, const ThisType& right) noexcept
         {
             return right.Compare(left) < 0;
         }
 
+        /// @brief Performs lexicographic greater-than comparison.
         friend bool operator>(const ThisType& left, const ThisType& right) noexcept
         {
             return left > right.View();
         }
 
+        /// @brief Performs lexicographic greater-than-or-equal comparison.
         friend bool operator>=(const ThisType& left, view_type right) noexcept
         {
             return left.Compare(right) >= 0;
         }
 
+        /// @brief Performs lexicographic greater-than-or-equal comparison.
         friend bool operator>=(view_type left, const ThisType& right) noexcept
         {
             return right.Compare(left) <= 0;
         }
 
+        /// @brief Performs lexicographic greater-than-or-equal comparison.
         friend bool operator>=(const ThisType& left, const ThisType& right) noexcept
         {
             return left >= right.View();
@@ -1654,8 +1787,8 @@ namespace NGIN::Text
             ~Storage() = default;
         };
 
-        size_type                   m_sizeAndFlags {0};
-        Storage                     m_storage {};
+        size_type m_sizeAndFlags {0};
+        Storage   m_storage {};
 #if defined(_MSC_VER)
         [[msvc::no_unique_address]] Alloc m_allocator {};
 #else
@@ -1663,6 +1796,7 @@ namespace NGIN::Text
 #endif
     };
 
+    /// @brief Returns a new string containing @p left followed by @p right.
     template<class CharT, UIntSize SBOBytes, class Alloc, class Growth, class Traits>
     inline BasicString<CharT, SBOBytes, Alloc, Growth, Traits>
     operator+(const BasicString<CharT, SBOBytes, Alloc, Growth, Traits>& left,
@@ -1673,6 +1807,7 @@ namespace NGIN::Text
         return result;
     }
 
+    /// @brief Returns a new string containing @p left followed by @p right.
     template<class CharT, UIntSize SBOBytes, class Alloc, class Growth, class Traits>
     inline BasicString<CharT, SBOBytes, Alloc, Growth, Traits>
     operator+(std::basic_string_view<CharT, Traits>                      left,
@@ -1683,6 +1818,7 @@ namespace NGIN::Text
         return result;
     }
 
+    /// @brief Returns a new string containing @p left followed by @p right.
     template<class CharT, UIntSize SBOBytes, class Alloc, class Growth, class Traits>
     inline BasicString<CharT, SBOBytes, Alloc, Growth, Traits>
     operator+(const BasicString<CharT, SBOBytes, Alloc, Growth, Traits>& left,
@@ -1693,6 +1829,7 @@ namespace NGIN::Text
         return result;
     }
 
+    /// @brief Returns a new string containing @p left followed by the null-terminated @p right.
     template<class CharT, UIntSize SBOBytes, class Alloc, class Growth, class Traits>
     inline BasicString<CharT, SBOBytes, Alloc, Growth, Traits>
     operator+(const BasicString<CharT, SBOBytes, Alloc, Growth, Traits>& left,
@@ -1703,6 +1840,7 @@ namespace NGIN::Text
         return result;
     }
 
+    /// @brief Returns a new string containing the null-terminated @p left followed by @p right.
     template<class CharT, UIntSize SBOBytes, class Alloc, class Growth, class Traits>
     inline BasicString<CharT, SBOBytes, Alloc, Growth, Traits>
     operator+(const CharT*                                               left,
@@ -1716,6 +1854,7 @@ namespace NGIN::Text
         return result;
     }
 
+    /// @brief Returns a new string containing @p left followed by code unit @p right.
     template<class CharT, UIntSize SBOBytes, class Alloc, class Growth, class Traits>
     inline BasicString<CharT, SBOBytes, Alloc, Growth, Traits>
     operator+(const BasicString<CharT, SBOBytes, Alloc, Growth, Traits>& left,
@@ -1726,6 +1865,7 @@ namespace NGIN::Text
         return result;
     }
 
+    /// @brief Returns a new string containing code unit @p left followed by @p right.
     template<class CharT, UIntSize SBOBytes, class Alloc, class Growth, class Traits>
     inline BasicString<CharT, SBOBytes, Alloc, Growth, Traits>
     operator+(CharT                                                      left,

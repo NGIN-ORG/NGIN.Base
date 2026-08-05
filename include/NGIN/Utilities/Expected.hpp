@@ -505,27 +505,40 @@ namespace NGIN::Utilities
 
         /// @brief Moves the contained value out of an rvalue `Expected`.
         [[nodiscard]] constexpr T TakeValue() &&
-                requires(NGIN::Meta::TypeTraits<T>::IsMoveConstructible()) {
-                    return std::move(*this).Value();
-                }
+            requires(NGIN::Meta::TypeTraits<T>::IsMoveConstructible())
+        {
+            return std::move(*this).Value();
+        }
 
-                /// @brief Moves the contained error out of an rvalue `Expected`.
-                [[nodiscard]] constexpr E TakeError() &&
-                requires(NGIN::Meta::TypeTraits<E>::IsMoveConstructible()) {
-                    return std::move(*this).Error();
-                }
+        /// @brief Moves the contained error out of an rvalue `Expected`.
+        [[nodiscard]] constexpr E TakeError() &&
+            requires(NGIN::Meta::TypeTraits<E>::IsMoveConstructible())
+        {
+            return std::move(*this).Error();
+        }
 
-                /// @brief `std::expected`-style dereference operators.
-                [[nodiscard]] constexpr T& operator*() & noexcept
+        /// @brief Returns the contained value from a mutable lvalue.
+        [[nodiscard]] constexpr T& operator*() & noexcept
         {
             return Value();
         }
-        [[nodiscard]] constexpr const T&  operator*() const& noexcept { return Value(); }
-        [[nodiscard]] constexpr T&&       operator*() && noexcept { return std::move(*this).Value(); }
-        [[nodiscard]] constexpr const T&& operator*() const&& noexcept { return std::move(*this).Value(); }
-        [[nodiscard]] constexpr T*        operator->() noexcept { return &Value(); }
-        [[nodiscard]] constexpr const T*  operator->() const noexcept { return &Value(); }
+        /// @brief Returns the contained value from an immutable lvalue.
+        [[nodiscard]] constexpr const T& operator*() const& noexcept { return Value(); }
 
+        /// @brief Returns the contained value from a mutable rvalue.
+        [[nodiscard]] constexpr T&& operator*() && noexcept { return std::move(*this).Value(); }
+
+        /// @brief Returns the contained value from an immutable rvalue.
+        [[nodiscard]] constexpr const T&& operator*() const&& noexcept { return std::move(*this).Value(); }
+
+        /// @brief Returns a pointer to the contained value.
+        [[nodiscard]] constexpr T* operator->() noexcept { return &Value(); }
+
+        /// @brief Returns an immutable pointer to the contained value.
+        [[nodiscard]] constexpr const T* operator->() const noexcept { return &Value(); }
+
+        /// @brief Maps a mutable success value to a new non-void value while preserving an error.
+        /// @tparam F Callable type accepting `T&`.
         template<class F>
         constexpr auto Transform(F&& f) & -> Expected<std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<T&>()))>, E>
             requires(
@@ -538,6 +551,8 @@ namespace NGIN::Utilities
             return Expected<ResultValue, E>(Unexpected<E>(ErrorRef()));
         }
 
+        /// @brief Maps an immutable success value to a new non-void value while preserving an error.
+        /// @tparam F Callable type accepting `const T&`.
         template<class F>
         constexpr auto Transform(F&& f) const& -> Expected<std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<const T&>()))>, E>
             requires(
@@ -550,6 +565,8 @@ namespace NGIN::Utilities
             return Expected<ResultValue, E>(Unexpected<E>(ErrorRef()));
         }
 
+        /// @brief Maps a moved success value to a new non-void value while moving an error.
+        /// @tparam F Callable type accepting `T&&`.
         template<class F>
         constexpr auto Transform(F&& f) && -> Expected<std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<T&&>()))>, E>
             requires(!std::is_void_v<decltype(std::forward<F>(f)(std::declval<T &&>()))>)
@@ -560,6 +577,8 @@ namespace NGIN::Utilities
             return Expected<ResultValue, E>(Unexpected<E>(std::move(ErrorRef())));
         }
 
+        /// @brief Invokes a callable for a mutable success value and converts success to `void`.
+        /// @tparam F Callable type accepting `T&` and returning `void`.
         template<class F>
         constexpr auto Transform(F&& f) & -> Expected<void, E>
             requires(
@@ -574,6 +593,8 @@ namespace NGIN::Utilities
             return Expected<void, E>(Unexpected<E>(ErrorRef()));
         }
 
+        /// @brief Invokes a callable for an immutable success value and converts success to `void`.
+        /// @tparam F Callable type accepting `const T&` and returning `void`.
         template<class F>
         constexpr auto Transform(F&& f) const& -> Expected<void, E>
             requires(
@@ -588,6 +609,8 @@ namespace NGIN::Utilities
             return Expected<void, E>(Unexpected<E>(ErrorRef()));
         }
 
+        /// @brief Invokes a callable for a moved success value and converts success to `void`.
+        /// @tparam F Callable type accepting `T&&` and returning `void`.
         template<class F>
         constexpr auto Transform(F&& f) && -> Expected<void, E>
             requires(std::is_void_v<decltype(std::forward<F>(f)(std::declval<T &&>()))>)
@@ -600,6 +623,8 @@ namespace NGIN::Utilities
             return Expected<void, E>(Unexpected<E>(std::move(ErrorRef())));
         }
 
+        /// @brief Chains a mutable success value into another `Expected` with the same error type.
+        /// @tparam F Callable type accepting `T&` and returning an `Expected`.
         template<class F>
         constexpr auto AndThen(F&& f) & -> std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<T&>()))>
             requires(
@@ -613,6 +638,8 @@ namespace NGIN::Utilities
             return ResultType(Unexpected<E>(ErrorRef()));
         }
 
+        /// @brief Chains an immutable success value into another `Expected` with the same error type.
+        /// @tparam F Callable type accepting `const T&` and returning an `Expected`.
         template<class F>
         constexpr auto AndThen(F&& f) const& -> std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<const T&>()))>
             requires(
@@ -626,6 +653,8 @@ namespace NGIN::Utilities
             return ResultType(Unexpected<E>(ErrorRef()));
         }
 
+        /// @brief Chains a moved success value into another `Expected` with the same error type.
+        /// @tparam F Callable type accepting `T&&` and returning an `Expected`.
         template<class F>
         constexpr auto AndThen(F&& f) && -> std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<T&&>()))>
             requires(
@@ -638,6 +667,8 @@ namespace NGIN::Utilities
             return ResultType(Unexpected<E>(std::move(ErrorRef())));
         }
 
+        /// @brief Recovers from a mutable error by invoking a callable that returns the same `Expected` type.
+        /// @tparam F Callable type accepting `E&`.
         template<class F>
         constexpr auto OrElse(F&& f) & -> Expected<T, E>
             requires(
@@ -649,6 +680,8 @@ namespace NGIN::Utilities
             return std::forward<F>(f)(ErrorRef());
         }
 
+        /// @brief Recovers from an immutable error by invoking a callable that returns the same `Expected` type.
+        /// @tparam F Callable type accepting `const E&`.
         template<class F>
         constexpr auto OrElse(F&& f) const& -> Expected<T, E>
             requires(
@@ -660,6 +693,8 @@ namespace NGIN::Utilities
             return std::forward<F>(f)(ErrorRef());
         }
 
+        /// @brief Recovers from a moved error by invoking a callable that returns the same `Expected` type.
+        /// @tparam F Callable type accepting `E&&`.
         template<class F>
         constexpr auto OrElse(F&& f) && -> Expected<T, E>
             requires(std::is_same_v<std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<E &&>()))>, Expected<T, E>>)
@@ -669,6 +704,8 @@ namespace NGIN::Utilities
             return std::forward<F>(f)(std::move(ErrorRef()));
         }
 
+        /// @brief Maps a mutable error to a new error type while preserving a success value.
+        /// @tparam F Callable type accepting `E&`.
         template<class F>
         constexpr auto TransformError(F&& f) & -> Expected<T, std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<E&>()))>>
             requires(
@@ -681,6 +718,8 @@ namespace NGIN::Utilities
             return Expected<T, ResultError>(Unexpected<ResultError>(std::forward<F>(f)(ErrorRef())));
         }
 
+        /// @brief Maps an immutable error to a new error type while preserving a success value.
+        /// @tparam F Callable type accepting `const E&`.
         template<class F>
         constexpr auto TransformError(F&& f) const& -> Expected<T, std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<const E&>()))>>
             requires(
@@ -693,6 +732,8 @@ namespace NGIN::Utilities
             return Expected<T, ResultError>(Unexpected<ResultError>(std::forward<F>(f)(ErrorRef())));
         }
 
+        /// @brief Maps a moved error to a new error type while moving a success value.
+        /// @tparam F Callable type accepting `E&&`.
         template<class F>
         constexpr auto TransformError(F&& f) && -> Expected<T, std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<E&&>()))>>
             requires(!std::is_void_v<decltype(std::forward<F>(f)(std::declval<E &&>()))>)
@@ -1118,15 +1159,18 @@ namespace NGIN::Utilities
 
         /// @brief Moves the contained error out of an rvalue `Expected<void, E>`.
         [[nodiscard]] constexpr E TakeError() &&
-                requires(NGIN::Meta::TypeTraits<E>::IsMoveConstructible()) {
-                    return std::move(*this).Error();
-                }
+            requires(NGIN::Meta::TypeTraits<E>::IsMoveConstructible())
+        {
+            return std::move(*this).Error();
+        }
 
-                template<class F>
-                constexpr auto Transform(F&& f) & -> Expected<std::remove_cvref_t<decltype(std::forward<F>(f)())>, E>
-                    requires(
-                            !std::is_void_v<decltype(std::forward<F>(f)())> &&
-                            NGIN::Meta::TypeTraits<E>::IsCopyConstructible())
+        /// @brief Maps a mutable `void` success to a new non-void value while preserving an error.
+        /// @tparam F Nullary callable type.
+        template<class F>
+        constexpr auto Transform(F&& f) & -> Expected<std::remove_cvref_t<decltype(std::forward<F>(f)())>, E>
+            requires(
+                    !std::is_void_v<decltype(std::forward<F>(f)())> &&
+                    NGIN::Meta::TypeTraits<E>::IsCopyConstructible())
         {
             using ResultValue = std::remove_cvref_t<decltype(std::forward<F>(f)())>;
             if (m_hasValue)
@@ -1134,6 +1178,8 @@ namespace NGIN::Utilities
             return Expected<ResultValue, E>(Unexpected<E>(m_error.Ref()));
         }
 
+        /// @brief Maps an immutable `void` success to a new non-void value while preserving an error.
+        /// @tparam F Nullary callable type.
         template<class F>
         constexpr auto Transform(F&& f) const& -> Expected<std::remove_cvref_t<decltype(std::forward<F>(f)())>, E>
             requires(
@@ -1146,6 +1192,8 @@ namespace NGIN::Utilities
             return Expected<ResultValue, E>(Unexpected<E>(m_error.Ref()));
         }
 
+        /// @brief Maps a moved `void` success to a new non-void value while moving an error.
+        /// @tparam F Nullary callable type.
         template<class F>
         constexpr auto Transform(F&& f) && -> Expected<std::remove_cvref_t<decltype(std::forward<F>(f)())>, E>
             requires(!std::is_void_v<decltype(std::forward<F>(f)())>)
@@ -1156,6 +1204,8 @@ namespace NGIN::Utilities
             return Expected<ResultValue, E>(Unexpected<E>(std::move(m_error.Ref())));
         }
 
+        /// @brief Invokes a callable for a mutable `void` success and preserves the `void` value type.
+        /// @tparam F Nullary callable type returning `void`.
         template<class F>
         constexpr auto Transform(F&& f) & -> Expected<void, E>
             requires(
@@ -1170,6 +1220,8 @@ namespace NGIN::Utilities
             return Expected<void, E>(Unexpected<E>(m_error.Ref()));
         }
 
+        /// @brief Invokes a callable for an immutable `void` success and preserves the `void` value type.
+        /// @tparam F Nullary callable type returning `void`.
         template<class F>
         constexpr auto Transform(F&& f) const& -> Expected<void, E>
             requires(
@@ -1184,6 +1236,8 @@ namespace NGIN::Utilities
             return Expected<void, E>(Unexpected<E>(m_error.Ref()));
         }
 
+        /// @brief Invokes a callable for a moved `void` success and preserves the `void` value type.
+        /// @tparam F Nullary callable type returning `void`.
         template<class F>
         constexpr auto Transform(F&& f) && -> Expected<void, E>
             requires(std::is_void_v<decltype(std::forward<F>(f)())>)
@@ -1196,6 +1250,8 @@ namespace NGIN::Utilities
             return Expected<void, E>(Unexpected<E>(std::move(m_error.Ref())));
         }
 
+        /// @brief Chains a mutable `void` success into another `Expected` with the same error type.
+        /// @tparam F Nullary callable type returning an `Expected`.
         template<class F>
         constexpr auto AndThen(F&& f) & -> std::remove_cvref_t<decltype(std::forward<F>(f)())>
             requires(
@@ -1209,6 +1265,8 @@ namespace NGIN::Utilities
             return ResultType(Unexpected<E>(m_error.Ref()));
         }
 
+        /// @brief Chains an immutable `void` success into another `Expected` with the same error type.
+        /// @tparam F Nullary callable type returning an `Expected`.
         template<class F>
         constexpr auto AndThen(F&& f) const& -> std::remove_cvref_t<decltype(std::forward<F>(f)())>
             requires(
@@ -1222,6 +1280,8 @@ namespace NGIN::Utilities
             return ResultType(Unexpected<E>(m_error.Ref()));
         }
 
+        /// @brief Chains a moved `void` success into another `Expected` with the same error type.
+        /// @tparam F Nullary callable type returning an `Expected`.
         template<class F>
         constexpr auto AndThen(F&& f) && -> std::remove_cvref_t<decltype(std::forward<F>(f)())>
             requires(
@@ -1234,6 +1294,8 @@ namespace NGIN::Utilities
             return ResultType(Unexpected<E>(std::move(m_error.Ref())));
         }
 
+        /// @brief Recovers from a mutable error by invoking a callable that returns `Expected<void, E>`.
+        /// @tparam F Callable type accepting `E&`.
         template<class F>
         constexpr auto OrElse(F&& f) & -> Expected<void, E>
             requires(std::is_same_v<std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<E&>()))>, Expected<void, E>>)
@@ -1243,6 +1305,8 @@ namespace NGIN::Utilities
             return std::forward<F>(f)(m_error.Ref());
         }
 
+        /// @brief Recovers from an immutable error by invoking a callable that returns `Expected<void, E>`.
+        /// @tparam F Callable type accepting `const E&`.
         template<class F>
         constexpr auto OrElse(F&& f) const& -> Expected<void, E>
             requires(std::is_same_v<std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<const E&>()))>, Expected<void, E>>)
@@ -1252,6 +1316,8 @@ namespace NGIN::Utilities
             return std::forward<F>(f)(m_error.Ref());
         }
 
+        /// @brief Recovers from a moved error by invoking a callable that returns `Expected<void, E>`.
+        /// @tparam F Callable type accepting `E&&`.
         template<class F>
         constexpr auto OrElse(F&& f) && -> Expected<void, E>
             requires(std::is_same_v<std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<E &&>()))>, Expected<void, E>>)
@@ -1261,6 +1327,8 @@ namespace NGIN::Utilities
             return std::forward<F>(f)(std::move(m_error.Ref()));
         }
 
+        /// @brief Maps a mutable error to a new error type while preserving `void` success.
+        /// @tparam F Callable type accepting `E&`.
         template<class F>
         constexpr auto TransformError(F&& f) & -> Expected<void, std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<E&>()))>>
             requires(!std::is_void_v<decltype(std::forward<F>(f)(std::declval<E&>()))>)
@@ -1271,6 +1339,8 @@ namespace NGIN::Utilities
             return Expected<void, ResultError>(Unexpected<ResultError>(std::forward<F>(f)(m_error.Ref())));
         }
 
+        /// @brief Maps an immutable error to a new error type while preserving `void` success.
+        /// @tparam F Callable type accepting `const E&`.
         template<class F>
         constexpr auto TransformError(F&& f) const& -> Expected<void, std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<const E&>()))>>
             requires(!std::is_void_v<decltype(std::forward<F>(f)(std::declval<const E&>()))>)
@@ -1281,6 +1351,8 @@ namespace NGIN::Utilities
             return Expected<void, ResultError>(Unexpected<ResultError>(std::forward<F>(f)(m_error.Ref())));
         }
 
+        /// @brief Maps a moved error to a new error type while preserving `void` success.
+        /// @tparam F Callable type accepting `E&&`.
         template<class F>
         constexpr auto TransformError(F&& f) && -> Expected<void, std::remove_cvref_t<decltype(std::forward<F>(f)(std::declval<E&&>()))>>
             requires(!std::is_void_v<decltype(std::forward<F>(f)(std::declval<E &&>()))>)

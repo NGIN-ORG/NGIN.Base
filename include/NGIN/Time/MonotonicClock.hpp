@@ -10,6 +10,8 @@ namespace NGIN::Time
     /// @brief Monotonic clock based on platform high-resolution timers.
     struct MonotonicClock final
     {
+        /// @brief Returns the current monotonic time point.
+        /// @details The value is suitable for elapsed-time comparisons and is unaffected by wall-clock changes.
         [[nodiscard]] static NGIN_FOUNDATION_API TimePoint Now() noexcept;
     };
 }// namespace NGIN::Time

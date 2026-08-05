@@ -1,25 +1,25 @@
 #pragma once
 
-#include <cstddef>      // std::byte, std::size_t
-#include <new>          // ::new, std::launder
-#include <type_traits>  // std::is_*, std::enable_if_t
-#include <utility>      // std::forward, std::move
+#include <cstddef>    // std::byte, std::size_t
+#include <new>        // ::new, std::launder
+#include <type_traits>// std::is_*, std::enable_if_t
+#include <utility>    // std::forward, std::move
 
 namespace NGIN::Memory
 {
     namespace detail
     {
-        template <class T>
+        template<class T>
         class StorageForCommon
         {
             static_assert(!std::is_reference_v<T>,
-                "StorageFor<T&> is not supported. Use StorageFor<std::remove_reference_t<T>> plus a pointer if needed.");
+                          "StorageFor<T&> is not supported. Use StorageFor<std::remove_reference_t<T>> plus a pointer if needed.");
 
         public:
             using ValueType = T;
 
             constexpr StorageForCommon() noexcept = default;
-            ~StorageForCommon() = default;
+            ~StorageForCommon()                   = default;
 
             constexpr T* Ptr() noexcept
             {
@@ -41,7 +41,7 @@ namespace NGIN::Memory
                 return *Ptr();
             }
 
-            template <class... Args>
+            template<class... Args>
             constexpr T& Construct(Args&&... args) noexcept(std::is_nothrow_constructible_v<T, Args...>)
             {
                 ::new (static_cast<void*>(m_data)) T(std::forward<Args>(args)...);
@@ -74,9 +74,8 @@ namespace NGIN::Memory
                 return Construct(std::move(other.Ref()));
             }
 
-            template <class... Args>
-            constexpr T& Reconstruct(bool isAlive, Args&&... args)
-                noexcept(std::is_nothrow_constructible_v<T, Args...> && std::is_nothrow_destructible_v<T>)
+            template<class... Args>
+            constexpr T& Reconstruct(bool isAlive, Args&&... args) noexcept(std::is_nothrow_constructible_v<T, Args...> && std::is_nothrow_destructible_v<T>)
             {
                 DestroyIf(isAlive);
                 return Construct(std::forward<Args>(args)...);
@@ -88,7 +87,7 @@ namespace NGIN::Memory
         protected:
             alignas(T) std::byte m_data[sizeof(T)];
         };
-    }
+    }// namespace detail
 
     /// @brief Raw, properly-aligned inline storage for a value of type `T` without tracking lifetime.
     ///
@@ -127,7 +126,7 @@ namespace NGIN::Memory
     /// - Constructing twice without destroying the previous object is undefined behavior.
     ///
     /// @tparam T The stored type. References are not supported (`StorageFor<T&>` is ill-formed).
-    template <class T, bool IsTriviallyCopyable = std::is_trivially_copyable_v<T>>
+    template<class T, bool IsTriviallyCopyable = std::is_trivially_copyable_v<T>>
     class StorageFor;
 
     /// @brief Trivially-copyable storage when `T` is trivially copyable.
@@ -135,15 +134,26 @@ namespace NGIN::Memory
     /// @details
     /// This enables wrapper types that include `StorageFor<T>` + an "alive" flag to remain trivially
     /// copyable/movable when the contained `T` permits it.
-    template <class T>
+    template<class T>
     class StorageFor<T, true> : public detail::StorageForCommon<T>
     {
     public:
+        /// @brief Constructs uninitialized storage without beginning a `T` lifetime.
         constexpr StorageFor() noexcept = default;
+
+        /// @brief Copies the raw storage bytes; the owning wrapper must manage object lifetime.
         StorageFor(const StorageFor&) noexcept = default;
+
+        /// @brief Moves the raw storage bytes; the owning wrapper must manage object lifetime.
         StorageFor(StorageFor&&) noexcept = default;
+
+        /// @brief Copy-assigns the raw storage bytes; the owning wrapper must manage object lifetime.
         StorageFor& operator=(const StorageFor&) noexcept = default;
+
+        /// @brief Move-assigns the raw storage bytes; the owning wrapper must manage object lifetime.
         StorageFor& operator=(StorageFor&&) noexcept = default;
+
+        /// @brief Destroys only the storage wrapper and never destroys a contained `T`.
         ~StorageFor() = default;
     };
 
@@ -153,17 +163,26 @@ namespace NGIN::Memory
     /// For non-trivial types, byte-copying the storage would be unsafe unless the owning wrapper
     /// carefully controls construction/destruction. The wrapper should implement copy/move semantics
     /// explicitly using `CopyConstructFrom` / `MoveConstructFrom`.
-    template <class T>
+    template<class T>
     class StorageFor<T, false> : public detail::StorageForCommon<T>
     {
     public:
+        /// @brief Constructs uninitialized storage without beginning a `T` lifetime.
         constexpr StorageFor() noexcept = default;
 
+        /// @brief Copy construction is disabled to prevent byte-copying a non-trivial object.
         StorageFor(const StorageFor&) = delete;
+
+        /// @brief Move construction is disabled to prevent byte-moving a non-trivial object.
         StorageFor(StorageFor&&) = delete;
+
+        /// @brief Copy assignment is disabled to prevent byte-copying a non-trivial object.
         StorageFor& operator=(const StorageFor&) = delete;
+
+        /// @brief Move assignment is disabled to prevent byte-moving a non-trivial object.
         StorageFor& operator=(StorageFor&&) = delete;
 
+        /// @brief Destroys only the storage wrapper and never destroys a contained `T`.
         ~StorageFor() = default;
     };
-} // namespace NGIN::Memory
+}// namespace NGIN::Memory

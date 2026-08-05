@@ -75,6 +75,7 @@ namespace NGIN::Utilities
             requires(NGIN::Meta::TypeTraits<T>::IsTriviallyCopyable())
         = default;
 
+        /// @brief Copy-constructs an optional containing a non-trivially-copyable type.
         constexpr Optional(const Optional& other) noexcept(NGIN::Meta::TypeTraits<T>::IsNothrowCopyConstructible())
             requires(!NGIN::Meta::TypeTraits<T>::IsTriviallyCopyable() && NGIN::Meta::TypeTraits<T>::IsCopyConstructible())
             : m_value {}, m_hasValue {false}
@@ -93,6 +94,7 @@ namespace NGIN::Utilities
             requires(NGIN::Meta::TypeTraits<T>::IsTriviallyCopyable())
         = default;
 
+        /// @brief Move-constructs an optional containing a non-trivially-copyable type.
         constexpr Optional(Optional&& other) noexcept(NGIN::Meta::TypeTraits<T>::IsNothrowMoveConstructible())
             requires(!NGIN::Meta::TypeTraits<T>::IsTriviallyCopyable() && NGIN::Meta::TypeTraits<T>::IsMoveConstructible())
             : m_value {}, m_hasValue {false}
@@ -111,6 +113,7 @@ namespace NGIN::Utilities
             requires(NGIN::Meta::TypeTraits<T>::IsTriviallyCopyable())
         = default;
 
+        /// @brief Copy-assigns an optional containing a non-trivially-copyable type.
         constexpr Optional& operator=(const Optional& other) noexcept(
                 NGIN::Meta::TypeTraits<T>::IsNothrowCopyConstructible() &&
                 NGIN::Meta::TypeTraits<T>::IsNothrowDestructible() &&
@@ -162,6 +165,7 @@ namespace NGIN::Utilities
             requires(NGIN::Meta::TypeTraits<T>::IsTriviallyCopyable())
         = default;
 
+        /// @brief Move-assigns an optional containing a non-trivially-copyable type.
         constexpr Optional& operator=(Optional&& other) noexcept(
                 NGIN::Meta::TypeTraits<T>::IsNothrowMoveConstructible() &&
                 NGIN::Meta::TypeTraits<T>::IsNothrowDestructible() &&

@@ -1,10 +1,8 @@
 /// @file Vector.hpp
 /// @brief Declaration and inline implementation of the Vector container class.
 /// @details
-/// A dynamically resizable array-like container that uses an externally-owned
-/// allocator and stores elements contiguously.  If you default-construct,
-/// it assumes `Allocator::Instance()` exists; otherwise you must supply a
-/// reference to an allocator yourself.
+/// A dynamically resizable array-like container that stores its allocator and
+/// elements contiguously.
 #pragma once
 
 #include <NGIN/Memory/AllocatorConcept.hpp>
@@ -23,27 +21,42 @@
 
 namespace NGIN::Containers
 {
-    /// @tparam T Element type
-    /// @tparam Alloc Allocator satisfying AllocatorConcept (value-stored). Defaults to SystemAllocator.
+    /// @brief Contiguous dynamically sized sequence backed by an NGIN allocator.
+    /// @tparam T Element type.
+    /// @tparam Alloc Value-stored allocator satisfying `AllocatorConcept`.
     template<class T, NGIN::Memory::AllocatorConcept Alloc = NGIN::Memory::SystemAllocator>
     class Vector
     {
     public:
-        using Value     = T;
+        /// @brief Element type stored by the vector.
+        using Value = T;
+
+        /// @brief Allocator type stored by the vector.
         using AllocType = Alloc;
 
+        /// @brief Constructs an empty vector with a default-constructed allocator.
         Vector() noexcept(std::is_nothrow_default_constructible_v<Alloc>) = default;
+
+        /// @brief Constructs an empty vector with reserved storage.
+        /// @param initialCapacity Number of element slots to allocate.
+        /// @param alloc Allocator to store in the vector.
         explicit Vector(std::size_t initialCapacity, Alloc alloc = Alloc {}) : m_alloc(std::move(alloc))
         {
             if (initialCapacity)
                 Reserve(initialCapacity);
         }
+        /// @brief Constructs a vector by copying an initializer list.
+        /// @param init Elements to copy.
+        /// @param alloc Allocator to store in the vector.
         Vector(std::initializer_list<T> init, Alloc alloc = Alloc {}) : m_alloc(std::move(alloc))
         {
             Reserve(init.size());
-            for (const auto& v: init)
+            for (const T& v: init)
                 ::new (&m_data[m_size++]) T(v);
         }
+
+        /// @brief Copy-constructs the elements and allocator from another vector.
+        /// @param other Vector to copy.
         Vector(const Vector& other) : m_alloc(other.m_alloc)
         {
             Reserve(other.m_size);
@@ -51,6 +64,9 @@ namespace NGIN::Containers
                 ::new (&m_data[i]) T(other.m_data[i]);
             m_size = other.m_size;
         }
+        /// @brief Replaces the contents with a copy of another vector.
+        /// @param other Vector to copy.
+        /// @return This vector.
         Vector& operator=(const Vector& other)
         {
             if (this != &other)
@@ -59,12 +75,18 @@ namespace NGIN::Containers
             }
             return *this;
         }
+        /// @brief Move-constructs by taking ownership of another vector's storage.
+        /// @param other Vector whose storage is transferred; it is left empty.
         Vector(Vector&& other) noexcept(std::is_nothrow_move_constructible_v<Alloc>)
             : m_alloc(std::move(other.m_alloc)), m_data(other.m_data), m_size(other.m_size), m_capacity(other.m_capacity)
         {
             other.m_data = nullptr;
             other.m_size = other.m_capacity = 0;
         }
+        /// @brief Replaces the contents by moving from another vector.
+        /// @details Storage is transferred when allocator propagation permits it; otherwise elements are moved.
+        /// @param other Vector to consume; it is left empty.
+        /// @return This vector.
         Vector& operator=(Vector&& other) noexcept(
                 (NGIN::Memory::AllocatorPropagationTraits<Alloc>::PropagateOnMoveAssignment &&
                  std::is_nothrow_move_assignable_v<Alloc>) ||
@@ -102,6 +124,7 @@ namespace NGIN::Containers
             }
             return *this;
         }
+        /// @brief Destroys all elements and releases allocated storage.
         ~Vector()
         {
             ReleaseStorage();
@@ -369,29 +392,39 @@ namespace NGIN::Containers
 
         //=== Observers ===//
 
+        /// @brief Returns the number of constructed elements.
         [[nodiscard]] UIntSize Size() const noexcept
         {
             return m_size;
         }
+        /// @brief Returns the number of elements that fit without reallocating.
         [[nodiscard]] UIntSize Capacity() const noexcept
         {
             return m_capacity;
         }
+        /// @brief Returns the allocator stored by the vector.
         [[nodiscard]] Alloc& GetAllocator() noexcept
         {
             return m_alloc;
         }
+        /// @brief Returns the allocator stored by the vector.
         [[nodiscard]] const Alloc& GetAllocator() const noexcept
         {
             return m_alloc;
         }
 
+        /// @brief Returns the element at an index with bounds checking.
+        /// @param idx Zero-based element index.
+        /// @throws std::out_of_range If `idx` is not less than `Size()`.
         T& At(UIntSize idx)
         {
             if (idx >= m_size)
                 throw std::out_of_range("Vector::At: index out of range");
             return m_data[idx];
         }
+        /// @brief Returns the element at an index with bounds checking.
+        /// @param idx Zero-based element index.
+        /// @throws std::out_of_range If `idx` is not less than `Size()`.
         const T& At(UIntSize idx) const
         {
             if (idx >= m_size)
@@ -399,10 +432,14 @@ namespace NGIN::Containers
             return m_data[idx];
         }
 
+        /// @brief Returns the element at an index without bounds checking.
+        /// @param idx Zero-based element index that must be less than `Size()`.
         T& operator[](UIntSize idx)
         {
             return m_data[idx];
         }
+        /// @brief Returns the element at an index without bounds checking.
+        /// @param idx Zero-based element index that must be less than `Size()`.
         const T& operator[](UIntSize idx) const
         {
             return m_data[idx];
@@ -410,26 +447,32 @@ namespace NGIN::Containers
 
         //=== Iterators & data ===//
 
+        /// @brief Returns a pointer to the contiguous element storage.
         [[nodiscard]] T* data() noexcept
         {
             return m_data;
         }
+        /// @brief Returns a pointer to the contiguous element storage.
         [[nodiscard]] const T* data() const noexcept
         {
             return m_data;
         }
+        /// @brief Returns an iterator to the first element.
         [[nodiscard]] T* begin() noexcept
         {
             return m_data;
         }
+        /// @brief Returns an iterator to the first element.
         [[nodiscard]] const T* begin() const noexcept
         {
             return m_data;
         }
+        /// @brief Returns an iterator one past the final element.
         [[nodiscard]] T* end() noexcept
         {
             return m_data + m_size;
         }
+        /// @brief Returns an iterator one past the final element.
         [[nodiscard]] const T* end() const noexcept
         {
             return m_data + m_size;

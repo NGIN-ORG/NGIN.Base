@@ -84,7 +84,7 @@ namespace NGIN::Utilities
             using Descriptor = AnyTypeDescriptor<SboSize, Allocator, TypeIdPolicy>;
 
             static constexpr bool FitsInline =
-                (sizeof(Stored) <= SboSize) && (alignof(Stored) <= alignof(std::max_align_t));
+                    (sizeof(Stored) <= SboSize) && (alignof(Stored) <= alignof(std::max_align_t));
 
             static void Destroy(Storage& storage, Allocator& allocator) noexcept
             {
@@ -134,8 +134,8 @@ namespace NGIN::Utilities
                     else
                     {
                         static_assert(std::is_move_constructible_v<Stored> ||
-                                          std::is_copy_constructible_v<Stored> ||
-                                          std::is_trivially_copyable_v<Stored>,
+                                              std::is_copy_constructible_v<Stored> ||
+                                              std::is_trivially_copyable_v<Stored>,
                                       "Stored type must be movable, copyable, or trivially copyable to reside in Any.");
                     }
                     if constexpr (!std::is_trivially_destructible_v<Stored>)
@@ -287,7 +287,10 @@ namespace NGIN::Utilities
         };
     }// namespace detail
 
-    /// <summary>Mutable view into an `Any` payload.</summary>
+    /// @brief Non-owning mutable view of an `Any` payload.
+    /// @tparam SboSize Inline storage size used by the viewed `Any` type.
+    /// @tparam Allocator Allocator used by the viewed `Any` type.
+    /// @tparam TypeIdPolicy Policy used to identify stored types.
     template<std::size_t SboSize, class Allocator, class TypeIdPolicy>
     class AnyView : public detail::AnyViewBase<SboSize, Allocator, TypeIdPolicy>
     {
@@ -295,13 +298,20 @@ namespace NGIN::Utilities
         using Base       = detail::AnyViewBase<SboSize, Allocator, TypeIdPolicy>;
         using Descriptor = typename Base::Descriptor;
 
+        /// @brief Constructs an empty view.
         constexpr AnyView() noexcept : Base(nullptr, nullptr) {}
 
+        /// @brief Constructs a view from payload data and its type descriptor.
+        /// @param data Mutable payload address, or `nullptr` for an empty view.
+        /// @param descriptor Descriptor associated with `data`, or `nullptr` for an empty view.
         constexpr AnyView(void* data, const Descriptor* descriptor) noexcept
             : detail::AnyViewBase<SboSize, Allocator, TypeIdPolicy>(data, descriptor)
         {
         }
 
+        /// @brief Returns the payload as `T` when its type identifier matches.
+        /// @tparam T Requested payload type.
+        /// @return Pointer to the payload, or `nullptr` on a type mismatch or empty view.
         template<typename T>
         [[nodiscard]] T* TryCast() const noexcept
         {
@@ -311,6 +321,9 @@ namespace NGIN::Utilities
             return static_cast<BaseT*>(const_cast<void*>(this->m_data));
         }
 
+        /// @brief Returns the payload as `T`.
+        /// @tparam T Requested payload type.
+        /// @throws std::bad_any_cast If the view is empty or contains another type.
         template<typename T>
         T& Cast() const
         {
@@ -321,21 +334,31 @@ namespace NGIN::Utilities
         }
     };
 
-    /// <summary>Immutable view into an `Any` payload.</summary>
+    /// @brief Non-owning immutable view of an `Any` payload.
+    /// @tparam SboSize Inline storage size used by the viewed `Any` type.
+    /// @tparam Allocator Allocator used by the viewed `Any` type.
+    /// @tparam TypeIdPolicy Policy used to identify stored types.
     template<std::size_t SboSize, class Allocator, class TypeIdPolicy>
     class ConstAnyView : public detail::AnyViewBase<SboSize, Allocator, TypeIdPolicy>
     {
     public:
         using detail::AnyViewBase<SboSize, Allocator, TypeIdPolicy>::AnyViewBase;
 
+        /// @brief Constructs an empty view.
         constexpr ConstAnyView() noexcept : detail::AnyViewBase<SboSize, Allocator, TypeIdPolicy>(nullptr, nullptr) {}
 
+        /// @brief Returns the payload as `T` when its type identifier matches.
+        /// @tparam T Requested payload type.
+        /// @return Pointer to the payload, or `nullptr` on a type mismatch or empty view.
         template<typename T>
         [[nodiscard]] const T* TryCast() const noexcept
         {
             return detail::AnyViewBase<SboSize, Allocator, TypeIdPolicy>::template TryCast<T>();
         }
 
+        /// @brief Returns the payload as `T`.
+        /// @tparam T Requested payload type.
+        /// @throws std::bad_any_cast If the view is empty or contains another type.
         template<typename T>
         const T& Cast() const
         {
@@ -343,10 +366,12 @@ namespace NGIN::Utilities
         }
     };
 
-    /// <summary>
-    /// Small-buffer-optimized type-erased container with allocator and visit support.
-    /// Copying an Any that holds a non-copyable, non-trivially-copyable type will throw.
-    /// </summary>
+    /// @brief Owning small-buffer-optimized type-erased value.
+    /// @details Copying an `Any` that holds a non-copyable, non-trivially-copyable type throws
+    /// `std::bad_any_cast`.
+    /// @tparam SboSize Number of bytes reserved for inline payload storage.
+    /// @tparam Allocator Allocator used for payloads that do not fit inline.
+    /// @tparam TypeIdPolicy Policy that maps payload types to stable identifiers.
     template<std::size_t SboSize = 32,
              class Allocator     = NGIN::Memory::SystemAllocator,
              class TypeIdPolicy  = detail::AnyDefaultTypeIdPolicy>
@@ -354,21 +379,37 @@ namespace NGIN::Utilities
     class Any
     {
     public:
-        using Storage    = detail::AnyStorage<SboSize>;
-        using Descriptor = detail::AnyTypeDescriptor<SboSize, Allocator, TypeIdPolicy>;
-        using View       = AnyView<SboSize, Allocator, TypeIdPolicy>;
-        using ConstView  = ConstAnyView<SboSize, Allocator, TypeIdPolicy>;
-        using TypeId     = UInt64;
+        /// @brief Storage representation used by this specialization.
+        using Storage = detail::AnyStorage<SboSize>;
 
+        /// @brief Runtime payload descriptor used by this specialization.
+        using Descriptor = detail::AnyTypeDescriptor<SboSize, Allocator, TypeIdPolicy>;
+
+        /// @brief Mutable non-owning payload view.
+        using View = AnyView<SboSize, Allocator, TypeIdPolicy>;
+
+        /// @brief Immutable non-owning payload view.
+        using ConstView = ConstAnyView<SboSize, Allocator, TypeIdPolicy>;
+
+        /// @brief Type used for runtime payload identifiers.
+        using TypeId = UInt64;
+
+        /// @brief Type identifier returned when no value is stored.
         static constexpr TypeId VOID_TYPE_ID = 0u;
 
+        /// @brief Constructs an empty value with a default-constructed allocator.
         constexpr Any() noexcept = default;
 
+        /// @brief Constructs an empty value with a specific allocator.
+        /// @param allocator Allocator copied into the container.
         explicit constexpr Any(const Allocator& allocator) noexcept(std::is_nothrow_copy_constructible_v<Allocator>)
             : m_allocator(allocator)
         {
         }
 
+        /// @brief Copies a stored value and its allocator.
+        /// @param other Value to copy.
+        /// @throws std::bad_any_cast If the stored type cannot be copied.
         Any(const Any& other)
             : m_allocator(other.m_allocator)
         {
@@ -379,12 +420,17 @@ namespace NGIN::Utilities
             }
         }
 
+        /// @brief Moves a stored value and its allocator, leaving `other` empty.
+        /// @param other Value to consume.
         Any(Any&& other) noexcept(std::is_nothrow_move_constructible_v<Allocator>)
             : m_allocator(std::move(other.m_allocator))
         {
             MoveFrom(std::move(other));
         }
 
+        /// @brief Constructs a value by storing a forwarded object.
+        /// @tparam T Stored value type after removal of cv-ref qualifiers.
+        /// @param value Object used to construct the payload.
         template<typename T>
             requires(!std::is_same_v<std::remove_cv_t<std::remove_reference_t<T>>, Any>)
         explicit Any(T&& value)
@@ -392,6 +438,10 @@ namespace NGIN::Utilities
             Emplace<std::remove_cv_t<std::remove_reference_t<T>>>(std::forward<T>(value));
         }
 
+        /// @brief Constructs a payload of type `T` in place.
+        /// @tparam T Payload type.
+        /// @tparam Args Constructor argument types.
+        /// @param args Arguments forwarded to `T`'s constructor.
         template<typename T, typename... Args>
             requires(!std::is_same_v<std::remove_cv_t<T>, Any>)
         explicit Any(std::in_place_type_t<T>, Args&&... args)
@@ -399,11 +449,15 @@ namespace NGIN::Utilities
             Emplace<T>(std::forward<Args>(args)...);
         }
 
+        /// @brief Destroys the stored payload, if any.
         ~Any()
         {
             Reset();
         }
 
+        /// @brief Replaces this value with a copy of `other`.
+        /// @param other Value to copy.
+        /// @return This container.
         Any& operator=(const Any& other)
         {
             if (this == &other)
@@ -413,6 +467,9 @@ namespace NGIN::Utilities
             return *this;
         }
 
+        /// @brief Replaces this value by moving from `other`, leaving `other` empty.
+        /// @param other Value to consume.
+        /// @return This container.
         Any& operator=(Any&& other) noexcept(std::is_nothrow_move_assignable_v<Allocator>)
         {
             if (this == &other)
@@ -430,6 +487,10 @@ namespace NGIN::Utilities
             return *this;
         }
 
+        /// @brief Replaces the payload with a forwarded object.
+        /// @tparam T Stored value type after removal of cv-ref qualifiers.
+        /// @param value Object used to construct the replacement payload.
+        /// @return This container.
         template<typename T>
             requires(!std::is_same_v<std::remove_cv_t<std::remove_reference_t<T>>, Any>)
         Any& operator=(T&& value)
@@ -438,13 +499,19 @@ namespace NGIN::Utilities
             return *this;
         }
 
+        /// @brief Replaces the payload with a value of type `T` constructed in place.
+        /// @tparam T Payload type.
+        /// @tparam Args Constructor argument types.
+        /// @param args Arguments forwarded to `T`'s constructor.
+        /// @return Reference to the newly stored value.
+        /// @throws std::bad_alloc If out-of-line storage cannot be allocated.
         template<typename T, typename... Args>
             requires(!std::is_same_v<std::remove_cv_t<T>, Any>)
         T& Emplace(Args&&... args)
         {
-            using Stored               = std::remove_cv_t<T>;
+            using Stored = std::remove_cv_t<T>;
             constexpr auto& descriptor =
-                detail::AnyDescriptorProvider<Stored, SboSize, Allocator, TypeIdPolicy>::descriptor;
+                    detail::AnyDescriptorProvider<Stored, SboSize, Allocator, TypeIdPolicy>::descriptor;
             Reset();
             void* target = nullptr;
             if (descriptor.storesInline)
@@ -474,6 +541,7 @@ namespace NGIN::Utilities
             return *static_cast<Stored*>(target);
         }
 
+        /// @brief Destroys the stored payload and makes the container empty.
         void Reset() noexcept
         {
             if (m_descriptor != nullptr)
@@ -484,31 +552,41 @@ namespace NGIN::Utilities
             }
         }
 
+        /// @brief Returns whether the container holds a payload.
         [[nodiscard]] bool HasValue() const noexcept
         {
             return m_descriptor != nullptr;
         }
 
+        /// @brief Returns whether the current payload resides in inline storage.
+        /// @return `false` when the container is empty or uses allocated storage.
         [[nodiscard]] bool IsInline() const noexcept
         {
             return m_descriptor != nullptr && m_descriptor->storesInline;
         }
 
+        /// @brief Returns the current payload type identifier.
+        /// @return `VOID_TYPE_ID` when the container is empty.
         [[nodiscard]] TypeId GetTypeId() const noexcept
         {
             return m_descriptor ? m_descriptor->typeId : VOID_TYPE_ID;
         }
 
+        /// @brief Returns the payload size in bytes, or zero when empty.
         [[nodiscard]] UIntSize Size() const noexcept
         {
             return m_descriptor ? m_descriptor->sizeBytes : 0u;
         }
 
+        /// @brief Returns the payload alignment requirement.
+        /// @return `alignof(std::max_align_t)` when the container is empty.
         [[nodiscard]] UIntSize Alignment() const noexcept
         {
             return m_descriptor ? m_descriptor->alignment : alignof(std::max_align_t);
         }
 
+        /// @brief Returns whether the stored payload has type `T`.
+        /// @tparam T Type to compare after removal of cv-ref qualifiers.
         template<typename T>
         [[nodiscard]] bool Is() const noexcept
         {
@@ -518,6 +596,9 @@ namespace NGIN::Utilities
             return m_descriptor->typeId == detail::AnyTypeIdOf<TypeIdPolicy, Base>();
         }
 
+        /// @brief Returns mutable access to the payload when it has type `T`.
+        /// @tparam T Requested payload type.
+        /// @return Pointer to the payload, or `nullptr` on a type mismatch or empty container.
         template<typename T>
         [[nodiscard]] T* TryCast() noexcept
         {
@@ -529,6 +610,9 @@ namespace NGIN::Utilities
             return static_cast<Base*>(m_descriptor->access(m_storage));
         }
 
+        /// @brief Returns immutable access to the payload when it has type `T`.
+        /// @tparam T Requested payload type.
+        /// @return Pointer to the payload, or `nullptr` on a type mismatch or empty container.
         template<typename T>
         [[nodiscard]] const T* TryCast() const noexcept
         {
@@ -540,6 +624,9 @@ namespace NGIN::Utilities
             return static_cast<const Base*>(m_descriptor->accessConst(m_storage));
         }
 
+        /// @brief Returns mutable access to the payload as `T`.
+        /// @tparam T Requested payload type.
+        /// @throws std::bad_any_cast If the container is empty or contains another type.
         template<typename T>
         T& Cast()
         {
@@ -549,6 +636,9 @@ namespace NGIN::Utilities
             return *ptr;
         }
 
+        /// @brief Returns immutable access to the payload as `T`.
+        /// @tparam T Requested payload type.
+        /// @throws std::bad_any_cast If the container is empty or contains another type.
         template<typename T>
         const T& Cast() const
         {
@@ -558,6 +648,11 @@ namespace NGIN::Utilities
             return *ptr;
         }
 
+        /// @brief Invokes a callable with a mutable view of the payload.
+        /// @tparam Fn Callable type accepting `View`.
+        /// @param fn Callable to invoke.
+        /// @return The callable's result.
+        /// @throws std::logic_error If the container is empty.
         template<typename Fn>
         decltype(auto) Visit(Fn&& fn)
         {
@@ -567,6 +662,11 @@ namespace NGIN::Utilities
             return std::invoke(std::forward<Fn>(fn), view);
         }
 
+        /// @brief Invokes a callable with an immutable view of the payload.
+        /// @tparam Fn Callable type accepting `ConstView`.
+        /// @param fn Callable to invoke.
+        /// @return The callable's result.
+        /// @throws std::logic_error If the container is empty.
         template<typename Fn>
         decltype(auto) Visit(Fn&& fn) const
         {
@@ -576,47 +676,61 @@ namespace NGIN::Utilities
             return std::invoke(std::forward<Fn>(fn), view);
         }
 
+        /// @brief Invokes a callable with a mutable view when a payload is present.
+        /// @tparam Fn Callable type accepting `View`; its result is discarded.
+        /// @param fn Callable to invoke.
+        /// @return `true` when the callable was invoked.
         template<typename Fn>
         bool TryVisit(Fn&& fn)
         {
             if (!m_descriptor)
                 return false;
             View view {m_descriptor->access(m_storage), m_descriptor};
-            (void)std::invoke(std::forward<Fn>(fn), view);
+            (void) std::invoke(std::forward<Fn>(fn), view);
             return true;
         }
 
+        /// @brief Invokes a callable with an immutable view when a payload is present.
+        /// @tparam Fn Callable type accepting `ConstView`; its result is discarded.
+        /// @param fn Callable to invoke.
+        /// @return `true` when the callable was invoked.
         template<typename Fn>
         bool TryVisit(Fn&& fn) const
         {
             if (!m_descriptor)
                 return false;
             ConstView view {m_descriptor->accessConst(m_storage), m_descriptor};
-            (void)std::invoke(std::forward<Fn>(fn), view);
+            (void) std::invoke(std::forward<Fn>(fn), view);
             return true;
         }
 
+        /// @brief Returns a mutable non-owning view of the payload.
+        /// @warning The view is invalidated when this container is modified or destroyed.
         [[nodiscard]] View MakeView() noexcept
         {
             return View {m_descriptor ? m_descriptor->access(m_storage) : nullptr, m_descriptor};
         }
 
+        /// @brief Returns an immutable non-owning view of the payload.
+        /// @warning The view is invalidated when this container is modified or destroyed.
         [[nodiscard]] ConstView MakeView() const noexcept
         {
             return ConstView {m_descriptor ? m_descriptor->accessConst(m_storage) : nullptr, m_descriptor};
         }
 
+        /// @brief Returns the allocator used for out-of-line payload storage.
         [[nodiscard]] Allocator& GetAllocator() noexcept
         {
             return m_allocator;
         }
 
+        /// @brief Returns the allocator used for out-of-line payload storage.
         [[nodiscard]] const Allocator& GetAllocator() const noexcept
         {
             return m_allocator;
         }
 
-        /// <summary>Mutable pointer to the stored object, or nullptr when empty.</summary>
+        /// @brief Returns a mutable pointer to the stored object, or `nullptr` when empty.
         [[nodiscard]] void* Data() noexcept
         {
             if (m_descriptor == nullptr)
@@ -624,7 +738,7 @@ namespace NGIN::Utilities
             return m_descriptor->access(m_storage);
         }
 
-        /// <summary>Const pointer to the stored object, or nullptr when empty.</summary>
+        /// @brief Returns an immutable pointer to the stored object, or `nullptr` when empty.
         [[nodiscard]] const void* Data() const noexcept
         {
             if (m_descriptor == nullptr)
@@ -632,24 +746,33 @@ namespace NGIN::Utilities
             return m_descriptor->accessConst(m_storage);
         }
 
+        /// @brief Creates a mutable non-owning view of an external object.
+        /// @tparam T Referenced object type.
+        /// @param value Object to reference.
+        /// @return View that remains valid while `value` remains alive at the same address.
         template<typename T>
         [[nodiscard]] static View FromRef(T& value) noexcept
         {
             using Base = std::remove_cv_t<std::remove_reference_t<T>>;
             constexpr auto& descriptor =
-                detail::AnyDescriptorProvider<Base, SboSize, Allocator, TypeIdPolicy>::descriptor;
+                    detail::AnyDescriptorProvider<Base, SboSize, Allocator, TypeIdPolicy>::descriptor;
             return View {static_cast<void*>(std::addressof(value)), &descriptor};
         }
 
+        /// @brief Creates an immutable non-owning view of an external object.
+        /// @tparam T Referenced object type.
+        /// @param value Object to reference.
+        /// @return View that remains valid while `value` remains alive at the same address.
         template<typename T>
         [[nodiscard]] static ConstView FromConstRef(const T& value) noexcept
         {
             using Base = std::remove_cv_t<std::remove_reference_t<T>>;
             constexpr auto& descriptor =
-                detail::AnyDescriptorProvider<Base, SboSize, Allocator, TypeIdPolicy>::descriptor;
+                    detail::AnyDescriptorProvider<Base, SboSize, Allocator, TypeIdPolicy>::descriptor;
             return ConstView {static_cast<const void*>(std::addressof(value)), &descriptor};
         }
 
+        /// @brief Creates an empty `Any` value.
         static Any MakeVoid() noexcept
         {
             return Any {};

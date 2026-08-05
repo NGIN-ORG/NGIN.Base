@@ -35,10 +35,9 @@ namespace NGIN::Utilities
         };
     }// namespace detail
 
-    /// <summary>
-    /// Fixed-lifetime string interning table that returns stable string_view references.
-    /// Uses page-backed storage with geometric growth, optional threading policy, and caller-supplied allocator.
-    /// </summary>
+    /// @brief Fixed-lifetime string table that returns stable identifiers and views.
+    /// @details Uses page-backed storage with geometric growth, an optional locking policy, and a caller-supplied
+    /// allocator. Views remain valid until `Clear`, move assignment, or destruction.
     template<class Allocator = NGIN::Memory::SystemAllocator, class ThreadPolicy = detail::NullMutex>
         requires NGIN::Memory::AllocatorConcept<Allocator> && detail::MutexConcept<ThreadPolicy> &&
                  std::default_initializable<Allocator> && std::default_initializable<ThreadPolicy>
@@ -65,6 +64,7 @@ namespace NGIN::Utilities
         static constexpr UInt32 MIN_PAGE_CAPACITY   = 4u * 1024u;
         static constexpr UInt32 DEFAULT_PAGE_GROWTH = MIN_PAGE_CAPACITY;
 
+        /// @brief Constructs an empty interner with default-constructed policies.
         constexpr StringInterner() noexcept(std::is_nothrow_default_constructible_v<Allocator>)
             : m_allocator(),
               m_mutex(),
@@ -73,6 +73,7 @@ namespace NGIN::Utilities
         {
         }
 
+        /// @brief Constructs an empty interner with a specific allocator.
         explicit StringInterner(Allocator allocator) noexcept(std::is_nothrow_move_constructible_v<Allocator>)
             : m_allocator(std::move(allocator)),
               m_mutex(),
@@ -81,6 +82,7 @@ namespace NGIN::Utilities
         {
         }
 
+        /// @brief Transfers interned storage and statistics from another interner.
         StringInterner(StringInterner&& other) noexcept
             : m_allocator(std::move(other.m_allocator)),
               m_mutex(),
@@ -90,6 +92,7 @@ namespace NGIN::Utilities
             MoveFrom(std::move(other));
         }
 
+        /// @brief Clears this interner and transfers storage and statistics from another interner.
         StringInterner& operator=(StringInterner&& other) noexcept
         {
             if (this != &other)
@@ -108,9 +111,13 @@ namespace NGIN::Utilities
             return *this;
         }
 
-        StringInterner(const StringInterner&)            = delete;
+        /// @brief String interners cannot be copied because their views refer to owned page storage.
+        StringInterner(const StringInterner&) = delete;
+
+        /// @brief String interners cannot be copy-assigned because their views refer to owned page storage.
         StringInterner& operator=(const StringInterner&) = delete;
 
+        /// @brief Releases every page and invalidates outstanding views.
         ~StringInterner()
         {
             Clear();

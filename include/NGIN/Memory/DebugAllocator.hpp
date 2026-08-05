@@ -15,6 +15,7 @@
 
 namespace NGIN::Memory
 {
+    /// @brief Snapshot of allocation diagnostics collected by `DebugAllocator`.
     struct DebugAllocatorStats
     {
         std::size_t liveAllocations {0};
@@ -22,6 +23,9 @@ namespace NGIN::Memory
         std::size_t corruptedAllocations {0};
     };
 
+    /// @brief Allocator adaptor that detects invalid frees and boundary corruption.
+    /// @details Live allocations carry head and tail canaries and are poisoned on allocation and release.
+    /// @tparam Inner Allocator used for the underlying byte blocks.
     template<AllocatorConcept Inner = SystemAllocator>
     class DebugAllocator
     {
@@ -47,16 +51,26 @@ namespace NGIN::Memory
         static constexpr std::uint64_t Canary = 0xD38B'5A71'C4E2'9F06ULL;
 
     public:
+        /// @brief Constructs the adaptor around an inner allocator.
         explicit DebugAllocator(Inner inner = {})
             : m_inner(std::move(inner))
         {
         }
 
-        DebugAllocator(const DebugAllocator&)                        = delete;
-        auto operator=(const DebugAllocator&) -> DebugAllocator&     = delete;
-        DebugAllocator(DebugAllocator&&) noexcept                    = default;
+        /// @brief Debug allocators are non-copyable because live allocation records are instance-owned.
+        DebugAllocator(const DebugAllocator&) = delete;
+
+        /// @brief Debug allocators are non-copy-assignable because live allocation records are instance-owned.
+        auto operator=(const DebugAllocator&) -> DebugAllocator& = delete;
+
+        /// @brief Moves the inner allocator, live records, and diagnostic counters.
+        DebugAllocator(DebugAllocator&&) noexcept = default;
+
+        /// @brief Move-assigns the inner allocator, live records, and diagnostic counters.
         auto operator=(DebugAllocator&&) noexcept -> DebugAllocator& = default;
 
+        /// @brief Allocates a guarded and initially poisoned byte block.
+        /// @return User address, or `nullptr` for an invalid request or allocation failure.
         [[nodiscard]] void* Allocate(const std::size_t bytes, const std::size_t alignment)
         {
             if (bytes == 0 || alignment == 0 || (alignment & (alignment - 1)) != 0)
@@ -69,11 +83,11 @@ namespace NGIN::Memory
             if (!raw)
                 return nullptr;
 
-            auto address  = reinterpret_cast<std::uintptr_t>(raw) + sizeof(Header);
-            address       = (address + effectiveAlignment - 1) & ~(effectiveAlignment - 1);
-            void* pointer = reinterpret_cast<void*>(address);
-            auto* header  = reinterpret_cast<Header*>(address - sizeof(Header));
-            *header       = Header {
+            std::uintptr_t address = reinterpret_cast<std::uintptr_t>(raw) + sizeof(Header);
+            address                = (address + effectiveAlignment - 1) & ~(effectiveAlignment - 1);
+            void*   pointer        = reinterpret_cast<void*>(address);
+            Header* header         = reinterpret_cast<Header*>(address - sizeof(Header));
+            *header                = Header {
                     .raw           = raw,
                     .rawSize       = rawSize,
                     .rawAlignment  = effectiveAlignment,
@@ -94,6 +108,9 @@ namespace NGIN::Memory
             return pointer;
         }
 
+        /// @brief Validates, poisons, and releases a live allocation.
+        /// @details Unknown pointers increment the invalid-deallocation counter; damaged canaries increment the
+        /// corruption counter.
         void Deallocate(void* pointer, std::size_t, std::size_t) noexcept
         {
             if (!pointer)
@@ -122,12 +139,14 @@ namespace NGIN::Memory
             m_inner.Deallocate(raw, rawSize, rawAlignment);
         }
 
+        /// @brief Allocates a guarded block and reports the requested size and alignment.
         [[nodiscard]] MemoryBlock AllocateEx(const std::size_t bytes, const std::size_t alignment)
         {
             void* pointer = Allocate(bytes, alignment);
             return {pointer, pointer ? bytes : 0, pointer ? alignment : 0};
         }
 
+        /// @brief Returns whether a pointer exactly matches a currently live allocation.
         [[nodiscard]] bool Owns(const void* pointer) const noexcept
         {
             return std::find_if(m_live.begin(), m_live.end(), [pointer](const Record& record) {
@@ -135,24 +154,27 @@ namespace NGIN::Memory
                    }) != m_live.end();
         }
 
+        /// @brief Returns a snapshot of diagnostic counters and current live allocation count.
         [[nodiscard]] DebugAllocatorStats GetStats() const noexcept
         {
-            auto stats            = m_stats;
-            stats.liveAllocations = m_live.size();
+            DebugAllocatorStats stats = m_stats;
+            stats.liveAllocations     = m_live.size();
             return stats;
         }
 
+        /// @brief Returns the inner allocator's maximum size minus diagnostic overhead.
         [[nodiscard]] std::size_t MaxSize() const noexcept
         {
-            const auto     inner    = AllocatorTraits<Inner>::MaxSize(m_inner);
-            constexpr auto overhead = sizeof(Header) + sizeof(Canary) + alignof(Header) - 1;
+            const std::size_t     inner    = AllocatorTraits<Inner>::MaxSize(m_inner);
+            constexpr std::size_t overhead = sizeof(Header) + sizeof(Canary) + alignof(Header) - 1;
             return inner > overhead ? inner - overhead : 0;
         }
 
+        /// @brief Returns the inner allocator's remaining capacity minus diagnostic overhead.
         [[nodiscard]] std::size_t Remaining() const noexcept
         {
-            const auto     inner    = AllocatorTraits<Inner>::Remaining(m_inner);
-            constexpr auto overhead = sizeof(Header) + sizeof(Canary) + alignof(Header) - 1;
+            const std::size_t     inner    = AllocatorTraits<Inner>::Remaining(m_inner);
+            constexpr std::size_t overhead = sizeof(Header) + sizeof(Canary) + alignof(Header) - 1;
             return inner > overhead ? inner - overhead : 0;
         }
 

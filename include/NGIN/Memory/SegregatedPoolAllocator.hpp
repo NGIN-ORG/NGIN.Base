@@ -12,6 +12,9 @@
 
 namespace NGIN::Memory
 {
+    /// @brief Owns fixed-capacity pools for the 16, 32, 64, 128, 256, and 512-byte size classes.
+    /// @tparam BlocksPerClass Number of blocks reserved for each size class.
+    /// @tparam Upstream Allocator used to acquire the combined slab.
     template<std::size_t BlocksPerClass = 64, AllocatorConcept Upstream = SystemAllocator>
     class SegregatedPoolAllocator
     {
@@ -45,6 +48,7 @@ namespace NGIN::Memory
         static constexpr std::size_t SlabSize = ComputeSlabSize();
 
     public:
+        /// @brief Acquires and initializes the combined slab from an upstream allocator.
         explicit SegregatedPoolAllocator(Upstream upstream = {})
             : m_upstream(std::move(upstream))
         {
@@ -53,15 +57,20 @@ namespace NGIN::Memory
                 Initialize();
         }
 
-        SegregatedPoolAllocator(const SegregatedPoolAllocator&)                    = delete;
+        /// @brief Segregated pool allocators cannot be copied because they own a slab.
+        SegregatedPoolAllocator(const SegregatedPoolAllocator&) = delete;
+
+        /// @brief Segregated pool allocators cannot be copy-assigned because they own a slab.
         auto operator=(const SegregatedPoolAllocator&) -> SegregatedPoolAllocator& = delete;
 
+        /// @brief Transfers slab ownership from another allocator.
         SegregatedPoolAllocator(SegregatedPoolAllocator&& other) noexcept
             requires std::is_nothrow_move_constructible_v<Upstream>
             : m_upstream(std::move(other.m_upstream)), m_base(std::exchange(other.m_base, nullptr)), m_classes(std::move(other.m_classes)), m_invalidDeallocations(std::exchange(other.m_invalidDeallocations, 0))
         {
         }
 
+        /// @brief Releases the current slab and transfers ownership from another allocator.
         auto operator=(SegregatedPoolAllocator&& other) noexcept -> SegregatedPoolAllocator&
             requires std::is_nothrow_move_assignable_v<Upstream>
         {
@@ -76,25 +85,29 @@ namespace NGIN::Memory
             return *this;
         }
 
+        /// @brief Releases the owned slab.
         ~SegregatedPoolAllocator()
         {
             Release();
         }
 
+        /// @brief Allocates from the smallest size class that satisfies the request.
+        /// @return Block address, or `nullptr` for an invalid request or exhausted matching classes.
         [[nodiscard]] void* Allocate(const std::size_t bytes, const std::size_t alignment) noexcept
         {
             if (bytes == 0 || alignment == 0 || alignment > Alignment || (alignment & (alignment - 1)) != 0)
                 return nullptr;
-            for (auto& state: m_classes)
+            for (ClassState& state: m_classes)
             {
                 if (bytes > state.blockSize)
                     continue;
                 if (!state.free)
                     continue;
-                FreeNode* node         = state.free;
-                state.free             = node->next;
-                const auto index       = static_cast<std::size_t>(reinterpret_cast<std::byte*>(node) - (m_base + state.offset)) /
-                                         state.blockSize;
+                FreeNode* node = state.free;
+                state.free     = node->next;
+                const std::size_t index =
+                        static_cast<std::size_t>(reinterpret_cast<std::byte*>(node) - (m_base + state.offset)) /
+                        state.blockSize;
                 state.allocated[index] = true;
                 --state.available;
                 return node;
@@ -102,54 +115,62 @@ namespace NGIN::Memory
             return nullptr;
         }
 
+        /// @brief Returns a block to its size class.
+        /// @details Foreign, interior, and duplicate deallocations are ignored and counted.
         void Deallocate(void* pointer, std::size_t, std::size_t) noexcept
         {
             if (!pointer)
                 return;
-            auto* state = ClassForPointer(pointer);
+            ClassState* state = ClassForPointer(pointer);
             if (!state)
             {
                 ++m_invalidDeallocations;
                 return;
             }
-            const auto index = static_cast<std::size_t>(static_cast<std::byte*>(pointer) - (m_base + state->offset)) /
-                               state->blockSize;
+            const std::size_t index =
+                    static_cast<std::size_t>(static_cast<std::byte*>(pointer) - (m_base + state->offset)) /
+                    state->blockSize;
             if (!state->allocated[index])
             {
                 ++m_invalidDeallocations;
                 return;
             }
-            auto* node  = static_cast<FreeNode*>(pointer);
-            node->next  = state->free;
-            state->free = node;
+            FreeNode* node = static_cast<FreeNode*>(pointer);
+            node->next     = state->free;
+            state->free    = node;
             ++state->available;
             state->allocated[index] = false;
         }
 
+        /// @brief Allocates one block and reports its size-class capacity.
         [[nodiscard]] MemoryBlock AllocateEx(const std::size_t bytes, const std::size_t alignment) noexcept
         {
             void* pointer = Allocate(bytes, alignment);
             if (!pointer)
                 return {};
-            const auto* state = ClassForPointer(pointer);
+            const ClassState* state = ClassForPointer(pointer);
             return {pointer, state ? state->blockSize : bytes, Alignment};
         }
 
+        /// @brief Returns whether a pointer is the start of a block in any size class.
         [[nodiscard]] bool Owns(const void* pointer) const noexcept
         {
             return ClassForPointer(pointer) != nullptr;
         }
 
+        /// @brief Returns the largest request served by the allocator.
         [[nodiscard]] static constexpr std::size_t MaxSize() noexcept { return Sizes.back(); }
 
+        /// @brief Returns the total payload bytes remaining across every size class.
         [[nodiscard]] std::size_t Remaining() const noexcept
         {
             std::size_t remaining = 0;
-            for (const auto& state: m_classes)
+            for (const ClassState& state: m_classes)
                 remaining += state.available * state.blockSize;
             return remaining;
         }
 
+        /// @brief Returns the number of rejected invalid or duplicate deallocations.
         [[nodiscard]] std::size_t InvalidDeallocations() const noexcept { return m_invalidDeallocations; }
 
     private:
@@ -158,17 +179,17 @@ namespace NGIN::Memory
             std::size_t offset = 0;
             for (std::size_t classIndex = 0; classIndex < Sizes.size(); ++classIndex)
             {
-                auto& state     = m_classes[classIndex];
-                state.blockSize = Sizes[classIndex];
-                state.offset    = offset;
-                state.available = BlocksPerClass;
-                state.free      = nullptr;
+                ClassState& state = m_classes[classIndex];
+                state.blockSize   = Sizes[classIndex];
+                state.offset      = offset;
+                state.available   = BlocksPerClass;
+                state.free        = nullptr;
                 state.allocated.fill(false);
                 for (std::size_t index = BlocksPerClass; index > 0; --index)
                 {
-                    auto* node = reinterpret_cast<FreeNode*>(m_base + offset + (index - 1) * state.blockSize);
-                    node->next = state.free;
-                    state.free = node;
+                    FreeNode* node = reinterpret_cast<FreeNode*>(m_base + offset + (index - 1) * state.blockSize);
+                    node->next     = state.free;
+                    state.free     = node;
                 }
                 offset += state.blockSize * BlocksPerClass;
             }
@@ -191,11 +212,11 @@ namespace NGIN::Memory
         {
             if (!m_base || !pointer)
                 return nullptr;
-            const auto* bytes = static_cast<const std::byte*>(pointer);
-            for (const auto& state: m_classes)
+            const std::byte* bytes = static_cast<const std::byte*>(pointer);
+            for (const ClassState& state: m_classes)
             {
-                const auto* begin = m_base + state.offset;
-                const auto* end   = begin + state.blockSize * BlocksPerClass;
+                const std::byte* begin = m_base + state.offset;
+                const std::byte* end   = begin + state.blockSize * BlocksPerClass;
                 if (bytes >= begin && bytes < end &&
                     static_cast<std::size_t>(bytes - begin) % state.blockSize == 0)
                     return &state;

@@ -1,8 +1,10 @@
+/// @file Units.hpp
+/// @brief Strongly typed physical quantities with compile-time dimensions and conversion policies.
 #pragma once
-#include <cstdint>
-#include <cstddef>
 #include <array>
 #include <concepts>
+#include <cstddef>
+#include <cstdint>
 #include <format>
 #include <ostream>
 #include <type_traits>
@@ -12,8 +14,10 @@ namespace NGIN::Units
     /// @brief Represents the exponents for SI base quantities.
     struct QuantityExponents
     {
-        static constexpr std::size_t NUM_EXPONENTS = 7;
+        static constexpr std::size_t      NUM_EXPONENTS = 7;
         std::array<int8_t, NUM_EXPONENTS> exponents {};// L, M, T, I, Θ, N, J
+
+        /// @brief Returns whether every SI base-quantity exponent matches.
         constexpr bool operator==(const QuantityExponents& other) const noexcept
         {
             for (std::size_t k = 0; k < NUM_EXPONENTS; ++k)
@@ -21,6 +25,7 @@ namespace NGIN::Units
                     return false;
             return true;
         }
+        /// @brief Returns whether any SI base-quantity exponent differs.
         constexpr bool operator!=(const QuantityExponents& other) const noexcept
         {
             return !(*this == other);
@@ -69,14 +74,17 @@ namespace NGIN::Units
 
 
     // --- Conversion Policies ---
+    /// @brief Linear conversion policy using the scale factor `Num / Den`.
     template<int64_t Num, int64_t Den = 1>
     struct RatioPolicy
     {
+        /// @brief Converts a scaled value to its base-unit representation.
         template<typename ValueT>
         static constexpr ValueT ToBase(ValueT value) noexcept
         {
             return value * static_cast<ValueT>(Num) / static_cast<ValueT>(Den);
         }
+        /// @brief Converts a base-unit value to this policy's scaled representation.
         template<typename ValueT>
         static constexpr ValueT FromBase(ValueT base) noexcept
         {
@@ -84,14 +92,17 @@ namespace NGIN::Units
         }
     };
 
+    /// @brief Affine conversion policy that adds a fixed offset when converting to base units.
     template<double Offset>
     struct OffsetPolicy
     {
+        /// @brief Converts an offset value to its base-unit representation.
         template<typename ValueT>
         static constexpr ValueT ToBase(ValueT value) noexcept
         {
             return value + static_cast<ValueT>(Offset);
         }
+        /// @brief Converts a base-unit value to this policy's offset representation.
         template<typename ValueT>
         static constexpr ValueT FromBase(ValueT base) noexcept
         {
@@ -99,14 +110,17 @@ namespace NGIN::Units
         }
     };
 
+    /// @brief Conversion policy between Fahrenheit and kelvin.
     struct FahrenheitToKelvinPolicy
     {
+        /// @brief Converts Fahrenheit to kelvin.
         template<typename ValueT>
         static constexpr ValueT ToBase(ValueT value) noexcept
         {
             // F -> K
             return (value - 32.0) * 5.0 / 9.0 + 273.15;
         }
+        /// @brief Converts kelvin to Fahrenheit.
         template<typename ValueT>
         static constexpr ValueT FromBase(ValueT base) noexcept
         {
@@ -117,6 +131,10 @@ namespace NGIN::Units
 
     // --- Unit class with ConversionPolicy ---
 
+    /// @brief Strongly typed physical quantity with a dimension and conversion policy.
+    /// @tparam Q SI base-quantity exponents defining the dimension.
+    /// @tparam ValueT Numeric representation.
+    /// @tparam Policy Conversion between this unit and its base unit.
     template<
             QuantityExponents Q,
             typename ValueT = double,
@@ -124,59 +142,74 @@ namespace NGIN::Units
     class Unit
     {
     public:
-        using ValueType                              = ValueT;
-        static constexpr QuantityExponents Exponents = Q;
-        using ConversionPolicy                       = Policy;
+        /// @brief Numeric representation stored by the unit.
+        using ValueType = ValueT;
 
+        /// @brief Compile-time SI base-quantity exponents.
+        static constexpr QuantityExponents Exponents = Q;
+
+        /// @brief Policy used for base-unit conversion.
+        using ConversionPolicy = Policy;
+
+        /// @brief Constructs a unit from a value expressed in this unit's representation.
         constexpr explicit Unit(ValueT value) noexcept : m_value(value) {}
+
+        /// @brief Returns the stored value without performing unit conversion.
         constexpr ValueT GetValue() const noexcept
         {
             return m_value;
         }
 
-        // Arithmetic (same exponents)
+        /// @brief Adds a quantity expressed in the same unit type.
         constexpr Unit operator+(const Unit& other) const noexcept
         {
             return Unit(m_value + other.m_value);
         }
+        /// @brief Subtracts a quantity expressed in the same unit type.
         constexpr Unit operator-(const Unit& other) const noexcept
         {
             return Unit(m_value - other.m_value);
         }
+        /// @brief Multiplies the stored value by a scalar.
         constexpr Unit operator*(ValueT scalar) const noexcept
         {
             return Unit(m_value * scalar);
         }
+        /// @brief Divides the stored value by a scalar.
         constexpr Unit operator/(ValueT scalar) const noexcept
         {
             return Unit(m_value / scalar);
         }
+        /// @brief Compares stored values for equality.
         constexpr bool operator==(const Unit& other) const noexcept
         {
             return m_value == other.m_value;
         }
+        /// @brief Compares stored values for inequality.
         constexpr bool operator!=(const Unit& other) const noexcept
         {
             return m_value != other.m_value;
         }
 
-        // Unit algebra: multiplication/division yields new Unit type
+        /// @brief Multiplies quantities and adds their dimensional exponents.
         template<QuantityExponents Q2, typename P2>
         constexpr auto operator*(const Unit<Q2, ValueT, P2>& rhs) const noexcept
         {
             return Unit<AddExponents(Q, Q2), ValueT, RatioPolicy<1, 1>>(m_value * rhs.GetValue());
         }
+        /// @brief Divides quantities and subtracts their dimensional exponents.
         template<QuantityExponents Q2, typename P2>
         constexpr auto operator/(const Unit<Q2, ValueT, P2>& rhs) const noexcept
         {
             return Unit<SubExponents(Q, Q2), ValueT, RatioPolicy<1, 1>>(m_value / rhs.GetValue());
         }
 
-        // Conversion to base unit
+        /// @brief Converts the stored value to the dimension's base-unit representation.
         constexpr ValueT ToBase() const noexcept
         {
             return Policy::ToBase(m_value);
         }
+        /// @brief Converts a base-unit value to this unit's representation.
         static constexpr ValueT FromBase(ValueT baseValue) noexcept
         {
             return Policy::FromBase(baseValue);
@@ -408,7 +441,7 @@ namespace NGIN::Units
     };
 
 
-    // Output streaming for units with or without UnitTraits (C++20 requires)
+    /// @brief Writes a unit's value followed by its registered symbol.
     template<QuantityExponents Q, typename ValueT, typename Policy>
     std::ostream& operator<<(std::ostream& os, const Unit<Q, ValueT, Policy>& u)
         requires requires { UnitTraits<Unit<Q, ValueT, Policy>>::symbol; }
@@ -416,6 +449,7 @@ namespace NGIN::Units
         return os << u.GetValue() << ' ' << UnitTraits<Unit<Q, ValueT, Policy>>::symbol;
     }
 
+    /// @brief Writes the raw value of a unit without a registered symbol.
     template<QuantityExponents Q, typename ValueT, typename Policy>
     std::ostream& operator<<(std::ostream& os, const Unit<Q, ValueT, Policy>& u)
         requires(!requires { UnitTraits<Unit<Q, ValueT, Policy>>::symbol; })
@@ -440,12 +474,13 @@ namespace std
         // delegate all the number‐parsing work to std::formatter<ValueT,CharT>
         using Base = std::formatter<ValueT, CharT>;
 
-        // must match exactly what MSVC expects
+        /// @brief Parses the numeric format specification through the underlying value formatter.
         constexpr auto parse(std::format_parse_context& ctx)
         {
             return Base::parse(ctx);
         }
 
+        /// @brief Formats the numeric value and appends a registered unit symbol when available.
         template<typename FormatContext>
         auto format(const NGIN::Units::Unit<Q, ValueT, Policy>& u, FormatContext& ctx) const
         {

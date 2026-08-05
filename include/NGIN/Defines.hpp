@@ -168,6 +168,8 @@ namespace NGIN
 #define NGIN_ABORT(msg) ::NGIN::detail::Abort(msg)
 #endif
 
+    /// @brief Marks a control-flow path that must never be reached.
+    /// @warning Calling this function when the path is reachable causes undefined behavior.
     [[noreturn]] inline void Unreachable()
     {
 #if defined(_MSC_VER) && !defined(__clang__)// MSVC

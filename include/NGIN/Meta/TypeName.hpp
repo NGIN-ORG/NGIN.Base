@@ -15,6 +15,7 @@ namespace NGIN::Meta
     // are not constexpr-friendly in deeply nested constant evaluation contexts (shows
     // up when building large template type names). To preserve full constexpr support
     // we provide lightweight manual find helpers used only inside constexpr code paths.
+    /// @brief Finds a substring using a constant-evaluation-friendly implementation.
     constexpr std::size_t SVFind(std::string_view haystack, std::string_view needle, std::size_t pos = 0) noexcept
     {
         if (needle.empty())
@@ -38,6 +39,7 @@ namespace NGIN::Meta
         return std::string_view::npos;
     }
 
+    /// @brief Finds a character using a constant-evaluation-friendly implementation.
     constexpr std::size_t SVFindChar(std::string_view haystack, char c, std::size_t pos = 0) noexcept
     {
         for (std::size_t i = pos; i < haystack.size(); ++i)
@@ -111,6 +113,7 @@ namespace NGIN::Meta
     template<typename U>
     struct RawTypeNameBuilder
     {
+        /// @brief Extracts and normalizes the compiler-provided decorated name for `U`.
         static consteval std::array<char, MAX_NAME_BUFFER> BuildRawBuffer() noexcept
         {
             std::array<char, MAX_NAME_BUFFER> buf {};

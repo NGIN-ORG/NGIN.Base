@@ -55,6 +55,14 @@ namespace NGIN::Memory
         };
     }// namespace detail
 
+    /// @brief Allocates storage and constructs one object with rollback on constructor failure.
+    /// @tparam A Allocator type.
+    /// @tparam T Object type.
+    /// @tparam Args Constructor argument types.
+    /// @param alloc Allocator used for storage.
+    /// @param args Arguments forwarded to the object constructor.
+    /// @return Pointer to the constructed object.
+    /// @throws std::bad_alloc If storage cannot be allocated.
     template<AllocatorConcept A, class T, class... Args>
     [[nodiscard]] T* AllocateObject(A& alloc, Args&&... args)
     {
@@ -71,13 +79,19 @@ namespace NGIN::Memory
         }
     }
 
-    // Convenience overload: AllocateObject<T>(allocator, args...)
+    /// @brief Allocates and constructs one explicitly named object type.
+    /// @tparam T Object type.
+    /// @tparam A Allocator type.
+    /// @tparam Args Constructor argument types.
     template<class T, AllocatorConcept A, class... Args>
     [[nodiscard]] T* AllocateObject(A& alloc, Args&&... args)
     {
         return AllocateObject<A, T>(alloc, std::forward<Args>(args)...);
     }
 
+    /// @brief Destroys an object and releases its storage through the allocator.
+    /// @param alloc Allocator that owns `ptr`.
+    /// @param ptr Object pointer returned by `AllocateObject`; `nullptr` is accepted.
     template<AllocatorConcept A, class T>
     void DeallocateObject(A& alloc, T* ptr) noexcept(std::is_nothrow_destructible_v<T>)
     {
@@ -87,6 +101,11 @@ namespace NGIN::Memory
         alloc.Deallocate(ptr, sizeof(T), alignof(T));
     }
 
+    /// @brief Allocates array storage without constructing any elements.
+    /// @param alloc Allocator used for storage.
+    /// @param count Number of elements for which storage is reserved.
+    /// @return Aligned element storage, or `nullptr` when `count` is zero.
+    /// @throws std::bad_alloc If the size overflows or allocation fails.
     template<AllocatorConcept A, class T>
     [[nodiscard]] T* AllocateArrayUninitialized(A& alloc, std::size_t count)
     {
@@ -117,7 +136,10 @@ namespace NGIN::Memory
         return arr;
     }
 
-    // Allocate + value default construct each element
+    /// @brief Allocates an array and value-initializes every element.
+    /// @param alloc Allocator used for storage.
+    /// @param count Number of elements to construct.
+    /// @return Pointer to the first element, or `nullptr` when `count` is zero.
     template<AllocatorConcept A, class T>
     [[nodiscard]] T* AllocateArray(A& alloc, std::size_t count)
     {
@@ -134,21 +156,26 @@ namespace NGIN::Memory
             for (std::size_t j = 0; j < i; ++j)
                 arr[j].~T();
             // Recover header to free entire region.
-            auto* header = reinterpret_cast<detail::ArrayHeader*>(arr) - 1;
+            detail::ArrayHeader* header = reinterpret_cast<detail::ArrayHeader*>(arr) - 1;
             alloc.Deallocate(header->rawBase, header->rawSizeInBytes, header->rawAlignmentInBytes);
             throw;
         }
         return arr;
     }
 
-    // Convenience overload: AllocateArray<T>(allocator, count)
+    /// @brief Allocates and value-initializes an array of an explicitly named element type.
+    /// @param alloc Allocator used for storage.
+    /// @param count Number of elements to construct.
     template<class T, AllocatorConcept A>
     [[nodiscard]] T* AllocateArray(A& alloc, std::size_t count)
     {
         return AllocateArray<A, T>(alloc, count);
     }
 
-    // Allocate array constructing each element with provided args (same args for each element)
+    /// @brief Allocates an array and constructs every element from the same arguments.
+    /// @param alloc Allocator used for storage.
+    /// @param count Number of elements to construct.
+    /// @param args Arguments copied into each element constructor.
     template<AllocatorConcept A, class T, class... Args>
     [[nodiscard]] T* AllocateArray(A& alloc, std::size_t count, const Args&... args)
     {
@@ -164,19 +191,22 @@ namespace NGIN::Memory
         {
             for (std::size_t j = 0; j < i; ++j)
                 arr[j].~T();
-            auto* header = reinterpret_cast<detail::ArrayHeader*>(arr) - 1;
+            detail::ArrayHeader* header = reinterpret_cast<detail::ArrayHeader*>(arr) - 1;
             alloc.Deallocate(header->rawBase, header->rawSizeInBytes, header->rawAlignmentInBytes);
             throw;
         }
         return arr;
     }
 
+    /// @brief Destroys an allocated array in reverse order and releases its backing storage.
+    /// @param alloc Allocator used by `AllocateArray`.
+    /// @param ptr First element pointer returned by `AllocateArray`; `nullptr` is accepted.
     template<AllocatorConcept A, class T>
     void DeallocateArray(A& alloc, T* ptr) noexcept(std::is_nothrow_destructible_v<T>)
     {
         if (!ptr)
             return;
-        auto* header = reinterpret_cast<detail::ArrayHeader*>(ptr) - 1;
+        detail::ArrayHeader* header = reinterpret_cast<detail::ArrayHeader*>(ptr) - 1;
         if (header->magic != detail::ArrayHeader::MAGIC)
             return;// corruption; debug assert below
 #if defined(NGIN_DEBUG) || !defined(NDEBUG)

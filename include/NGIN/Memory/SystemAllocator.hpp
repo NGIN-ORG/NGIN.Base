@@ -4,8 +4,8 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <new>
 #include <cstdlib>
+#include <new>
 #include <stdexcept>
 #include <type_traits>
 
@@ -13,13 +13,19 @@
 
 namespace NGIN::Memory
 {
+    /// @brief Stateless allocator backed by the platform's aligned allocation API.
     struct SystemAllocator
     {
+        /// @brief Returns whether a value is a nonzero power of two.
         [[nodiscard]] static bool IsPowerOfTwo(UIntSize v) noexcept
         {
             return v && ((v & (v - 1)) == 0);
         }
 
+        /// @brief Allocates an aligned byte block.
+        /// @param size Requested size in bytes; zero returns `nullptr`.
+        /// @param alignment Requested alignment; invalid values fall back to `std::max_align_t`.
+        /// @return Allocation base address, or `nullptr` on failure.
         [[nodiscard]] void* Allocate(UIntSize size, UIntSize alignment) noexcept
         {
             if (size == 0)
@@ -45,6 +51,8 @@ namespace NGIN::Memory
 #endif
         }
 
+        /// @brief Releases a block previously returned by this allocator.
+        /// @param ptr Allocation base address; `nullptr` is accepted.
         void Deallocate(void* ptr, UIntSize, UIntSize) noexcept
         {
             if (!ptr)
@@ -56,14 +64,17 @@ namespace NGIN::Memory
 #endif
         }
 
+        /// @brief Returns the largest representable allocation size.
         [[nodiscard]] constexpr UIntSize MaxSize() const noexcept
         {
             return static_cast<UIntSize>(-1);
         }
+        /// @brief Returns the allocator's conceptual remaining capacity.
         [[nodiscard]] constexpr UIntSize Remaining() const noexcept
         {
             return MaxSize();
         }
+        /// @brief Returns `true` because system allocations cannot be distinguished by instance.
         [[nodiscard]] constexpr bool Owns(const void*) const noexcept
         {
             return true;
