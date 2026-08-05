@@ -79,7 +79,7 @@ namespace
 
     void AppendBytes(NGIN::Crypto::ByteBuffer& output, NGIN::Crypto::ConstByteSpan bytes)
     {
-        for (auto byte: bytes)
+        for (NGIN::Byte byte: bytes)
         {
             output.PushBack(byte);
         }
@@ -92,7 +92,7 @@ namespace
 
     [[nodiscard]] NGIN::Crypto::ByteBuffer DerInteger(NGIN::UInt32 value)
     {
-        NGIN::UInt8 encoded[5] {};
+        NGIN::UInt8    encoded[5] {};
         NGIN::UIntSize count = 0;
         do
         {
@@ -171,21 +171,21 @@ namespace
             NGIN::UInt32                    iterations,
             const NGIN::Crypto::ByteBuffer& nonce)
     {
-        auto saltOctets = DerOctetString(salt);
+        auto saltOctets       = DerOctetString(salt);
         auto iterationInteger = DerInteger(iterations);
         auto keyLengthInteger = DerInteger(32);
-        auto nullParameters = NGIN::Crypto::Encoding::EncodeDerElement(
+        auto nullParameters   = NGIN::Crypto::Encoding::EncodeDerElement(
                 NGIN::Crypto::Encoding::MakeDerUniversalTag(NGIN::Crypto::Encoding::DerUniversalTag::Null),
                 NGIN::Crypto::ConstByteSpan {});
         REQUIRE(nullParameters.HasValue());
 
-        auto prf = AlgorithmIdentifier({1, 2, 840, 113549, 2, 9}, &nullParameters.Value());
+        auto prf              = AlgorithmIdentifier({1, 2, 840, 113549, 2, 9}, &nullParameters.Value());
         auto pbkdf2Parameters = DerSequence({&saltOctets, &iterationInteger, &keyLengthInteger, &prf});
-        auto keyDerivation = AlgorithmIdentifier({1, 2, 840, 113549, 1, 5, 12}, &pbkdf2Parameters);
+        auto keyDerivation    = AlgorithmIdentifier({1, 2, 840, 113549, 1, 5, 12}, &pbkdf2Parameters);
 
-        auto nonceOctets = DerOctetString(nonce);
-        auto tagLength = DerInteger(16);
-        auto gcmParameters = DerSequence({&nonceOctets, &tagLength});
+        auto nonceOctets      = DerOctetString(nonce);
+        auto tagLength        = DerInteger(16);
+        auto gcmParameters    = DerSequence({&nonceOctets, &tagLength});
         auto encryptionScheme = AlgorithmIdentifier({2, 16, 840, 1, 101, 3, 4, 1, 46}, &gcmParameters);
 
         return DerSequence({&keyDerivation, &encryptionScheme});
@@ -395,7 +395,7 @@ TEST_CASE("Parsed key operations reject mismatched algorithms before backend dis
     REQUIRE(publicKeyInfo.HasValue());
 
     const auto message = Bytes({0x01, 0x02, 0x03});
-    auto       sign = NGIN::Crypto::Keys::SignPrivateKeyInfo(
+    auto       sign    = NGIN::Crypto::Keys::SignPrivateKeyInfo(
             context.Value(),
             NGIN::Crypto::SignatureAlgorithm::EcdsaP256Sha256,
             privateKeyInfo.Value(),
@@ -404,7 +404,7 @@ TEST_CASE("Parsed key operations reject mismatched algorithms before backend dis
     REQUIRE(sign.Error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidKey);
 
     const auto signature = RepeatedByte(0x33, 64);
-    auto       verify = NGIN::Crypto::Keys::VerifySubjectPublicKeyInfo(
+    auto       verify    = NGIN::Crypto::Keys::VerifySubjectPublicKeyInfo(
             context.Value(),
             NGIN::Crypto::SignatureAlgorithm::EcdsaP256Sha256,
             publicKeyInfo.Value(),
@@ -414,7 +414,7 @@ TEST_CASE("Parsed key operations reject mismatched algorithms before backend dis
     REQUIRE(verify.Error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidKey);
 
     const auto ciphertext = RepeatedByte(0x44, 16);
-    auto       decrypt = NGIN::Crypto::Keys::DecryptPrivateKeyInfoRsaOaepSha256(
+    auto       decrypt    = NGIN::Crypto::Keys::DecryptPrivateKeyInfoRsaOaepSha256(
             context.Value(),
             privateKeyInfo.Value(),
             NGIN::Crypto::Keys::RsaOaepPrivateKeyInfoDecryptInput {
@@ -534,7 +534,7 @@ TEST_CASE("EncryptedPrivateKeyInfo decrypts PBES2 PBKDF2-SHA256 AES-256-GCM when
         return;
     }
 
-    const auto privateKey = RepeatedByte(0x5a, 32);
+    const auto privateKey        = RepeatedByte(0x5a, 32);
     auto       privateKeyInfoDer = NGIN::Crypto::Keys::WritePrivateKeyInfo(
             NGIN::Crypto::Keys::KeyAlgorithm::Ed25519,
             NGIN::Crypto::ConstByteSpan {privateKey.data(), privateKey.Size()});
@@ -544,9 +544,9 @@ TEST_CASE("EncryptedPrivateKeyInfo decrypts PBES2 PBKDF2-SHA256 AES-256-GCM when
     const auto salt     = Bytes({0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08});
     const auto nonce    = Bytes({0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b});
 
-    auto derivedKey = NGIN::Crypto::Memory::SecureBuffer {32};
+    auto                                derivedKey = NGIN::Crypto::Memory::SecureBuffer {32};
     NGIN::Crypto::Kdf::Pbkdf2Parameters kdfParameters {
-            .password   = NGIN::Crypto::Memory::SecretView {
+            .password = NGIN::Crypto::Memory::SecretView {
                     NGIN::Crypto::ConstByteSpan {password.data(), password.Size()}},
             .salt       = NGIN::Crypto::ConstByteSpan {salt.data(), salt.Size()},
             .iterations = 4096,
@@ -558,9 +558,9 @@ TEST_CASE("EncryptedPrivateKeyInfo decrypts PBES2 PBKDF2-SHA256 AES-256-GCM when
             context.Value(),
             NGIN::Crypto::AeadAlgorithm::Aes256Gcm,
             NGIN::Crypto::Symmetric::AeadSealInput {
-                    .key = NGIN::Crypto::Memory::SecretView {derivedKey.AsBytes()},
-                    .nonce = NGIN::Crypto::ConstByteSpan {nonce.data(), nonce.Size()},
-                    .plaintext = NGIN::Crypto::ConstByteSpan {privateKeyInfoDer.Value().data(), privateKeyInfoDer.Value().Size()},
+                    .key            = NGIN::Crypto::Memory::SecretView {derivedKey.AsBytes()},
+                    .nonce          = NGIN::Crypto::ConstByteSpan {nonce.data(), nonce.Size()},
+                    .plaintext      = NGIN::Crypto::ConstByteSpan {privateKeyInfoDer.Value().data(), privateKeyInfoDer.Value().Size()},
                     .associatedData = {},
             });
     REQUIRE(sealed.HasValue());
@@ -598,8 +598,8 @@ TEST_CASE("EncryptedPrivateKeyInfo decrypts PBES2 PBKDF2-SHA256 AES-256-GCM when
 
 TEST_CASE("EncryptedPrivateKeyInfo decryption enforces explicit PBES2 password policy", "[Crypto][KeyFormat]")
 {
-    const auto salt  = Bytes({0x01, 0x02, 0x03, 0x04});
-    const auto nonce = Bytes({0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b});
+    const auto salt          = Bytes({0x01, 0x02, 0x03, 0x04});
+    const auto nonce         = Bytes({0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b});
     auto       encryptedData = RepeatedByte(0x00, 16);
 
     NGIN::Crypto::Keys::EncryptedPrivateKeyInfo encryptedInfo {
@@ -615,7 +615,7 @@ TEST_CASE("EncryptedPrivateKeyInfo decryption enforces explicit PBES2 password p
     REQUIRE(context.HasValue());
 
     const auto password = Bytes({0x70, 0x61, 0x73, 0x73});
-    auto rejected = NGIN::Crypto::Keys::DecryptEncryptedPrivateKeyInfo(
+    auto       rejected = NGIN::Crypto::Keys::DecryptEncryptedPrivateKeyInfo(
             context.Value(),
             encryptedInfo,
             NGIN::Crypto::Memory::SecretView {NGIN::Crypto::ConstByteSpan {password.data(), password.Size()}},
@@ -626,7 +626,7 @@ TEST_CASE("EncryptedPrivateKeyInfo decryption enforces explicit PBES2 password p
 
 TEST_CASE("EncryptedPrivateKeyInfo rejects malformed envelopes and invalid raw parameters", "[Crypto][KeyFormat]")
 {
-    const auto extraField = Bytes({
+    const auto extraField  = Bytes({
             0x30,
             0x0f,
             0x30,
@@ -643,7 +643,7 @@ TEST_CASE("EncryptedPrivateKeyInfo rejects malformed envelopes and invalid raw p
             0x05,
             0x00,
     });
-    auto parsedExtra = NGIN::Crypto::Keys::ParseEncryptedPrivateKeyInfo(
+    auto       parsedExtra = NGIN::Crypto::Keys::ParseEncryptedPrivateKeyInfo(
             NGIN::Crypto::ConstByteSpan {extraField.data(), extraField.Size()});
     REQUIRE_FALSE(parsedExtra.HasValue());
     REQUIRE(parsedExtra.Error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);

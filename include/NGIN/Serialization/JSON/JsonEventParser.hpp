@@ -162,7 +162,7 @@ namespace NGIN::Serialization::JSON
                     if (!delivered)
                         return delivered;
                     const auto array = value.TryArray();
-                    for (const auto child: *array)
+                    for (const ValueView child: *array)
                     {
                         auto result = Emit(child, handler);
                         if (!result)
@@ -177,7 +177,7 @@ namespace NGIN::Serialization::JSON
                     if (!delivered)
                         return delivered;
                     const auto object = value.TryObject();
-                    for (const auto member: *object)
+                    for (const MemberView member: *object)
                     {
                         Event key {.kind = EventKind::Key,
                                    .span = member.Span(),

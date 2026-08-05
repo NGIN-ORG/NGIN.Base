@@ -84,7 +84,7 @@ namespace NGIN::Crypto::Keys
 
         void AppendBytes(ByteBuffer& output, ConstByteSpan bytes)
         {
-            for (auto byte: bytes)
+            for (NGIN::Byte byte: bytes)
             {
                 output.PushBack(byte);
             }
@@ -158,7 +158,7 @@ namespace NGIN::Crypto::Keys
             }
 
             auto output = NGIN::UInt32 {0};
-            for (auto byte: value)
+            for (NGIN::Byte byte: value)
             {
                 output = static_cast<NGIN::UInt32>((output << 8u) | std::to_integer<NGIN::UInt8>(byte));
             }
@@ -1123,7 +1123,7 @@ namespace NGIN::Crypto::Keys
 
         return EncryptedPrivateKeyInfo {
                 .encryptionAlgorithm = std::move(algorithm.Value()),
-                .encryptedData        = CopyBytes(encryptedData.Value()),
+                .encryptedData       = CopyBytes(encryptedData.Value()),
         };
     }
 
@@ -1177,7 +1177,7 @@ namespace NGIN::Crypto::Keys
             return InvalidArgument();
         }
 
-        auto derivedKey = NGIN::Crypto::Memory::SecureBuffer {encryption.keyLength};
+        auto                                derivedKey = NGIN::Crypto::Memory::SecureBuffer {encryption.keyLength};
         NGIN::Crypto::Kdf::Pbkdf2Parameters kdfParameters {
                 .password   = password,
                 .salt       = ConstByteSpan {kdf.salt.data(), kdf.salt.Size()},

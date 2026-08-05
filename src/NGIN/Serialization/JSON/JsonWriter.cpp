@@ -182,7 +182,7 @@ namespace NGIN::Serialization::JSON
                     try
                     {
                         members.reserve(object.Size());
-                        for (const auto member: object)
+                        for (const MemberView member: object)
                             members.push_back(member);
                         if (context.options.sortObjectKeys)
                         {

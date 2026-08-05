@@ -317,7 +317,7 @@ namespace NGIN::Net
         std::size_t hash = 1469598103934665603ull;
         hash ^= static_cast<std::size_t>(address.GetFamily());
         hash *= 1099511628211ull;
-        for (const auto byte: address.Bytes())
+        for (const NGIN::Byte byte: address.Bytes())
         {
             hash ^= std::to_integer<std::size_t>(byte);
             hash *= 1099511628211ull;

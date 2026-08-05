@@ -37,7 +37,7 @@ namespace NGIN::Memory
         [[nodiscard]] static consteval std::size_t ComputeSlabSize()
         {
             std::size_t size = 0;
-            for (const auto blockSize: Sizes)
+            for (const std::size_t blockSize: Sizes)
                 size += blockSize * BlocksPerClass;
             return size;
         }

@@ -18,7 +18,7 @@ namespace NGIN::Crypto::Encoding
 
         void ConvertStandardToUrl(std::span<char> text) noexcept
         {
-            for (auto& character: text)
+            for (char& character: text)
             {
                 if (character == '+')
                 {

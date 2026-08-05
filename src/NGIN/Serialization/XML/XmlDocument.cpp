@@ -209,7 +209,7 @@ namespace NGIN::Serialization::XML
     }
     std::optional<AttributeView> ElementView::Attribute(std::string_view attributeName) const noexcept
     {
-        for (const auto attribute: Attributes())
+        for (const AttributeView attribute: Attributes())
         {
             if (attribute.Name() == attributeName)
                 return attribute;
@@ -246,7 +246,7 @@ namespace NGIN::Serialization::XML
     }
     std::optional<std::string_view> ElementView::FirstText() const noexcept
     {
-        for (const auto child: Children())
+        for (const NodeView child: Children())
         {
             if (child.Kind() == NodeKind::Text || child.Kind() == NodeKind::CData)
                 return child.TryText();

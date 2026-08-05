@@ -10,6 +10,7 @@
 #include <string_view>
 #include <utility>
 
+// clang-format off
 #if defined(_WIN32)
 #include <windows.h>
 #include <wincrypt.h>
@@ -17,6 +18,7 @@
 #include <CoreFoundation/CoreFoundation.h>
 #include <Security/Security.h>
 #endif
+// clang-format on
 
 namespace NGIN::Crypto::Certificates
 {
@@ -171,8 +173,8 @@ namespace NGIN::Crypto::Certificates
                 return ParseError();
             }
 
-            auto diagnostic = std::string {"loaded "} + std::to_string(certificates.Size()) + " certificates from " +
-                              std::string {bundlePath} + "; skipped " + std::to_string(skipped);
+            std::string          diagnostic = std::string {"loaded "} + std::to_string(certificates.Size()) + " certificates from " +
+                                              std::string {bundlePath} + "; skipped " + std::to_string(skipped);
             CertificateStoreInfo info {
                     .kind                = CertificateStoreKind::PlatformRoot,
                     .name                = std::string {storeName},
@@ -266,10 +268,11 @@ namespace NGIN::Crypto::Certificates
             NGIN::UIntSize                        skipped        = 0;
             bool                                  openedAnyStore = false;
 
-            for (const auto storeName: {std::wstring_view {L"ROOT"}, std::wstring_view {L"CA"}})
+            for (const std::wstring_view storeName: {std::wstring_view {L"ROOT"}, std::wstring_view {L"CA"}})
             {
-                auto       appended   = AppendWindowsCertificateStore(storeName, certificates, skipped);
-                const auto sourcePath = storeName == std::wstring_view {L"ROOT"} ? std::string {"ROOT"} : std::string {"CA"};
+                auto              appended = AppendWindowsCertificateStore(storeName, certificates, skipped);
+                const std::string sourcePath =
+                        storeName == std::wstring_view {L"ROOT"} ? std::string {"ROOT"} : std::string {"CA"};
                 if (appended.HasValue())
                 {
                     openedAnyStore = true;
@@ -308,8 +311,8 @@ namespace NGIN::Crypto::Certificates
                 return ParseError();
             }
 
-            auto diagnostic = std::string {"loaded "} + std::to_string(certificates.Size()) +
-                              " certificates from Windows ROOT/CA stores; skipped " + std::to_string(skipped);
+            std::string          diagnostic = std::string {"loaded "} + std::to_string(certificates.Size()) +
+                                              " certificates from Windows ROOT/CA stores; skipped " + std::to_string(skipped);
             CertificateStoreInfo info {
                     .kind                = CertificateStoreKind::PlatformRoot,
                     .name                = "windows-system-certificates",
@@ -426,8 +429,8 @@ namespace NGIN::Crypto::Certificates
                 return ParseError();
             }
 
-            auto diagnostic = std::string {"loaded "} + std::to_string(certificates.Size()) +
-                              " certificates from Apple trust anchors; skipped " + std::to_string(skipped);
+            std::string          diagnostic = std::string {"loaded "} + std::to_string(certificates.Size()) +
+                                              " certificates from Apple trust anchors; skipped " + std::to_string(skipped);
             CertificateStoreInfo info {
                     .kind                = CertificateStoreKind::PlatformRoot,
                     .name                = "macos-system-anchors",
@@ -528,15 +531,15 @@ namespace NGIN::Crypto::Certificates
     CryptoExpected<CertificateStore> CreateCustomCertificateStore(NGIN::Containers::Vector<Certificate> certificates)
     {
         CertificateStoreInfo info {
-                        .kind               = CertificateStoreKind::Custom,
-                        .name               = "custom",
-                        .operatingSystem    = {},
-                        .source             = "custom",
-                        .sourcePath         = {},
-                        .certificatesLoaded = certificates.Size(),
-                        .platformBacked     = false,
-                        .available          = true,
-                        .diagnostic         = {},
+                .kind               = CertificateStoreKind::Custom,
+                .name               = "custom",
+                .operatingSystem    = {},
+                .source             = "custom",
+                .sourcePath         = {},
+                .certificatesLoaded = certificates.Size(),
+                .platformBacked     = false,
+                .available          = true,
+                .diagnostic         = {},
         };
         return CertificateStore {std::move(info), std::move(certificates)};
     }
@@ -550,7 +553,7 @@ namespace NGIN::Crypto::Certificates
     {
 #if defined(__linux__)
         NGIN::Containers::Vector<CertificateStoreOpenDiagnostic> diagnostics;
-        for (const auto path: LINUX_CA_BUNDLE_PATHS)
+        for (const std::string_view path: LINUX_CA_BUNDLE_PATHS)
         {
             auto store = OpenPemCertificateBundle(path, "linux-system-roots");
             if (store.HasValue())

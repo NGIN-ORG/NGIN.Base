@@ -112,7 +112,7 @@ namespace NGIN::Crypto::Certificates
 
         [[nodiscard]] bool IsIa5StringValue(ConstByteSpan value) noexcept
         {
-            for (auto byte: value)
+            for (NGIN::Byte byte: value)
             {
                 if (ByteValue(byte) > 0x7fu)
                 {
@@ -161,7 +161,7 @@ namespace NGIN::Crypto::Certificates
 
             std::string value;
             value.reserve(element.value.size());
-            for (auto byte: element.value)
+            for (NGIN::Byte byte: element.value)
             {
                 value.push_back(static_cast<char>(ByteValue(byte)));
             }
@@ -286,7 +286,7 @@ namespace NGIN::Crypto::Certificates
             }
 
             value.reserve(element.value.size());
-            for (auto byte: element.value)
+            for (NGIN::Byte byte: element.value)
             {
                 value.push_back(static_cast<char>(ByteValue(byte)));
             }
@@ -523,7 +523,7 @@ namespace NGIN::Crypto::Certificates
                 {
                     std::string text;
                     text.reserve(generalName.Value().value.size());
-                    for (auto byte: generalName.Value().value)
+                    for (NGIN::Byte byte: generalName.Value().value)
                     {
                         text.push_back(static_cast<char>(ByteValue(byte)));
                     }

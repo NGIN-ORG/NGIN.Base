@@ -1,3 +1,5 @@
+/// @file KeyOperations.hpp
+/// @brief Algorithm-dispatched operations over parsed public and private key information.
 #pragma once
 
 #include <NGIN/Crypto/Asymmetric/Ecdsa.hpp>
@@ -32,8 +34,8 @@ namespace NGIN::Crypto::Keys
             {
             }
 
-            ScopedPrivateKeyDer(const ScopedPrivateKeyDer&)            = delete;
-            ScopedPrivateKeyDer& operator=(const ScopedPrivateKeyDer&) = delete;
+            ScopedPrivateKeyDer(const ScopedPrivateKeyDer&)                = delete;
+            ScopedPrivateKeyDer& operator=(const ScopedPrivateKeyDer&)     = delete;
             ScopedPrivateKeyDer(ScopedPrivateKeyDer&&) noexcept            = default;
             ScopedPrivateKeyDer& operator=(ScopedPrivateKeyDer&&) noexcept = default;
 
@@ -88,7 +90,7 @@ namespace NGIN::Crypto::Keys
 
             ByteBuffer output;
             output.Reserve(signature.Value().size());
-            for (auto byte: signature.Value())
+            for (NGIN::Byte byte: signature.Value())
             {
                 output.PushBack(byte);
             }
@@ -110,7 +112,7 @@ namespace NGIN::Crypto::Keys
 
             ByteBuffer output;
             output.Reserve(signature.Value().size());
-            for (auto byte: signature.Value())
+            for (NGIN::Byte byte: signature.Value())
             {
                 output.PushBack(byte);
             }
@@ -221,8 +223,8 @@ namespace NGIN::Crypto::Keys
     }
 
     [[nodiscard]] inline CryptoExpected<ByteBuffer> EncryptSubjectPublicKeyInfoRsaOaepSha256(
-            const NGIN::Crypto::Backend::CryptoContext& context,
-            const SubjectPublicKeyInfo&                 publicKeyInfo,
+            const NGIN::Crypto::Backend::CryptoContext&    context,
+            const SubjectPublicKeyInfo&                    publicKeyInfo,
             const RsaOaepSubjectPublicKeyInfoEncryptInput& input)
     {
         if (publicKeyInfo.algorithm.algorithm != KeyAlgorithm::Rsa)

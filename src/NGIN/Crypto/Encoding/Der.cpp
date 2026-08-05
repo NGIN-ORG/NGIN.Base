@@ -31,7 +31,7 @@ namespace NGIN::Crypto::Encoding
 
         void AppendBytes(ByteBuffer& output, ConstByteSpan bytes)
         {
-            for (auto byte: bytes)
+            for (NGIN::Byte byte: bytes)
             {
                 output.PushBack(byte);
             }

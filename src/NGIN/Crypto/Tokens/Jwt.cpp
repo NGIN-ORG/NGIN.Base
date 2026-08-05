@@ -154,7 +154,7 @@ namespace NGIN::Crypto::Tokens
                 else if (value->IsArray())
                 {
                     const auto audiences = value->TryArray();
-                    for (const auto item: *audiences)
+                    for (const NGIN::Serialization::JSON::ValueView item: *audiences)
                     {
                         if (!item.IsString())
                         {

@@ -45,7 +45,7 @@ TEST_CASE("Secret move transfers value and wipes moved-from storage", "[Crypto][
     REQUIRE(second.View()[0] == NGIN::Byte {0xaa});
     REQUIRE(second.View()[3] == NGIN::Byte {0xdd});
 
-    for (auto byte: first.Bytes())
+    for (NGIN::Byte byte: first.Bytes())
     {
         REQUIRE(byte == NGIN::Byte {0});
     }

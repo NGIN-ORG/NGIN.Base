@@ -52,7 +52,11 @@ Naming Conventions:
 
 Type Usage:
 
-- Use `auto` when the type is obvious from the right-hand side or prevents repetition.
+- Prefer explicit types when the type is short or communicates domain meaning, including
+  scalar values and range elements such as `Byte`, `UIntSize`, handles, and enums.
+- Use `auto` for iterators, lambdas, structured bindings, dependent types, or genuinely
+  cumbersome result types where spelling the type would obscure the operation.
+- Do not use `auto` merely to save a short, stable type name.
 - Avoid implicit narrowing; use explicit `static_cast`.
 - Prefer uniform initialization.
 
@@ -220,4 +224,3 @@ Apache 2.0 (see `LICENSE`). Preserve license headers and attribution where prese
 ---
 
 Adhere to these guidelines for consistent, safe, and maintainable contributions.
-

@@ -362,11 +362,11 @@ TEST_CASE("DER reads nested SEQUENCE values with bounded readers", "[Crypto][Enc
 
     auto children = NGIN::Crypto::ByteBuffer {};
     children.Reserve(integer.Value().Size() + octetString.Value().Size());
-    for (auto byte: integer.Value())
+    for (NGIN::Byte byte: integer.Value())
     {
         children.PushBack(byte);
     }
-    for (auto byte: octetString.Value())
+    for (NGIN::Byte byte: octetString.Value())
     {
         children.PushBack(byte);
     }

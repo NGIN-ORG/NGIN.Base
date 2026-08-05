@@ -88,7 +88,7 @@ namespace NGIN::Serialization::XML
 
         [[nodiscard]] bool HasTextChildren(ElementView element)
         {
-            for (const auto child: element.Children())
+            for (const NodeView child: element.Children())
             {
                 if (child.Kind() == NodeKind::Text || child.Kind() == NodeKind::CData)
                     return true;
@@ -106,7 +106,7 @@ namespace NGIN::Serialization::XML
 
             if (!Append(context, "<") || !Append(context, element.Name()))
                 return Failure<void>(WriteErrorCode::OutputLimitExceeded, "XML output limit exceeded");
-            for (const auto attribute: element.Attributes())
+            for (const AttributeView attribute: element.Attributes())
             {
                 if (!Append(context, " ") || !Append(context, attribute.Name()) ||
                     !Append(context, "=\"") || !Escape(context, attribute.Value(), true) ||
@@ -125,7 +125,7 @@ namespace NGIN::Serialization::XML
                 return Failure<void>(WriteErrorCode::OutputLimitExceeded, "XML output limit exceeded");
 
             const bool mixed = HasTextChildren(element);
-            for (const auto child: children)
+            for (const NodeView child: children)
             {
                 if (context.options.pretty && !mixed && !Indent(context, depth + 1))
                     return Failure<void>(WriteErrorCode::OutputLimitExceeded, "XML output limit exceeded");

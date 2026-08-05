@@ -265,7 +265,7 @@ namespace NGIN::IO
 
             std::wstring result {L'\"'};
             std::size_t  slashes = 0;
-            for (const auto character: value)
+            for (const wchar_t character: value)
             {
                 if (character == L'\\')
                 {
@@ -388,7 +388,7 @@ namespace NGIN::IO
 
             ~StartupStreams()
             {
-                for (const auto handle: ownedChildHandles)
+                for (const HANDLE handle: ownedChildHandles)
                 {
                     if (handle)
                     {
@@ -982,7 +982,7 @@ namespace NGIN::IO
 
             ~StartupStreams()
             {
-                for (const auto descriptor: ownedChildDescriptors)
+                for (const int descriptor: ownedChildDescriptors)
                 {
                     if (descriptor >= 0)
                     {
@@ -1151,7 +1151,7 @@ namespace NGIN::IO
                 {
                     ::close(streams.Value().errorRead);
                 }
-                for (const auto descriptor: streams.Value().ownedChildDescriptors)
+                for (const int descriptor: streams.Value().ownedChildDescriptors)
                 {
                     if (descriptor > STDERR_FILENO)
                     {

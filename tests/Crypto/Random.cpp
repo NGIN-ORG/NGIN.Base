@@ -56,7 +56,7 @@ TEST_CASE("Entropy source can be deterministic for tests", "[Crypto][Random]")
 
     auto fill = [](void* state, NGIN::Crypto::ByteSpan output) noexcept -> NGIN::Crypto::CryptoExpected<void> {
         auto& counter = *static_cast<CounterState*>(state);
-        for (auto& byte: output)
+        for (NGIN::Byte& byte: output)
         {
             byte = static_cast<NGIN::Byte>(counter.next++);
         }

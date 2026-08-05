@@ -30,7 +30,7 @@ TEST_CASE("Crypto core value types are cheap to pass", "[Crypto][Types]")
 
     auto bytes = NGIN::Crypto::MakeByteBuffer(4);
     REQUIRE(bytes.Size() == 4);
-    for (auto byte: bytes)
+    for (NGIN::Byte byte: bytes)
     {
         REQUIRE(byte == NGIN::Byte {0});
     }

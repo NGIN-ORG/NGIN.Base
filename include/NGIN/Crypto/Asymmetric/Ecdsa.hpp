@@ -1,3 +1,5 @@
+/// @file Ecdsa.hpp
+/// @brief P-256 ECDSA key, signature, DER conversion, signing, and verification helpers.
 #pragma once
 
 #include <NGIN/Crypto/Asymmetric/KeyTypes.hpp>
@@ -30,14 +32,14 @@ namespace NGIN::Crypto::Asymmetric
                 ++offset;
             }
 
-            const auto value = raw.subspan(offset);
-            ByteBuffer output;
+            const ConstByteSpan value = raw.subspan(offset);
+            ByteBuffer          output;
             output.Reserve(value.size() + 1);
             if ((std::to_integer<NGIN::UInt8>(value[0]) & 0x80u) != 0)
             {
                 output.PushBack(NGIN::Byte {0});
             }
-            for (auto byte: value)
+            for (NGIN::Byte byte: value)
             {
                 output.PushBack(byte);
             }
@@ -54,7 +56,7 @@ namespace NGIN::Crypto::Asymmetric
                 return EcdsaDerParseError();
             }
 
-            auto value = integer;
+            ConstByteSpan value = integer;
             if (std::to_integer<NGIN::UInt8>(value[0]) == 0)
             {
                 if (value.size() == 1)
@@ -73,12 +75,12 @@ namespace NGIN::Crypto::Asymmetric
                 return EcdsaDerParseError();
             }
 
-            for (auto& byte: output)
+            for (NGIN::Byte& byte: output)
             {
                 byte = NGIN::Byte {0};
             }
 
-            const auto pad = output.size() - value.size();
+            const NGIN::UIntSize pad = output.size() - value.size();
             for (NGIN::UIntSize i = 0; i < value.size(); ++i)
             {
                 output[pad + i] = value[i];
@@ -92,15 +94,15 @@ namespace NGIN::Crypto::Asymmetric
     [[nodiscard]] inline CryptoExpected<ByteBuffer> EncodeEcdsaP256Sha256SignatureDer(
             const EcdsaP256Sha256Signature& signature)
     {
-        const auto r = detail::NormalizeEcdsaIntegerForDer(ConstByteSpan {signature.data(), 32});
-        const auto s = detail::NormalizeEcdsaIntegerForDer(ConstByteSpan {signature.data() + 32, 32});
+        const ByteBuffer r = detail::NormalizeEcdsaIntegerForDer(ConstByteSpan {signature.data(), 32});
+        const ByteBuffer s = detail::NormalizeEcdsaIntegerForDer(ConstByteSpan {signature.data() + 32, 32});
 
-        auto derR = NGIN::Crypto::Encoding::EncodeDerInteger(ConstByteSpan {r.data(), r.Size()});
+        CryptoExpected<ByteBuffer> derR = NGIN::Crypto::Encoding::EncodeDerInteger(ConstByteSpan {r.data(), r.Size()});
         if (!derR.HasValue())
         {
             return derR.Error();
         }
-        auto derS = NGIN::Crypto::Encoding::EncodeDerInteger(ConstByteSpan {s.data(), s.Size()});
+        CryptoExpected<ByteBuffer> derS = NGIN::Crypto::Encoding::EncodeDerInteger(ConstByteSpan {s.data(), s.Size()});
         if (!derS.HasValue())
         {
             return derS.Error();
@@ -108,11 +110,11 @@ namespace NGIN::Crypto::Asymmetric
 
         ByteBuffer children;
         children.Reserve(derR.Value().Size() + derS.Value().Size());
-        for (auto byte: derR.Value())
+        for (NGIN::Byte byte: derR.Value())
         {
             children.PushBack(byte);
         }
-        for (auto byte: derS.Value())
+        for (NGIN::Byte byte: derS.Value())
         {
             children.PushBack(byte);
         }
@@ -132,35 +134,37 @@ namespace NGIN::Crypto::Asymmetric
                 },
         };
 
-        auto sequenceElement = reader.ReadElement();
+        CryptoExpected<NGIN::Crypto::Encoding::DerElement> sequenceElement = reader.ReadElement();
         if (!sequenceElement.HasValue() || !reader.IsAtEnd())
         {
             return detail::EcdsaDerParseError();
         }
 
-        auto sequence = NGIN::Crypto::Encoding::ReadDerSequence(reader, sequenceElement.Value());
+        CryptoExpected<NGIN::Crypto::Encoding::DerReader> sequence =
+                NGIN::Crypto::Encoding::ReadDerSequence(reader, sequenceElement.Value());
         if (!sequence.HasValue())
         {
             return detail::EcdsaDerParseError();
         }
 
-        auto rElement = sequence.Value().ReadElement();
-        auto sElement = sequence.Value().ReadElement();
+        CryptoExpected<NGIN::Crypto::Encoding::DerElement> rElement = sequence.Value().ReadElement();
+        CryptoExpected<NGIN::Crypto::Encoding::DerElement> sElement = sequence.Value().ReadElement();
         if (!rElement.HasValue() || !sElement.HasValue() || !sequence.Value().IsAtEnd())
         {
             return detail::EcdsaDerParseError();
         }
 
-        auto r = NGIN::Crypto::Encoding::ReadDerInteger(rElement.Value());
-        auto s = NGIN::Crypto::Encoding::ReadDerInteger(sElement.Value());
+        CryptoExpected<ConstByteSpan> r = NGIN::Crypto::Encoding::ReadDerInteger(rElement.Value());
+        CryptoExpected<ConstByteSpan> s = NGIN::Crypto::Encoding::ReadDerInteger(sElement.Value());
         if (!r.HasValue() || !s.HasValue())
         {
             return detail::EcdsaDerParseError();
         }
 
         EcdsaP256Sha256Signature signature {};
-        auto                     copyR = detail::CopyDerIntegerToEcdsaComponent(r.Value(), ByteSpan {signature.data(), 32});
-        auto                     copyS = detail::CopyDerIntegerToEcdsaComponent(s.Value(), ByteSpan {signature.data() + 32, 32});
+        CryptoExpected<void>     copyR = detail::CopyDerIntegerToEcdsaComponent(r.Value(), ByteSpan {signature.data(), 32});
+        CryptoExpected<void>     copyS =
+                detail::CopyDerIntegerToEcdsaComponent(s.Value(), ByteSpan {signature.data() + 32, 32});
         if (!copyR.HasValue() || !copyS.HasValue())
         {
             return detail::EcdsaDerParseError();
@@ -191,7 +195,7 @@ namespace NGIN::Crypto::Asymmetric
             ConstByteSpan                               message)
     {
         EcdsaP256Sha256Signature signature {};
-        auto                     result = SignEcdsaP256Sha256Into(context, privateKey, message, signature);
+        CryptoExpected<void>     result = SignEcdsaP256Sha256Into(context, privateKey, message, signature);
         if (!result.HasValue())
         {
             return result.Error();

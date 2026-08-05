@@ -26,14 +26,14 @@ namespace NGIN::Crypto::Tokens
         constexpr std::string_view PASETO_V4_LOCAL_ENCRYPTION_INFO {"paseto-encryption-key"};
         constexpr std::string_view PASETO_V4_LOCAL_AUTH_INFO {"paseto-auth-key-for-aead"};
 #endif
-        constexpr NGIN::UIntSize   ED25519_PUBLIC_KEY_BYTES            = 32;
-        constexpr NGIN::UIntSize   ED25519_SIGNATURE_BYTES             = 64;
-        constexpr NGIN::UIntSize   PASETO_V4_LOCAL_KEY_BYTES           = 32;
-        constexpr NGIN::UIntSize   PASETO_V4_LOCAL_NONCE_BYTES         = 32;
+        constexpr NGIN::UIntSize ED25519_PUBLIC_KEY_BYTES    = 32;
+        constexpr NGIN::UIntSize ED25519_SIGNATURE_BYTES     = 64;
+        constexpr NGIN::UIntSize PASETO_V4_LOCAL_KEY_BYTES   = 32;
+        constexpr NGIN::UIntSize PASETO_V4_LOCAL_NONCE_BYTES = 32;
 #if defined(NGIN_BASE_CRYPTO_HAS_LIBSODIUM)
-        constexpr NGIN::UIntSize   PASETO_V4_LOCAL_COUNTER_NONCE_BYTES = 24;
+        constexpr NGIN::UIntSize PASETO_V4_LOCAL_COUNTER_NONCE_BYTES = 24;
 #endif
-        constexpr NGIN::UIntSize   PASETO_V4_LOCAL_TAG_BYTES           = 32;
+        constexpr NGIN::UIntSize PASETO_V4_LOCAL_TAG_BYTES = 32;
 
         [[nodiscard]] constexpr CryptoError ParseError() noexcept
         {
@@ -113,7 +113,7 @@ namespace NGIN::Crypto::Tokens
 
         [[nodiscard]] bool HasClaim(
                 NGIN::Serialization::JSON::ObjectView object,
-                std::string_view claim) noexcept
+                std::string_view                      claim) noexcept
         {
             return object.Find(claim).has_value();
         }
@@ -149,7 +149,7 @@ namespace NGIN::Crypto::Tokens
 
         void AppendBytes(ByteBuffer& output, ConstByteSpan bytes)
         {
-            for (auto byte: bytes)
+            for (NGIN::Byte byte: bytes)
             {
                 output.PushBack(byte);
             }

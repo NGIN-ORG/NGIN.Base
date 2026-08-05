@@ -134,7 +134,7 @@ namespace NGIN::Serialization::JSON
     {
         if (!m_impl || !m_impl->state)
             return Failure<NodeId>(BuildErrorCode::AlreadyFinished, "JSON builder has already been finished");
-        for (const auto value: values)
+        for (const NodeId value: values)
         {
             if (!m_impl->Valid(value))
                 return Failure<NodeId>(BuildErrorCode::InvalidHandle, "JSON array contains an invalid value handle");

@@ -15,7 +15,7 @@ TEST_CASE("SecureZero clears mutable bytes", "[Crypto][ZeroMemory]")
 
     NGIN::Crypto::Memory::SecureZero(bytes);
 
-    for (auto byte: bytes)
+    for (NGIN::Byte byte: bytes)
     {
         REQUIRE(byte == NGIN::Byte {0});
     }
