@@ -17,7 +17,7 @@ Modern, composable, header-only allocators for high-performance components.
 
 1. Concepts over virtual dispatch (`AllocatorConcept`).
 2. Explicit ownership (`OwnedTag` / `BorrowedTag`).
-3. Zero-cost abstractions via `[[no_unique_address]]` for decorators.
+3. Zero-cost abstractions via `NGIN_NO_UNIQUE_ADDRESS` for decorators.
 4. Deterministic array layout (header + back-pointer) for O(1) deallocation.
 5. Optional instrumentation / thread safety through composition.
 

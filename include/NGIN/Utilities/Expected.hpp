@@ -890,8 +890,8 @@ namespace NGIN::Utilities
             }
         }
 
-        [[no_unique_address]] NGIN::Memory::UnionStorageFor<T, E> m_storage {};
-        NGIN::UInt8                                               m_hasValue {0};
+        NGIN_NO_UNIQUE_ADDRESS NGIN::Memory::UnionStorageFor<T, E> m_storage {};
+        NGIN::UInt8                                                m_hasValue {0};
     };
 
     /// @brief Specialization for "success or error" without a value payload.
@@ -1460,7 +1460,7 @@ namespace NGIN::Utilities
             }
         }
 
-        [[no_unique_address]] NGIN::Memory::StorageFor<E> m_error {};
-        NGIN::UInt8                                       m_hasValue {1};
+        NGIN_NO_UNIQUE_ADDRESS NGIN::Memory::StorageFor<E> m_error {};
+        NGIN::UInt8                                        m_hasValue {1};
     };
 }// namespace NGIN::Utilities

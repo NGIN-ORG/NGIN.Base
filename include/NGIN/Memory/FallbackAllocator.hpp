@@ -2,14 +2,15 @@
 /// @brief Allocator that tries a primary allocator then falls back to secondary.
 #pragma once
 
+#include <NGIN/Defines.hpp>
+#include <NGIN/Memory/AllocatorConcept.hpp>
+
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <memory>
 #include <new>
 #include <utility>
-
-#include <NGIN/Memory/AllocatorConcept.hpp>
 
 namespace NGIN::Memory
 {
@@ -69,8 +70,8 @@ namespace NGIN::Memory
         }
 
     private:
-        [[no_unique_address]] Primary   m_primary {};
-        [[no_unique_address]] Secondary m_secondary {};
+        NGIN_NO_UNIQUE_ADDRESS Primary   m_primary {};
+        NGIN_NO_UNIQUE_ADDRESS Secondary m_secondary {};
     };
 
     namespace detail
@@ -246,7 +247,7 @@ namespace NGIN::Memory
             return aligned;
         }
 
-        [[no_unique_address]] Primary   m_primary {};
-        [[no_unique_address]] Secondary m_secondary {};
+        NGIN_NO_UNIQUE_ADDRESS Primary   m_primary {};
+        NGIN_NO_UNIQUE_ADDRESS Secondary m_secondary {};
     };
 }// namespace NGIN::Memory

@@ -118,14 +118,14 @@ namespace NGIN::Meta
         {
             std::array<char, MAX_NAME_BUFFER> buf {};
 
-#if defined(_MSC_VER)
-            constexpr std::string_view signature = __FUNCSIG__;
-            constexpr std::string_view prefix    = "RawTypeNameBuilder<";
-            constexpr std::string_view suffix    = ">::BuildRawBuffer";
-#elif defined(__clang__)
+#if defined(__clang__)
             constexpr std::string_view signature = __PRETTY_FUNCTION__;
             constexpr std::string_view prefix    = "[U = ";
             constexpr std::string_view suffix    = "]";
+#elif defined(_MSC_VER)
+            constexpr std::string_view signature = __FUNCSIG__;
+            constexpr std::string_view prefix    = "RawTypeNameBuilder<";
+            constexpr std::string_view suffix    = ">::BuildRawBuffer";
 #elif defined(__GNUC__)
             constexpr std::string_view signature = __PRETTY_FUNCTION__;
             constexpr std::string_view prefix    = "[with U = ";

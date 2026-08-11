@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <cstddef>
 #include <cstring>
 #include <vector>
 
@@ -153,7 +154,8 @@ namespace NGIN::Net
 
             std::array<NGIN::UInt16, 8> words {};
             std::copy(left.Value().begin(), left.Value().end(), words.begin());
-            std::copy(right.Value().begin(), right.Value().end(), words.end() - right.Value().size());
+            std::copy(right.Value().begin(), right.Value().end(),
+                      words.end() - static_cast<std::ptrdiff_t>(right.Value().size()));
             std::array<NGIN::Byte, IpAddress::V6Size> bytes {};
             for (NGIN::UIntSize index = 0; index < words.size(); ++index)
             {

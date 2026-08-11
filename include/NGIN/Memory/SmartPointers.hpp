@@ -9,9 +9,11 @@
 /// - Deterministic deallocation through the provided allocator.
 #pragma once
 
+#include <NGIN/Defines.hpp>
+
 #include <atomic>
-#include <cstddef>
 #include <concepts>
+#include <cstddef>
 #include <memory>
 #include <new>
 #include <type_traits>
@@ -33,13 +35,13 @@ namespace NGIN::Memory
             std::atomic<std::size_t> strong {1};// number of Shared owners
             std::atomic<std::size_t> weak {1};  // number of Ticket owners + control's self-weak
 
-            [[no_unique_address]] Alloc alloc {};
-            void*                       base {nullptr};
-            std::size_t                 totalBytes {0};
-            std::size_t                 allocAlignment {alignof(std::max_align_t)};
-            T*                          objectPtr {nullptr};
-            void*                       destroyObjectPtr {nullptr};
-            DestroyObjectFn             destroyObjectFn {nullptr};
+            NGIN_NO_UNIQUE_ADDRESS Alloc alloc {};
+            void*                        base {nullptr};
+            std::size_t                  totalBytes {0};
+            std::size_t                  allocAlignment {alignof(std::max_align_t)};
+            T*                           objectPtr {nullptr};
+            void*                        destroyObjectPtr {nullptr};
+            DestroyObjectFn              destroyObjectFn {nullptr};
 
             SharedControl() = default;
             SharedControl(Alloc a, void* b, std::size_t bytes, std::size_t aln, T* obj, void* destroyPtr, DestroyObjectFn destroyFn) noexcept
@@ -65,17 +67,17 @@ namespace NGIN::Memory
             {
                 if (base)
                 {
-                    auto        allocCopy = alloc;
-                    void*       basePtr = base;
-                    const auto  bytes = totalBytes;
-                    const auto  alignment = allocAlignment;
+                    auto       allocCopy = alloc;
+                    void*      basePtr   = base;
+                    const auto bytes     = totalBytes;
+                    const auto alignment = allocAlignment;
 
-                    base = nullptr;
-                    totalBytes = 0;
-                    allocAlignment = alignof(std::max_align_t);
-                    objectPtr = nullptr;
+                    base             = nullptr;
+                    totalBytes       = 0;
+                    allocAlignment   = alignof(std::max_align_t);
+                    objectPtr        = nullptr;
                     destroyObjectPtr = nullptr;
-                    destroyObjectFn = nullptr;
+                    destroyObjectFn  = nullptr;
 
                     allocCopy.Deallocate(basePtr, bytes, alignment);
                 }
@@ -429,15 +431,15 @@ namespace NGIN::Memory
 
         // place the control block at base
         auto* ctrl = ::new (base) Control(
-            std::move(alloc),
-            base,
-            total,
-            alignment,
-            nullptr,
-            nullptr,
-            +[](void* ptr) noexcept {
-                static_cast<T*>(ptr)->~T();
-            });
+                std::move(alloc),
+                base,
+                total,
+                alignment,
+                nullptr,
+                nullptr,
+                +[](void* ptr) noexcept {
+                    static_cast<T*>(ptr)->~T();
+                });
 
         // carve out space for T after the control block
         auto*       raw   = static_cast<std::byte*>(base) + sizeof(Control);
@@ -455,7 +457,7 @@ namespace NGIN::Memory
         // construct T in-place
         T* objPtr = std::construct_at(static_cast<T*>(objVoid), std::forward<Args>(args)...);
 
-        ctrl->objectPtr = objPtr;
+        ctrl->objectPtr        = objPtr;
         ctrl->destroyObjectPtr = objPtr;
         ctrl->strong.store(1, std::memory_order_relaxed);
         ctrl->weak.store(1, std::memory_order_relaxed);// control’s self-weak
@@ -486,15 +488,15 @@ namespace NGIN::Memory
             throw std::bad_alloc {};
 
         auto* ctrl = ::new (base) Control(
-            std::move(alloc),
-            base,
-            total,
-            alignment,
-            nullptr,
-            nullptr,
-            +[](void* ptr) noexcept {
-                static_cast<TDerived*>(ptr)->~TDerived();
-            });
+                std::move(alloc),
+                base,
+                total,
+                alignment,
+                nullptr,
+                nullptr,
+                +[](void* ptr) noexcept {
+                    static_cast<TDerived*>(ptr)->~TDerived();
+                });
 
         auto*       raw   = static_cast<std::byte*>(base) + sizeof(Control);
         std::size_t space = total - sizeof(Control);
@@ -508,7 +510,7 @@ namespace NGIN::Memory
 
         TDerived* derivedPtr = std::construct_at(static_cast<TDerived*>(objVoid), std::forward<Args>(args)...);
 
-        ctrl->objectPtr = static_cast<TBase*>(derivedPtr);
+        ctrl->objectPtr        = static_cast<TBase*>(derivedPtr);
         ctrl->destroyObjectPtr = derivedPtr;
         ctrl->strong.store(1, std::memory_order_relaxed);
         ctrl->weak.store(1, std::memory_order_relaxed);
@@ -541,18 +543,18 @@ namespace NGIN::Memory
             throw std::bad_alloc {};
 
         auto* ctrl = ::new (base) Control(
-            std::move(alloc),
-            base,
-            total,
-            alignment,
-            object,
-            nullptr,
-            +[](void* ptr) noexcept {
-                static_cast<OwnerType*>(ptr)->~OwnerType();
-            });
+                std::move(alloc),
+                base,
+                total,
+                alignment,
+                object,
+                nullptr,
+                +[](void* ptr) noexcept {
+                    static_cast<OwnerType*>(ptr)->~OwnerType();
+                });
 
-        auto*       raw   = static_cast<std::byte*>(base) + sizeof(Control);
-        std::size_t space = total - sizeof(Control);
+        auto*       raw       = static_cast<std::byte*>(base) + sizeof(Control);
+        std::size_t space     = total - sizeof(Control);
         void*       ownerVoid = static_cast<void*>(raw);
         if (std::align(alignof(OwnerType), sizeof(OwnerType), ownerVoid, space) == nullptr)
         {
@@ -560,7 +562,7 @@ namespace NGIN::Memory
             throw std::bad_alloc {};
         }
 
-        auto* ownerPtr = std::construct_at(static_cast<OwnerType*>(ownerVoid), std::forward<Owner>(owner));
+        auto* ownerPtr         = std::construct_at(static_cast<OwnerType*>(ownerVoid), std::forward<Owner>(owner));
         ctrl->destroyObjectPtr = ownerPtr;
         ctrl->strong.store(1, std::memory_order_relaxed);
         ctrl->weak.store(1, std::memory_order_relaxed);

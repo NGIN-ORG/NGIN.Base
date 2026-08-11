@@ -536,10 +536,10 @@ namespace NGIN::Containers::detail
     template<class Key, class Value>
     struct ConcurrentHashMapNode
     {
-        std::size_t                 hash {0};
-        ConcurrentHashMapNode*      next {nullptr};
-        [[no_unique_address]] Key   key;
-        [[no_unique_address]] Value value;
+        std::size_t                  hash {0};
+        ConcurrentHashMapNode*       next {nullptr};
+        NGIN_NO_UNIQUE_ADDRESS Key   key;
+        NGIN_NO_UNIQUE_ADDRESS Value value;
 
         template<class K, class V>
         ConcurrentHashMapNode(std::size_t h, ConcurrentHashMapNode* nextNode, K&& k, V&& v)

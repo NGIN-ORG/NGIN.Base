@@ -299,7 +299,7 @@ namespace NGIN::Containers
         }
 
         /// @brief Returns a pointer to the mapped value, or `nullptr` when absent.
-        [[nodiscard]] Value*       GetPtr(const Key& key) noexcept { return GetPtrImpl_(key); }
+        [[nodiscard]] Value* GetPtr(const Key& key) noexcept { return GetPtrImpl_(key); }
         /// @copydoc GetPtr(const Key&)
         [[nodiscard]] const Value* GetPtr(const Key& key) const noexcept { return GetPtrImpl_(key); }
 
@@ -530,9 +530,9 @@ namespace NGIN::Containers
         };
 
         /// @brief Returns an iterator to the first occupied entry.
-        Iterator      Begin() { return Iterator(this, 0); }
+        Iterator Begin() { return Iterator(this, 0); }
         /// @brief Returns the mutable end iterator.
-        Iterator      End() { return Iterator(this, m_capacity); }
+        Iterator End() { return Iterator(this, m_capacity); }
         /// @brief Returns a read-only iterator to the first occupied entry.
         ConstIterator Begin() const { return ConstIterator(this, 0); }
         /// @brief Returns the read-only end iterator.
@@ -543,9 +543,9 @@ namespace NGIN::Containers
         ConstIterator CEnd() const { return ConstIterator(this, m_capacity); }
 
         /// @brief Standard-library-compatible spelling of Begin().
-        Iterator      begin() { return Begin(); }
+        Iterator begin() { return Begin(); }
         /// @brief Standard-library-compatible spelling of End().
-        Iterator      end() { return End(); }
+        Iterator end() { return End(); }
         /// @brief Standard-library-compatible read-only spelling of Begin().
         ConstIterator begin() const { return Begin(); }
         /// @brief Standard-library-compatible read-only spelling of End().
@@ -829,9 +829,9 @@ namespace NGIN::Containers
 
         static constexpr size_type kNotFound = static_cast<size_type>(-1);
 
-        [[no_unique_address]] Hash          m_hash {};
-        [[no_unique_address]] KeyEqual      m_equal {};
-        [[no_unique_address]] AllocatorType m_allocator {};
+        NGIN_NO_UNIQUE_ADDRESS Hash          m_hash {};
+        NGIN_NO_UNIQUE_ADDRESS KeyEqual      m_equal {};
+        NGIN_NO_UNIQUE_ADDRESS AllocatorType m_allocator {};
 
         Bucket*   m_buckets {nullptr};
         size_type m_capacity {0};

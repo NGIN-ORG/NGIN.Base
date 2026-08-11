@@ -2,6 +2,7 @@
 /// @brief Decorator allocator adding allocation statistics (current / peak / totals).
 #pragma once
 
+#include <NGIN/Defines.hpp>
 #include <NGIN/Memory/AllocationStats.hpp>
 #include <NGIN/Memory/AllocatorConcept.hpp>
 #include <cstddef>
@@ -98,8 +99,8 @@ namespace NGIN::Memory
         }
 
     private:
-        [[no_unique_address]] Inner m_inner {};
-        AllocationStats             m_stats {};
+        NGIN_NO_UNIQUE_ADDRESS Inner m_inner {};
+        AllocationStats              m_stats {};
     };
 
 }// namespace NGIN::Memory

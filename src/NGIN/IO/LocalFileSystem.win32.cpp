@@ -1280,7 +1280,8 @@ namespace NGIN::IO
                 {
                     DWORD attributes = GetFileAttributesW(ToNativePath(to).c_str());
                     if (attributes != INVALID_FILE_ATTRIBUTES)
-                        (void) SetFileAttributesW(ToNativePath(to).c_str(), attributes & ~FILE_ATTRIBUTE_READONLY);
+                        (void) SetFileAttributesW(ToNativePath(to).c_str(),
+                                                  attributes & ~static_cast<DWORD>(FILE_ATTRIBUTE_READONLY));
                 }
                 return {};
             }
@@ -1397,7 +1398,7 @@ namespace NGIN::IO
             return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "GetFileAttributesW failed", path)));
 
         if (permissions.writable)
-            attributes &= ~FILE_ATTRIBUTE_READONLY;
+            attributes &= ~static_cast<DWORD>(FILE_ATTRIBUTE_READONLY);
         else
             attributes |= FILE_ATTRIBUTE_READONLY;
 

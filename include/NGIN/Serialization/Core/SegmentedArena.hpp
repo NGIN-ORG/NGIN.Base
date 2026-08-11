@@ -1,6 +1,7 @@
 #pragma once
 
 #include <NGIN/Containers/Vector.hpp>
+#include <NGIN/Defines.hpp>
 #include <NGIN/Memory/PolyAllocatorRef.hpp>
 #include <NGIN/Memory/SystemAllocator.hpp>
 #include <NGIN/Primitives.hpp>
@@ -148,7 +149,7 @@ namespace NGIN::Serialization
             return memory;
         }
 
-        [[no_unique_address]] NGIN::Memory::SystemAllocator             m_systemAllocator {};
+        NGIN_NO_UNIQUE_ADDRESS NGIN::Memory::SystemAllocator            m_systemAllocator {};
         NGIN::Memory::PolyAllocatorRef                                  m_upstream {};
         NGIN::Containers::Vector<Block, NGIN::Memory::PolyAllocatorRef> m_blocks;
         UIntSize                                                        m_maxCommittedBytes {0};

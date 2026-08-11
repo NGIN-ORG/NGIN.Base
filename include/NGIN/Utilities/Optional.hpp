@@ -394,7 +394,7 @@ namespace NGIN::Utilities
             return ref;
         }
 
-        [[no_unique_address]] NGIN::Memory::StorageFor<T> m_value {};
-        NGIN::UInt8                                       m_hasValue {0};
+        NGIN_NO_UNIQUE_ADDRESS NGIN::Memory::StorageFor<T> m_value {};
+        NGIN::UInt8                                        m_hasValue {0};
     };
 }// namespace NGIN::Utilities

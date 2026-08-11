@@ -2,6 +2,7 @@
 /// @brief Owning, fixed-capacity allocator for one size and alignment class.
 #pragma once
 
+#include <NGIN/Defines.hpp>
 #include <NGIN/Memory/AllocatorConcept.hpp>
 #include <NGIN/Memory/SystemAllocator.hpp>
 
@@ -188,11 +189,11 @@ namespace NGIN::Memory
             m_available = 0;
         }
 
-        [[no_unique_address]] Upstream m_upstream {};
-        std::byte*                     m_base {nullptr};
-        FreeNode*                      m_free {nullptr};
-        std::size_t                    m_available {0};
-        std::size_t                    m_invalidDeallocations {0};
-        std::array<bool, BlockCount>   m_allocated {};
+        NGIN_NO_UNIQUE_ADDRESS Upstream m_upstream {};
+        std::byte*                      m_base {nullptr};
+        FreeNode*                       m_free {nullptr};
+        std::size_t                     m_available {0};
+        std::size_t                     m_invalidDeallocations {0};
+        std::array<bool, BlockCount>    m_allocated {};
     };
 }// namespace NGIN::Memory

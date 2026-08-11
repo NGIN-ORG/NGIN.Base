@@ -23,6 +23,15 @@
 #define NGIN_FORCEINLINE NGIN_ALWAYS_INLINE
 #endif
 
+#ifndef NGIN_NO_UNIQUE_ADDRESS
+// MSVC ABI targets require the vendor spelling to affect object layout.
+#if defined(_MSC_VER)
+#define NGIN_NO_UNIQUE_ADDRESS [[msvc::no_unique_address]]
+#else
+#define NGIN_NO_UNIQUE_ADDRESS [[no_unique_address]]
+#endif
+#endif
+
 #ifndef NGIN_LIKELY
 #if defined(__GNUC__) || defined(__clang__)
 #define NGIN_LIKELY(x) __builtin_expect(!!(x), 1)

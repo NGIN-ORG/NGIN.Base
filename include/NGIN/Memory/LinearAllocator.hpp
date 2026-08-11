@@ -30,12 +30,14 @@
 /// type as the `Upstream` template parameter (so the arenas do not "own" the global heap instance).
 #pragma once
 
+#include <NGIN/Defines.hpp>
+
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <utility>
-#include <new>
-#include <algorithm>
 #include <memory>// std::align
+#include <new>
+#include <utility>
 
 #include <NGIN/Memory/AllocatorConcept.hpp>
 #include <NGIN/Memory/SystemAllocator.hpp>
@@ -255,7 +257,7 @@ namespace NGIN::Memory
         }
 
         // Upstream allocator instance (by value). For shared/global allocators, pass a handle/ref-wrapper here.
-        [[no_unique_address]] Upstream m_upstreamInstance {};
+        NGIN_NO_UNIQUE_ADDRESS Upstream m_upstreamInstance {};
 
         // Slab properties
         std::size_t m_baseAlignmentInBytes {alignof(std::max_align_t)};

@@ -5,6 +5,7 @@
 /// elements contiguously.
 #pragma once
 
+#include <NGIN/Defines.hpp>
 #include <NGIN/Memory/AllocatorConcept.hpp>
 #include <NGIN/Memory/SystemAllocator.hpp>
 #include <NGIN/Meta/TypeTraits.hpp>
@@ -666,9 +667,9 @@ namespace NGIN::Containers
                 next = m_capacity + 1;
             Reserve(next);
         }
-        [[no_unique_address]] Alloc m_alloc {};
-        T*                          m_data {nullptr};
-        UIntSize                    m_size {0};
-        UIntSize                    m_capacity {0};
+        NGIN_NO_UNIQUE_ADDRESS Alloc m_alloc {};
+        T*                           m_data {nullptr};
+        UIntSize                     m_size {0};
+        UIntSize                     m_capacity {0};
     };
 }// namespace NGIN::Containers

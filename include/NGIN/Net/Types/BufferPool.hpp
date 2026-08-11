@@ -2,6 +2,8 @@
 /// @brief Simple pool for network buffers.
 #pragma once
 
+#include <NGIN/Defines.hpp>
+
 #include <cstddef>
 #include <vector>
 
@@ -91,8 +93,7 @@ namespace NGIN::Net
             try
             {
                 pool->m_free.push_back(Block {buffer.data, buffer.capacity});
-            }
-            catch (...)
+            } catch (...)
             {
                 pool->m_allocator.Deallocate(buffer.data, buffer.capacity, BufferAlignment);
             }
@@ -109,7 +110,7 @@ namespace NGIN::Net
             return buffer;
         }
 
-        [[no_unique_address]] Allocator m_allocator {};
-        std::vector<Block> m_free {};
+        NGIN_NO_UNIQUE_ADDRESS Allocator m_allocator {};
+        std::vector<Block>               m_free {};
     };
 }// namespace NGIN::Net

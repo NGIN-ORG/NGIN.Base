@@ -2,6 +2,7 @@
 /// @brief Canary, poisoning, and invalid-free diagnostics for an inner allocator.
 #pragma once
 
+#include <NGIN/Defines.hpp>
 #include <NGIN/Memory/AllocatorConcept.hpp>
 #include <NGIN/Memory/SystemAllocator.hpp>
 
@@ -179,8 +180,8 @@ namespace NGIN::Memory
         }
 
     private:
-        [[no_unique_address]] Inner m_inner {};
-        std::vector<Record>         m_live {};
-        DebugAllocatorStats         m_stats {};
+        NGIN_NO_UNIQUE_ADDRESS Inner m_inner {};
+        std::vector<Record>          m_live {};
+        DebugAllocatorStats          m_stats {};
     };
 }// namespace NGIN::Memory

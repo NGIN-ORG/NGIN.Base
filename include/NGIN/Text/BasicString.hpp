@@ -1787,13 +1787,9 @@ namespace NGIN::Text
             ~Storage() = default;
         };
 
-        size_type m_sizeAndFlags {0};
-        Storage   m_storage {};
-#if defined(_MSC_VER)
-        [[msvc::no_unique_address]] Alloc m_allocator {};
-#else
-        [[no_unique_address]] Alloc m_allocator {};
-#endif
+        size_type                    m_sizeAndFlags {0};
+        Storage                      m_storage {};
+        NGIN_NO_UNIQUE_ADDRESS Alloc m_allocator {};
     };
 
     /// @brief Returns a new string containing @p left followed by @p right.

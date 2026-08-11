@@ -66,14 +66,14 @@ namespace NGIN::SIMD
                 const auto maxValue = static_cast<Common>(std::numeric_limits<To>::max());
                 if (!(promoted >= minValue && promoted <= maxValue))
                 {
-                    assert(!"Exact conversion out of range for integral types.");
+                    assert(false && "Exact conversion out of range for integral types.");
                     const auto fallback = std::clamp(promoted, minValue, maxValue);
                     return static_cast<To>(fallback);
                 }
                 const auto converted = static_cast<To>(value);
                 if (static_cast<Common>(converted) != promoted)
                 {
-                    assert(!"Exact conversion lost integral precision.");
+                    assert(false && "Exact conversion lost integral precision.");
                 }
                 return converted;
             }
@@ -82,25 +82,25 @@ namespace NGIN::SIMD
                 using Limits = std::numeric_limits<To>;
                 if (!std::isfinite(value))
                 {
-                    assert(!"Exact conversion requires finite floating-point input.");
+                    assert(false && "Exact conversion requires finite floating-point input.");
                     return std::signbit(value) ? Limits::lowest() : Limits::max();
                 }
                 if (std::trunc(value) != value)
                 {
-                    assert(!"Exact conversion requires integer-valued floating-point input.");
+                    assert(false && "Exact conversion requires integer-valued floating-point input.");
                 }
                 const auto minBound  = static_cast<long double>(Limits::lowest());
                 const auto maxBound  = static_cast<long double>(Limits::max());
                 const auto wideValue = static_cast<long double>(value);
                 if (wideValue < minBound || wideValue > maxBound)
                 {
-                    assert(!"Exact conversion out of range for floating-to-integral conversion.");
+                    assert(false && "Exact conversion out of range for floating-to-integral conversion.");
                     return wideValue < minBound ? Limits::lowest() : Limits::max();
                 }
                 const auto converted = static_cast<To>(wideValue);
                 if (static_cast<long double>(converted) != wideValue)
                 {
-                    assert(!"Exact conversion lost floating-to-integral precision.");
+                    assert(false && "Exact conversion lost floating-to-integral precision.");
                     return wideValue < minBound ? Limits::lowest() : Limits::max();
                 }
                 return converted;
@@ -110,7 +110,7 @@ namespace NGIN::SIMD
                 const auto converted = static_cast<To>(value);
                 if (!std::isfinite(converted) || static_cast<From>(converted) != value)
                 {
-                    assert(!"Exact conversion lost integral-to-floating precision.");
+                    assert(false && "Exact conversion lost integral-to-floating precision.");
                 }
                 return converted;
             }
@@ -123,7 +123,7 @@ namespace NGIN::SIMD
                 const auto converted = static_cast<To>(value);
                 if (static_cast<From>(converted) != value)
                 {
-                    assert(!"Exact conversion lost floating-point precision.");
+                    assert(false && "Exact conversion lost floating-point precision.");
                 }
                 return converted;
             }

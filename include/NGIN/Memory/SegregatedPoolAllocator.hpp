@@ -2,6 +2,7 @@
 /// @brief Fixed-capacity segregated pools for common small allocation sizes.
 #pragma once
 
+#include <NGIN/Defines.hpp>
 #include <NGIN/Memory/AllocatorConcept.hpp>
 #include <NGIN/Memory/SystemAllocator.hpp>
 
@@ -224,7 +225,7 @@ namespace NGIN::Memory
             return nullptr;
         }
 
-        [[no_unique_address]] Upstream       m_upstream {};
+        NGIN_NO_UNIQUE_ADDRESS Upstream      m_upstream {};
         std::byte*                           m_base {nullptr};
         std::array<ClassState, Sizes.size()> m_classes {};
         std::size_t                          m_invalidDeallocations {0};

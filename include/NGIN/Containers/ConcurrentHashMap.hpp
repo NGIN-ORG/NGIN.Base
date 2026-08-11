@@ -835,8 +835,8 @@ namespace NGIN::Containers
 
         std::atomic<size_type> m_size {0};
         alignas(64) Shard m_shards[ShardCount] {};
-        [[no_unique_address]] Hash      m_hash {};
-        [[no_unique_address]] Equal     m_equal {};
-        [[no_unique_address]] Allocator m_allocator {};
+        NGIN_NO_UNIQUE_ADDRESS Hash      m_hash {};
+        NGIN_NO_UNIQUE_ADDRESS Equal     m_equal {};
+        NGIN_NO_UNIQUE_ADDRESS Allocator m_allocator {};
     };
 }// namespace NGIN::Containers

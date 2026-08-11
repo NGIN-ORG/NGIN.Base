@@ -1,5 +1,7 @@
 #pragma once
 
+#include <NGIN/Defines.hpp>
+
 #include <mutex>
 #include <utility>
 
@@ -55,7 +57,7 @@ namespace NGIN::Memory
         }
 
     private:
-        mutable Lockable            m_lock {};
-        [[no_unique_address]] Inner m_inner {};
+        mutable Lockable             m_lock {};
+        NGIN_NO_UNIQUE_ADDRESS Inner m_inner {};
     };
 }// namespace NGIN::Memory
