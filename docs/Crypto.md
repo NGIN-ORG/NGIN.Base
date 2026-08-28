@@ -298,9 +298,8 @@ Troubleshooting common failures:
 
 ## Provider Install And Restore
 
-There are three supported ways to make a package-backed provider available:
-
-1. System or SDK install: install the provider with your OS/toolchain and configure NGIN.Base directly.
+Install the provider through the host package manager, SDK, or another acquisition workflow, then make it visible to
+CMake. NGIN.Base can also be configured directly:
 
 ```bash
 cmake -S Dependencies/NGIN/NGIN.Base -B build/base-openssl \
@@ -308,70 +307,35 @@ cmake -S Dependencies/NGIN/NGIN.Base -B build/base-openssl \
   -DNGIN_BASE_CRYPTO_REQUIRE_PROVIDER=openssl
 ```
 
-2. Workspace package wrapper plus external provider: use a package manifest whose `<Build>` names a provider, and declare
-   that external restore provider in the workspace manifest. A vcpkg-shaped workspace entry looks like:
+For an NGIN project, discover the checked-in package wrappers from the workspace:
 
 ```xml
-<Packages>
-  <PackageProvider Name="OpenSSL" Root="Packages/OpenSSL" />
-  <Provider Name="vcpkg" Kind="Vcpkg" Root="Tools/vcpkg" Triplet="x64-windows" />
-</Packages>
+<Discover><Packages Include="Packages/**/*.nginpkg" /></Discover>
 ```
 
-The OpenSSL package manifest uses `Build Mode="FindPackage"` and carries the NGIN.Base enable option. If the package is
-resolved through an external provider, `ngin restore` writes a vcpkg manifest containing the provider package name, runs
-`vcpkg install`, records the vcpkg toolchain and install prefix, and generated CMake consumes that metadata. The
-provider binding belongs on the package build metadata:
+The consuming product declares the semantic package requirement:
 
 ```xml
-<Build Backend="CMake"
-       Mode="FindPackage"
-       Provider="vcpkg"
-       ProviderPackage="openssl"
-       ProviderVersion="3.0.0"
-       CMakePackage="OpenSSL"
-       Linkage="Static;Shared"
-       RuntimeDeployment="PackageRuntimeLibraries"
-       RuntimeArtifacts="libcrypto">
-  <Options>
-    <Option Name="NGIN_BASE_CRYPTO_WITH_OPENSSL" Value="ON" />
-  </Options>
-</Build>
+<Uses><Package Name="OpenSSL" Version="3" /></Uses>
 ```
 
-The committed `Packages/OpenSSL`, `Packages/libsodium`, and `Packages/BoringSSL` wrappers are provider-neutral discovery
-wrappers. They declare default provider package names and versions where the upstream ecosystem has a stable package
-identity, plus linkage and runtime artifact hints for diagnostics and future staging. They do not choose vcpkg, Conan,
-or another acquisition tool by themselves. Use them as-is for system packages or CMake prefix paths. Add `Provider` in a
-project-local wrapper or package override when the dependency should be acquired by `ngin restore`.
+The committed OpenSSL, libsodium, and BoringSSL wrappers use typed exports and CMake Adapters for provider-neutral
+`find_package` integration. CPS metadata is preferred when an acquired package supplies it. Exact acquisition results
+belong in `ngin.lock`; a wrapper does not silently choose vcpkg, Conan, or another external package manager.
 
-3. Conan-backed restore: use the same package wrapper, but declare a Conan provider:
-
-```xml
-<Packages>
-  <PackageProvider Name="OpenSSL" Root="Packages/OpenSSL" />
-  <Provider Name="conan" Kind="Conan" Profile="default" />
-</Packages>
-```
-
-`ngin restore` writes a `conanfile.txt` for the provider packages, runs `conan install --build=missing`, records the
-generated prefix path, and generated CMake passes that prefix path to package discovery.
-
-Then restore and build the consuming project:
+Restore and build the consuming project:
 
 ```bash
-./build/dev/Tools/NGIN.CLI/ngin restore --project path/to/App.nginproj --profile Debug
-./build/dev/Tools/NGIN.CLI/ngin build --project path/to/App.nginproj --profile Debug --output build/manual/App
+./build/dev/Tools/NGIN.CLI/ngin restore --project path/to/App.nginproj
+./build/dev/Tools/NGIN.CLI/ngin build --project path/to/App.nginproj --configuration Debug --output build/manual/App
 ```
 
 Important limits:
 
-- Restore is explicit; ordinary build expects provider metadata to exist when a package uses an external provider.
-- vcpkg restore requires a provider `Root` or `VCPKG_ROOT` so the generated build can use the vcpkg toolchain file.
-- Conan restore requires `conan` on `PATH` or a provider `Root` that contains the executable.
+- Restore is explicit; an ordinary build expects required provider metadata or installed packages to exist.
 - `Packages/BoringSSL` normalizes BoringSSL layouts but does not prove a BoringSSL installation exists on every host.
 - A clean Windows machine can use platform CNG for baseline algorithms without OpenSSL, but OpenSSL/BoringSSL/libsodium
-  still require either an installed package or an explicit restore provider.
+  still require an installed or otherwise acquired package.
 
 ## Build-Time Requirements
 
