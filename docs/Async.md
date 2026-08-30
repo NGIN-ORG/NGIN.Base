@@ -170,6 +170,12 @@ failures.
 `TaskContext` carries the cancellation token. Cancellation-aware await points
 such as `YieldNow()` and `Delay(...)` observe it automatically.
 
+`CancellationSource` may be constructed with a
+`std::pmr::memory_resource*` when registrations must use a caller-controlled
+resource. That resource must outlive the source, every token copied from it,
+and every registration associated with it. Registration allocation failure is
+reported as `CancellationRegistrationError::ResourceExhausted`.
+
 Manual cancellation checks:
 
 ```cpp
@@ -190,21 +196,50 @@ NGIN::Async::Task<void, DemoError> Work(NGIN::Async::TaskContext& ctx)
 
 ## Combinators
 
-`WhenAll` and `WhenAny` consume child tasks. Pass freshly created tasks or move
-existing task objects into them.
+`WhenAll` consumes child tasks. Pass freshly created tasks or move existing
+task objects into it.
 
 ```cpp
 auto both = co_await NGIN::Async::WhenAll(ctx, Child(ctx), Child(ctx));
 ```
 
 ```cpp
-auto firstIndex = co_await NGIN::Async::WhenAny(ctx, Child(ctx), Child(ctx));
+auto firstIndex = co_await NGIN::Async::WhenAny(
+        ctx,
+        [](NGIN::Async::TaskContext& child) { return Child(child); },
+        [](NGIN::Async::TaskContext& child) { return Child(child); });
 ```
 
-`WhenAny` returns the index of the first completed child. The first completed
-child may have succeeded, domain-failed, been canceled, or faulted. Non-winning
-children are detached; do not pass loser tasks that depend on the parent
-coroutine frame staying alive after `WhenAny` returns.
+`WhenAny` accepts factories so it can construct every task with a distinct
+child context linked to the parent context. It records the first terminal
+child, requests cancellation through every losing child context, and drains
+all child watchers before returning. A winning domain error, cancellation, or
+fault is propagated after the drain. A loser may safely reference state in the
+parent coroutine frame. This structured lifetime adds loser cancellation and
+drain time to observable completion latency; children should cooperate with
+cancellation or otherwise finish promptly.
+
+## Frame Lifetime and Publication
+
+Task frames use explicit owner, execution, queued-work, and continuation
+references. Dropping an `Operation` or calling `Detach` releases only the
+owner reference; a running task remains alive until execution and all retained
+continuations or executor work have released their references. The final
+release is the only operation that destroys the frame.
+
+Continuation installation and terminal completion use a CAS-controlled state.
+Completion release-publishes its payload before an awaiting reader observes the
+terminal state with acquire semantics. A child continuation retains its parent
+frame until the child completion handler has either resumed the parent or
+observed that the parent already completed. Queued `YieldNow()` and `Delay()`
+callbacks similarly retain the suspended frame, unregister cancellation before
+resuming it, and release the queued-work reference when the callback is run or
+discarded.
+
+These rules make operation release, detachment, cancellation, and completion
+safe to race. They do not make a single `Task` or `Operation` a general-purpose
+multi-consumer object; duplicate awaits and repeated result consumption remain
+programmer errors.
 
 ## Async Generators
 
@@ -224,7 +259,9 @@ auto next = co_await generator.Next(ctx);
 - Calling `TakeResult()` before an operation is complete.
 - Calling `TakeResult()` more than once.
 - Awaiting the same running operation from multiple consumers.
-- Passing lvalue tasks to `WhenAll` or `WhenAny` instead of moving/creating tasks.
+- Passing lvalue tasks to `WhenAll` instead of moving/creating tasks.
+- Passing preconstructed tasks to `WhenAny`; use child-context factories so
+  loser cancellation reaches the task body.
 - Mixing incompatible error types across composed tasks.
 - Treating cancellation like a domain error.
 - Using faults for normal operation failures that should be represented by `E`.

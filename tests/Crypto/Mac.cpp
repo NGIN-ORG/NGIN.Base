@@ -89,8 +89,8 @@ TEST_CASE("MacInto checks output size before backend support", "[Crypto][Mac]")
             NGIN::Crypto::ConstByteSpan {},
             output);
 
-    REQUIRE_FALSE(result.HasValue());
-    REQUIRE(result.Error().Code() == NGIN::Crypto::CryptoErrorCode::OutputBufferTooSmall);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().Code() == NGIN::Crypto::CryptoErrorCode::OutputBufferTooSmall);
 }
 
 TEST_CASE("ComputeMac returns unsupported algorithm when context lacks capability", "[Crypto][Mac]")
@@ -106,16 +106,16 @@ TEST_CASE("ComputeMac returns unsupported algorithm when context lacks capabilit
             TestKey(),
             NGIN::Crypto::ConstByteSpan {});
 
-    REQUIRE_FALSE(result.HasValue());
-    REQUIRE(result.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
 }
 
 TEST_CASE("HMAC computes RFC 4231 vectors when backend supports them", "[Crypto][Mac]")
 {
     auto context = NGIN::Crypto::Backend::CreateContext();
-    REQUIRE(context.HasValue());
+    REQUIRE(context.has_value());
 
-    if (!context.Value().Supports(NGIN::Crypto::MacAlgorithm::HmacSha256) || !context.Value().Supports(NGIN::Crypto::MacAlgorithm::HmacSha512))
+    if (!context.value().Supports(NGIN::Crypto::MacAlgorithm::HmacSha256) || !context.value().Supports(NGIN::Crypto::MacAlgorithm::HmacSha512))
     {
         SUCCEED("HMAC vector test requires a MAC-capable backend such as optional OpenSSL.");
         return;
@@ -126,11 +126,11 @@ TEST_CASE("HMAC computes RFC 4231 vectors when backend supports them", "[Crypto]
     const auto                 input = std::as_bytes(std::span {MESSAGE.data(), MESSAGE.size()});
 
     auto hmacSha256 = NGIN::Crypto::Mac::HmacSha256(
-            context.Value(),
+            context.value(),
             NGIN::Crypto::Memory::SecretView {key},
             input);
     auto hmacSha512 = NGIN::Crypto::Mac::HmacSha512(
-            context.Value(),
+            context.value(),
             NGIN::Crypto::Memory::SecretView {key},
             input);
 
@@ -143,26 +143,26 @@ TEST_CASE("HMAC computes RFC 4231 vectors when backend supports them", "[Crypto]
             "daa833b7d6b8a702038b274eaea3f4e4"
             "be9d914eeb61f1702e696c203a126854");
 
-    REQUIRE(hmacSha256.HasValue());
-    REQUIRE(hmacSha512.HasValue());
-    REQUIRE(expectedSha256.HasValue());
-    REQUIRE(expectedSha512.HasValue());
+    REQUIRE(hmacSha256.has_value());
+    REQUIRE(hmacSha512.has_value());
+    REQUIRE(expectedSha256.has_value());
+    REQUIRE(expectedSha512.has_value());
 
     RequireBytesEqual(
-            NGIN::Crypto::ConstByteSpan {hmacSha256.Value().data(), hmacSha256.Value().size()},
-            NGIN::Crypto::ConstByteSpan {expectedSha256.Value().data(), expectedSha256.Value().Size()});
+            NGIN::Crypto::ConstByteSpan {hmacSha256.value().data(), hmacSha256.value().size()},
+            NGIN::Crypto::ConstByteSpan {expectedSha256.value().data(), expectedSha256.value().Size()});
     RequireBytesEqual(
-            NGIN::Crypto::ConstByteSpan {hmacSha512.Value().data(), hmacSha512.Value().size()},
-            NGIN::Crypto::ConstByteSpan {expectedSha512.Value().data(), expectedSha512.Value().Size()});
+            NGIN::Crypto::ConstByteSpan {hmacSha512.value().data(), hmacSha512.value().size()},
+            NGIN::Crypto::ConstByteSpan {expectedSha512.value().data(), expectedSha512.value().Size()});
 
     auto verified = NGIN::Crypto::Mac::VerifyMac(
-            context.Value(),
+            context.value(),
             NGIN::Crypto::MacAlgorithm::HmacSha256,
             NGIN::Crypto::Memory::SecretView {key},
             input,
-            NGIN::Crypto::ConstByteSpan {hmacSha256.Value().data(), hmacSha256.Value().size()});
+            NGIN::Crypto::ConstByteSpan {hmacSha256.value().data(), hmacSha256.value().size()});
 
-    REQUIRE(verified.HasValue());
+    REQUIRE(verified.has_value());
 }
 
 TEST_CASE("MAC contract does not fake implementation even if capability is manually enabled", "[Crypto][Mac]")
@@ -177,8 +177,8 @@ TEST_CASE("MAC contract does not fake implementation even if capability is manua
 
     auto result = NGIN::Crypto::Mac::HmacSha256(context, TestKey(), NGIN::Crypto::ConstByteSpan {});
 
-    REQUIRE_FALSE(result.HasValue());
-    REQUIRE(result.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
 }
 
 TEST_CASE("VerifyMac validates expected tag size", "[Crypto][Mac]")
@@ -196,8 +196,8 @@ TEST_CASE("VerifyMac validates expected tag size", "[Crypto][Mac]")
             NGIN::Crypto::ConstByteSpan {},
             expectedTag);
 
-    REQUIRE_FALSE(result.HasValue());
-    REQUIRE(result.Error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidTag);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidTag);
 }
 
 TEST_CASE("VerifyMac returns unsupported algorithm without backend implementation", "[Crypto][Mac]")
@@ -218,6 +218,6 @@ TEST_CASE("VerifyMac returns unsupported algorithm without backend implementatio
             NGIN::Crypto::ConstByteSpan {},
             expectedTag);
 
-    REQUIRE_FALSE(result.HasValue());
-    REQUIRE(result.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
 }

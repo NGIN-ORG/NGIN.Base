@@ -49,17 +49,17 @@ namespace NGIN::Crypto::Kdf
     {
         if (output.empty())
         {
-            return OutputBufferTooSmall();
+            return std::unexpected(OutputBufferTooSmall());
         }
         if (!IsValid(parameters))
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         auto supported = context.EnsureSupports(parameters.Algorithm());
-        if (!supported.HasValue())
+        if (!supported.has_value())
         {
-            return supported.Error();
+            return std::unexpected(std::move(supported).error());
         }
 
         switch (parameters.Algorithm())
@@ -90,7 +90,7 @@ namespace NGIN::Crypto::Kdf
                         output);
         }
 
-        return UnsupportedAlgorithm();
+        return std::unexpected(UnsupportedAlgorithm());
     }
 
     CryptoExpected<ByteBuffer> DeriveKey(
@@ -100,14 +100,14 @@ namespace NGIN::Crypto::Kdf
     {
         if (outputSize == 0)
         {
-            return OutputBufferTooSmall();
+            return std::unexpected(OutputBufferTooSmall());
         }
 
         auto output = MakeByteBuffer(outputSize);
         auto result = DeriveKeyInto(context, parameters, ByteSpan {output.data(), output.Size()});
-        if (!result.HasValue())
+        if (!result.has_value())
         {
-            return result.Error();
+            return std::unexpected(std::move(result).error());
         }
 
         return output;

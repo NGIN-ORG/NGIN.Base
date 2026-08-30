@@ -23,14 +23,14 @@ namespace NGIN::Text::Unicode
 
         inline void AppendCodePoint(UTF8String& output, CodePoint codePoint)
         {
-            char buffer[4] {};
+            char8_t        buffer[4] {};
             const UIntSize count = EncodeUtf8(codePoint, buffer);
             output.Append(buffer, count);
         }
 
         inline void AppendCodePoint(UTF16String& output, CodePoint codePoint)
         {
-            char16_t buffer[2] {};
+            char16_t       buffer[2] {};
             const UIntSize count = EncodeUtf16(codePoint, buffer);
             output.Append(buffer, count);
         }
@@ -38,7 +38,7 @@ namespace NGIN::Text::Unicode
         inline void AppendCodePoint(UTF32String& output, CodePoint codePoint)
         {
             char32_t buffer[1] {};
-            (void)EncodeUtf32(codePoint, buffer);
+            (void) EncodeUtf32(codePoint, buffer);
             output.Append(buffer[0]);
         }
     }// namespace detail
@@ -75,6 +75,14 @@ namespace NGIN::Text::Unicode
         }
 
         return Utilities::Expected<UTF32String, ConversionError>(std::move(output));
+    }
+
+    /// @brief Converts `char8_t` UTF-8 input into `UTF32String` without an input copy.
+    [[nodiscard]] inline Utilities::Expected<UTF32String, ConversionError> ToUtf32(
+            std::u8string_view input,
+            ErrorPolicy        policy = ErrorPolicy::Strict)
+    {
+        return ToUtf32(NGIN::Text::AsBytes(input), policy);
     }
 
     /// @brief Converts UTF-16 input into `UTF32String`.
@@ -135,6 +143,14 @@ namespace NGIN::Text::Unicode
         }
 
         return Utilities::Expected<UTF16String, ConversionError>(std::move(output));
+    }
+
+    /// @brief Converts `char8_t` UTF-8 input into `UTF16String` without an input copy.
+    [[nodiscard]] inline Utilities::Expected<UTF16String, ConversionError> ToUtf16(
+            std::u8string_view input,
+            ErrorPolicy        policy = ErrorPolicy::Strict)
+    {
+        return ToUtf16(NGIN::Text::AsBytes(input), policy);
     }
 
     /// @brief Converts UTF-32 input into `UTF16String`.
@@ -255,6 +271,14 @@ namespace NGIN::Text::Unicode
         return Utilities::Expected<UIntSize, ConversionError>(count);
     }
 
+    /// @brief Counts Unicode code points in `char8_t` UTF-8 input.
+    [[nodiscard]] inline Utilities::Expected<UIntSize, ConversionError> CountCodePoints(
+            std::u8string_view input,
+            ErrorPolicy        policy = ErrorPolicy::Strict)
+    {
+        return CountCodePoints(NGIN::Text::AsBytes(input), policy);
+    }
+
     /// @brief Returns whether the entire byte range is ASCII.
     [[nodiscard]] inline constexpr bool IsAscii(std::string_view input) noexcept
     {
@@ -266,14 +290,24 @@ namespace NGIN::Text::Unicode
         return true;
     }
 
+    /// @brief Returns whether the entire `char8_t` range is ASCII.
+    [[nodiscard]] inline constexpr bool IsAscii(std::u8string_view input) noexcept
+    {
+        for (const char8_t codeUnit: input)
+        {
+            if (static_cast<unsigned char>(codeUnit) > 0x7Fu)
+                return false;
+        }
+        return true;
+    }
+
     /// @brief Detects a leading Unicode byte-order mark.
     ///
     /// @param bytes Raw input bytes to inspect.
     /// @return Detected BOM kind and byte count, or `BomKind::None`.
     [[nodiscard]] inline constexpr BomInfo DetectBom(std::span<const Byte> bytes) noexcept
     {
-        auto byteAt = [&](UIntSize index) noexcept -> unsigned char
-        {
+        auto byteAt = [&](UIntSize index) noexcept -> unsigned char {
             return std::to_integer<unsigned char>(bytes[index]);
         };
 

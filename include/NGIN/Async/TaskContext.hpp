@@ -34,6 +34,103 @@ namespace NGIN::Async
             }
         }
 
+        template<typename Promise>
+        [[nodiscard]] static bool RetainPromiseFrame(Promise& promise) noexcept
+        {
+            if constexpr (requires { promise.RetainFrameReference(); })
+            {
+                promise.RetainFrameReference();
+                return true;
+            }
+            return false;
+        }
+
+        template<typename Promise>
+        static void ReleasePromiseFrame(Promise&                             promise,
+                                        const std::coroutine_handle<Promise> handle,
+                                        const bool                           retained) noexcept
+        {
+            if constexpr (requires { promise.ReleaseFrameReference(handle); })
+            {
+                if (retained)
+                {
+                    promise.ReleaseFrameReference(handle);
+                }
+            }
+        }
+
+        template<typename Promise>
+        class PromiseFrameLease final
+        {
+        public:
+            PromiseFrameLease(Promise& promise, const std::coroutine_handle<Promise> handle) noexcept
+                : m_promise(&promise), m_handle(handle), m_retained(TaskContext::RetainPromiseFrame(promise))
+            {
+            }
+
+            PromiseFrameLease(PromiseFrameLease&& other) noexcept
+                : m_promise(other.m_promise), m_handle(other.m_handle), m_retained(other.m_retained)
+            {
+                other.m_promise  = nullptr;
+                other.m_handle   = {};
+                other.m_retained = false;
+            }
+
+            PromiseFrameLease& operator=(PromiseFrameLease&& other) noexcept
+            {
+                if (this != &other)
+                {
+                    Reset();
+                    m_promise        = other.m_promise;
+                    m_handle         = other.m_handle;
+                    m_retained       = other.m_retained;
+                    other.m_promise  = nullptr;
+                    other.m_handle   = {};
+                    other.m_retained = false;
+                }
+                return *this;
+            }
+
+            PromiseFrameLease(const PromiseFrameLease&)            = delete;
+            PromiseFrameLease& operator=(const PromiseFrameLease&) = delete;
+
+            ~PromiseFrameLease()
+            {
+                Reset();
+            }
+
+            void Reset() noexcept
+            {
+                if (m_promise == nullptr)
+                {
+                    return;
+                }
+
+                Promise* const                       promise  = std::exchange(m_promise, nullptr);
+                const std::coroutine_handle<Promise> handle   = std::exchange(m_handle, {});
+                const bool                           retained = std::exchange(m_retained, false);
+                TaskContext::ReleasePromiseFrame(*promise, handle, retained);
+            }
+
+        private:
+            Promise*                       m_promise {};
+            std::coroutine_handle<Promise> m_handle {};
+            bool                           m_retained {false};
+        };
+
+        template<typename Promise>
+        static void CompleteSchedulingFailure(
+                Promise&                             promise,
+                const std::coroutine_handle<Promise> awaiting,
+                const NGIN::Execution::ScheduleError error) noexcept
+        {
+            AsyncFault fault;
+            fault.code   = AsyncFaultCode::SchedulerDispatchFailed;
+            fault.native = static_cast<int>(error);
+            promise.SetFault(std::move(fault));
+            promise.MarkFinishedAndResume(awaiting);
+        }
+
         struct YieldAwaiter final
         {
             NGIN::Execution::ExecutorRef     exec {};
@@ -48,46 +145,79 @@ namespace NGIN::Async
             template<typename Promise>
             std::coroutine_handle<> await_suspend(std::coroutine_handle<Promise> awaiting) const noexcept
             {
+                Promise&   promise       = awaiting.promise();
+                const bool setupRetained = TaskContext::RetainPromiseFrame(promise);
                 if (cancellation.IsCancellationRequested())
                 {
-                    awaiting.promise().SetCanceled();
-                    awaiting.promise().MarkFinishedAndResume(awaiting);
+                    promise.SetCanceled();
+                    promise.MarkFinishedAndResume(awaiting);
+                    TaskContext::ReleasePromiseFrame(promise, awaiting, setupRetained);
                     return std::noop_coroutine();
                 }
 
                 if (!exec.IsValid())
                 {
-                    awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidTaskUsage));
-                    awaiting.promise().MarkFinishedAndResume(awaiting);
+                    promise.SetFault(MakeAsyncFault(AsyncFaultCode::InvalidTaskUsage));
+                    promise.MarkFinishedAndResume(awaiting);
+                    TaskContext::ReleasePromiseFrame(promise, awaiting, setupRetained);
                     return std::noop_coroutine();
                 }
 
-                cancellation.Register(
+                const CancellationRegistrationResult registrationResult = cancellation.Register(
                         cancellationRegistration,
                         {},
                         {},
                         +[](void* rawPromise) noexcept -> bool {
-                            auto* promise = static_cast<Promise*>(rawPromise);
-                            if (!promise)
+                            Promise* callbackPromise = static_cast<Promise*>(rawPromise);
+                            if (!callbackPromise)
                             {
                                 return false;
                             }
 
-                            auto handle = std::coroutine_handle<Promise>::from_promise(*promise);
-                            promise->SetCanceled();
-                            promise->MarkFinishedAndResume(handle);
+                            std::coroutine_handle<Promise> handle = std::coroutine_handle<Promise>::from_promise(*callbackPromise);
+                            callbackPromise->SetCanceled();
+                            callbackPromise->MarkFinishedAndResume(handle);
                             return false;
                         },
-                        &awaiting.promise());
+                        &promise);
+                if (!registrationResult)
+                {
+                    AsyncFault fault;
+                    fault.code   = AsyncFaultCode::CancellationRegistrationFailed;
+                    fault.native = static_cast<int>(registrationResult.error());
+                    promise.SetFault(std::move(fault));
+                    promise.MarkFinishedAndResume(awaiting);
+                    TaskContext::ReleasePromiseFrame(promise, awaiting, setupRetained);
+                    return std::noop_coroutine();
+                }
 
-                auto* promise = &awaiting.promise();
-                exec.Execute([promise, awaiting]() mutable noexcept {
-                    if (TaskContext::PromiseAlreadyCompleted(*promise))
-                    {
-                        return;
-                    }
-                    awaiting.resume();
-                });
+                if (TaskContext::PromiseAlreadyCompleted(promise))
+                {
+                    cancellationRegistration.Reset();
+                    TaskContext::ReleasePromiseFrame(promise, awaiting, setupRetained);
+                    return std::noop_coroutine();
+                }
+
+                PromiseFrameLease<Promise>            workLease(promise, awaiting);
+                CancellationRegistration* const       registration   = &cancellationRegistration;
+                Promise* const                        promisePointer = &promise;
+                const NGIN::Execution::ScheduleResult result         = exec.Execute(
+                        [promisePointer, registration, awaiting, lease = std::move(workLease)]() mutable noexcept {
+                            registration->Reset();
+                            if (!TaskContext::PromiseAlreadyCompleted(*promisePointer))
+                            {
+                                awaiting.resume();
+                            }
+                            lease.Reset();
+                        });
+                if (!result)
+                {
+                    cancellationRegistration.Reset();
+                    TaskContext::CompleteSchedulingFailure(promise, awaiting, result.error());
+                    TaskContext::ReleasePromiseFrame(promise, awaiting, setupRetained);
+                    return std::noop_coroutine();
+                }
+                TaskContext::ReleasePromiseFrame(promise, awaiting, setupRetained);
                 return std::noop_coroutine();
             }
 
@@ -131,48 +261,80 @@ namespace NGIN::Async
             template<typename Promise>
             std::coroutine_handle<> await_suspend(std::coroutine_handle<Promise> awaiting) const noexcept
             {
+                Promise&   promise       = awaiting.promise();
+                const bool setupRetained = TaskContext::RetainPromiseFrame(promise);
                 if (cancellation.IsCancellationRequested())
                 {
-                    awaiting.promise().SetCanceled();
-                    awaiting.promise().MarkFinishedAndResume(awaiting);
+                    promise.SetCanceled();
+                    promise.MarkFinishedAndResume(awaiting);
+                    TaskContext::ReleasePromiseFrame(promise, awaiting, setupRetained);
                     return std::noop_coroutine();
                 }
 
                 if (!exec.IsValid())
                 {
-                    awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidTaskUsage));
-                    awaiting.promise().MarkFinishedAndResume(awaiting);
+                    promise.SetFault(MakeAsyncFault(AsyncFaultCode::InvalidTaskUsage));
+                    promise.MarkFinishedAndResume(awaiting);
+                    TaskContext::ReleasePromiseFrame(promise, awaiting, setupRetained);
                     return std::noop_coroutine();
                 }
 
-                cancellation.Register(
+                const CancellationRegistrationResult registrationResult = cancellation.Register(
                         cancellationRegistration,
                         {},
                         {},
                         +[](void* rawPromise) noexcept -> bool {
-                            auto* promise = static_cast<Promise*>(rawPromise);
-                            if (!promise)
+                            Promise* callbackPromise = static_cast<Promise*>(rawPromise);
+                            if (!callbackPromise)
                             {
                                 return false;
                             }
 
-                            auto handle = std::coroutine_handle<Promise>::from_promise(*promise);
-                            promise->SetCanceled();
-                            promise->MarkFinishedAndResume(handle);
+                            std::coroutine_handle<Promise> handle = std::coroutine_handle<Promise>::from_promise(*callbackPromise);
+                            callbackPromise->SetCanceled();
+                            callbackPromise->MarkFinishedAndResume(handle);
                             return false;
                         },
-                        &awaiting.promise());
+                        &promise);
+                if (!registrationResult)
+                {
+                    AsyncFault fault;
+                    fault.code   = AsyncFaultCode::CancellationRegistrationFailed;
+                    fault.native = static_cast<int>(registrationResult.error());
+                    promise.SetFault(std::move(fault));
+                    promise.MarkFinishedAndResume(awaiting);
+                    TaskContext::ReleasePromiseFrame(promise, awaiting, setupRetained);
+                    return std::noop_coroutine();
+                }
 
-                auto* promise = &awaiting.promise();
-                exec.ExecuteAt(
-                        [promise, awaiting]() mutable noexcept {
-                            if (TaskContext::PromiseAlreadyCompleted(*promise))
+                if (TaskContext::PromiseAlreadyCompleted(promise))
+                {
+                    cancellationRegistration.Reset();
+                    TaskContext::ReleasePromiseFrame(promise, awaiting, setupRetained);
+                    return std::noop_coroutine();
+                }
+
+                PromiseFrameLease<Promise>            workLease(promise, awaiting);
+                CancellationRegistration* const       registration   = &cancellationRegistration;
+                Promise* const                        promisePointer = &promise;
+                const NGIN::Execution::ScheduleResult result         = exec.ExecuteAt(
+                        [promisePointer, registration, awaiting, lease = std::move(workLease)]() mutable noexcept {
+                            registration->Reset();
+                            if (!TaskContext::PromiseAlreadyCompleted(*promisePointer))
                             {
-                                return;
+                                awaiting.resume();
                             }
-                            awaiting.resume();
+                            lease.Reset();
                         },
                         until);
+                if (!result)
+                {
+                    cancellationRegistration.Reset();
+                    TaskContext::CompleteSchedulingFailure(promise, awaiting, result.error());
+                    TaskContext::ReleasePromiseFrame(promise, awaiting, setupRetained);
+                    return std::noop_coroutine();
+                }
+                TaskContext::ReleasePromiseFrame(promise, awaiting, setupRetained);
                 return std::noop_coroutine();
             }
 

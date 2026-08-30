@@ -49,9 +49,9 @@ Use platform secure randomness for keys, nonces that are specified as random, an
 
 ```cpp
 auto key = NGIN::Crypto::Random::RandomBytes<32>();
-if (!key.HasValue())
+if (!key.has_value())
 {
-    return key.Error();
+    return key.error();
 }
 ```
 
@@ -167,12 +167,12 @@ surface first, then falls back to platform facilities:
 
 ```cpp
 auto context = NGIN::Crypto::Backend::CreateBestAvailableContext();
-if (!context.HasValue())
+if (!context.has_value())
 {
-    return context.Error();
+    return context.error();
 }
 
-auto digest = NGIN::Crypto::Hashing::Sha256(context.Value(), message);
+auto digest = NGIN::Crypto::Hashing::Sha256(context.value(), message);
 ```
 
 Use `CreatePlatformContext()` when you explicitly want only fresh-machine platform facilities. On Windows builds with
@@ -183,7 +183,7 @@ package provider must be selected by name.
 Check capabilities before selecting optional algorithms:
 
 ```cpp
-if (!context.Value().Supports(NGIN::Crypto::AeadAlgorithm::Aes256Gcm))
+if (!context.value().Supports(NGIN::Crypto::AeadAlgorithm::Aes256Gcm))
 {
     return NGIN::Crypto::CryptoError {NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm};
 }
@@ -192,7 +192,7 @@ if (!context.Value().Supports(NGIN::Crypto::AeadAlgorithm::Aes256Gcm))
 Use `DescribeSupport(...)` when diagnostics matter:
 
 ```cpp
-auto support = context.Value().DescribeSupport(NGIN::Crypto::HashAlgorithm::Sha256);
+auto support = context.value().DescribeSupport(NGIN::Crypto::HashAlgorithm::Sha256);
 if (!support.supported)
 {
     return support.reason;
@@ -202,15 +202,15 @@ if (!support.supported)
 Use `CreateContextWithDiagnostics()` when startup tooling needs to explain rejected providers:
 
 ```cpp
-auto selection = NGIN::Crypto::Backend::CreateContextWithDiagnostics({
+NGIN::Crypto::Backend::BackendContextSelection selection = NGIN::Crypto::Backend::CreateContextWithDiagnostics({
         .policy = NGIN::Crypto::Backend::BackendPolicy::RequireAlgorithmSet,
 });
 
-if (!selection.context.HasValue())
+if (!selection.context.has_value())
 {
     for (NGIN::UIntSize i = 0; i < selection.diagnostics.Count(); ++i)
     {
-        auto entry = selection.diagnostics[i];
+        const NGIN::Crypto::Backend::BackendSelectionDiagnostic& entry = selection.diagnostics[i];
         // entry.backend.Name(), entry.code, and entry.reason are safe to log.
     }
 }

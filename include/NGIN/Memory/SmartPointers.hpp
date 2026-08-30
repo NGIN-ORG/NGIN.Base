@@ -11,6 +11,7 @@
 
 #include <NGIN/Defines.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <concepts>
 #include <cstddef>
@@ -22,6 +23,8 @@
 #include <NGIN/Memory/AllocationHelpers.hpp>
 #include <NGIN/Memory/AllocatorConcept.hpp>
 #include <NGIN/Memory/SystemAllocator.hpp>
+#include <NGIN/Memory/detail/CheckedArithmetic.hpp>
+#include <NGIN/Memory/detail/ConstructionGuard.hpp>
 
 namespace NGIN::Memory
 {
@@ -32,10 +35,15 @@ namespace NGIN::Memory
         {
             using DestroyObjectFn = void (*)(void*) noexcept;
 
+            static_assert(std::is_nothrow_move_constructible_v<Alloc>,
+                          "Shared allocators must be nothrow move constructible so final deallocation is safe");
+            static_assert(std::is_nothrow_destructible_v<Alloc>,
+                          "Shared allocators must be nothrow destructible");
+
             std::atomic<std::size_t> strong {1};// number of Shared owners
             std::atomic<std::size_t> weak {1};  // number of Ticket owners + control's self-weak
 
-            NGIN_NO_UNIQUE_ADDRESS Alloc alloc {};
+            NGIN_NO_UNIQUE_ADDRESS Alloc alloc;
             void*                        base {nullptr};
             std::size_t                  totalBytes {0};
             std::size_t                  allocAlignment {alignof(std::max_align_t)};
@@ -43,11 +51,10 @@ namespace NGIN::Memory
             void*                        destroyObjectPtr {nullptr};
             DestroyObjectFn              destroyObjectFn {nullptr};
 
-            SharedControl() = default;
-            SharedControl(Alloc a, void* b, std::size_t bytes, std::size_t aln, T* obj, void* destroyPtr, DestroyObjectFn destroyFn) noexcept
+            SharedControl(Alloc&& a, void* b, std::size_t bytes, std::size_t aln, T* obj, void* destroyPtr, DestroyObjectFn destroyFn) noexcept
                 : alloc(std::move(a)), base(b), totalBytes(bytes), allocAlignment(aln), objectPtr(obj), destroyObjectPtr(destroyPtr), destroyObjectFn(destroyFn) {}
 
-            void DestroyObject() noexcept(std::is_nothrow_destructible_v<T>)
+            void DestroyObject() noexcept
             {
                 if (objectPtr)
                 {
@@ -67,27 +74,38 @@ namespace NGIN::Memory
             {
                 if (base)
                 {
-                    auto       allocCopy = alloc;
-                    void*      basePtr   = base;
-                    const auto bytes     = totalBytes;
-                    const auto alignment = allocAlignment;
-
-                    base             = nullptr;
-                    totalBytes       = 0;
-                    allocAlignment   = alignof(std::max_align_t);
-                    objectPtr        = nullptr;
-                    destroyObjectPtr = nullptr;
-                    destroyObjectFn  = nullptr;
-
-                    allocCopy.Deallocate(basePtr, bytes, alignment);
+                    Alloc             deallocator(std::move(alloc));
+                    void* const       basePtr   = base;
+                    const std::size_t bytes     = totalBytes;
+                    const std::size_t alignment = allocAlignment;
+                    std::destroy_at(this);
+                    deallocator.Deallocate(basePtr, bytes, alignment);
                 }
             }
         };
 
-        template<class T>
-        [[nodiscard]] constexpr bool IsNoexceptMove() noexcept
+        template<class Control, class Object>
+        struct SharedAllocationLayout final
         {
-            return std::is_nothrow_move_constructible_v<T> && std::is_nothrow_move_assignable_v<T>;
+            std::size_t totalBytes;
+            std::size_t alignment;
+        };
+
+        template<class Control, class Object>
+        [[nodiscard]] SharedAllocationLayout<Control, Object> MakeSharedAllocationLayout()
+        {
+            constexpr std::size_t objectAlignment  = alignof(Object);
+            constexpr std::size_t controlAlignment = alignof(Control);
+            const std::size_t     alignment        = (std::max) (objectAlignment, controlAlignment);
+
+            std::size_t controlAndPadding = 0;
+            std::size_t totalBytes        = 0;
+            if (!CheckedAdd(sizeof(Control), objectAlignment - 1, controlAndPadding) ||
+                !CheckedAdd(controlAndPadding, sizeof(Object), totalBytes))
+            {
+                throw std::bad_alloc {};
+            }
+            return {totalBytes, alignment};
         }
     }// namespace detail
 
@@ -112,7 +130,7 @@ namespace NGIN::Memory
         constexpr Scoped() noexcept = default;
         constexpr Scoped(std::nullptr_t) noexcept {}
 
-        explicit Scoped(T* ptr, Alloc alloc = Alloc {}) noexcept
+        explicit Scoped(T* ptr, Alloc alloc = Alloc {}) noexcept(std::is_nothrow_move_constructible_v<Alloc>)
             : m_ptr(ptr), m_alloc(std::move(alloc)) {}
 
         Scoped(const Scoped&)            = delete;
@@ -161,7 +179,7 @@ namespace NGIN::Memory
             return p;
         }
 
-        void Swap(Scoped& other) noexcept
+        void Swap(Scoped& other) noexcept(std::is_nothrow_swappable_v<Alloc>)
         {
             using std::swap;
             swap(m_ptr, other.m_ptr);
@@ -416,51 +434,49 @@ namespace NGIN::Memory
     template<class T, AllocatorConcept Alloc = SystemAllocator, class... Args>
     [[nodiscard]] Shared<T, Alloc> MakeShared(Alloc alloc, Args&&... args)
     {
-        using Control = detail::SharedControl<T, Alloc>;
+        using Control                                           = detail::SharedControl<T, Alloc>;
+        const detail::SharedAllocationLayout<Control, T> layout = detail::MakeSharedAllocationLayout<Control, T>();
 
-        constexpr std::size_t tAlign    = alignof(T);
-        constexpr std::size_t ctrlAlign = alignof(Control);
-        const std::size_t     alignment = ctrlAlign > tAlign ? ctrlAlign : tAlign;
-
-        // conservative size: control + possible padding + T
-        const std::size_t total = sizeof(Control) + (tAlign - 1) + sizeof(T);
-
-        void* base = alloc.Allocate(total, alignment);
+        void* const base = alloc.Allocate(layout.totalBytes, layout.alignment);
         if (!base)
             throw std::bad_alloc {};
+        detail::AllocationGuard<Alloc> allocationGuard {alloc, base, layout.totalBytes, layout.alignment};
 
-        // place the control block at base
-        auto* ctrl = ::new (base) Control(
+        Control* const ctrl = std::construct_at(
+                static_cast<Control*>(base),
                 std::move(alloc),
                 base,
-                total,
-                alignment,
+                layout.totalBytes,
+                layout.alignment,
                 nullptr,
                 nullptr,
                 +[](void* ptr) noexcept {
                     static_cast<T*>(ptr)->~T();
                 });
+        allocationGuard.Release();
 
-        // carve out space for T after the control block
-        auto*       raw   = static_cast<std::byte*>(base) + sizeof(Control);
-        std::size_t space = total - sizeof(Control);
+        std::byte*  raw   = static_cast<std::byte*>(base) + sizeof(Control);
+        std::size_t space = layout.totalBytes - sizeof(Control);
 
-        // use std::align to find a properly aligned spot for T within the remaining space
         void* objVoid = static_cast<void*>(raw);
         if (std::align(alignof(T), sizeof(T), objVoid, space) == nullptr)
         {
-            // Should not happen with the above sizing; fail safe:
             ctrl->DeallocateSelf();
             throw std::bad_alloc {};
         }
 
-        // construct T in-place
-        T* objPtr = std::construct_at(static_cast<T*>(objVoid), std::forward<Args>(args)...);
+        T* object = nullptr;
+        try
+        {
+            object = std::construct_at(static_cast<T*>(objVoid), std::forward<Args>(args)...);
+        } catch (...)
+        {
+            ctrl->DeallocateSelf();
+            throw;
+        }
 
-        ctrl->objectPtr        = objPtr;
-        ctrl->destroyObjectPtr = objPtr;
-        ctrl->strong.store(1, std::memory_order_relaxed);
-        ctrl->weak.store(1, std::memory_order_relaxed);// control’s self-weak
+        ctrl->objectPtr        = object;
+        ctrl->destroyObjectPtr = object;
 
         return Shared<T, Alloc>(ctrl);
     }
@@ -476,30 +492,29 @@ namespace NGIN::Memory
     [[nodiscard]] Shared<TBase, Alloc> MakeSharedAs(Alloc alloc, Args&&... args)
     {
         using Control = detail::SharedControl<TBase, Alloc>;
+        const detail::SharedAllocationLayout<Control, TDerived> layout =
+                detail::MakeSharedAllocationLayout<Control, TDerived>();
 
-        constexpr std::size_t derivedAlign = alignof(TDerived);
-        constexpr std::size_t ctrlAlign    = alignof(Control);
-        const std::size_t     alignment    = ctrlAlign > derivedAlign ? ctrlAlign : derivedAlign;
-
-        const std::size_t total = sizeof(Control) + (derivedAlign - 1) + sizeof(TDerived);
-
-        void* base = alloc.Allocate(total, alignment);
+        void* const base = alloc.Allocate(layout.totalBytes, layout.alignment);
         if (!base)
             throw std::bad_alloc {};
+        detail::AllocationGuard<Alloc> allocationGuard {alloc, base, layout.totalBytes, layout.alignment};
 
-        auto* ctrl = ::new (base) Control(
+        Control* const ctrl = std::construct_at(
+                static_cast<Control*>(base),
                 std::move(alloc),
                 base,
-                total,
-                alignment,
+                layout.totalBytes,
+                layout.alignment,
                 nullptr,
                 nullptr,
                 +[](void* ptr) noexcept {
                     static_cast<TDerived*>(ptr)->~TDerived();
                 });
+        allocationGuard.Release();
 
-        auto*       raw   = static_cast<std::byte*>(base) + sizeof(Control);
-        std::size_t space = total - sizeof(Control);
+        std::byte*  raw   = static_cast<std::byte*>(base) + sizeof(Control);
+        std::size_t space = layout.totalBytes - sizeof(Control);
 
         void* objVoid = static_cast<void*>(raw);
         if (std::align(alignof(TDerived), sizeof(TDerived), objVoid, space) == nullptr)
@@ -508,12 +523,18 @@ namespace NGIN::Memory
             throw std::bad_alloc {};
         }
 
-        TDerived* derivedPtr = std::construct_at(static_cast<TDerived*>(objVoid), std::forward<Args>(args)...);
+        TDerived* derived = nullptr;
+        try
+        {
+            derived = std::construct_at(static_cast<TDerived*>(objVoid), std::forward<Args>(args)...);
+        } catch (...)
+        {
+            ctrl->DeallocateSelf();
+            throw;
+        }
 
-        ctrl->objectPtr        = static_cast<TBase*>(derivedPtr);
-        ctrl->destroyObjectPtr = derivedPtr;
-        ctrl->strong.store(1, std::memory_order_relaxed);
-        ctrl->weak.store(1, std::memory_order_relaxed);
+        ctrl->objectPtr        = static_cast<TBase*>(derived);
+        ctrl->destroyObjectPtr = derived;
 
         return Shared<TBase, Alloc>(ctrl);
     }
@@ -533,28 +554,29 @@ namespace NGIN::Memory
         if (object == nullptr)
             return {};
 
-        constexpr std::size_t ownerAlign = alignof(OwnerType);
-        constexpr std::size_t ctrlAlign  = alignof(Control);
-        const std::size_t     alignment  = ctrlAlign > ownerAlign ? ctrlAlign : ownerAlign;
-        const std::size_t     total      = sizeof(Control) + (ownerAlign - 1) + sizeof(OwnerType);
+        const detail::SharedAllocationLayout<Control, OwnerType> layout =
+                detail::MakeSharedAllocationLayout<Control, OwnerType>();
 
-        void* base = alloc.Allocate(total, alignment);
+        void* const base = alloc.Allocate(layout.totalBytes, layout.alignment);
         if (!base)
             throw std::bad_alloc {};
+        detail::AllocationGuard<Alloc> allocationGuard {alloc, base, layout.totalBytes, layout.alignment};
 
-        auto* ctrl = ::new (base) Control(
+        Control* const ctrl = std::construct_at(
+                static_cast<Control*>(base),
                 std::move(alloc),
                 base,
-                total,
-                alignment,
+                layout.totalBytes,
+                layout.alignment,
                 object,
                 nullptr,
                 +[](void* ptr) noexcept {
                     static_cast<OwnerType*>(ptr)->~OwnerType();
                 });
+        allocationGuard.Release();
 
-        auto*       raw       = static_cast<std::byte*>(base) + sizeof(Control);
-        std::size_t space     = total - sizeof(Control);
+        std::byte*  raw       = static_cast<std::byte*>(base) + sizeof(Control);
+        std::size_t space     = layout.totalBytes - sizeof(Control);
         void*       ownerVoid = static_cast<void*>(raw);
         if (std::align(alignof(OwnerType), sizeof(OwnerType), ownerVoid, space) == nullptr)
         {
@@ -562,10 +584,16 @@ namespace NGIN::Memory
             throw std::bad_alloc {};
         }
 
-        auto* ownerPtr         = std::construct_at(static_cast<OwnerType*>(ownerVoid), std::forward<Owner>(owner));
+        OwnerType* ownerPtr = nullptr;
+        try
+        {
+            ownerPtr = std::construct_at(static_cast<OwnerType*>(ownerVoid), std::forward<Owner>(owner));
+        } catch (...)
+        {
+            ctrl->DeallocateSelf();
+            throw;
+        }
         ctrl->destroyObjectPtr = ownerPtr;
-        ctrl->strong.store(1, std::memory_order_relaxed);
-        ctrl->weak.store(1, std::memory_order_relaxed);
         return Shared<T, Alloc>(ctrl);
     }
 

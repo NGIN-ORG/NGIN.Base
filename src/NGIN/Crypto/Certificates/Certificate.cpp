@@ -98,16 +98,16 @@ namespace NGIN::Crypto::Certificates
         {
             DerReader reader {der};
             auto      element = reader.ReadElement();
-            if (!element.HasValue())
+            if (!element.has_value())
             {
-                return element.Error();
+                return std::unexpected(std::move(element).error());
             }
             if (!reader.IsAtEnd())
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
-            return element.Value();
+            return element.value();
         }
 
         [[nodiscard]] bool IsIa5StringValue(ConstByteSpan value) noexcept
@@ -125,29 +125,29 @@ namespace NGIN::Crypto::Certificates
         [[nodiscard]] CryptoExpected<NGIN::UInt32> ReadUInt32Integer(const DerElement& element) noexcept
         {
             auto integer = NGIN::Crypto::Encoding::ReadDerInteger(element);
-            if (!integer.HasValue())
+            if (!integer.has_value())
             {
-                return integer.Error();
+                return std::unexpected(std::move(integer).error());
             }
-            if (integer.Value().empty() || (ByteValue(integer.Value()[0]) & 0x80u) != 0)
+            if (integer.value().empty() || (ByteValue(integer.value()[0]) & 0x80u) != 0)
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
             NGIN::UIntSize offset = 0;
-            if (integer.Value().size() > 1 && ByteValue(integer.Value()[0]) == 0x00u)
+            if (integer.value().size() > 1 && ByteValue(integer.value()[0]) == 0x00u)
             {
                 offset = 1;
             }
-            if (integer.Value().size() - offset > sizeof(NGIN::UInt32))
+            if (integer.value().size() - offset > sizeof(NGIN::UInt32))
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
             NGIN::UInt32 value = 0;
-            for (NGIN::UIntSize i = offset; i < integer.Value().size(); ++i)
+            for (NGIN::UIntSize i = offset; i < integer.value().size(); ++i)
             {
-                value = static_cast<NGIN::UInt32>((value << 8u) | ByteValue(integer.Value()[i]));
+                value = static_cast<NGIN::UInt32>((value << 8u) | ByteValue(integer.value()[i]));
             }
             return value;
         }
@@ -156,7 +156,7 @@ namespace NGIN::Crypto::Certificates
         {
             if (!IsUniversal(element, static_cast<DerUniversalTag>(23)) && !IsUniversal(element, static_cast<DerUniversalTag>(24)))
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
             std::string value;
@@ -173,40 +173,40 @@ namespace NGIN::Crypto::Certificates
         {
             DerReader parent {element.encoded};
             auto      reader = NGIN::Crypto::Encoding::ReadDerSequence(parent, element);
-            if (!reader.HasValue())
+            if (!reader.has_value())
             {
-                return reader.Error();
+                return std::unexpected(std::move(reader).error());
             }
 
-            auto notBeforeElement = reader.Value().ReadElement();
-            if (!notBeforeElement.HasValue())
+            auto notBeforeElement = reader.value().ReadElement();
+            if (!notBeforeElement.has_value())
             {
-                return notBeforeElement.Error();
+                return std::unexpected(std::move(notBeforeElement).error());
             }
-            auto notBefore = ReadTimeString(notBeforeElement.Value());
-            if (!notBefore.HasValue())
+            auto notBefore = ReadTimeString(notBeforeElement.value());
+            if (!notBefore.has_value())
             {
-                return notBefore.Error();
+                return std::unexpected(std::move(notBefore).error());
             }
 
-            auto notAfterElement = reader.Value().ReadElement();
-            if (!notAfterElement.HasValue())
+            auto notAfterElement = reader.value().ReadElement();
+            if (!notAfterElement.has_value())
             {
-                return notAfterElement.Error();
+                return std::unexpected(std::move(notAfterElement).error());
             }
-            auto notAfter = ReadTimeString(notAfterElement.Value());
-            if (!notAfter.HasValue())
+            auto notAfter = ReadTimeString(notAfterElement.value());
+            if (!notAfter.has_value())
             {
-                return notAfter.Error();
+                return std::unexpected(std::move(notAfter).error());
             }
-            if (!reader.Value().IsAtEnd())
+            if (!reader.value().IsAtEnd())
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
             return CertificateValidity {
-                    .notBefore = std::move(notBefore.Value()),
-                    .notAfter  = std::move(notAfter.Value()),
+                    .notBefore = std::move(notBefore.value()),
+                    .notAfter  = std::move(notAfter.value()),
             };
         }
 
@@ -257,7 +257,7 @@ namespace NGIN::Crypto::Certificates
         {
             if (element.tag.tagClass != DerTagClass::Universal || element.tag.constructed)
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
             std::string value;
@@ -265,14 +265,14 @@ namespace NGIN::Crypto::Certificates
             {
                 if ((element.value.size() % 2) != 0)
                 {
-                    return ParseError();
+                    return std::unexpected(ParseError());
                 }
                 value.reserve(element.value.size() / 2);
                 for (NGIN::UIntSize i = 0; i < element.value.size(); i += 2)
                 {
                     if (ByteValue(element.value[i]) != 0)
                     {
-                        return ParseError();
+                        return std::unexpected(ParseError());
                     }
                     value.push_back(static_cast<char>(ByteValue(element.value[i + 1])));
                 }
@@ -282,7 +282,7 @@ namespace NGIN::Crypto::Certificates
             if (element.tag.number != 12 && element.tag.number != 19 && element.tag.number != 20 &&
                 element.tag.number != 22)
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
             value.reserve(element.value.size());
@@ -297,78 +297,78 @@ namespace NGIN::Crypto::Certificates
         {
             DerReader parent {element.encoded};
             auto      name = NGIN::Crypto::Encoding::ReadDerSequence(parent, element);
-            if (!name.HasValue())
+            if (!name.has_value())
             {
-                return name.Error();
+                return std::unexpected(std::move(name).error());
             }
 
             DistinguishedName result;
-            while (!name.Value().IsAtEnd())
+            while (!name.value().IsAtEnd())
             {
-                auto rdnSetElement = name.Value().ReadElement();
-                if (!rdnSetElement.HasValue())
+                auto rdnSetElement = name.value().ReadElement();
+                if (!rdnSetElement.has_value())
                 {
-                    return rdnSetElement.Error();
+                    return std::unexpected(std::move(rdnSetElement).error());
                 }
-                if (!IsUniversal(rdnSetElement.Value(), DerUniversalTag::Set, true))
+                if (!IsUniversal(rdnSetElement.value(), DerUniversalTag::Set, true))
                 {
-                    return ParseError();
-                }
-
-                DerReader setParent {rdnSetElement.Value().encoded};
-                auto      rdnSet = NGIN::Crypto::Encoding::ReadDerSet(setParent, rdnSetElement.Value());
-                if (!rdnSet.HasValue())
-                {
-                    return rdnSet.Error();
+                    return std::unexpected(ParseError());
                 }
 
-                while (!rdnSet.Value().IsAtEnd())
+                DerReader setParent {rdnSetElement.value().encoded};
+                auto      rdnSet = NGIN::Crypto::Encoding::ReadDerSet(setParent, rdnSetElement.value());
+                if (!rdnSet.has_value())
                 {
-                    auto attributeElement = rdnSet.Value().ReadElement();
-                    if (!attributeElement.HasValue())
+                    return std::unexpected(std::move(rdnSet).error());
+                }
+
+                while (!rdnSet.value().IsAtEnd())
+                {
+                    auto attributeElement = rdnSet.value().ReadElement();
+                    if (!attributeElement.has_value())
                     {
-                        return attributeElement.Error();
+                        return std::unexpected(std::move(attributeElement).error());
                     }
 
-                    DerReader attributeParent {attributeElement.Value().encoded};
-                    auto      attribute = NGIN::Crypto::Encoding::ReadDerSequence(attributeParent, attributeElement.Value());
-                    if (!attribute.HasValue())
+                    DerReader attributeParent {attributeElement.value().encoded};
+                    auto      attribute = NGIN::Crypto::Encoding::ReadDerSequence(attributeParent, attributeElement.value());
+                    if (!attribute.has_value())
                     {
-                        return attribute.Error();
+                        return std::unexpected(std::move(attribute).error());
                     }
 
-                    auto oidElement = attribute.Value().ReadElement();
-                    if (!oidElement.HasValue())
+                    auto oidElement = attribute.value().ReadElement();
+                    if (!oidElement.has_value())
                     {
-                        return oidElement.Error();
+                        return std::unexpected(std::move(oidElement).error());
                     }
-                    auto oid = NGIN::Crypto::Encoding::ReadDerObjectIdentifier(oidElement.Value());
-                    if (!oid.HasValue())
+                    auto oid = NGIN::Crypto::Encoding::ReadDerObjectIdentifier(oidElement.value());
+                    if (!oid.has_value())
                     {
-                        return oid.Error();
-                    }
-
-                    auto valueElement = attribute.Value().ReadElement();
-                    if (!valueElement.HasValue())
-                    {
-                        return valueElement.Error();
-                    }
-                    if (!attribute.Value().IsAtEnd())
-                    {
-                        return ParseError();
+                        return std::unexpected(std::move(oid).error());
                     }
 
-                    auto value = ReadNameValueString(valueElement.Value());
-                    if (!value.HasValue())
+                    auto valueElement = attribute.value().ReadElement();
+                    if (!valueElement.has_value())
                     {
-                        return value.Error();
+                        return std::unexpected(std::move(valueElement).error());
+                    }
+                    if (!attribute.value().IsAtEnd())
+                    {
+                        return std::unexpected(ParseError());
+                    }
+
+                    auto value = ReadNameValueString(valueElement.value());
+                    if (!value.has_value())
+                    {
+                        return std::unexpected(std::move(value).error());
                     }
 
                     result.attributes.PushBack(DistinguishedNameAttribute {
-                            .type             = IdentifyNameAttribute(oid.Value()),
-                            .objectIdentifier = std::move(oid.Value()),
-                            .value            = std::move(value.Value()),
-                            .valueTag         = valueElement.Value().tag.number,
+                            .type             = IdentifyNameAttribute(oid.value()),
+                            .objectIdentifier = std::move(oid.value()),
+                            .value            = std::move(value.value()),
+                            .valueTag         = valueElement.value().tag.number,
                     });
                 }
             }
@@ -385,53 +385,53 @@ namespace NGIN::Crypto::Certificates
         {
             DerReader parent {element.encoded};
             auto      reader = NGIN::Crypto::Encoding::ReadDerSequence(parent, element);
-            if (!reader.HasValue())
+            if (!reader.has_value())
             {
-                return reader.Error();
+                return std::unexpected(std::move(reader).error());
             }
 
-            auto oidElement = reader.Value().ReadElement();
-            if (!oidElement.HasValue())
+            auto oidElement = reader.value().ReadElement();
+            if (!oidElement.has_value())
             {
-                return oidElement.Error();
+                return std::unexpected(std::move(oidElement).error());
             }
-            auto oid = ReadOidElement(oidElement.Value());
-            if (!oid.HasValue())
+            auto oid = ReadOidElement(oidElement.value());
+            if (!oid.has_value())
             {
-                return oid.Error();
+                return std::unexpected(std::move(oid).error());
             }
 
-            if (OidEquals(oid.Value(), ED25519_OID))
+            if (OidEquals(oid.value(), ED25519_OID))
             {
-                if (!reader.Value().IsAtEnd())
+                if (!reader.value().IsAtEnd())
                 {
-                    return ParseError();
+                    return std::unexpected(ParseError());
                 }
                 return NGIN::Crypto::SignatureAlgorithm::Ed25519;
             }
 
-            if (OidEquals(oid.Value(), ECDSA_WITH_SHA256_OID))
+            if (OidEquals(oid.value(), ECDSA_WITH_SHA256_OID))
             {
-                if (!reader.Value().IsAtEnd())
+                if (!reader.value().IsAtEnd())
                 {
-                    return ParseError();
+                    return std::unexpected(ParseError());
                 }
                 return NGIN::Crypto::SignatureAlgorithm::EcdsaP256Sha256;
             }
 
-            if (OidEquals(oid.Value(), RSA_PSS_OID))
+            if (OidEquals(oid.value(), RSA_PSS_OID))
             {
                 return NGIN::Crypto::SignatureAlgorithm::RsaPssSha256;
             }
 
-            return UnsupportedAlgorithm();
+            return std::unexpected(UnsupportedAlgorithm());
         }
 
         [[nodiscard]] CryptoExpected<void> ValidateGeneralNameSchema(const DerElement& generalName)
         {
             if (generalName.tag.tagClass != DerTagClass::ContextSpecific)
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
             switch (generalName.tag.number)
@@ -439,36 +439,39 @@ namespace NGIN::Crypto::Certificates
                 case 0:
                 case 3:
                 case 5:
-                    return generalName.tag.constructed && !generalName.value.empty() ? CryptoExpected<void> {}
-                                                                                     : ParseError();
+                    return generalName.tag.constructed && !generalName.value.empty()
+                                   ? CryptoExpected<void> {}
+                                   : CryptoExpected<void> {std::unexpected(ParseError())};
                 case 1:
                 case 2:
                 case 6:
                     return !generalName.tag.constructed && !generalName.value.empty() && IsIa5StringValue(generalName.value)
                                    ? CryptoExpected<void> {}
-                                   : ParseError();
+                                   : CryptoExpected<void> {std::unexpected(ParseError())};
                 case 4: {
                     if (!generalName.tag.constructed)
                     {
-                        return ParseError();
+                        return std::unexpected(ParseError());
                     }
                     auto nameElement = ReadSingleElement(generalName.value);
-                    if (!nameElement.HasValue())
+                    if (!nameElement.has_value())
                     {
-                        return nameElement.Error();
+                        return std::unexpected(std::move(nameElement).error());
                     }
-                    auto name = ParseDistinguishedName(nameElement.Value());
-                    return name.HasValue() ? CryptoExpected<void> {} : name.Error();
+                    auto name = ParseDistinguishedName(nameElement.value());
+                    return name.has_value()
+                                   ? CryptoExpected<void> {}
+                                   : CryptoExpected<void> {std::unexpected(std::move(name).error())};
                 }
                 case 7:
                     return !generalName.tag.constructed &&
                                            (generalName.value.size() == 4 || generalName.value.size() == 16)
                                    ? CryptoExpected<void> {}
-                                   : ParseError();
+                                   : CryptoExpected<void> {std::unexpected(ParseError())};
                 case 8: {
                     if (generalName.tag.constructed || generalName.value.empty())
                     {
-                        return ParseError();
+                        return std::unexpected(ParseError());
                     }
                     DerElement oidElement {
                             .tag     = NGIN::Crypto::Encoding::MakeDerUniversalTag(DerUniversalTag::ObjectIdentifier),
@@ -476,10 +479,12 @@ namespace NGIN::Crypto::Certificates
                             .encoded = generalName.value,
                     };
                     auto oid = NGIN::Crypto::Encoding::ReadDerObjectIdentifier(oidElement);
-                    return oid.HasValue() ? CryptoExpected<void> {} : oid.Error();
+                    return oid.has_value()
+                                   ? CryptoExpected<void> {}
+                                   : CryptoExpected<void> {std::unexpected(std::move(oid).error())};
                 }
                 default:
-                    return ParseError();
+                    return std::unexpected(ParseError());
             }
         }
 
@@ -487,48 +492,48 @@ namespace NGIN::Crypto::Certificates
         {
             DerReader reader {encodedNames};
             auto      top = reader.ReadElement();
-            if (!top.HasValue())
+            if (!top.has_value())
             {
-                return top.Error();
+                return std::unexpected(std::move(top).error());
             }
             if (!reader.IsAtEnd())
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
-            DerReader parent {top.Value().encoded};
-            auto      generalNames = NGIN::Crypto::Encoding::ReadDerSequence(parent, top.Value());
-            if (!generalNames.HasValue())
+            DerReader parent {top.value().encoded};
+            auto      generalNames = NGIN::Crypto::Encoding::ReadDerSequence(parent, top.value());
+            if (!generalNames.has_value())
             {
-                return generalNames.Error();
+                return std::unexpected(std::move(generalNames).error());
             }
 
             bool hasAnyGeneralName = false;
-            while (!generalNames.Value().IsAtEnd())
+            while (!generalNames.value().IsAtEnd())
             {
-                auto generalName = generalNames.Value().ReadElement();
-                if (!generalName.HasValue())
+                auto generalName = generalNames.value().ReadElement();
+                if (!generalName.has_value())
                 {
-                    return generalName.Error();
+                    return std::unexpected(std::move(generalName).error());
                 }
                 hasAnyGeneralName = true;
-                auto schema       = ValidateGeneralNameSchema(generalName.Value());
-                if (!schema.HasValue())
+                auto schema       = ValidateGeneralNameSchema(generalName.value());
+                if (!schema.has_value())
                 {
-                    return schema.Error();
+                    return std::unexpected(std::move(schema).error());
                 }
 
-                if (IsTag(generalName.Value(), DerTagClass::ContextSpecific, false, 1) ||
-                    IsTag(generalName.Value(), DerTagClass::ContextSpecific, false, 2))
+                if (IsTag(generalName.value(), DerTagClass::ContextSpecific, false, 1) ||
+                    IsTag(generalName.value(), DerTagClass::ContextSpecific, false, 2))
                 {
                     std::string text;
-                    text.reserve(generalName.Value().value.size());
-                    for (NGIN::Byte byte: generalName.Value().value)
+                    text.reserve(generalName.value().value.size());
+                    for (NGIN::Byte byte: generalName.value().value)
                     {
                         text.push_back(static_cast<char>(ByteValue(byte)));
                     }
 
-                    if (generalName.Value().tag.number == 1)
+                    if (generalName.value().tag.number == 1)
                     {
                         names.emailAddresses.PushBack(std::move(text));
                     }
@@ -537,15 +542,15 @@ namespace NGIN::Crypto::Certificates
                         names.dnsNames.PushBack(std::move(text));
                     }
                 }
-                else if (IsTag(generalName.Value(), DerTagClass::ContextSpecific, false, 7))
+                else if (IsTag(generalName.value(), DerTagClass::ContextSpecific, false, 7))
                 {
-                    names.ipAddresses.PushBack(CopyBytes(generalName.Value().value));
+                    names.ipAddresses.PushBack(CopyBytes(generalName.value().value));
                 }
             }
 
             if (!hasAnyGeneralName)
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
             return {};
@@ -555,32 +560,32 @@ namespace NGIN::Crypto::Certificates
         {
             DerReader reader {encodedKeyUsage};
             auto      element = reader.ReadElement();
-            if (!element.HasValue())
+            if (!element.has_value())
             {
-                return element.Error();
+                return std::unexpected(std::move(element).error());
             }
             if (!reader.IsAtEnd())
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
-            auto bits = NGIN::Crypto::Encoding::ReadDerBitString(element.Value());
-            if (!bits.HasValue())
+            auto bits = NGIN::Crypto::Encoding::ReadDerBitString(element.value());
+            if (!bits.has_value())
             {
-                return bits.Error();
+                return std::unexpected(std::move(bits).error());
             }
-            if (bits.Value().bytes.empty() || bits.Value().bytes.size() > 2)
+            if (bits.value().bytes.empty() || bits.value().bytes.size() > 2)
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
-            const auto usedBits = (bits.Value().bytes.size() * 8u) - bits.Value().unusedBitCount;
+            const auto usedBits = (bits.value().bytes.size() * 8u) - bits.value().unusedBitCount;
             if (usedBits == 0 || usedBits > 9)
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
-            keyUsage.unusedBitCount = bits.Value().unusedBitCount;
-            keyUsage.bits           = CopyBytes(bits.Value().bytes);
+            keyUsage.unusedBitCount = bits.value().unusedBitCount;
+            keyUsage.bits           = CopyBytes(bits.value().bytes);
             return {};
         }
 
@@ -589,72 +594,72 @@ namespace NGIN::Crypto::Certificates
         {
             DerReader reader {encodedBasicConstraints};
             auto      top = reader.ReadElement();
-            if (!top.HasValue())
+            if (!top.has_value())
             {
-                return top.Error();
+                return std::unexpected(std::move(top).error());
             }
             if (!reader.IsAtEnd())
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
-            DerReader parent {top.Value().encoded};
-            auto      sequence = NGIN::Crypto::Encoding::ReadDerSequence(parent, top.Value());
-            if (!sequence.HasValue())
+            DerReader parent {top.value().encoded};
+            auto      sequence = NGIN::Crypto::Encoding::ReadDerSequence(parent, top.value());
+            if (!sequence.has_value())
             {
-                return sequence.Error();
+                return std::unexpected(std::move(sequence).error());
             }
 
             BasicConstraints parsed;
-            if (!sequence.Value().IsAtEnd())
+            if (!sequence.value().IsAtEnd())
             {
-                auto first = sequence.Value().ReadElement();
-                if (!first.HasValue())
+                auto first = sequence.value().ReadElement();
+                if (!first.has_value())
                 {
-                    return first.Error();
+                    return std::unexpected(std::move(first).error());
                 }
 
-                if (IsUniversal(first.Value(), DerUniversalTag::Boolean))
+                if (IsUniversal(first.value(), DerUniversalTag::Boolean))
                 {
-                    if (first.Value().value.size() != 1 || first.Value().value[0] != NGIN::Byte {0xff})
+                    if (first.value().value.size() != 1 || first.value().value[0] != NGIN::Byte {0xff})
                     {
-                        return ParseError();
+                        return std::unexpected(ParseError());
                     }
                     parsed.certificateAuthority = true;
                 }
-                else if (IsUniversal(first.Value(), DerUniversalTag::Integer))
+                else if (IsUniversal(first.value(), DerUniversalTag::Integer))
                 {
-                    return ParseError();
+                    return std::unexpected(ParseError());
                 }
                 else
                 {
-                    return ParseError();
+                    return std::unexpected(ParseError());
                 }
             }
 
-            if (!sequence.Value().IsAtEnd())
+            if (!sequence.value().IsAtEnd())
             {
-                auto pathLengthElement = sequence.Value().ReadElement();
-                if (!pathLengthElement.HasValue())
+                auto pathLengthElement = sequence.value().ReadElement();
+                if (!pathLengthElement.has_value())
                 {
-                    return pathLengthElement.Error();
+                    return std::unexpected(std::move(pathLengthElement).error());
                 }
-                auto pathLength = ReadUInt32Integer(pathLengthElement.Value());
-                if (!pathLength.HasValue())
+                auto pathLength = ReadUInt32Integer(pathLengthElement.value());
+                if (!pathLength.has_value())
                 {
-                    return pathLength.Error();
+                    return std::unexpected(std::move(pathLength).error());
                 }
                 if (!parsed.certificateAuthority)
                 {
-                    return ParseError();
+                    return std::unexpected(ParseError());
                 }
                 parsed.hasPathLengthConstraint = true;
-                parsed.pathLengthConstraint    = pathLength.Value();
+                parsed.pathLengthConstraint    = pathLength.value();
             }
 
-            if (!sequence.Value().IsAtEnd())
+            if (!sequence.value().IsAtEnd())
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
             basicConstraints = parsed;
@@ -666,26 +671,26 @@ namespace NGIN::Crypto::Certificates
         {
             DerReader reader {encodedKeyIdentifier};
             auto      element = reader.ReadElement();
-            if (!element.HasValue())
+            if (!element.has_value())
             {
-                return element.Error();
+                return std::unexpected(std::move(element).error());
             }
             if (!reader.IsAtEnd())
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
-            auto keyIdentifier = NGIN::Crypto::Encoding::ReadDerOctetString(element.Value());
-            if (!keyIdentifier.HasValue())
+            auto keyIdentifier = NGIN::Crypto::Encoding::ReadDerOctetString(element.value());
+            if (!keyIdentifier.has_value())
             {
-                return keyIdentifier.Error();
+                return std::unexpected(std::move(keyIdentifier).error());
             }
-            if (keyIdentifier.Value().empty())
+            if (keyIdentifier.value().empty())
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
-            certificate.subjectKeyIdentifier    = CopyBytes(keyIdentifier.Value());
+            certificate.subjectKeyIdentifier    = CopyBytes(keyIdentifier.value());
             certificate.hasSubjectKeyIdentifier = true;
             return {};
         }
@@ -695,72 +700,72 @@ namespace NGIN::Crypto::Certificates
         {
             DerReader reader {encodedAuthorityKeyIdentifier};
             auto      top = reader.ReadElement();
-            if (!top.HasValue())
+            if (!top.has_value())
             {
-                return top.Error();
+                return std::unexpected(std::move(top).error());
             }
             if (!reader.IsAtEnd())
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
-            DerReader parent {top.Value().encoded};
-            auto      sequence = NGIN::Crypto::Encoding::ReadDerSequence(parent, top.Value());
-            if (!sequence.HasValue())
+            DerReader parent {top.value().encoded};
+            auto      sequence = NGIN::Crypto::Encoding::ReadDerSequence(parent, top.value());
+            if (!sequence.has_value())
             {
-                return sequence.Error();
+                return std::unexpected(std::move(sequence).error());
             }
 
-            while (!sequence.Value().IsAtEnd())
+            while (!sequence.value().IsAtEnd())
             {
-                auto field = sequence.Value().ReadElement();
-                if (!field.HasValue())
+                auto field = sequence.value().ReadElement();
+                if (!field.has_value())
                 {
-                    return field.Error();
+                    return std::unexpected(std::move(field).error());
                 }
 
-                if (IsTag(field.Value(), DerTagClass::ContextSpecific, false, 0))
+                if (IsTag(field.value(), DerTagClass::ContextSpecific, false, 0))
                 {
-                    if (certificate.hasAuthorityKeyIdentifier || field.Value().value.empty())
+                    if (certificate.hasAuthorityKeyIdentifier || field.value().value.empty())
                     {
-                        return ParseError();
+                        return std::unexpected(ParseError());
                     }
-                    certificate.authorityKeyIdentifier    = CopyBytes(field.Value().value);
+                    certificate.authorityKeyIdentifier    = CopyBytes(field.value().value);
                     certificate.hasAuthorityKeyIdentifier = true;
                 }
-                else if (IsTag(field.Value(), DerTagClass::ContextSpecific, true, 1))
+                else if (IsTag(field.value(), DerTagClass::ContextSpecific, true, 1))
                 {
-                    DerReader namesReader {field.Value().value};
+                    DerReader namesReader {field.value().value};
                     while (!namesReader.IsAtEnd())
                     {
                         auto generalName = namesReader.ReadElement();
-                        if (!generalName.HasValue())
+                        if (!generalName.has_value())
                         {
-                            return generalName.Error();
+                            return std::unexpected(std::move(generalName).error());
                         }
-                        auto schema = ValidateGeneralNameSchema(generalName.Value());
-                        if (!schema.HasValue())
+                        auto schema = ValidateGeneralNameSchema(generalName.value());
+                        if (!schema.has_value())
                         {
-                            return schema.Error();
+                            return std::unexpected(std::move(schema).error());
                         }
                     }
                 }
-                else if (IsTag(field.Value(), DerTagClass::ContextSpecific, false, 2))
+                else if (IsTag(field.value(), DerTagClass::ContextSpecific, false, 2))
                 {
                     DerElement serialElement {
                             .tag     = NGIN::Crypto::Encoding::MakeDerUniversalTag(DerUniversalTag::Integer),
-                            .value   = field.Value().value,
-                            .encoded = field.Value().value,
+                            .value   = field.value().value,
+                            .encoded = field.value().value,
                     };
                     auto serial = NGIN::Crypto::Encoding::ReadDerInteger(serialElement);
-                    if (!serial.HasValue())
+                    if (!serial.has_value())
                     {
-                        return serial.Error();
+                        return std::unexpected(std::move(serial).error());
                     }
                 }
                 else
                 {
-                    return ParseError();
+                    return std::unexpected(ParseError());
                 }
             }
 
@@ -772,39 +777,39 @@ namespace NGIN::Crypto::Certificates
         {
             DerReader reader {encodedEku};
             auto      top = reader.ReadElement();
-            if (!top.HasValue())
+            if (!top.has_value())
             {
-                return top.Error();
+                return std::unexpected(std::move(top).error());
             }
             if (!reader.IsAtEnd())
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
-            DerReader parent {top.Value().encoded};
-            auto      sequence = NGIN::Crypto::Encoding::ReadDerSequence(parent, top.Value());
-            if (!sequence.HasValue())
+            DerReader parent {top.value().encoded};
+            auto      sequence = NGIN::Crypto::Encoding::ReadDerSequence(parent, top.value());
+            if (!sequence.has_value())
             {
-                return sequence.Error();
+                return std::unexpected(std::move(sequence).error());
             }
 
-            while (!sequence.Value().IsAtEnd())
+            while (!sequence.value().IsAtEnd())
             {
-                auto usage = sequence.Value().ReadElement();
-                if (!usage.HasValue())
+                auto usage = sequence.value().ReadElement();
+                if (!usage.has_value())
                 {
-                    return usage.Error();
+                    return std::unexpected(std::move(usage).error());
                 }
-                auto oid = ReadOidElement(usage.Value());
-                if (!oid.HasValue())
+                auto oid = ReadOidElement(usage.value());
+                if (!oid.has_value())
                 {
-                    return oid.Error();
+                    return std::unexpected(std::move(oid).error());
                 }
-                usages.PushBack(std::move(oid.Value()));
+                usages.PushBack(std::move(oid.value()));
             }
             if (usages.Size() == 0)
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
             return {};
@@ -814,31 +819,31 @@ namespace NGIN::Crypto::Certificates
         {
             if (!IsTag(explicitExtensions, DerTagClass::ContextSpecific, true, 3))
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
             DerReader wrapper {explicitExtensions.encoded};
             auto      extensionsReader = wrapper.EnterConstructed(explicitExtensions);
-            if (!extensionsReader.HasValue())
+            if (!extensionsReader.has_value())
             {
-                return extensionsReader.Error();
+                return std::unexpected(std::move(extensionsReader).error());
             }
 
-            auto extensionsElement = extensionsReader.Value().ReadElement();
-            if (!extensionsElement.HasValue())
+            auto extensionsElement = extensionsReader.value().ReadElement();
+            if (!extensionsElement.has_value())
             {
-                return extensionsElement.Error();
+                return std::unexpected(std::move(extensionsElement).error());
             }
-            if (!extensionsReader.Value().IsAtEnd())
+            if (!extensionsReader.value().IsAtEnd())
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
-            DerReader parent {extensionsElement.Value().encoded};
-            auto      extensions = NGIN::Crypto::Encoding::ReadDerSequence(parent, extensionsElement.Value());
-            if (!extensions.HasValue())
+            DerReader parent {extensionsElement.value().encoded};
+            auto      extensions = NGIN::Crypto::Encoding::ReadDerSequence(parent, extensionsElement.value());
+            if (!extensions.has_value())
             {
-                return extensions.Error();
+                return std::unexpected(std::move(extensions).error());
             }
 
             bool sawSubjectAltName         = false;
@@ -848,143 +853,143 @@ namespace NGIN::Crypto::Certificates
             bool sawAuthorityKeyIdentifier = false;
             bool sawExtendedKeyUsage       = false;
 
-            while (!extensions.Value().IsAtEnd())
+            while (!extensions.value().IsAtEnd())
             {
-                auto extensionElement = extensions.Value().ReadElement();
-                if (!extensionElement.HasValue())
+                auto extensionElement = extensions.value().ReadElement();
+                if (!extensionElement.has_value())
                 {
-                    return extensionElement.Error();
+                    return std::unexpected(std::move(extensionElement).error());
                 }
 
-                DerReader extensionParent {extensionElement.Value().encoded};
-                auto      extensionReader = NGIN::Crypto::Encoding::ReadDerSequence(extensionParent, extensionElement.Value());
-                if (!extensionReader.HasValue())
+                DerReader extensionParent {extensionElement.value().encoded};
+                auto      extensionReader = NGIN::Crypto::Encoding::ReadDerSequence(extensionParent, extensionElement.value());
+                if (!extensionReader.has_value())
                 {
-                    return extensionReader.Error();
+                    return std::unexpected(std::move(extensionReader).error());
                 }
 
-                auto oidElement = extensionReader.Value().ReadElement();
-                if (!oidElement.HasValue())
+                auto oidElement = extensionReader.value().ReadElement();
+                if (!oidElement.has_value())
                 {
-                    return oidElement.Error();
+                    return std::unexpected(std::move(oidElement).error());
                 }
-                auto oid = ReadOidElement(oidElement.Value());
-                if (!oid.HasValue())
+                auto oid = ReadOidElement(oidElement.value());
+                if (!oid.has_value())
                 {
-                    return oid.Error();
+                    return std::unexpected(std::move(oid).error());
                 }
 
                 bool critical = false;
-                auto next     = extensionReader.Value().ReadElement();
-                if (!next.HasValue())
+                auto next     = extensionReader.value().ReadElement();
+                if (!next.has_value())
                 {
-                    return next.Error();
+                    return std::unexpected(std::move(next).error());
                 }
-                if (IsUniversal(next.Value(), static_cast<DerUniversalTag>(1)))
+                if (IsUniversal(next.value(), static_cast<DerUniversalTag>(1)))
                 {
-                    if (next.Value().value.size() != 1 || next.Value().value[0] != NGIN::Byte {0xff})
+                    if (next.value().value.size() != 1 || next.value().value[0] != NGIN::Byte {0xff})
                     {
-                        return ParseError();
+                        return std::unexpected(ParseError());
                     }
                     critical = true;
-                    next     = extensionReader.Value().ReadElement();
-                    if (!next.HasValue())
+                    next     = extensionReader.value().ReadElement();
+                    if (!next.has_value())
                     {
-                        return next.Error();
+                        return std::unexpected(std::move(next).error());
                     }
                 }
 
                 (void) critical;
 
-                auto extensionValue = NGIN::Crypto::Encoding::ReadDerOctetString(next.Value());
-                if (!extensionValue.HasValue())
+                auto extensionValue = NGIN::Crypto::Encoding::ReadDerOctetString(next.value());
+                if (!extensionValue.has_value())
                 {
-                    return extensionValue.Error();
+                    return std::unexpected(std::move(extensionValue).error());
                 }
-                if (!extensionReader.Value().IsAtEnd())
+                if (!extensionReader.value().IsAtEnd())
                 {
-                    return ParseError();
+                    return std::unexpected(ParseError());
                 }
 
-                if (OidEquals(oid.Value(), SUBJECT_ALT_NAME_OID))
+                if (OidEquals(oid.value(), SUBJECT_ALT_NAME_OID))
                 {
                     if (sawSubjectAltName)
                     {
-                        return ParseError();
+                        return std::unexpected(ParseError());
                     }
                     sawSubjectAltName = true;
-                    auto result       = ParseSubjectAltNameExtension(extensionValue.Value(), certificate.subjectAltNames);
-                    if (!result.HasValue())
+                    auto result       = ParseSubjectAltNameExtension(extensionValue.value(), certificate.subjectAltNames);
+                    if (!result.has_value())
                     {
-                        return result.Error();
+                        return std::unexpected(std::move(result).error());
                     }
                     certificate.hasSubjectAltNames = true;
                 }
-                else if (OidEquals(oid.Value(), KEY_USAGE_OID))
+                else if (OidEquals(oid.value(), KEY_USAGE_OID))
                 {
                     if (sawKeyUsage)
                     {
-                        return ParseError();
+                        return std::unexpected(ParseError());
                     }
                     sawKeyUsage = true;
-                    auto result = ParseKeyUsageExtension(extensionValue.Value(), certificate.keyUsage);
-                    if (!result.HasValue())
+                    auto result = ParseKeyUsageExtension(extensionValue.value(), certificate.keyUsage);
+                    if (!result.has_value())
                     {
-                        return result.Error();
+                        return std::unexpected(std::move(result).error());
                     }
                     certificate.hasKeyUsage = true;
                 }
-                else if (OidEquals(oid.Value(), BASIC_CONSTRAINTS_OID))
+                else if (OidEquals(oid.value(), BASIC_CONSTRAINTS_OID))
                 {
                     if (sawBasicConstraints)
                     {
-                        return ParseError();
+                        return std::unexpected(ParseError());
                     }
                     sawBasicConstraints = true;
-                    auto result         = ParseBasicConstraintsExtension(extensionValue.Value(), certificate.basicConstraints);
-                    if (!result.HasValue())
+                    auto result         = ParseBasicConstraintsExtension(extensionValue.value(), certificate.basicConstraints);
+                    if (!result.has_value())
                     {
-                        return result.Error();
+                        return std::unexpected(std::move(result).error());
                     }
                     certificate.hasBasicConstraints = true;
                 }
-                else if (OidEquals(oid.Value(), SUBJECT_KEY_IDENTIFIER_OID))
+                else if (OidEquals(oid.value(), SUBJECT_KEY_IDENTIFIER_OID))
                 {
                     if (sawSubjectKeyIdentifier)
                     {
-                        return ParseError();
+                        return std::unexpected(ParseError());
                     }
                     sawSubjectKeyIdentifier = true;
-                    auto result             = ParseSubjectKeyIdentifierExtension(extensionValue.Value(), certificate);
-                    if (!result.HasValue())
+                    auto result             = ParseSubjectKeyIdentifierExtension(extensionValue.value(), certificate);
+                    if (!result.has_value())
                     {
-                        return result.Error();
+                        return std::unexpected(std::move(result).error());
                     }
                 }
-                else if (OidEquals(oid.Value(), AUTHORITY_KEY_IDENTIFIER_OID))
+                else if (OidEquals(oid.value(), AUTHORITY_KEY_IDENTIFIER_OID))
                 {
                     if (sawAuthorityKeyIdentifier)
                     {
-                        return ParseError();
+                        return std::unexpected(ParseError());
                     }
                     sawAuthorityKeyIdentifier = true;
-                    auto result               = ParseAuthorityKeyIdentifierExtension(extensionValue.Value(), certificate);
-                    if (!result.HasValue())
+                    auto result               = ParseAuthorityKeyIdentifierExtension(extensionValue.value(), certificate);
+                    if (!result.has_value())
                     {
-                        return result.Error();
+                        return std::unexpected(std::move(result).error());
                     }
                 }
-                else if (OidEquals(oid.Value(), EXTENDED_KEY_USAGE_OID))
+                else if (OidEquals(oid.value(), EXTENDED_KEY_USAGE_OID))
                 {
                     if (sawExtendedKeyUsage)
                     {
-                        return ParseError();
+                        return std::unexpected(ParseError());
                     }
                     sawExtendedKeyUsage = true;
-                    auto result         = ParseExtendedKeyUsageExtension(extensionValue.Value(), certificate.extendedKeyUsages);
-                    if (!result.HasValue())
+                    auto result         = ParseExtendedKeyUsageExtension(extensionValue.value(), certificate.extendedKeyUsages);
+                    if (!result.has_value())
                     {
-                        return result.Error();
+                        return std::unexpected(std::move(result).error());
                     }
                 }
             }
@@ -997,210 +1002,210 @@ namespace NGIN::Crypto::Certificates
     {
         DerReader reader {der};
         auto      certificateElement = reader.ReadElement();
-        if (!certificateElement.HasValue())
+        if (!certificateElement.has_value())
         {
-            return certificateElement.Error();
+            return std::unexpected(std::move(certificateElement).error());
         }
         if (!reader.IsAtEnd())
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
-        DerReader certificateParent {certificateElement.Value().encoded};
-        auto      certificateSequence = NGIN::Crypto::Encoding::ReadDerSequence(certificateParent, certificateElement.Value());
-        if (!certificateSequence.HasValue())
+        DerReader certificateParent {certificateElement.value().encoded};
+        auto      certificateSequence = NGIN::Crypto::Encoding::ReadDerSequence(certificateParent, certificateElement.value());
+        if (!certificateSequence.has_value())
         {
-            return certificateSequence.Error();
+            return std::unexpected(std::move(certificateSequence).error());
         }
 
-        auto tbsElement = certificateSequence.Value().ReadElement();
-        if (!tbsElement.HasValue())
+        auto tbsElement = certificateSequence.value().ReadElement();
+        if (!tbsElement.has_value())
         {
-            return tbsElement.Error();
+            return std::unexpected(std::move(tbsElement).error());
         }
 
-        auto signatureAlgorithmElement = certificateSequence.Value().ReadElement();
-        if (!signatureAlgorithmElement.HasValue())
+        auto signatureAlgorithmElement = certificateSequence.value().ReadElement();
+        if (!signatureAlgorithmElement.has_value())
         {
-            return signatureAlgorithmElement.Error();
+            return std::unexpected(std::move(signatureAlgorithmElement).error());
         }
 
-        auto signatureValueElement = certificateSequence.Value().ReadElement();
-        if (!signatureValueElement.HasValue())
+        auto signatureValueElement = certificateSequence.value().ReadElement();
+        if (!signatureValueElement.has_value())
         {
-            return signatureValueElement.Error();
+            return std::unexpected(std::move(signatureValueElement).error());
         }
-        if (!certificateSequence.Value().IsAtEnd())
+        if (!certificateSequence.value().IsAtEnd())
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
         Certificate certificate;
-        certificate.certificateDer        = CopyBytes(certificateElement.Value().encoded);
-        certificate.tbsCertificateDer     = CopyBytes(tbsElement.Value().encoded);
-        certificate.signatureAlgorithmDer = CopyBytes(signatureAlgorithmElement.Value().encoded);
+        certificate.certificateDer        = CopyBytes(certificateElement.value().encoded);
+        certificate.tbsCertificateDer     = CopyBytes(tbsElement.value().encoded);
+        certificate.signatureAlgorithmDer = CopyBytes(signatureAlgorithmElement.value().encoded);
 
-        auto signatureAlgorithm = IdentifySignatureAlgorithm(signatureAlgorithmElement.Value());
-        if (signatureAlgorithm.HasValue())
+        auto signatureAlgorithm = IdentifySignatureAlgorithm(signatureAlgorithmElement.value());
+        if (signatureAlgorithm.has_value())
         {
-            certificate.signatureAlgorithm         = signatureAlgorithm.Value();
+            certificate.signatureAlgorithm         = signatureAlgorithm.value();
             certificate.hasKnownSignatureAlgorithm = true;
         }
-        else if (signatureAlgorithm.Error().Code() != CryptoErrorCode::UnsupportedAlgorithm)
+        else if (signatureAlgorithm.error().Code() != CryptoErrorCode::UnsupportedAlgorithm)
         {
-            return signatureAlgorithm.Error();
+            return std::unexpected(std::move(signatureAlgorithm).error());
         }
 
-        auto signatureValue = NGIN::Crypto::Encoding::ReadDerBitString(signatureValueElement.Value());
-        if (!signatureValue.HasValue())
+        auto signatureValue = NGIN::Crypto::Encoding::ReadDerBitString(signatureValueElement.value());
+        if (!signatureValue.has_value())
         {
-            return signatureValue.Error();
+            return std::unexpected(std::move(signatureValue).error());
         }
-        if (signatureValue.Value().unusedBitCount != 0)
+        if (signatureValue.value().unusedBitCount != 0)
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
-        certificate.signatureValue = CopyBytes(signatureValue.Value().bytes);
+        certificate.signatureValue = CopyBytes(signatureValue.value().bytes);
 
-        DerReader tbsParent {tbsElement.Value().encoded};
-        auto      tbsReader = NGIN::Crypto::Encoding::ReadDerSequence(tbsParent, tbsElement.Value());
-        if (!tbsReader.HasValue())
+        DerReader tbsParent {tbsElement.value().encoded};
+        auto      tbsReader = NGIN::Crypto::Encoding::ReadDerSequence(tbsParent, tbsElement.value());
+        if (!tbsReader.has_value())
         {
-            return tbsReader.Error();
-        }
-
-        auto first = tbsReader.Value().ReadElement();
-        if (!first.HasValue())
-        {
-            return first.Error();
+            return std::unexpected(std::move(tbsReader).error());
         }
 
-        DerElement serialElement = first.Value();
-        if (IsTag(first.Value(), DerTagClass::ContextSpecific, true, 0))
+        auto first = tbsReader.value().ReadElement();
+        if (!first.has_value())
         {
-            DerReader versionWrapper {first.Value().encoded};
-            auto      versionReader = versionWrapper.EnterConstructed(first.Value());
-            if (!versionReader.HasValue())
-            {
-                return versionReader.Error();
-            }
-            auto versionElement = versionReader.Value().ReadElement();
-            if (!versionElement.HasValue())
-            {
-                return versionElement.Error();
-            }
-            if (!versionReader.Value().IsAtEnd())
-            {
-                return ParseError();
-            }
-            auto version = NGIN::Crypto::Encoding::ReadDerInteger(versionElement.Value());
-            if (!version.HasValue())
-            {
-                return version.Error();
-            }
-            if (version.Value().size() != 1 || ByteValue(version.Value()[0]) > 2)
-            {
-                return ParseError();
-            }
-            certificate.version = static_cast<NGIN::UInt32>(ByteValue(version.Value()[0]) + 1);
+            return std::unexpected(std::move(first).error());
+        }
 
-            auto serial = tbsReader.Value().ReadElement();
-            if (!serial.HasValue())
+        DerElement serialElement = first.value();
+        if (IsTag(first.value(), DerTagClass::ContextSpecific, true, 0))
+        {
+            DerReader versionWrapper {first.value().encoded};
+            auto      versionReader = versionWrapper.EnterConstructed(first.value());
+            if (!versionReader.has_value())
             {
-                return serial.Error();
+                return std::unexpected(std::move(versionReader).error());
             }
-            serialElement = serial.Value();
+            auto versionElement = versionReader.value().ReadElement();
+            if (!versionElement.has_value())
+            {
+                return std::unexpected(std::move(versionElement).error());
+            }
+            if (!versionReader.value().IsAtEnd())
+            {
+                return std::unexpected(ParseError());
+            }
+            auto version = NGIN::Crypto::Encoding::ReadDerInteger(versionElement.value());
+            if (!version.has_value())
+            {
+                return std::unexpected(std::move(version).error());
+            }
+            if (version.value().size() != 1 || ByteValue(version.value()[0]) > 2)
+            {
+                return std::unexpected(ParseError());
+            }
+            certificate.version = static_cast<NGIN::UInt32>(ByteValue(version.value()[0]) + 1);
+
+            auto serial = tbsReader.value().ReadElement();
+            if (!serial.has_value())
+            {
+                return std::unexpected(std::move(serial).error());
+            }
+            serialElement = serial.value();
         }
 
         auto serial = NGIN::Crypto::Encoding::ReadDerInteger(serialElement);
-        if (!serial.HasValue())
+        if (!serial.has_value())
         {
-            return serial.Error();
+            return std::unexpected(std::move(serial).error());
         }
-        certificate.serialNumber = CopyBytes(serial.Value());
+        certificate.serialNumber = CopyBytes(serial.value());
 
-        auto tbsSignature = tbsReader.Value().ReadElement();
-        if (!tbsSignature.HasValue())
+        auto tbsSignature = tbsReader.value().ReadElement();
+        if (!tbsSignature.has_value())
         {
-            return tbsSignature.Error();
-        }
-
-        auto issuer = tbsReader.Value().ReadElement();
-        if (!issuer.HasValue())
-        {
-            return issuer.Error();
-        }
-        if (!IsUniversal(issuer.Value(), DerUniversalTag::Sequence, true))
-        {
-            return ParseError();
-        }
-        certificate.issuerDer = CopyBytes(issuer.Value().encoded);
-        auto issuerName       = ParseDistinguishedName(issuer.Value());
-        if (issuerName.HasValue())
-        {
-            certificate.issuer = std::move(issuerName.Value());
+            return std::unexpected(std::move(tbsSignature).error());
         }
 
-        auto validityElement = tbsReader.Value().ReadElement();
-        if (!validityElement.HasValue())
+        auto issuer = tbsReader.value().ReadElement();
+        if (!issuer.has_value())
         {
-            return validityElement.Error();
+            return std::unexpected(std::move(issuer).error());
         }
-        auto validity = ParseValidity(validityElement.Value());
-        if (!validity.HasValue())
+        if (!IsUniversal(issuer.value(), DerUniversalTag::Sequence, true))
         {
-            return validity.Error();
+            return std::unexpected(ParseError());
         }
-        certificate.validity = std::move(validity.Value());
-
-        auto subject = tbsReader.Value().ReadElement();
-        if (!subject.HasValue())
+        certificate.issuerDer = CopyBytes(issuer.value().encoded);
+        auto issuerName       = ParseDistinguishedName(issuer.value());
+        if (issuerName.has_value())
         {
-            return subject.Error();
-        }
-        if (!IsUniversal(subject.Value(), DerUniversalTag::Sequence, true))
-        {
-            return ParseError();
-        }
-        certificate.subjectDer = CopyBytes(subject.Value().encoded);
-        auto subjectName       = ParseDistinguishedName(subject.Value());
-        if (subjectName.HasValue())
-        {
-            certificate.subject = std::move(subjectName.Value());
+            certificate.issuer = std::move(issuerName.value());
         }
 
-        auto spkiElement = tbsReader.Value().ReadElement();
-        if (!spkiElement.HasValue())
+        auto validityElement = tbsReader.value().ReadElement();
+        if (!validityElement.has_value())
         {
-            return spkiElement.Error();
+            return std::unexpected(std::move(validityElement).error());
         }
-        auto spki = NGIN::Crypto::Keys::ParseSubjectPublicKeyInfo(spkiElement.Value().encoded);
-        if (!spki.HasValue())
+        auto validity = ParseValidity(validityElement.value());
+        if (!validity.has_value())
         {
-            return spki.Error();
+            return std::unexpected(std::move(validity).error());
         }
-        certificate.subjectPublicKeyInfo = std::move(spki.Value());
+        certificate.validity = std::move(validity.value());
+
+        auto subject = tbsReader.value().ReadElement();
+        if (!subject.has_value())
+        {
+            return std::unexpected(std::move(subject).error());
+        }
+        if (!IsUniversal(subject.value(), DerUniversalTag::Sequence, true))
+        {
+            return std::unexpected(ParseError());
+        }
+        certificate.subjectDer = CopyBytes(subject.value().encoded);
+        auto subjectName       = ParseDistinguishedName(subject.value());
+        if (subjectName.has_value())
+        {
+            certificate.subject = std::move(subjectName.value());
+        }
+
+        auto spkiElement = tbsReader.value().ReadElement();
+        if (!spkiElement.has_value())
+        {
+            return std::unexpected(std::move(spkiElement).error());
+        }
+        auto spki = NGIN::Crypto::Keys::ParseSubjectPublicKeyInfo(spkiElement.value().encoded);
+        if (!spki.has_value())
+        {
+            return std::unexpected(std::move(spki).error());
+        }
+        certificate.subjectPublicKeyInfo = std::move(spki.value());
         certificate.publicKeyAlgorithm   = certificate.subjectPublicKeyInfo.algorithm;
 
-        while (!tbsReader.Value().IsAtEnd())
+        while (!tbsReader.value().IsAtEnd())
         {
-            auto optional = tbsReader.Value().ReadElement();
-            if (!optional.HasValue())
+            auto optional = tbsReader.value().ReadElement();
+            if (!optional.has_value())
             {
-                return optional.Error();
+                return std::unexpected(std::move(optional).error());
             }
-            if (IsTag(optional.Value(), DerTagClass::ContextSpecific, true, 3))
+            if (IsTag(optional.value(), DerTagClass::ContextSpecific, true, 3))
             {
-                auto extensions = ParseExtensions(optional.Value(), certificate);
-                if (!extensions.HasValue())
+                auto extensions = ParseExtensions(optional.value(), certificate);
+                if (!extensions.has_value())
                 {
-                    return extensions.Error();
+                    return std::unexpected(std::move(extensions).error());
                 }
             }
-            else if (!IsTag(optional.Value(), DerTagClass::ContextSpecific, false, 1) &&
-                     !IsTag(optional.Value(), DerTagClass::ContextSpecific, false, 2))
+            else if (!IsTag(optional.value(), DerTagClass::ContextSpecific, false, 1) &&
+                     !IsTag(optional.value(), DerTagClass::ContextSpecific, false, 2))
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
         }
 
@@ -1216,7 +1221,7 @@ namespace NGIN::Crypto::Certificates
     {
         if (!certificate.hasKnownSignatureAlgorithm)
         {
-            return UnsupportedAlgorithm();
+            return std::unexpected(UnsupportedAlgorithm());
         }
 
         return NGIN::Crypto::Signatures::Verify(

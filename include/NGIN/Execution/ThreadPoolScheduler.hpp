@@ -4,6 +4,7 @@
 #pragma once
 
 #include "WorkItem.hpp"
+#include <NGIN/Execution/ScheduleResult.hpp>
 #include <NGIN/Execution/Thread.hpp>
 #include <NGIN/Sync/AtomicCondition.hpp>
 #include <NGIN/Sync/SpinLock.hpp>
@@ -79,32 +80,53 @@ namespace NGIN::Execution
         }
 
         /// @brief Queues work for a local worker or the shared injection queue.
-        void Execute(WorkItem item) noexcept
+        [[nodiscard]] ScheduleResult Execute(WorkItem item) noexcept
         {
-            if (TryEnqueueToLocal(item))
+            if (item.IsEmpty())
+                return std::unexpected(ScheduleError::Rejected);
+            if (m_stop.load(std::memory_order_acquire))
+                return std::unexpected(ScheduleError::Stopped);
+
+            ScheduleResult result;
+            if (s_currentScheduler == this && s_workerIndex < m_workers.size())
             {
-                m_workWake.NotifyOne();
-                return;
+                result = m_workers[s_workerIndex].Push(std::move(item));
             }
-            EnqueueToInjection(std::move(item));
-            m_workWake.NotifyOne();
+            else
+            {
+                result = EnqueueToInjection(std::move(item));
+            }
+            if (result)
+                m_workWake.NotifyOne();
+            return result;
         }
 
         /// @brief Queues work for execution no earlier than a monotonic time point.
-        void ExecuteAt(WorkItem item, NGIN::Time::TimePoint resumeAt)
+        [[nodiscard]] ScheduleResult ExecuteAt(WorkItem item, NGIN::Time::TimePoint resumeAt) noexcept
         {
+            if (item.IsEmpty())
+                return std::unexpected(ScheduleError::Rejected);
+            if (m_stop.load(std::memory_order_acquire))
+                return std::unexpected(ScheduleError::Stopped);
             const NGIN::Time::TimePoint now = NGIN::Time::MonotonicClock::Now();
             if (resumeAt <= now)
-            {
-                Execute(std::move(item));
-                return;
-            }
+                return Execute(std::move(item));
+            try
             {
                 std::lock_guard<std::mutex> lock(m_timersMutex);
+                if (m_stop.load(std::memory_order_acquire))
+                    return std::unexpected(ScheduleError::Stopped);
                 m_timerHeap.emplace_back(resumeAt, std::move(item));
                 std::push_heap(m_timerHeap.begin(), m_timerHeap.end(), TimerEntryCompare {});
+            } catch (const std::bad_alloc&)
+            {
+                return std::unexpected(ScheduleError::ResourceExhausted);
+            } catch (...)
+            {
+                return std::unexpected(ScheduleError::Rejected);
             }
             m_timerWake.NotifyOne();
+            return {};
         }
 
         /// @brief Executes at most one available work item on the calling thread.
@@ -227,10 +249,20 @@ namespace NGIN::Execution
                 head = 0;
             }
 
-            void Push(WorkItem item) noexcept
+            [[nodiscard]] ScheduleResult Push(WorkItem&& item) noexcept
             {
-                std::lock_guard guard(lock);
-                items.push_back(std::move(item));
+                try
+                {
+                    std::lock_guard guard(lock);
+                    items.push_back(std::move(item));
+                    return {};
+                } catch (const std::bad_alloc&)
+                {
+                    return std::unexpected(ScheduleError::ResourceExhausted);
+                } catch (...)
+                {
+                    return std::unexpected(ScheduleError::Rejected);
+                }
             }
 
             [[nodiscard]] WorkItem TryPop() noexcept
@@ -293,52 +325,40 @@ namespace NGIN::Execution
 
         void ClearAllWork() noexcept
         {
-            {
-                std::lock_guard guard(m_injectionLock);
-                m_injection.items.clear();
-                m_injection.head = 0;
-            }
+            m_injection.Clear();
             for (auto& w: m_workers)
             {
                 w.Clear();
             }
         }
 
-        void EnqueueToInjection(WorkItem item) noexcept
+        [[nodiscard]] ScheduleResult EnqueueToInjection(WorkItem&& item) noexcept
         {
-            std::lock_guard guard(m_injectionLock);
-            m_injection.items.push_back(std::move(item));
+            return m_injection.Push(std::move(item));
+        }
+
+        /// Timed work was already accepted by ExecuteAt. If the ready queue is
+        /// exhausted later, execute it on the timer thread instead of silently
+        /// dropping an accepted item.
+        void DispatchAcceptedTimer(WorkItem item) noexcept
+        {
+            if (m_stop.load(std::memory_order_acquire))
+                return;
+
+            const ScheduleResult result = EnqueueToInjection(std::move(item));
+            if (result)
+            {
+                m_workWake.NotifyOne();
+            }
+            else if (!item.IsEmpty() && !m_stop.load(std::memory_order_acquire))
+            {
+                item.Invoke();
+            }
         }
 
         [[nodiscard]] WorkItem TryDequeueInjection() noexcept
         {
-            std::lock_guard guard(m_injectionLock);
-            if (m_injection.items.size() <= m_injection.head)
-            {
-                return {};
-            }
-            WorkItem out = std::move(m_injection.items[m_injection.head]);
-            ++m_injection.head;
-            if (m_injection.head >= m_injection.items.size())
-            {
-                m_injection.items.clear();
-                m_injection.head = 0;
-            }
-            return out;
-        }
-
-        [[nodiscard]] bool TryEnqueueToLocal(WorkItem& item) noexcept
-        {
-            if (s_currentScheduler != this)
-            {
-                return false;
-            }
-            if (s_workerIndex >= m_workers.size())
-            {
-                return false;
-            }
-            m_workers[s_workerIndex].Push(std::move(item));
-            return true;
+            return m_injection.TrySteal();
         }
 
         [[nodiscard]] WorkItem TryDequeueAny() noexcept
@@ -375,6 +395,7 @@ namespace NGIN::Execution
             {
                 const auto            observedWakeGeneration = m_timerWake.Load();
                 std::vector<WorkItem> ready;
+                WorkItem              allocationFallback;
                 NGIN::Time::TimePoint nextWakeAt {};
                 bool                  hasNextWake = false;
 
@@ -384,8 +405,16 @@ namespace NGIN::Execution
                     while (!m_timerHeap.empty() && m_timerHeap.front().first <= now)
                     {
                         std::pop_heap(m_timerHeap.begin(), m_timerHeap.end(), TimerEntryCompare {});
-                        ready.push_back(std::move(m_timerHeap.back().second));
+                        try
+                        {
+                            ready.push_back(std::move(m_timerHeap.back().second));
+                        } catch (...)
+                        {
+                            allocationFallback = std::move(m_timerHeap.back().second);
+                        }
                         m_timerHeap.pop_back();
+                        if (!allocationFallback.IsEmpty())
+                            break;
                     }
 
                     if (!m_timerHeap.empty())
@@ -397,8 +426,10 @@ namespace NGIN::Execution
 
                 for (auto& item: ready)
                 {
-                    Execute(std::move(item));
+                    DispatchAcceptedTimer(std::move(item));
                 }
+                if (!allocationFallback.IsEmpty())
+                    DispatchAcceptedTimer(std::move(allocationFallback));
 
                 if (m_stop.load(std::memory_order_acquire))
                 {
@@ -465,8 +496,7 @@ namespace NGIN::Execution
         std::vector<WorkerQueue> m_workers;
 
         // Injection queue for external producers (and timer thread).
-        WorkerQueue          m_injection;
-        NGIN::Sync::SpinLock m_injectionLock {};
+        WorkerQueue m_injection;
 
         NGIN::Sync::AtomicCondition m_workWake;
 

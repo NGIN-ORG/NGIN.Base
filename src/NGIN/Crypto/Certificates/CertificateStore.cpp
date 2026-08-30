@@ -95,9 +95,9 @@ namespace NGIN::Crypto::Certificates
                 NGIN::UIntSize&                        skipped)
         {
             auto parsed = ParseX509Certificate(der);
-            if (parsed.HasValue())
+            if (parsed.has_value())
             {
-                certificates.PushBack(std::move(parsed.Value()));
+                certificates.PushBack(std::move(parsed.value()));
                 return true;
             }
 
@@ -120,7 +120,7 @@ namespace NGIN::Crypto::Certificates
                 std::ifstream input {std::string {path}, std::ios::binary};
                 if (!input)
                 {
-                    return UnsupportedBackend();
+                    return std::unexpected(UnsupportedBackend());
                 }
 
                 return std::string {
@@ -129,7 +129,7 @@ namespace NGIN::Crypto::Certificates
                 };
             } catch (...)
             {
-                return CryptoError {CryptoErrorCode::InternalError};
+                return std::unexpected(CryptoError {CryptoErrorCode::InternalError});
             }
         }
 
@@ -138,29 +138,29 @@ namespace NGIN::Crypto::Certificates
                 std::string_view storeName) noexcept
         {
             auto content = ReadTextFile(bundlePath);
-            if (!content.HasValue())
+            if (!content.has_value())
             {
-                return content.Error();
+                return std::unexpected(std::move(content).error());
             }
-            if (content.Value().empty())
+            if (content.value().empty())
             {
-                return UnsupportedBackend();
+                return std::unexpected(UnsupportedBackend());
             }
 
             auto blocks = NGIN::Crypto::Encoding::ParsePem(
-                    content.Value(),
+                    content.value(),
                     NGIN::Crypto::Encoding::PemParseOptions {
                             .allowedLabels   = {"CERTIFICATE"},
                             .maxDecodedBytes = 1u << 20,
                     });
-            if (!blocks.HasValue())
+            if (!blocks.has_value())
             {
-                return blocks.Error();
+                return std::unexpected(std::move(blocks).error());
             }
 
             NGIN::Containers::Vector<Certificate> certificates;
             NGIN::UIntSize                        skipped = 0;
-            for (const auto& block: blocks.Value())
+            for (const auto& block: blocks.value())
             {
                 TryAppendParsedCertificate(
                         certificates,
@@ -170,11 +170,11 @@ namespace NGIN::Crypto::Certificates
 
             if (certificates.Size() == 0)
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
-            std::string          diagnostic = std::string {"loaded "} + std::to_string(certificates.Size()) + " certificates from " +
-                                              std::string {bundlePath} + "; skipped " + std::to_string(skipped);
+            std::string diagnostic = std::string {"loaded "} + std::to_string(certificates.Size()) + " certificates from " +
+                                     std::string {bundlePath} + "; skipped " + std::to_string(skipped);
             CertificateStoreInfo info {
                     .kind                = CertificateStoreKind::PlatformRoot,
                     .name                = std::string {storeName},
@@ -243,7 +243,7 @@ namespace NGIN::Crypto::Certificates
                     CertOpenSystemStoreW(static_cast<HCRYPTPROV_LEGACY>(0), storeName.data())};
             if (store.value == nullptr)
             {
-                return UnsupportedBackend();
+                return std::unexpected(UnsupportedBackend());
             }
 
             PCCERT_CONTEXT context = nullptr;
@@ -273,7 +273,7 @@ namespace NGIN::Crypto::Certificates
                 auto              appended = AppendWindowsCertificateStore(storeName, certificates, skipped);
                 const std::string sourcePath =
                         storeName == std::wstring_view {L"ROOT"} ? std::string {"ROOT"} : std::string {"CA"};
-                if (appended.HasValue())
+                if (appended.has_value())
                 {
                     openedAnyStore = true;
                     AddDiagnostic(
@@ -297,22 +297,22 @@ namespace NGIN::Crypto::Certificates
                                     sourcePath,
                                     false,
                                     "could not open native Windows certificate store"),
-                            appended.Error().Code(),
-                            appended.Error().Message());
+                            appended.error().Code(),
+                            appended.error().Message());
                 }
             }
 
             if (!openedAnyStore)
             {
-                return UnsupportedBackend();
+                return std::unexpected(UnsupportedBackend());
             }
             if (certificates.Size() == 0)
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
-            std::string          diagnostic = std::string {"loaded "} + std::to_string(certificates.Size()) +
-                                              " certificates from Windows ROOT/CA stores; skipped " + std::to_string(skipped);
+            std::string diagnostic = std::string {"loaded "} + std::to_string(certificates.Size()) +
+                                     " certificates from Windows ROOT/CA stores; skipped " + std::to_string(skipped);
             CertificateStoreInfo info {
                     .kind                = CertificateStoreKind::PlatformRoot,
                     .name                = "windows-system-certificates",
@@ -389,7 +389,7 @@ namespace NGIN::Crypto::Certificates
                                 "could not copy Apple trust anchor certificates"),
                         CryptoErrorCode::UnsupportedBackend,
                         "could not copy Apple trust anchor certificates");
-                return UnsupportedBackend();
+                return std::unexpected(UnsupportedBackend());
             }
 
             CoreFoundationObject anchorOwner {anchors};
@@ -426,11 +426,11 @@ namespace NGIN::Crypto::Certificates
 
             if (certificates.Size() == 0)
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
-            std::string          diagnostic = std::string {"loaded "} + std::to_string(certificates.Size()) +
-                                              " certificates from Apple trust anchors; skipped " + std::to_string(skipped);
+            std::string diagnostic = std::string {"loaded "} + std::to_string(certificates.Size()) +
+                                     " certificates from Apple trust anchors; skipped " + std::to_string(skipped);
             CertificateStoreInfo info {
                     .kind                = CertificateStoreKind::PlatformRoot,
                     .name                = "macos-system-anchors",
@@ -556,9 +556,9 @@ namespace NGIN::Crypto::Certificates
         for (const std::string_view path: LINUX_CA_BUNDLE_PATHS)
         {
             auto store = OpenPemCertificateBundle(path, "linux-system-roots");
-            if (store.HasValue())
+            if (store.has_value())
             {
-                auto info = store.Value().Info();
+                auto info = store.value().Info();
                 AddDiagnostic(diagnostics, info, CryptoErrorCode::None, "loaded platform root certificate bundle");
                 return CertificateStoreOpenSelection {
                         .store       = std::move(store),
@@ -573,19 +573,19 @@ namespace NGIN::Crypto::Certificates
                     path,
                     false,
                     std::move(reason));
-            AddDiagnostic(diagnostics, std::move(info), store.Error().Code(), store.Error().Message());
+            AddDiagnostic(diagnostics, std::move(info), store.error().Code(), store.error().Message());
 
-            if (store.Error().Code() != CryptoErrorCode::UnsupportedBackend)
+            if (store.error().Code() != CryptoErrorCode::UnsupportedBackend)
             {
                 return CertificateStoreOpenSelection {
-                        .store       = store.Error(),
+                        .store       = std::unexpected(std::move(store).error()),
                         .diagnostics = std::move(diagnostics),
                 };
             }
         }
 
         return CertificateStoreOpenSelection {
-                .store       = UnsupportedBackend(),
+                .store       = std::unexpected(UnsupportedBackend()),
                 .diagnostics = std::move(diagnostics),
         };
 #elif defined(_WIN32)

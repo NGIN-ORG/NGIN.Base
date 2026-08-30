@@ -5,6 +5,7 @@
 
 #include "Fiber.hpp"
 #include "WorkItem.hpp"
+#include <NGIN/Execution/ScheduleResult.hpp>
 #include <NGIN/Execution/Thread.hpp>
 #include <NGIN/Primitives.hpp>
 #include <NGIN/Sync/AtomicCondition.hpp>
@@ -91,24 +92,79 @@ namespace NGIN::Execution
         }
 
         /// @brief Queues a work item for execution by a worker fiber.
-        void Execute(WorkItem item) noexcept
+        [[nodiscard]] ScheduleResult Execute(WorkItem item) noexcept
         {
-            {
-                std::lock_guard lock(m_readyMutex);
-                m_readyQueue.push(std::move(item));
-            }
-            m_readyCv.notify_one();
+            if (item.IsEmpty())
+                return std::unexpected(ScheduleError::Rejected);
+            if (m_stop.load(std::memory_order_acquire))
+                return std::unexpected(ScheduleError::Stopped);
+            const ScheduleResult result = QueueReady(std::move(item));
+            if (result)
+                m_readyCv.notify_one();
+            return result;
         }
 
-        /// @brief Queues a work item for execution no earlier than a monotonic time point.
-        void ExecuteAt(WorkItem item, NGIN::Time::TimePoint resumeAt)
+    private:
+        [[nodiscard]] ScheduleResult QueueReady(WorkItem&& item) noexcept
         {
+            try
+            {
+                std::lock_guard lock(m_readyMutex);
+                if (m_stop.load(std::memory_order_acquire))
+                    return std::unexpected(ScheduleError::Stopped);
+                m_readyQueue.push(std::move(item));
+            } catch (const std::bad_alloc&)
+            {
+                return std::unexpected(ScheduleError::ResourceExhausted);
+            } catch (...)
+            {
+                return std::unexpected(ScheduleError::Rejected);
+            }
+            return {};
+        }
+
+        /// Timed work has already been accepted. Falling back to the driver
+        /// thread under queue exhaustion preserves that acceptance contract.
+        void DispatchAcceptedTimer(WorkItem item) noexcept
+        {
+            if (m_stop.load(std::memory_order_acquire))
+                return;
+
+            const ScheduleResult result = QueueReady(std::move(item));
+            if (result)
+            {
+                m_readyCv.notify_one();
+            }
+            else if (!item.IsEmpty() && !m_stop.load(std::memory_order_acquire))
+            {
+                item.Invoke();
+            }
+        }
+
+    public:
+        /// @brief Queues a work item for execution no earlier than a monotonic time point.
+        [[nodiscard]] ScheduleResult ExecuteAt(WorkItem item, NGIN::Time::TimePoint resumeAt) noexcept
+        {
+            if (item.IsEmpty())
+                return std::unexpected(ScheduleError::Rejected);
+            if (m_stop.load(std::memory_order_acquire))
+                return std::unexpected(ScheduleError::Stopped);
+            try
             {
                 std::lock_guard lock(m_timersMutex);
+                if (m_stop.load(std::memory_order_acquire))
+                    return std::unexpected(ScheduleError::Stopped);
                 m_timerHeap.emplace_back(resumeAt, std::move(item));
                 std::push_heap(m_timerHeap.begin(), m_timerHeap.end(), SleepEntryCompare {});
+            } catch (const std::bad_alloc&)
+            {
+                return std::unexpected(ScheduleError::ResourceExhausted);
+            } catch (...)
+            {
+                return std::unexpected(ScheduleError::Rejected);
             }
             m_timerWake.NotifyOne();
+            return {};
         }
 
 
@@ -228,19 +284,30 @@ namespace NGIN::Execution
         {
             auto                  now = NGIN::Time::MonotonicClock::Now();
             std::vector<WorkItem> expired;
+            WorkItem              allocationFallback;
             {
                 std::lock_guard lock(m_timersMutex);
                 while (!m_timerHeap.empty() && m_timerHeap.front().first <= now)
                 {
                     std::pop_heap(m_timerHeap.begin(), m_timerHeap.end(), SleepEntryCompare {});
-                    expired.push_back(std::move(m_timerHeap.back().second));
+                    try
+                    {
+                        expired.push_back(std::move(m_timerHeap.back().second));
+                    } catch (...)
+                    {
+                        allocationFallback = std::move(m_timerHeap.back().second);
+                    }
                     m_timerHeap.pop_back();
+                    if (!allocationFallback.IsEmpty())
+                        break;
                 }
             }
             for (auto& item: expired)
             {
-                Execute(std::move(item));
+                DispatchAcceptedTimer(std::move(item));
             }
+            if (!allocationFallback.IsEmpty())
+                DispatchAcceptedTimer(std::move(allocationFallback));
         }
 
         // Driver thread: manages timers/delays

@@ -145,7 +145,7 @@ TEST_CASE("Reallocate preserves data and retains the original on failure", "[Mem
         CHECK(grown[index] == static_cast<std::byte>(index));
 
     CHECK(NGIN::Memory::Reallocate(allocator, grown, 16, 32, alignof(std::max_align_t)) == nullptr);
-    CHECK(allocator.Owns(grown));
+    CHECK(allocator.OwnershipOf(grown) == NGIN::Memory::Ownership::Owns);
     allocator.Deallocate(grown, 16, alignof(std::max_align_t));
 }
 

@@ -356,9 +356,9 @@ TEST_CASE("incremental parsers keep limits errors and reset state global",
           IncrementalParseStatus::NeedMoreInput);
     const auto malformedJsonResult = malformedJsonParser.Finish();
     REQUIRE(malformedJsonResult.diagnostic);
-    CHECK(malformedJsonResult.diagnostic->code == jsonReference.Error().code);
-    CHECK(malformedJsonResult.diagnostic->location.offset == jsonReference.Error().location.offset);
-    CHECK(malformedJsonResult.diagnostic->span == jsonReference.Error().span);
+    CHECK(malformedJsonResult.diagnostic->code == jsonReference.error().code);
+    CHECK(malformedJsonResult.diagnostic->location.offset == jsonReference.error().location.offset);
+    CHECK(malformedJsonResult.diagnostic->span == jsonReference.error().span);
 
     std::vector<Int64> values;
     auto               resetHandler = [&values](const JSON::Event& event) {
@@ -415,9 +415,9 @@ TEST_CASE("incremental parsers keep limits errors and reset state global",
           IncrementalParseStatus::NeedMoreInput);
     const auto malformedXmlResult = malformedXmlParser.Finish();
     REQUIRE(malformedXmlResult.diagnostic);
-    CHECK(malformedXmlResult.diagnostic->code == xmlReference.Error().code);
-    CHECK(malformedXmlResult.diagnostic->location.offset == xmlReference.Error().location.offset);
-    CHECK(malformedXmlResult.diagnostic->span == xmlReference.Error().span);
+    CHECK(malformedXmlResult.diagnostic->code == xmlReference.error().code);
+    CHECK(malformedXmlResult.diagnostic->location.offset == xmlReference.error().location.offset);
+    CHECK(malformedXmlResult.diagnostic->span == xmlReference.error().span);
 
     XML::ParseOptions doctype;
     doctype.doctype = XML::DoctypePolicy::AllowWithoutExternalEntities;

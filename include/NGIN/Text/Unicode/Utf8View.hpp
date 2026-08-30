@@ -112,6 +112,12 @@ namespace NGIN::Text::Unicode
             }
         }
 
+        /// @brief Constructs a UTF-8 view over `char8_t` code-unit storage without copying.
+        explicit Utf8View(std::u8string_view input, ErrorPolicy policy = ErrorPolicy::Strict) noexcept
+            : Utf8View(NGIN::Text::AsBytes(input), policy)
+        {
+        }
+
         /// @brief Returns an iterator to the first decodable code point.
         [[nodiscard]] Iterator begin() const noexcept
         {

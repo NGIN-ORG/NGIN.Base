@@ -87,11 +87,11 @@ namespace NGIN::Net
                                 {AddressParseErrorCode::InvalidFormat, baseOffset + begin});
                     }
                     auto v4 = ParseV4(token, baseOffset + begin);
-                    if (!v4.HasValue())
+                    if (!v4.has_value())
                     {
-                        return NGIN::Utilities::Unexpected<AddressParseError>(std::move(v4).TakeError());
+                        return NGIN::Utilities::Unexpected<AddressParseError>(std::move(v4).error());
                     }
-                    const auto& bytes = v4.Value();
+                    const auto& bytes = v4.value();
                     words.push_back(static_cast<NGIN::UInt16>(
                             std::to_integer<NGIN::UInt8>(bytes[0]) << 8 | std::to_integer<NGIN::UInt8>(bytes[1])));
                     words.push_back(static_cast<NGIN::UInt16>(
@@ -134,17 +134,17 @@ namespace NGIN::Net
             const auto leftText  = compression == std::string_view::npos ? text : text.substr(0, compression);
             const auto rightText = compression == std::string_view::npos ? std::string_view {} : text.substr(compression + 2);
             auto       left      = ParseV6Side(leftText, 0, compression == std::string_view::npos && rightText.empty());
-            if (!left.HasValue())
+            if (!left.has_value())
             {
-                return NGIN::Utilities::Unexpected<AddressParseError>(std::move(left).TakeError());
+                return NGIN::Utilities::Unexpected<AddressParseError>(std::move(left).error());
             }
             auto right = ParseV6Side(rightText, compression == std::string_view::npos ? 0 : compression + 2, true);
-            if (!right.HasValue())
+            if (!right.has_value())
             {
-                return NGIN::Utilities::Unexpected<AddressParseError>(std::move(right).TakeError());
+                return NGIN::Utilities::Unexpected<AddressParseError>(std::move(right).error());
             }
 
-            const auto wordCount = left.Value().size() + right.Value().size();
+            const auto wordCount = left.value().size() + right.value().size();
             if ((compression == std::string_view::npos && wordCount != 8) ||
                 (compression != std::string_view::npos && wordCount >= 8))
             {
@@ -153,9 +153,9 @@ namespace NGIN::Net
             }
 
             std::array<NGIN::UInt16, 8> words {};
-            std::copy(left.Value().begin(), left.Value().end(), words.begin());
-            std::copy(right.Value().begin(), right.Value().end(),
-                      words.end() - static_cast<std::ptrdiff_t>(right.Value().size()));
+            std::copy(left.value().begin(), left.value().end(), words.begin());
+            std::copy(right.value().begin(), right.value().end(),
+                      words.end() - static_cast<std::ptrdiff_t>(right.value().size()));
             std::array<NGIN::Byte, IpAddress::V6Size> bytes {};
             for (NGIN::UIntSize index = 0; index < words.size(); ++index)
             {
@@ -194,12 +194,12 @@ namespace NGIN::Net
             return ParseV6(text);
         }
         auto v4 = ParseV4(text);
-        if (!v4.HasValue())
+        if (!v4.has_value())
         {
-            return NGIN::Utilities::Unexpected<AddressParseError>(std::move(v4).TakeError());
+            return NGIN::Utilities::Unexpected<AddressParseError>(std::move(v4).error());
         }
         std::array<NGIN::Byte, V6Size> bytes {};
-        std::copy(v4.Value().begin(), v4.Value().end(), bytes.begin());
+        std::copy(v4.value().begin(), v4.value().end(), bytes.begin());
         return IpAddress {AddressFamily::V4, bytes};
     }
 

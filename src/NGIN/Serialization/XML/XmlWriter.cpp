@@ -199,7 +199,7 @@ namespace NGIN::Serialization::XML
                 return Failure<std::string>(WriteErrorCode::OutputLimitExceeded, "XML output limit exceeded");
             auto result = WriteElement(context, root, 0);
             if (!result)
-                return NGIN::Utilities::Unexpected<WriteDiagnostic>(std::move(result.Error()));
+                return NGIN::Utilities::Unexpected<WriteDiagnostic>(std::move(result.error()));
             return std::move(context.output);
         } catch (const std::bad_alloc&)
         {

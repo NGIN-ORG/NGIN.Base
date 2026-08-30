@@ -37,21 +37,21 @@ namespace NGIN::Crypto::Signatures
         const auto sizes = NGIN::Crypto::Asymmetric::GetSignatureKeySizes(algorithm);
         if (sizes.signatureSize == 0)
         {
-            return UnsupportedAlgorithm();
+            return std::unexpected(UnsupportedAlgorithm());
         }
         if (input.privateKey.Size() != sizes.privateKeySize)
         {
-            return InvalidKey();
+            return std::unexpected(InvalidKey());
         }
         if (signature.size() != sizes.signatureSize)
         {
-            return OutputBufferTooSmall();
+            return std::unexpected(OutputBufferTooSmall());
         }
 
         auto supported = context.EnsureSupports(algorithm);
-        if (!supported.HasValue())
+        if (!supported.has_value())
         {
-            return supported.Error();
+            return std::unexpected(std::move(supported).error());
         }
 
         return context.SignInto(algorithm, input.privateKey, input.message, signature);
@@ -65,14 +65,14 @@ namespace NGIN::Crypto::Signatures
         const auto size = SignatureSize(algorithm);
         if (size == 0)
         {
-            return UnsupportedAlgorithm();
+            return std::unexpected(UnsupportedAlgorithm());
         }
 
         auto output = MakeByteBuffer(size);
         auto result = SignInto(context, algorithm, input, ByteSpan {output.data(), output.Size()});
-        if (!result.HasValue())
+        if (!result.has_value())
         {
-            return result.Error();
+            return std::unexpected(std::move(result).error());
         }
 
         return output;
@@ -86,21 +86,21 @@ namespace NGIN::Crypto::Signatures
         const auto sizes = NGIN::Crypto::Asymmetric::GetSignatureKeySizes(algorithm);
         if (sizes.signatureSize == 0)
         {
-            return UnsupportedAlgorithm();
+            return std::unexpected(UnsupportedAlgorithm());
         }
         if (input.publicKey.size() != sizes.publicKeySize)
         {
-            return InvalidKey();
+            return std::unexpected(InvalidKey());
         }
         if (input.signature.size() != sizes.signatureSize)
         {
-            return InvalidTag();
+            return std::unexpected(InvalidTag());
         }
 
         auto supported = context.EnsureSupports(algorithm);
-        if (!supported.HasValue())
+        if (!supported.has_value())
         {
-            return supported.Error();
+            return std::unexpected(std::move(supported).error());
         }
 
         return context.VerifySignature(algorithm, input.publicKey, input.message, input.signature);

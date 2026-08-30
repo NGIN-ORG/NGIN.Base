@@ -91,15 +91,16 @@ namespace NGIN::IO
 
         /// @copydoc IAsyncFileSystem::OpenFileAsync
         AsyncTask<AsyncFileHandle> OpenFileAsync(
-                NGIN::Async::TaskContext& ctx, const Path& path, const FileOpenOptions& options) override;
+                NGIN::Async::TaskContext& ctx, Path path, FileOpenOptions options) override;
         /// @copydoc IAsyncFileSystem::OpenDirectoryAsync
         AsyncTask<AsyncDirectoryHandle> OpenDirectoryAsync(
-                NGIN::Async::TaskContext& ctx, const Path& path) override;
+                NGIN::Async::TaskContext& ctx, Path path) override;
         /// @copydoc IAsyncFileSystem::GetInfoAsync
         AsyncTask<FileInfo> GetInfoAsync(
-                NGIN::Async::TaskContext& ctx, const Path& path, const MetadataOptions& options = {}) override;
+                NGIN::Async::TaskContext& ctx, Path path, MetadataOptions options = {}) override;
         /// @copydoc IAsyncFileSystem::CopyFileAsync
-        AsyncTaskVoid CopyFileAsync(NGIN::Async::TaskContext& ctx, const Path& from, const Path& to, const CopyOptions& options = {}) override;
+        AsyncTaskVoid CopyFileAsync(
+                NGIN::Async::TaskContext& ctx, Path from, Path to, CopyOptions options = {}) override;
 
     private:
         std::shared_ptr<FileSystemDriver> m_asyncDriver;

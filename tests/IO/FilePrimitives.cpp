@@ -1,10 +1,8 @@
 /// @file FilePrimitives.cpp
 /// @brief Focused tests for low-level file primitives.
 
-#include <NGIN/IO/File.hpp>
 #include <NGIN/IO/FileView.hpp>
 
-#include <array>
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
@@ -33,35 +31,6 @@ namespace
     }
 }// namespace
 
-TEST_CASE("IO.File reads an existing file", "[IO][File]")
-{
-    const std::filesystem::path filePath = MakeTempFilePath();
-    const std::string           content  = "ngin-base-file";
-
-    {
-        std::ofstream output(filePath, std::ios::binary);
-        REQUIRE(output.good());
-        output << content;
-    }
-
-    NGIN::IO::File file;
-    const auto     openResult = file.Open(NGIN::IO::Path(filePath.string()), NGIN::IO::File::OpenMode::Read);
-    REQUIRE(openResult.HasValue());
-
-    const auto sizeResult = file.Size();
-    REQUIRE(sizeResult.HasValue());
-    CHECK(sizeResult.Value() == content.size());
-
-    std::array<NGIN::Byte, 32> buffer {};
-    const auto                 readResult = file.Read(std::span<NGIN::Byte>(buffer.data(), content.size()));
-    REQUIRE(readResult.HasValue());
-    CHECK(readResult.Value() == content.size());
-    CHECK(ToString(std::span<const NGIN::Byte>(buffer.data(), content.size())) == content);
-
-    file.Close();
-    std::filesystem::remove(filePath);
-}
-
 TEST_CASE("IO.FileView maps or buffers an existing file", "[IO][FileView]")
 {
     const std::filesystem::path filePath = MakeTempFilePath();
@@ -75,7 +44,7 @@ TEST_CASE("IO.FileView maps or buffers an existing file", "[IO][FileView]")
 
     NGIN::IO::FileView fileView;
     const auto         openResult = fileView.Open(NGIN::IO::Path(filePath.string()));
-    REQUIRE(openResult.HasValue());
+    REQUIRE(openResult.has_value());
     CHECK(fileView.IsOpen());
     CHECK(fileView.Size() == content.size());
     CHECK(ToString(fileView.Data()) == content);
@@ -83,3 +52,32 @@ TEST_CASE("IO.FileView maps or buffers an existing file", "[IO][FileView]")
     fileView.Close();
     std::filesystem::remove(filePath);
 }
+
+#if defined(__linux__)
+TEST_CASE("IO.FileView buffers a readable sysfs file that cannot be mapped", "[IO][FileView]")
+{
+    // sysfs reports a page-sized regular file while serving shorter generated
+    // contents through read(2); its files do not support mmap(2). This exercises
+    // the production fallback without a test-only switch.
+    const std::filesystem::path filePath = "/sys/devices/system/cpu/online";
+    std::error_code             existsError;
+    if (!std::filesystem::exists(filePath, existsError) || existsError)
+        SKIP("the Linux sysfs CPU topology file is unavailable");
+
+    std::ifstream input(filePath, std::ios::binary);
+    REQUIRE(input.good());
+    std::string expected;
+    char        character = '\0';
+    while (input.get(character))
+        expected.push_back(character);
+    REQUIRE_FALSE(expected.empty());
+
+    NGIN::IO::FileView                                       fileView;
+    const NGIN::Utilities::Expected<void, NGIN::IO::IOError> openResult =
+            fileView.Open(NGIN::IO::Path(filePath.string()));
+    REQUIRE(openResult.has_value());
+    CHECK(fileView.IsOpen());
+    CHECK(fileView.Size() == expected.size());
+    CHECK(ToString(fileView.Data()) == expected);
+}
+#endif

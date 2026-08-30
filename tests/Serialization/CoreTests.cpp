@@ -1,9 +1,9 @@
+#include <NGIN/Memory/SystemAllocator.hpp>
 #include <NGIN/Serialization/Core/InputCursor.hpp>
 #include <NGIN/Serialization/Core/ParseResources.hpp>
 #include <NGIN/Serialization/Core/SourceMap.hpp>
 #include <NGIN/Serialization/JSON/JsonParser.hpp>
 #include <NGIN/Serialization/XML/XmlParser.hpp>
-#include <NGIN/Memory/SystemAllocator.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -12,8 +12,8 @@ namespace
     struct FailingAllocator
     {
         NGIN::Memory::SystemAllocator system;
-        NGIN::UIntSize successfulAllocationsBeforeFailure {0};
-        NGIN::UIntSize allocations {0};
+        NGIN::UIntSize                successfulAllocationsBeforeFailure {0};
+        NGIN::UIntSize                allocations {0};
 
         [[nodiscard]] void* Allocate(std::size_t size, std::size_t alignment) noexcept
         {
@@ -27,7 +27,7 @@ namespace
             system.Deallocate(memory, size, alignment);
         }
     };
-}
+}// namespace
 
 TEST_CASE("serialization cursor is bounds-safe at empty and end input", "[serialization][core]")
 {
@@ -54,7 +54,7 @@ TEST_CASE("serialization source mapping treats CRLF as one newline", "[serializa
 {
     using namespace NGIN::Serialization;
     const SourceMap map {"a\r\nb\nc", SourceId {7}};
-    const auto location = map.Locate(4);
+    const auto      location = map.Locate(4);
     CHECK(location.source.value == 7);
     CHECK(location.line == 2);
     CHECK(location.column == 2);
@@ -66,8 +66,8 @@ TEST_CASE("injected allocator failures become diagnostics rather than terminatio
     using namespace NGIN::Serialization;
 
     FailingAllocator allocator;
-    ParseResources resources {
-            .allocator = NGIN::Memory::PolyAllocatorRef {allocator},
+    ParseResources   resources {
+              .allocator = NGIN::Memory::PolyAllocatorRef {allocator},
     };
 
     auto json = JSON::Parse(
@@ -76,14 +76,14 @@ TEST_CASE("injected allocator failures become diagnostics rather than terminatio
             {},
             resources);
     REQUIRE_FALSE(json);
-    CHECK(json.Error().code == ParseErrorCode::OutOfMemory);
+    CHECK(json.error().code == ParseErrorCode::OutOfMemory);
 
     allocator.allocations = 0;
-    auto xml = XML::Parse(
+    auto xml              = XML::Parse(
             OwnedTextBuffer {std::string_view {R"(<root value="de&amp;coded"/>)"}},
             {},
             {},
             resources);
     REQUIRE_FALSE(xml);
-    CHECK(xml.Error().code == ParseErrorCode::OutOfMemory);
+    CHECK(xml.error().code == ParseErrorCode::OutOfMemory);
 }

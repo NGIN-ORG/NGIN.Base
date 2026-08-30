@@ -36,9 +36,9 @@ int main()
     using NGIN::Units::Milliseconds;
 
     auto context = NGIN::Crypto::Backend::CreateBestAvailableContext();
-    if (!context.HasValue())
+    if (!context.has_value())
     {
-        std::cerr << "CreateBestAvailableContext failed: " << context.Error().Message() << '\n';
+        std::cerr << "CreateBestAvailableContext failed: " << context.error().Message() << '\n';
         return 1;
     }
 
@@ -54,7 +54,7 @@ int main()
     FillPattern(plaintext);
 
     auto registerAead = [&](NGIN::Crypto::AeadAlgorithm algorithm, std::string_view name) {
-        if (!context.Value().Supports(algorithm))
+        if (!context.value().Supports(algorithm))
         {
             return;
         }
@@ -68,12 +68,12 @@ int main()
         };
 
         auto seal = NGIN::Crypto::Symmetric::SealInto(
-                context.Value(),
+                context.value(),
                 algorithm,
                 sealInput,
                 MutableBytes(ciphertext),
                 MutableBytes(tag));
-        if (!seal.HasValue())
+        if (!seal.has_value())
         {
             return;
         }
@@ -81,12 +81,12 @@ int main()
         Benchmark::Register([&, algorithm, sealInput](BenchmarkContext& ctx) {
             ctx.start();
             auto result = NGIN::Crypto::Symmetric::SealInto(
-                    context.Value(),
+                    context.value(),
                     algorithm,
                     sealInput,
                     MutableBytes(ciphertext),
                     MutableBytes(tag));
-            ctx.doNotOptimize(result.HasValue());
+            ctx.doNotOptimize(result.has_value());
             ctx.stop();
         },
                             std::string {"Crypto "} + std::string {name} + " seal 1 KiB");
@@ -102,11 +102,11 @@ int main()
         Benchmark::Register([&, algorithm, openInput](BenchmarkContext& ctx) {
             ctx.start();
             auto result = NGIN::Crypto::Symmetric::OpenInto(
-                    context.Value(),
+                    context.value(),
                     algorithm,
                     openInput,
                     MutableBytes(opened));
-            ctx.doNotOptimize(result.HasValue());
+            ctx.doNotOptimize(result.has_value());
             ctx.stop();
         },
                             std::string {"Crypto "} + std::string {name} + " open 1 KiB");

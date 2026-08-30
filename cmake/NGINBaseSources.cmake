@@ -429,7 +429,6 @@ if(WIN32)
   )
   list(APPEND NGIN_BASE_IO_SOURCES
     ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/DynamicLibrary.win32.cpp
-    ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/File.win32.cpp
     ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/FileView.win32.cpp
     ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/FileSystemDriver.win32.cpp
     ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/LocalFileSystem.win32.cpp
@@ -453,7 +452,6 @@ elseif(APPLE)
   )
   list(APPEND NGIN_BASE_IO_SOURCES
     ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/DynamicLibrary.posix.cpp
-    ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/File.posix.cpp
     ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/FileView.posix.cpp
     ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/FileSystemDriver.posix.cpp
     ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/LocalFileSystem.posix.cpp
@@ -476,7 +474,6 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   )
   list(APPEND NGIN_BASE_IO_SOURCES
     ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/DynamicLibrary.posix.cpp
-    ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/File.posix.cpp
     ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/FileView.posix.cpp
     ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/FileSystemDriver.linux.cpp
     ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/LocalFileSystem.posix.cpp
@@ -501,7 +498,6 @@ elseif(UNIX)
   )
   list(APPEND NGIN_BASE_IO_SOURCES
     ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/DynamicLibrary.posix.cpp
-    ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/File.posix.cpp
     ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/FileView.posix.cpp
     ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/FileSystemDriver.posix.cpp
     ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/LocalFileSystem.posix.cpp

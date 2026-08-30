@@ -475,8 +475,8 @@ namespace NGIN::Serialization::XML::detail
             context.cursor.Advance(2);
             auto target = ParseName(context);
             if (!target)
-                return Failure<void>(std::move(target.Error()));
-            const auto targetText = target.Value().value;
+                return Failure<void>(std::move(target.error()));
+            const auto targetText = target.value().value;
             const bool reservedXml =
                     targetText.size() == 3 &&
                     (targetText[0] == 'x' || targetText[0] == 'X') &&
@@ -614,7 +614,7 @@ namespace NGIN::Serialization::XML::detail
             context.cursor.Advance();
             auto name = ParseName(context);
             if (!name)
-                return Failure<void>(std::move(name.Error()));
+                return Failure<void>(std::move(name.error()));
 
             auto started = Deliver(
                     context,
@@ -625,7 +625,7 @@ namespace NGIN::Serialization::XML::detail
                                     start,
                                     context.cursor.Offset(),
                             },
-                            .name = name.Value().value,
+                            .name = name.value().value,
                     });
             if (!started)
                 return started;
@@ -649,7 +649,7 @@ namespace NGIN::Serialization::XML::detail
                                             endStart,
                                             context.cursor.Offset(),
                                     },
-                                    .name = name.Value().value,
+                                    .name = name.value().value,
                             });
                     return ended;
                 }
@@ -678,17 +678,17 @@ namespace NGIN::Serialization::XML::detail
                 const UIntSize attributeStart = context.cursor.Offset();
                 auto           attributeName  = ParseName(context);
                 if (!attributeName)
-                    return Failure<void>(std::move(attributeName.Error()));
+                    return Failure<void>(std::move(attributeName.error()));
 
-                const auto* duplicate = attributes.Find(attributeName.Value().value);
+                const auto* duplicate = attributes.Find(attributeName.value().value);
                 if (duplicate)
                 {
                     auto error = MakeErrorAt(
                             context,
                             ParseErrorCode::DuplicateName,
                             "Duplicate XML attribute",
-                            attributeName.Value().span.begin,
-                            attributeName.Value().span.end);
+                            attributeName.value().span.begin,
+                            attributeName.value().span.end);
                     error.related = duplicate->span;
                     return Failure<void>(std::move(error));
                 }
@@ -739,7 +739,7 @@ namespace NGIN::Serialization::XML::detail
                         context.source.substr(valueStart, valueEnd - valueStart);
                 auto value = DecodeText(context, rawValue, valueStart, true);
                 if (!value)
-                    return Failure<void>(std::move(value.Error()));
+                    return Failure<void>(std::move(value.error()));
                 context.cursor.Advance();
 
                 auto attributeLimit =
@@ -749,8 +749,8 @@ namespace NGIN::Serialization::XML::detail
                 try
                 {
                     attributes.Add(SeenAttribute {
-                            .value = attributeName.Value().value,
-                            .span  = attributeName.Value().span,
+                            .value = attributeName.value().value,
+                            .span  = attributeName.value().span,
                     });
                 } catch (const std::bad_alloc&)
                 {
@@ -771,8 +771,8 @@ namespace NGIN::Serialization::XML::detail
                                         attributeStart,
                                         context.cursor.Offset(),
                                 },
-                                .name  = attributeName.Value().value,
-                                .value = value.Value(),
+                                .name  = attributeName.value().value,
+                                .value = value.value(),
                         });
                 if (!delivered)
                     return delivered;
@@ -795,7 +795,7 @@ namespace NGIN::Serialization::XML::detail
                     context.cursor.Advance(2);
                     auto closeName = ParseName(context);
                     if (!closeName)
-                        return Failure<void>(std::move(closeName.Error()));
+                        return Failure<void>(std::move(closeName.error()));
                     SkipWhitespace(context);
                     if (context.cursor.Peek() != '>')
                     {
@@ -805,7 +805,7 @@ namespace NGIN::Serialization::XML::detail
                                 "Expected '>' after XML end tag"));
                     }
                     context.cursor.Advance();
-                    if (closeName.Value().value != name.Value().value)
+                    if (closeName.value().value != name.value().value)
                     {
                         return Failure<void>(MakeErrorAt(
                                 context,
@@ -823,7 +823,7 @@ namespace NGIN::Serialization::XML::detail
                                             closeStart,
                                             context.cursor.Offset(),
                                     },
-                                    .name = name.Value().value,
+                                    .name = name.value().value,
                             });
                 }
                 if (StartsWith(context, "<!--"))
@@ -916,7 +916,7 @@ namespace NGIN::Serialization::XML::detail
 
                 auto text = DecodeText(context, rawText, textStart, false);
                 if (!text)
-                    return Failure<void>(std::move(text.Error()));
+                    return Failure<void>(std::move(text.error()));
                 auto node = CountNode(context, textStart, textEnd);
                 if (!node)
                     return node;
@@ -928,7 +928,7 @@ namespace NGIN::Serialization::XML::detail
                         Event {
                                 .kind  = EventKind::Text,
                                 .span  = SourceSpan {context.sourceId, textStart, textEnd},
-                                .value = text.Value(),
+                                .value = text.value(),
                         });
                 if (!delivered)
                     return delivered;

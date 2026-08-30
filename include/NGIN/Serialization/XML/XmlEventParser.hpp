@@ -195,7 +195,7 @@ namespace NGIN::Serialization::XML
             NGIN::Utilities::Expected<BorrowedDocument, ParseDiagnostic> validated =
                     ParseBorrowed(input, *m_scratch, m_options, completionLimits);
             if (!validated)
-                return Fail(std::move(validated.Error()));
+                return Fail(std::move(validated.error()));
 
             UIntSize eventCount = 0;
             auto     forwarding = [this, &eventCount](const Event& event) {
@@ -205,7 +205,7 @@ namespace NGIN::Serialization::XML
             NGIN::Utilities::Expected<void, ParseDiagnostic> emitted = EventParser::ParseContiguous(
                     input, forwarding, *m_scratch, m_options, completionLimits);
             if (!emitted)
-                return Fail(std::move(emitted.Error()));
+                return Fail(std::move(emitted.error()));
             m_complete = true;
             return {.status = IncrementalParseStatus::Complete, .eventsProduced = eventCount};
         }

@@ -32,7 +32,7 @@ namespace NGIN::Net
         if (!optionResult)
         {
             m_handle.Close();
-            return NGIN::Utilities::Unexpected(optionResult.Error());
+            return NGIN::Utilities::Unexpected(optionResult.error());
         }
         return {};
     }
@@ -84,9 +84,9 @@ namespace NGIN::Net
                 co_return;
             }
 
-            if (result.Error().code != NetErrorCode::WouldBlock)
+            if (result.error().code != NetErrorCode::WouldBlock)
             {
-                co_await NGIN::Async::DomainFailure(result.Error());
+                co_await NGIN::Async::DomainFailure(result.error());
                 co_return;
             }
 
@@ -97,9 +97,9 @@ namespace NGIN::Net
                 co_return;
             }
 
-            if (connectResult.Error().code != NetErrorCode::WouldBlock)
+            if (connectResult.error().code != NetErrorCode::WouldBlock)
             {
-                co_await NGIN::Async::DomainFailure(connectResult.Error());
+                co_await NGIN::Async::DomainFailure(connectResult.error());
                 co_return;
             }
         }
@@ -345,9 +345,9 @@ namespace NGIN::Net
                 co_return *result;
             }
 
-            if (result.Error().code != NetErrorCode::WouldBlock)
+            if (result.error().code != NetErrorCode::WouldBlock)
             {
-                co_return NGIN::Utilities::Unexpected(result.Error());
+                co_return NGIN::Utilities::Unexpected(result.error());
             }
 
             co_await driver.WaitUntilWritable(ctx, m_handle, token);
@@ -371,9 +371,9 @@ namespace NGIN::Net
                 co_return *result;
             }
 
-            if (result.Error().code != NetErrorCode::WouldBlock)
+            if (result.error().code != NetErrorCode::WouldBlock)
             {
-                co_return NGIN::Utilities::Unexpected(result.Error());
+                co_return NGIN::Utilities::Unexpected(result.error());
             }
 
             co_await driver.WaitUntilReadable(ctx, m_handle, token);

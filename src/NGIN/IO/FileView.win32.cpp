@@ -1,7 +1,7 @@
 #include <NGIN/IO/FileView.hpp>
 
-#include <NGIN/IO/File.hpp>
-
+#include <new>
+#include <stdexcept>
 #include <windows.h>
 
 namespace NGIN::IO
@@ -15,6 +15,46 @@ namespace NGIN::IO
             error.systemCode = code;
             error.message    = message ? message : "system error";
             return error;
+        }
+
+        [[nodiscard]] NGIN::Utilities::Expected<NGIN::Containers::Vector<NGIN::Byte>, IOError>
+        ReadBuffered(const HANDLE fileHandle, const UIntSize fileSize) noexcept
+        {
+            try
+            {
+                NGIN::Containers::Vector<NGIN::Byte> buffer;
+                buffer.Reserve(fileSize);
+
+                static constexpr UIntSize chunkSize = 64 * 1024;
+                NGIN::Byte                chunk[chunkSize];
+                UIntSize                  totalRead = 0;
+                while (totalRead < fileSize)
+                {
+                    const UIntSize bytesRemaining = fileSize - totalRead;
+                    const DWORD    bytesToRead    = static_cast<DWORD>(bytesRemaining < chunkSize ? bytesRemaining : chunkSize);
+                    DWORD          bytesRead      = 0;
+                    if (!::ReadFile(fileHandle, chunk, bytesToRead, &bytesRead, nullptr))
+                    {
+                        return NGIN::Utilities::Unexpected<IOError>(
+                                MakeSystemError("buffered ReadFile failed", static_cast<int>(::GetLastError())));
+                    }
+                    if (bytesRead == 0)
+                        break;
+
+                    for (DWORD index = 0; index < bytesRead; ++index)
+                        buffer.PushBack(chunk[index]);
+                    totalRead += static_cast<UIntSize>(bytesRead);
+                }
+                return buffer;
+            } catch (const std::bad_alloc&)
+            {
+                return NGIN::Utilities::Unexpected<IOError>(
+                        MakeSystemError("buffer allocation failed", static_cast<int>(ERROR_NOT_ENOUGH_MEMORY)));
+            } catch (const std::length_error&)
+            {
+                return NGIN::Utilities::Unexpected<IOError>(
+                        MakeSystemError("file is too large to buffer", static_cast<int>(ERROR_FILE_TOO_LARGE)));
+            }
         }
     }// namespace
 
@@ -87,23 +127,18 @@ namespace NGIN::IO
             }
             ::CloseHandle(mapping);
         }
+        // Mapping can fail because of address-space or platform limits even
+        // though ordinary reads remain available. Reuse the same handle so the
+        // fallback still refers to the file that was inspected above.
+        NGIN::Utilities::Expected<NGIN::Containers::Vector<NGIN::Byte>, IOError> readResult =
+                ReadBuffered(handle, static_cast<UIntSize>(size.QuadPart));
         ::CloseHandle(handle);
-
-        File file;
-        auto openResult = file.Open(path, File::OpenMode::Read);
-        if (!openResult.HasValue())
+        if (!readResult.has_value())
         {
-            return openResult;
+            return NGIN::Utilities::Unexpected<IOError>(std::move(readResult.error()));
         }
 
-        auto readResult = file.ReadAll();
-        file.Close();
-        if (!readResult.HasValue())
-        {
-            return NGIN::Utilities::Unexpected<IOError>(std::move(readResult.Error()));
-        }
-
-        m_buffer     = std::move(readResult.Value());
+        m_buffer     = std::move(readResult.value());
         m_data       = m_buffer.data();
         m_size       = m_buffer.Size();
         m_ownsBuffer = true;

@@ -31,7 +31,7 @@ namespace NGIN::Net
         if (!optionResult)
         {
             m_handle.Close();
-            return NGIN::Utilities::Unexpected(optionResult.Error());
+            return NGIN::Utilities::Unexpected(optionResult.error());
         }
         return {};
     }
@@ -341,9 +341,9 @@ namespace NGIN::Net
                 co_return *result;
             }
 
-            if (result.Error().code != NetErrorCode::WouldBlock)
+            if (result.error().code != NetErrorCode::WouldBlock)
             {
-                co_return NGIN::Utilities::Unexpected(result.Error());
+                co_return NGIN::Utilities::Unexpected(result.error());
             }
 
             co_await driver.WaitUntilWritable(ctx, m_handle, token);
@@ -367,9 +367,9 @@ namespace NGIN::Net
                 co_return *result;
             }
 
-            if (result.Error().code != NetErrorCode::WouldBlock)
+            if (result.error().code != NetErrorCode::WouldBlock)
             {
-                co_return NGIN::Utilities::Unexpected(result.Error());
+                co_return NGIN::Utilities::Unexpected(result.error());
             }
 
             co_await driver.WaitUntilReadable(ctx, m_handle, token);

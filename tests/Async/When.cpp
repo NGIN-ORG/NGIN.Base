@@ -19,14 +19,15 @@ namespace
             m_queue.reserve(256);
         }
 
-        void Execute(NGIN::Execution::WorkItem item) noexcept
+        NGIN::Execution::ScheduleResult Execute(NGIN::Execution::WorkItem item) noexcept
         {
             m_queue.push_back(std::move(item));
+            return {};
         }
 
-        void ExecuteAt(NGIN::Execution::WorkItem item, NGIN::Time::TimePoint)
+        NGIN::Execution::ScheduleResult ExecuteAt(NGIN::Execution::WorkItem item, NGIN::Time::TimePoint) noexcept
         {
-            Execute(std::move(item));
+            return Execute(std::move(item));
         }
 
         [[nodiscard]] bool RunOne() noexcept
@@ -117,15 +118,61 @@ namespace
         co_return co_await NGIN::Async::WhenAll(ctx, YieldOnce(ctx, 1), YieldOnce(ctx, 2));
     }
 
+    NGIN::Async::Task<int> LocalLoser(NGIN::Async::TaskContext& ctx, int& parentLocal)
+    {
+        NGIN::Async::CancellationRegistration             registration;
+        const NGIN::Async::CancellationRegistrationResult result = ctx.GetCancellationToken().Register(
+                registration,
+                {},
+                {},
+                +[](void* context) noexcept -> bool {
+                    *static_cast<int*>(context) = 9;
+                    return false;
+                },
+                &parentLocal);
+        if (!result)
+        {
+            co_return NGIN::Async::Completion<int, NGIN::Async::NoError>::Faulted(
+                    NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::CancellationRegistrationFailed));
+        }
+        co_await ctx.YieldNow();
+        co_await ctx.YieldNow();
+        co_return parentLocal;
+    }
+
     NGIN::Async::Task<NGIN::UIntSize> AwaitWhenAnyWithLocalLoser(NGIN::Async::TaskContext& ctx)
     {
-        auto loser = [&]() -> NGIN::Async::Task<int> {
-            co_await ctx.YieldNow();
-            co_await ctx.YieldNow();
-            co_return 9;
-        }();
+        int                  local  = 0;
+        const NGIN::UIntSize winner = co_await NGIN::Async::WhenAny(
+                ctx,
+                [](NGIN::Async::TaskContext& child) { return YieldOnce(child, 1); },
+                [&local](NGIN::Async::TaskContext& child) { return LocalLoser(child, local); });
+        co_return local == 9 ? winner : winner + 100;
+    }
 
-        co_return co_await NGIN::Async::WhenAny(ctx, YieldOnce(ctx, 1), std::move(loser));
+    bool RecordCancellation(void* context) noexcept
+    {
+        *static_cast<bool*>(context) = true;
+        return false;
+    }
+
+    NGIN::Async::Task<int> CancellationAwareLoser(NGIN::Async::TaskContext& ctx, bool& observed)
+    {
+        NGIN::Async::CancellationRegistration             registration;
+        const NGIN::Async::CancellationRegistrationResult result = ctx.GetCancellationToken().Register(
+                registration,
+                {},
+                {},
+                &RecordCancellation,
+                &observed);
+        if (!result)
+        {
+            co_return NGIN::Async::Completion<int, NGIN::Async::NoError>::Faulted(
+                    NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::CancellationRegistrationFailed));
+        }
+        co_await ctx.YieldNow();
+        co_await ctx.YieldNow();
+        co_return 2;
     }
 }// namespace
 
@@ -213,7 +260,12 @@ TEST_CASE("WhenAny returns index of first completed task")
     ManualExecutor           exec;
     NGIN::Async::TaskContext ctx(exec);
 
-    auto operation = NGIN::Async::Spawn(ctx, NGIN::Async::WhenAny(ctx, YieldTwice(ctx, 1), YieldOnce(ctx, 2)));
+    auto operation = NGIN::Async::Spawn(
+            ctx,
+            NGIN::Async::WhenAny(
+                    ctx,
+                    [](NGIN::Async::TaskContext& child) { return YieldTwice(child, 1); },
+                    [](NGIN::Async::TaskContext& child) { return YieldOnce(child, 2); }));
     exec.RunUntilIdle();
 
     REQUIRE(operation.IsCompleted());
@@ -230,7 +282,12 @@ TEST_CASE("WhenAny returns canceled when context is already cancelled")
 
     NGIN::Async::TaskContext ctx(exec, source.GetToken());
 
-    auto operation = NGIN::Async::Spawn(ctx, NGIN::Async::WhenAny(ctx, YieldOnce(ctx, 1), YieldOnce(ctx, 2)));
+    auto operation = NGIN::Async::Spawn(
+            ctx,
+            NGIN::Async::WhenAny(
+                    ctx,
+                    [](NGIN::Async::TaskContext& child) { return YieldOnce(child, 1); },
+                    [](NGIN::Async::TaskContext& child) { return YieldOnce(child, 2); }));
     exec.RunUntilIdle();
 
     REQUIRE(operation.IsCompleted());
@@ -255,18 +312,23 @@ TEST_CASE("WhenAll propagates child exception")
     REQUIRE(result.IsFault());
 }
 
-TEST_CASE("WhenAny returns index when a task faults")
+TEST_CASE("WhenAny propagates a winning task fault after draining losers")
 {
     ManualExecutor           exec;
     NGIN::Async::TaskContext ctx(exec);
 
-    auto operation = NGIN::Async::Spawn(ctx, NGIN::Async::WhenAny(ctx, ThrowOnce(ctx), YieldTwice(ctx, 123)));
+    auto operation = NGIN::Async::Spawn(
+            ctx,
+            NGIN::Async::WhenAny(
+                    ctx,
+                    [](NGIN::Async::TaskContext& child) { return ThrowOnce(child); },
+                    [](NGIN::Async::TaskContext& child) { return YieldTwice(child, 123); }));
     exec.RunUntilIdle();
 
     REQUIRE(operation.IsCompleted());
     auto result = operation.TakeResult();
-    REQUIRE(result);
-    REQUIRE(result.Value() == 0);
+    REQUIRE_FALSE(result);
+    REQUIRE(result.IsFault());
 }
 
 TEST_CASE("WhenAny owns local loser task lifetime")
@@ -281,4 +343,27 @@ TEST_CASE("WhenAny owns local loser task lifetime")
     auto result = operation.TakeResult();
     REQUIRE(result);
     REQUIRE(result.Value() == 0);
+}
+
+TEST_CASE("WhenAny requests child-specific cancellation for losing tasks")
+{
+    ManualExecutor           exec;
+    NGIN::Async::TaskContext ctx(exec);
+    bool                     loserObservedCancellation = false;
+
+    auto operation = NGIN::Async::Spawn(
+            ctx,
+            NGIN::Async::WhenAny(
+                    ctx,
+                    [](NGIN::Async::TaskContext& child) { return YieldOnce(child, 1); },
+                    [&loserObservedCancellation](NGIN::Async::TaskContext& child) {
+                        return CancellationAwareLoser(child, loserObservedCancellation);
+                    }));
+    exec.RunUntilIdle();
+
+    REQUIRE(operation.IsCompleted());
+    const auto result = operation.TakeResult();
+    REQUIRE(result);
+    CHECK(result.Value() == 0);
+    CHECK(loserObservedCancellation);
 }

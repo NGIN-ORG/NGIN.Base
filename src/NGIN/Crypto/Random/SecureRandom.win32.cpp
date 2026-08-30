@@ -5,8 +5,8 @@
 #include <algorithm>
 #include <limits>
 
-#include <windows.h>
 #include <bcrypt.h>
+#include <windows.h>
 
 namespace NGIN::Crypto::Random
 {
@@ -27,7 +27,7 @@ namespace NGIN::Crypto::Random
                     BCRYPT_USE_SYSTEM_PREFERRED_RNG);
             if (status != 0)
             {
-                return EntropyUnavailableError(static_cast<NGIN::Int32>(status));
+                return std::unexpected(EntropyUnavailableError(static_cast<NGIN::Int32>(status)));
             }
 
             bytes += chunk;

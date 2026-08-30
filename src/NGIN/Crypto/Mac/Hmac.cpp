@@ -34,7 +34,7 @@ namespace NGIN::Crypto::Mac
     {
         if (output.size() != MacTagSize(algorithm))
         {
-            return OutputBufferTooSmall();
+            return std::unexpected(OutputBufferTooSmall());
         }
 
         return context.MacInto(algorithm, key, input, output);
@@ -48,9 +48,9 @@ namespace NGIN::Crypto::Mac
     {
         auto output = MakeByteBuffer(MacTagSize(algorithm));
         auto result = MacInto(context, algorithm, key, input, ByteSpan {output.data(), output.Size()});
-        if (!result.HasValue())
+        if (!result.has_value())
         {
-            return result.Error();
+            return std::unexpected(std::move(result).error());
         }
 
         return output;
@@ -65,21 +65,21 @@ namespace NGIN::Crypto::Mac
     {
         if (expectedTag.size() != MacTagSize(algorithm))
         {
-            return InvalidTag();
+            return std::unexpected(InvalidTag());
         }
 
         auto computed = MakeByteBuffer(MacTagSize(algorithm));
         auto result   = MacInto(context, algorithm, key, input, ByteSpan {computed.data(), computed.Size()});
-        if (!result.HasValue())
+        if (!result.has_value())
         {
-            return result.Error();
+            return std::unexpected(std::move(result).error());
         }
 
         if (!NGIN::Crypto::Memory::ConstantTimeEqual(
                     ConstByteSpan {computed.data(), computed.Size()},
                     expectedTag))
         {
-            return AuthenticationFailed();
+            return std::unexpected(AuthenticationFailed());
         }
 
         return {};
@@ -92,9 +92,9 @@ namespace NGIN::Crypto::Mac
     {
         HmacSha256Tag output {};
         auto          result = HmacSha256Into(context, key, input, output);
-        if (!result.HasValue())
+        if (!result.has_value())
         {
-            return result.Error();
+            return std::unexpected(std::move(result).error());
         }
 
         return output;
@@ -107,9 +107,9 @@ namespace NGIN::Crypto::Mac
     {
         HmacSha512Tag output {};
         auto          result = HmacSha512Into(context, key, input, output);
-        if (!result.HasValue())
+        if (!result.has_value())
         {
-            return result.Error();
+            return std::unexpected(std::move(result).error());
         }
 
         return output;

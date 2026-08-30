@@ -123,38 +123,38 @@ namespace NGIN::Crypto::Keys
         {
             DerReader reader {der};
             auto      element = reader.ReadElement();
-            if (!element.HasValue())
+            if (!element.has_value())
             {
-                return element.Error();
+                return std::unexpected(std::move(element).error());
             }
             if (!reader.IsAtEnd())
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
-            return element.Value();
+            return element.value();
         }
 
         [[nodiscard]] CryptoExpected<NGIN::UInt32> ReadDerPositiveUInt32(const DerElement& element) noexcept
         {
             auto integer = NGIN::Crypto::Encoding::ReadDerInteger(element);
-            if (!integer.HasValue())
+            if (!integer.has_value())
             {
-                return integer.Error();
+                return std::unexpected(std::move(integer).error());
             }
-            if (integer.Value().empty() || (std::to_integer<NGIN::UInt8>(integer.Value()[0]) & 0x80u) != 0)
+            if (integer.value().empty() || (std::to_integer<NGIN::UInt8>(integer.value()[0]) & 0x80u) != 0)
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
-            ConstByteSpan value = integer.Value();
+            ConstByteSpan value = integer.value();
             if (value.size() > 1 && value[0] == NGIN::Byte {0x00})
             {
                 value = value.subspan(1);
             }
             if (value.empty() || value.size() > sizeof(NGIN::UInt32))
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
             auto output = NGIN::UInt32 {0};
@@ -175,7 +175,7 @@ namespace NGIN::Crypto::Keys
             {
                 if (hasParameters)
                 {
-                    return ParseError();
+                    return std::unexpected(ParseError());
                 }
                 return KeyAlgorithm::Ed25519;
             }
@@ -183,7 +183,7 @@ namespace NGIN::Crypto::Keys
             {
                 if (hasParameters)
                 {
-                    return ParseError();
+                    return std::unexpected(ParseError());
                 }
                 return KeyAlgorithm::X25519;
             }
@@ -191,22 +191,22 @@ namespace NGIN::Crypto::Keys
             {
                 if (!hasParameters)
                 {
-                    return ParseError();
+                    return std::unexpected(ParseError());
                 }
 
                 auto parameterElement = ReadSingleElement(parameters);
-                if (!parameterElement.HasValue())
+                if (!parameterElement.has_value())
                 {
-                    return parameterElement.Error();
+                    return std::unexpected(std::move(parameterElement).error());
                 }
 
-                auto curveOid = NGIN::Crypto::Encoding::ReadDerObjectIdentifier(parameterElement.Value());
-                if (!curveOid.HasValue())
+                auto curveOid = NGIN::Crypto::Encoding::ReadDerObjectIdentifier(parameterElement.value());
+                if (!curveOid.has_value())
                 {
-                    return curveOid.Error();
+                    return std::unexpected(std::move(curveOid).error());
                 }
 
-                return OidEquals(curveOid.Value(), SECP256R1_OID) ? CryptoExpected<KeyAlgorithm> {KeyAlgorithm::EcdsaP256}
+                return OidEquals(curveOid.value(), SECP256R1_OID) ? CryptoExpected<KeyAlgorithm> {KeyAlgorithm::EcdsaP256}
                                                                   : CryptoExpected<KeyAlgorithm> {KeyAlgorithm::Unknown};
             }
             if (OidEquals(oid, RSA_ENCRYPTION_OID))
@@ -214,13 +214,13 @@ namespace NGIN::Crypto::Keys
                 if (hasParameters)
                 {
                     auto parameterElement = ReadSingleElement(parameters);
-                    if (!parameterElement.HasValue())
+                    if (!parameterElement.has_value())
                     {
-                        return parameterElement.Error();
+                        return std::unexpected(std::move(parameterElement).error());
                     }
-                    if (!IsDerNull(parameterElement.Value()))
+                    if (!IsDerNull(parameterElement.value()))
                     {
-                        return ParseError();
+                        return std::unexpected(ParseError());
                     }
                 }
 
@@ -273,13 +273,13 @@ namespace NGIN::Crypto::Keys
 
             auto parameterElement = ReadSingleElement(
                     ConstByteSpan {identifier.parameters.data(), identifier.parameters.Size()});
-            if (!parameterElement.HasValue())
+            if (!parameterElement.has_value())
             {
-                return parameterElement.Error();
+                return std::unexpected(std::move(parameterElement).error());
             }
-            if (!IsDerNull(parameterElement.Value()))
+            if (!IsDerNull(parameterElement.value()))
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
             return {};
@@ -288,115 +288,115 @@ namespace NGIN::Crypto::Keys
         [[nodiscard]] CryptoExpected<Pbkdf2PbesParameters> ParsePbkdf2Parameters(ConstByteSpan parameters)
         {
             auto parameterElement = ReadSingleElement(parameters);
-            if (!parameterElement.HasValue())
+            if (!parameterElement.has_value())
             {
-                return parameterElement.Error();
+                return std::unexpected(std::move(parameterElement).error());
             }
 
-            DerReader parent {parameterElement.Value().encoded};
-            auto      reader = NGIN::Crypto::Encoding::ReadDerSequence(parent, parameterElement.Value());
-            if (!reader.HasValue())
+            DerReader parent {parameterElement.value().encoded};
+            auto      reader = NGIN::Crypto::Encoding::ReadDerSequence(parent, parameterElement.value());
+            if (!reader.has_value())
             {
-                return reader.Error();
+                return std::unexpected(std::move(reader).error());
             }
 
-            auto saltElement = reader.Value().ReadElement();
-            if (!saltElement.HasValue())
+            auto saltElement = reader.value().ReadElement();
+            if (!saltElement.has_value())
             {
-                return saltElement.Error();
+                return std::unexpected(std::move(saltElement).error());
             }
-            auto salt = NGIN::Crypto::Encoding::ReadDerOctetString(saltElement.Value());
-            if (!salt.HasValue())
+            auto salt = NGIN::Crypto::Encoding::ReadDerOctetString(saltElement.value());
+            if (!salt.has_value())
             {
-                return UnsupportedAlgorithm();
+                return std::unexpected(UnsupportedAlgorithm());
             }
 
-            auto iterationsElement = reader.Value().ReadElement();
-            if (!iterationsElement.HasValue())
+            auto iterationsElement = reader.value().ReadElement();
+            if (!iterationsElement.has_value())
             {
-                return iterationsElement.Error();
+                return std::unexpected(std::move(iterationsElement).error());
             }
-            auto iterations = ReadDerPositiveUInt32(iterationsElement.Value());
-            if (!iterations.HasValue())
+            auto iterations = ReadDerPositiveUInt32(iterationsElement.value());
+            if (!iterations.has_value())
             {
-                return iterations.Error();
+                return std::unexpected(std::move(iterations).error());
             }
-            if (iterations.Value() == 0)
+            if (iterations.value() == 0)
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
             auto keyLength = std::optional<NGIN::UInt32> {};
             auto prf       = std::optional<EncryptedPrivateKeyAlgorithmIdentifier> {};
 
-            if (!reader.Value().IsAtEnd())
+            if (!reader.value().IsAtEnd())
             {
-                auto next = reader.Value().ReadElement();
-                if (!next.HasValue())
+                auto next = reader.value().ReadElement();
+                if (!next.has_value())
                 {
-                    return next.Error();
+                    return std::unexpected(std::move(next).error());
                 }
 
-                if (IsDerInteger(next.Value()))
+                if (IsDerInteger(next.value()))
                 {
-                    auto parsedKeyLength = ReadDerPositiveUInt32(next.Value());
-                    if (!parsedKeyLength.HasValue())
+                    auto parsedKeyLength = ReadDerPositiveUInt32(next.value());
+                    if (!parsedKeyLength.has_value())
                     {
-                        return parsedKeyLength.Error();
+                        return std::unexpected(std::move(parsedKeyLength).error());
                     }
-                    if (parsedKeyLength.Value() == 0)
+                    if (parsedKeyLength.value() == 0)
                     {
-                        return ParseError();
+                        return std::unexpected(ParseError());
                     }
-                    keyLength = parsedKeyLength.Value();
+                    keyLength = parsedKeyLength.value();
 
-                    if (!reader.Value().IsAtEnd())
+                    if (!reader.value().IsAtEnd())
                     {
-                        auto prfElement = reader.Value().ReadElement();
-                        if (!prfElement.HasValue())
+                        auto prfElement = reader.value().ReadElement();
+                        if (!prfElement.has_value())
                         {
-                            return prfElement.Error();
+                            return std::unexpected(std::move(prfElement).error());
                         }
-                        auto parsedPrf = ParseRawAlgorithmIdentifierElement(prfElement.Value());
-                        if (!parsedPrf.HasValue())
+                        auto parsedPrf = ParseRawAlgorithmIdentifierElement(prfElement.value());
+                        if (!parsedPrf.has_value())
                         {
-                            return parsedPrf.Error();
+                            return std::unexpected(std::move(parsedPrf).error());
                         }
-                        prf = std::move(parsedPrf.Value());
+                        prf = std::move(parsedPrf.value());
                     }
                 }
                 else
                 {
-                    auto parsedPrf = ParseRawAlgorithmIdentifierElement(next.Value());
-                    if (!parsedPrf.HasValue())
+                    auto parsedPrf = ParseRawAlgorithmIdentifierElement(next.value());
+                    if (!parsedPrf.has_value())
                     {
-                        return parsedPrf.Error();
+                        return std::unexpected(std::move(parsedPrf).error());
                     }
-                    prf = std::move(parsedPrf.Value());
+                    prf = std::move(parsedPrf.value());
                 }
             }
 
-            if (!reader.Value().IsAtEnd())
+            if (!reader.value().IsAtEnd())
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
             if (!prf.has_value())
             {
-                return UnsupportedAlgorithm();
+                return std::unexpected(UnsupportedAlgorithm());
             }
             if (!OidEquals(prf->objectIdentifier, HMAC_SHA256_OID))
             {
-                return UnsupportedAlgorithm();
+                return std::unexpected(UnsupportedAlgorithm());
             }
             auto prfParameters = ValidateAbsentOrNullParameters(*prf);
-            if (!prfParameters.HasValue())
+            if (!prfParameters.has_value())
             {
-                return prfParameters.Error();
+                return std::unexpected(std::move(prfParameters).error());
             }
 
             return Pbkdf2PbesParameters {
-                    .salt       = CopyBytes(salt.Value()),
-                    .iterations = iterations.Value(),
+                    .salt       = CopyBytes(salt.value()),
+                    .iterations = iterations.value(),
                     .keyLength  = keyLength.value_or(0),
             };
         }
@@ -418,73 +418,73 @@ namespace NGIN::Crypto::Keys
             }
             else
             {
-                return UnsupportedAlgorithm();
+                return std::unexpected(UnsupportedAlgorithm());
             }
             if (!encryptionScheme.hasParameters)
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
             auto parameterElement = ReadSingleElement(
                     ConstByteSpan {encryptionScheme.parameters.data(), encryptionScheme.parameters.Size()});
-            if (!parameterElement.HasValue())
+            if (!parameterElement.has_value())
             {
-                return parameterElement.Error();
+                return std::unexpected(std::move(parameterElement).error());
             }
 
-            DerReader parent {parameterElement.Value().encoded};
-            auto      reader = NGIN::Crypto::Encoding::ReadDerSequence(parent, parameterElement.Value());
-            if (!reader.HasValue())
+            DerReader parent {parameterElement.value().encoded};
+            auto      reader = NGIN::Crypto::Encoding::ReadDerSequence(parent, parameterElement.value());
+            if (!reader.has_value())
             {
-                return reader.Error();
+                return std::unexpected(std::move(reader).error());
             }
 
-            auto nonceElement = reader.Value().ReadElement();
-            if (!nonceElement.HasValue())
+            auto nonceElement = reader.value().ReadElement();
+            if (!nonceElement.has_value())
             {
-                return nonceElement.Error();
+                return std::unexpected(std::move(nonceElement).error());
             }
-            auto nonce = NGIN::Crypto::Encoding::ReadDerOctetString(nonceElement.Value());
-            if (!nonce.HasValue())
+            auto nonce = NGIN::Crypto::Encoding::ReadDerOctetString(nonceElement.value());
+            if (!nonce.has_value())
             {
-                return nonce.Error();
+                return std::unexpected(std::move(nonce).error());
             }
 
             auto tagLength = std::optional<NGIN::UInt32> {};
-            if (!reader.Value().IsAtEnd())
+            if (!reader.value().IsAtEnd())
             {
-                auto tagLengthElement = reader.Value().ReadElement();
-                if (!tagLengthElement.HasValue())
+                auto tagLengthElement = reader.value().ReadElement();
+                if (!tagLengthElement.has_value())
                 {
-                    return tagLengthElement.Error();
+                    return std::unexpected(std::move(tagLengthElement).error());
                 }
-                auto parsedTagLength = ReadDerPositiveUInt32(tagLengthElement.Value());
-                if (!parsedTagLength.HasValue())
+                auto parsedTagLength = ReadDerPositiveUInt32(tagLengthElement.value());
+                if (!parsedTagLength.has_value())
                 {
-                    return parsedTagLength.Error();
+                    return std::unexpected(std::move(parsedTagLength).error());
                 }
-                if (parsedTagLength.Value() == 0)
+                if (parsedTagLength.value() == 0)
                 {
-                    return ParseError();
+                    return std::unexpected(ParseError());
                 }
-                tagLength = parsedTagLength.Value();
+                tagLength = parsedTagLength.value();
             }
-            if (!reader.Value().IsAtEnd())
+            if (!reader.value().IsAtEnd())
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
-            if (nonce.Value().size() != Symmetric::AeadNonceSize(algorithm))
+            if (nonce.value().size() != Symmetric::AeadNonceSize(algorithm))
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
             if (!tagLength.has_value() || tagLength.value() != Symmetric::AeadTagSize(algorithm))
             {
-                return UnsupportedAlgorithm();
+                return std::unexpected(UnsupportedAlgorithm());
             }
 
             return AesGcmPbesParameters {
                     .algorithm = algorithm,
-                    .nonce     = CopyBytes(nonce.Value()),
+                    .nonce     = CopyBytes(nonce.value()),
                     .keyLength = keyLength,
                     .tagLength = tagLength.value(),
             };
@@ -495,75 +495,75 @@ namespace NGIN::Crypto::Keys
         {
             if (!OidEquals(algorithm.objectIdentifier, PBES2_OID))
             {
-                return UnsupportedAlgorithm();
+                return std::unexpected(UnsupportedAlgorithm());
             }
             if (!algorithm.hasParameters)
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
             auto parameterElement = ReadSingleElement(ConstByteSpan {algorithm.parameters.data(), algorithm.parameters.Size()});
-            if (!parameterElement.HasValue())
+            if (!parameterElement.has_value())
             {
-                return parameterElement.Error();
+                return std::unexpected(std::move(parameterElement).error());
             }
 
-            DerReader parent {parameterElement.Value().encoded};
-            auto      reader = NGIN::Crypto::Encoding::ReadDerSequence(parent, parameterElement.Value());
-            if (!reader.HasValue())
+            DerReader parent {parameterElement.value().encoded};
+            auto      reader = NGIN::Crypto::Encoding::ReadDerSequence(parent, parameterElement.value());
+            if (!reader.has_value())
             {
-                return reader.Error();
+                return std::unexpected(std::move(reader).error());
             }
 
-            auto kdfElement = reader.Value().ReadElement();
-            if (!kdfElement.HasValue())
+            auto kdfElement = reader.value().ReadElement();
+            if (!kdfElement.has_value())
             {
-                return kdfElement.Error();
+                return std::unexpected(std::move(kdfElement).error());
             }
-            auto kdf = ParseRawAlgorithmIdentifierElement(kdfElement.Value());
-            if (!kdf.HasValue())
+            auto kdf = ParseRawAlgorithmIdentifierElement(kdfElement.value());
+            if (!kdf.has_value())
             {
-                return kdf.Error();
+                return std::unexpected(std::move(kdf).error());
             }
-            if (!OidEquals(kdf.Value().objectIdentifier, PBKDF2_OID) || !kdf.Value().hasParameters)
+            if (!OidEquals(kdf.value().objectIdentifier, PBKDF2_OID) || !kdf.value().hasParameters)
             {
-                return UnsupportedAlgorithm();
-            }
-
-            auto encryptionElement = reader.Value().ReadElement();
-            if (!encryptionElement.HasValue())
-            {
-                return encryptionElement.Error();
-            }
-            auto encryptionScheme = ParseRawAlgorithmIdentifierElement(encryptionElement.Value());
-            if (!encryptionScheme.HasValue())
-            {
-                return encryptionScheme.Error();
-            }
-            if (!reader.Value().IsAtEnd())
-            {
-                return ParseError();
+                return std::unexpected(UnsupportedAlgorithm());
             }
 
-            auto parsedEncryption = ParseAesGcmParameters(encryptionScheme.Value());
-            if (!parsedEncryption.HasValue())
+            auto encryptionElement = reader.value().ReadElement();
+            if (!encryptionElement.has_value())
             {
-                return parsedEncryption.Error();
+                return std::unexpected(std::move(encryptionElement).error());
+            }
+            auto encryptionScheme = ParseRawAlgorithmIdentifierElement(encryptionElement.value());
+            if (!encryptionScheme.has_value())
+            {
+                return std::unexpected(std::move(encryptionScheme).error());
+            }
+            if (!reader.value().IsAtEnd())
+            {
+                return std::unexpected(ParseError());
+            }
+
+            auto parsedEncryption = ParseAesGcmParameters(encryptionScheme.value());
+            if (!parsedEncryption.has_value())
+            {
+                return std::unexpected(std::move(parsedEncryption).error());
             }
             auto parsedKdf =
-                    ParsePbkdf2Parameters(ConstByteSpan {kdf.Value().parameters.data(), kdf.Value().parameters.Size()});
-            if (!parsedKdf.HasValue())
+                    ParsePbkdf2Parameters(ConstByteSpan {kdf.value().parameters.data(), kdf.value().parameters.Size()});
+            if (!parsedKdf.has_value())
             {
-                return parsedKdf.Error();
+                return std::unexpected(std::move(parsedKdf).error());
             }
-            if (parsedKdf.Value().keyLength != 0 && parsedKdf.Value().keyLength != parsedEncryption.Value().keyLength)
+            if (parsedKdf.value().keyLength != 0 && parsedKdf.value().keyLength != parsedEncryption.value().keyLength)
             {
-                return UnsupportedAlgorithm();
+                return std::unexpected(UnsupportedAlgorithm());
             }
 
             return Pbes2Parameters {
-                    .kdf        = std::move(parsedKdf.Value()),
-                    .encryption = std::move(parsedEncryption.Value()),
+                    .kdf        = std::move(parsedKdf.value()),
+                    .encryption = std::move(parsedEncryption.value()),
             };
         }
 
@@ -571,54 +571,54 @@ namespace NGIN::Crypto::Keys
         {
             DerReader parent {element.encoded};
             auto      reader = NGIN::Crypto::Encoding::ReadDerSequence(parent, element);
-            if (!reader.HasValue())
+            if (!reader.has_value())
             {
-                return reader.Error();
+                return std::unexpected(std::move(reader).error());
             }
 
-            auto oidElement = reader.Value().ReadElement();
-            if (!oidElement.HasValue())
+            auto oidElement = reader.value().ReadElement();
+            if (!oidElement.has_value())
             {
-                return oidElement.Error();
+                return std::unexpected(std::move(oidElement).error());
             }
 
-            auto oid = NGIN::Crypto::Encoding::ReadDerObjectIdentifier(oidElement.Value());
-            if (!oid.HasValue())
+            auto oid = NGIN::Crypto::Encoding::ReadDerObjectIdentifier(oidElement.value());
+            if (!oid.has_value())
             {
-                return oid.Error();
+                return std::unexpected(std::move(oid).error());
             }
 
             KeyAlgorithmIdentifier identifier {
-                    .objectIdentifier = std::move(oid.Value()),
+                    .objectIdentifier = std::move(oid.value()),
                     .parameters       = {},
                     .hasParameters    = false,
             };
 
-            if (!reader.Value().IsAtEnd())
+            if (!reader.value().IsAtEnd())
             {
-                auto parameters = reader.Value().ReadElement();
-                if (!parameters.HasValue())
+                auto parameters = reader.value().ReadElement();
+                if (!parameters.has_value())
                 {
-                    return parameters.Error();
+                    return std::unexpected(std::move(parameters).error());
                 }
-                if (!reader.Value().IsAtEnd())
+                if (!reader.value().IsAtEnd())
                 {
-                    return ParseError();
+                    return std::unexpected(ParseError());
                 }
 
                 identifier.hasParameters = true;
-                identifier.parameters    = CopyBytes(parameters.Value().encoded);
+                identifier.parameters    = CopyBytes(parameters.value().encoded);
             }
 
             auto algorithm = IdentifyAlgorithm(
                     identifier.objectIdentifier,
                     identifier.hasParameters,
                     ConstByteSpan {identifier.parameters.data(), identifier.parameters.Size()});
-            if (!algorithm.HasValue())
+            if (!algorithm.has_value())
             {
-                return algorithm.Error();
+                return std::unexpected(std::move(algorithm).error());
             }
-            identifier.algorithm = algorithm.Value();
+            identifier.algorithm = algorithm.value();
 
             return identifier;
         }
@@ -628,43 +628,43 @@ namespace NGIN::Crypto::Keys
         {
             DerReader parent {element.encoded};
             auto      reader = NGIN::Crypto::Encoding::ReadDerSequence(parent, element);
-            if (!reader.HasValue())
+            if (!reader.has_value())
             {
-                return reader.Error();
+                return std::unexpected(std::move(reader).error());
             }
 
-            auto oidElement = reader.Value().ReadElement();
-            if (!oidElement.HasValue())
+            auto oidElement = reader.value().ReadElement();
+            if (!oidElement.has_value())
             {
-                return oidElement.Error();
+                return std::unexpected(std::move(oidElement).error());
             }
 
-            auto oid = NGIN::Crypto::Encoding::ReadDerObjectIdentifier(oidElement.Value());
-            if (!oid.HasValue())
+            auto oid = NGIN::Crypto::Encoding::ReadDerObjectIdentifier(oidElement.value());
+            if (!oid.has_value())
             {
-                return oid.Error();
+                return std::unexpected(std::move(oid).error());
             }
 
             EncryptedPrivateKeyAlgorithmIdentifier identifier {
-                    .objectIdentifier = std::move(oid.Value()),
+                    .objectIdentifier = std::move(oid.value()),
                     .parameters       = {},
                     .hasParameters    = false,
             };
 
-            if (!reader.Value().IsAtEnd())
+            if (!reader.value().IsAtEnd())
             {
-                auto parameters = reader.Value().ReadElement();
-                if (!parameters.HasValue())
+                auto parameters = reader.value().ReadElement();
+                if (!parameters.has_value())
                 {
-                    return parameters.Error();
+                    return std::unexpected(std::move(parameters).error());
                 }
-                if (!reader.Value().IsAtEnd())
+                if (!reader.value().IsAtEnd())
                 {
-                    return ParseError();
+                    return std::unexpected(ParseError());
                 }
 
                 identifier.hasParameters = true;
-                identifier.parameters    = CopyBytes(parameters.Value().encoded);
+                identifier.parameters    = CopyBytes(parameters.value().encoded);
             }
 
             return identifier;
@@ -677,25 +677,25 @@ namespace NGIN::Crypto::Keys
 
             auto oid = NGIN::Crypto::Encoding::EncodeDerObjectIdentifier(
                     std::span<const NGIN::UInt32> {algorithm.objectIdentifier.begin(), algorithm.objectIdentifier.Size()});
-            if (!oid.HasValue())
+            if (!oid.has_value())
             {
-                return oid.Error();
+                return std::unexpected(std::move(oid).error());
             }
-            AppendBytes(children, ConstByteSpan {oid.Value().data(), oid.Value().Size()});
+            AppendBytes(children, ConstByteSpan {oid.value().data(), oid.value().Size()});
 
             if (algorithm.hasParameters)
             {
                 auto parametersElement = ReadSingleElement(
                         ConstByteSpan {algorithm.parameters.data(), algorithm.parameters.Size()});
-                if (!parametersElement.HasValue())
+                if (!parametersElement.has_value())
                 {
-                    return parametersElement.Error();
+                    return std::unexpected(std::move(parametersElement).error());
                 }
                 AppendBytes(children, ConstByteSpan {algorithm.parameters.data(), algorithm.parameters.Size()});
             }
             else if (algorithm.parameters.Size() != 0)
             {
-                return InvalidArgument();
+                return std::unexpected(InvalidArgument());
             }
 
             return NGIN::Crypto::Encoding::EncodeDerSequence(ConstByteSpan {children.data(), children.Size()});
@@ -712,62 +712,62 @@ namespace NGIN::Crypto::Keys
             if (algorithm == KeyAlgorithm::Ed25519)
             {
                 auto oid = NGIN::Crypto::Encoding::EncodeDerObjectIdentifier(ED25519_OID);
-                if (!oid.HasValue())
+                if (!oid.has_value())
                 {
-                    return oid.Error();
+                    return std::unexpected(std::move(oid).error());
                 }
-                append(oid.Value());
+                append(oid.value());
                 return NGIN::Crypto::Encoding::EncodeDerSequence(ConstByteSpan {children.data(), children.Size()});
             }
 
             if (algorithm == KeyAlgorithm::X25519)
             {
                 auto oid = NGIN::Crypto::Encoding::EncodeDerObjectIdentifier(X25519_OID);
-                if (!oid.HasValue())
+                if (!oid.has_value())
                 {
-                    return oid.Error();
+                    return std::unexpected(std::move(oid).error());
                 }
-                append(oid.Value());
+                append(oid.value());
                 return NGIN::Crypto::Encoding::EncodeDerSequence(ConstByteSpan {children.data(), children.Size()});
             }
 
             if (algorithm == KeyAlgorithm::EcdsaP256)
             {
                 auto oid = NGIN::Crypto::Encoding::EncodeDerObjectIdentifier(EC_PUBLIC_KEY_OID);
-                if (!oid.HasValue())
+                if (!oid.has_value())
                 {
-                    return oid.Error();
+                    return std::unexpected(std::move(oid).error());
                 }
                 auto curve = NGIN::Crypto::Encoding::EncodeDerObjectIdentifier(SECP256R1_OID);
-                if (!curve.HasValue())
+                if (!curve.has_value())
                 {
-                    return curve.Error();
+                    return std::unexpected(std::move(curve).error());
                 }
-                append(oid.Value());
-                append(curve.Value());
+                append(oid.value());
+                append(curve.value());
                 return NGIN::Crypto::Encoding::EncodeDerSequence(ConstByteSpan {children.data(), children.Size()});
             }
 
             if (algorithm == KeyAlgorithm::Rsa)
             {
                 auto oid = NGIN::Crypto::Encoding::EncodeDerObjectIdentifier(RSA_ENCRYPTION_OID);
-                if (!oid.HasValue())
+                if (!oid.has_value())
                 {
-                    return oid.Error();
+                    return std::unexpected(std::move(oid).error());
                 }
                 auto nullParameters = NGIN::Crypto::Encoding::EncodeDerElement(
                         NGIN::Crypto::Encoding::MakeDerUniversalTag(DerUniversalTag::Null),
                         ConstByteSpan {});
-                if (!nullParameters.HasValue())
+                if (!nullParameters.has_value())
                 {
-                    return nullParameters.Error();
+                    return std::unexpected(std::move(nullParameters).error());
                 }
-                append(oid.Value());
-                append(nullParameters.Value());
+                append(oid.value());
+                append(nullParameters.value());
                 return NGIN::Crypto::Encoding::EncodeDerSequence(ConstByteSpan {children.data(), children.Size()});
             }
 
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         [[nodiscard]] CryptoExpected<ByteBuffer> EncodeSequenceFromChildren(ConstByteSpan first, ConstByteSpan second)
@@ -803,10 +803,10 @@ namespace NGIN::Crypto::Keys
                 return SignatureAlgorithm::RsaPssSha256;
             case KeyAlgorithm::Unknown:
             case KeyAlgorithm::X25519:
-                return UnsupportedAlgorithm();
+                return std::unexpected(UnsupportedAlgorithm());
         }
 
-        return UnsupportedAlgorithm();
+        return std::unexpected(UnsupportedAlgorithm());
     }
 
     CryptoExpected<KeyAgreementAlgorithm> ToKeyAgreementAlgorithm(KeyAlgorithm algorithm) noexcept
@@ -816,7 +816,7 @@ namespace NGIN::Crypto::Keys
             return KeyAgreementAlgorithm::X25519;
         }
 
-        return UnsupportedAlgorithm();
+        return std::unexpected(UnsupportedAlgorithm());
     }
 
     CryptoExpected<KeyAlgorithm> FromSignatureAlgorithm(SignatureAlgorithm algorithm) noexcept
@@ -831,7 +831,7 @@ namespace NGIN::Crypto::Keys
                 return KeyAlgorithm::Rsa;
         }
 
-        return UnsupportedAlgorithm();
+        return std::unexpected(UnsupportedAlgorithm());
     }
 
     CryptoExpected<KeyAlgorithm> FromKeyAgreementAlgorithm(KeyAgreementAlgorithm algorithm) noexcept
@@ -842,83 +842,83 @@ namespace NGIN::Crypto::Keys
                 return KeyAlgorithm::X25519;
         }
 
-        return UnsupportedAlgorithm();
+        return std::unexpected(UnsupportedAlgorithm());
     }
 
     CryptoExpected<SubjectPublicKeyInfo> ParseSubjectPublicKeyInfo(ConstByteSpan der)
     {
         DerReader reader {der};
         auto      top = reader.ReadElement();
-        if (!top.HasValue())
+        if (!top.has_value())
         {
-            return top.Error();
+            return std::unexpected(std::move(top).error());
         }
         if (!reader.IsAtEnd())
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
-        auto sequence = NGIN::Crypto::Encoding::ReadDerSequence(reader, top.Value());
-        if (!sequence.HasValue())
+        auto sequence = NGIN::Crypto::Encoding::ReadDerSequence(reader, top.value());
+        if (!sequence.has_value())
         {
-            return sequence.Error();
+            return std::unexpected(std::move(sequence).error());
         }
 
-        auto algorithmElement = sequence.Value().ReadElement();
-        if (!algorithmElement.HasValue())
+        auto algorithmElement = sequence.value().ReadElement();
+        if (!algorithmElement.has_value())
         {
-            return algorithmElement.Error();
+            return std::unexpected(std::move(algorithmElement).error());
         }
 
-        auto algorithm = ParseAlgorithmIdentifierElement(algorithmElement.Value());
-        if (!algorithm.HasValue())
+        auto algorithm = ParseAlgorithmIdentifierElement(algorithmElement.value());
+        if (!algorithm.has_value())
         {
-            return algorithm.Error();
+            return std::unexpected(std::move(algorithm).error());
         }
 
-        auto publicKeyElement = sequence.Value().ReadElement();
-        if (!publicKeyElement.HasValue())
+        auto publicKeyElement = sequence.value().ReadElement();
+        if (!publicKeyElement.has_value())
         {
-            return publicKeyElement.Error();
+            return std::unexpected(std::move(publicKeyElement).error());
         }
-        if (!sequence.Value().IsAtEnd())
+        if (!sequence.value().IsAtEnd())
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
-        auto bitString = NGIN::Crypto::Encoding::ReadDerBitString(publicKeyElement.Value());
-        if (!bitString.HasValue())
+        auto bitString = NGIN::Crypto::Encoding::ReadDerBitString(publicKeyElement.value());
+        if (!bitString.has_value())
         {
-            return bitString.Error();
+            return std::unexpected(std::move(bitString).error());
         }
-        if (bitString.Value().unusedBitCount != 0)
+        if (bitString.value().unusedBitCount != 0)
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
         return SubjectPublicKeyInfo {
-                .algorithm = std::move(algorithm.Value()),
-                .publicKey = CopyBytes(bitString.Value().bytes),
+                .algorithm = std::move(algorithm.value()),
+                .publicKey = CopyBytes(bitString.value().bytes),
         };
     }
 
     CryptoExpected<ByteBuffer> WriteSubjectPublicKeyInfo(KeyAlgorithm algorithm, ConstByteSpan publicKey)
     {
         auto algorithmIdentifier = EncodeAlgorithmIdentifier(algorithm);
-        if (!algorithmIdentifier.HasValue())
+        if (!algorithmIdentifier.has_value())
         {
-            return algorithmIdentifier.Error();
+            return std::unexpected(std::move(algorithmIdentifier).error());
         }
 
         auto publicKeyBits = NGIN::Crypto::Encoding::EncodeDerBitString(0, publicKey);
-        if (!publicKeyBits.HasValue())
+        if (!publicKeyBits.has_value())
         {
-            return publicKeyBits.Error();
+            return std::unexpected(std::move(publicKeyBits).error());
         }
 
         return EncodeSequenceFromChildren(
-                ConstByteSpan {algorithmIdentifier.Value().data(), algorithmIdentifier.Value().Size()},
-                ConstByteSpan {publicKeyBits.Value().data(), publicKeyBits.Value().Size()});
+                ConstByteSpan {algorithmIdentifier.value().data(), algorithmIdentifier.value().Size()},
+                ConstByteSpan {publicKeyBits.value().data(), publicKeyBits.value().Size()});
     }
 
     CryptoExpected<NGIN::Crypto::Asymmetric::Ed25519PublicKey> ImportEd25519PublicKey(
@@ -926,7 +926,7 @@ namespace NGIN::Crypto::Keys
     {
         if (publicKeyInfo.algorithm.algorithm != KeyAlgorithm::Ed25519)
         {
-            return InvalidKey();
+            return std::unexpected(InvalidKey());
         }
 
         return NGIN::Crypto::Asymmetric::Ed25519PublicKey::FromBytes(
@@ -938,7 +938,7 @@ namespace NGIN::Crypto::Keys
     {
         if (publicKeyInfo.algorithm.algorithm != KeyAlgorithm::X25519)
         {
-            return InvalidKey();
+            return std::unexpected(InvalidKey());
         }
 
         return NGIN::Crypto::Asymmetric::X25519PublicKey::FromBytes(
@@ -951,7 +951,7 @@ namespace NGIN::Crypto::Keys
         if (publicKeyInfo.algorithm.algorithm != KeyAlgorithm::EcdsaP256 || publicKeyInfo.publicKey.Size() != 65 ||
             publicKeyInfo.publicKey[0] != NGIN::Byte {0x04})
         {
-            return InvalidKey();
+            return std::unexpected(InvalidKey());
         }
 
         return NGIN::Crypto::Asymmetric::EcdsaP256PublicKey::FromBytes(
@@ -986,66 +986,66 @@ namespace NGIN::Crypto::Keys
     {
         DerReader reader {der};
         auto      top = reader.ReadElement();
-        if (!top.HasValue())
+        if (!top.has_value())
         {
-            return top.Error();
+            return std::unexpected(std::move(top).error());
         }
         if (!reader.IsAtEnd())
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
-        auto sequence = NGIN::Crypto::Encoding::ReadDerSequence(reader, top.Value());
-        if (!sequence.HasValue())
+        auto sequence = NGIN::Crypto::Encoding::ReadDerSequence(reader, top.value());
+        if (!sequence.has_value())
         {
-            return sequence.Error();
+            return std::unexpected(std::move(sequence).error());
         }
 
-        auto versionElement = sequence.Value().ReadElement();
-        if (!versionElement.HasValue())
+        auto versionElement = sequence.value().ReadElement();
+        if (!versionElement.has_value())
         {
-            return versionElement.Error();
+            return std::unexpected(std::move(versionElement).error());
         }
-        auto version = NGIN::Crypto::Encoding::ReadDerInteger(versionElement.Value());
-        if (!version.HasValue())
+        auto version = NGIN::Crypto::Encoding::ReadDerInteger(versionElement.value());
+        if (!version.has_value())
         {
-            return version.Error();
+            return std::unexpected(std::move(version).error());
         }
-        if (version.Value().size() != 1 || version.Value()[0] != NGIN::Byte {0})
+        if (version.value().size() != 1 || version.value()[0] != NGIN::Byte {0})
         {
-            return ParseError();
-        }
-
-        auto algorithmElement = sequence.Value().ReadElement();
-        if (!algorithmElement.HasValue())
-        {
-            return algorithmElement.Error();
-        }
-        auto algorithm = ParseAlgorithmIdentifierElement(algorithmElement.Value());
-        if (!algorithm.HasValue())
-        {
-            return algorithm.Error();
+            return std::unexpected(ParseError());
         }
 
-        auto privateKeyElement = sequence.Value().ReadElement();
-        if (!privateKeyElement.HasValue())
+        auto algorithmElement = sequence.value().ReadElement();
+        if (!algorithmElement.has_value())
         {
-            return privateKeyElement.Error();
+            return std::unexpected(std::move(algorithmElement).error());
         }
-        auto privateKey = NGIN::Crypto::Encoding::ReadDerOctetString(privateKeyElement.Value());
-        if (!privateKey.HasValue())
+        auto algorithm = ParseAlgorithmIdentifierElement(algorithmElement.value());
+        if (!algorithm.has_value())
         {
-            return privateKey.Error();
+            return std::unexpected(std::move(algorithm).error());
         }
-        if (!sequence.Value().IsAtEnd())
+
+        auto privateKeyElement = sequence.value().ReadElement();
+        if (!privateKeyElement.has_value())
         {
-            return ParseError();
+            return std::unexpected(std::move(privateKeyElement).error());
+        }
+        auto privateKey = NGIN::Crypto::Encoding::ReadDerOctetString(privateKeyElement.value());
+        if (!privateKey.has_value())
+        {
+            return std::unexpected(std::move(privateKey).error());
+        }
+        if (!sequence.value().IsAtEnd())
+        {
+            return std::unexpected(ParseError());
         }
 
         return PrivateKeyInfo {
                 .version    = 0,
-                .algorithm  = std::move(algorithm.Value()),
-                .privateKey = CopyBytes(privateKey.Value()),
+                .algorithm  = std::move(algorithm.value()),
+                .privateKey = CopyBytes(privateKey.value()),
         };
     }
 
@@ -1053,77 +1053,77 @@ namespace NGIN::Crypto::Keys
     {
         const std::array<NGIN::Byte, 1> versionValue {NGIN::Byte {0}};
         auto                            version = NGIN::Crypto::Encoding::EncodeDerInteger(versionValue);
-        if (!version.HasValue())
+        if (!version.has_value())
         {
-            return version.Error();
+            return std::unexpected(std::move(version).error());
         }
 
         auto algorithmIdentifier = EncodeAlgorithmIdentifier(algorithm);
-        if (!algorithmIdentifier.HasValue())
+        if (!algorithmIdentifier.has_value())
         {
-            return algorithmIdentifier.Error();
+            return std::unexpected(std::move(algorithmIdentifier).error());
         }
 
         auto privateKeyOctets = NGIN::Crypto::Encoding::EncodeDerOctetString(privateKey);
-        if (!privateKeyOctets.HasValue())
+        if (!privateKeyOctets.has_value())
         {
-            return privateKeyOctets.Error();
+            return std::unexpected(std::move(privateKeyOctets).error());
         }
 
         return EncodeSequenceFromChildren(
-                ConstByteSpan {version.Value().data(), version.Value().Size()},
-                ConstByteSpan {algorithmIdentifier.Value().data(), algorithmIdentifier.Value().Size()},
-                ConstByteSpan {privateKeyOctets.Value().data(), privateKeyOctets.Value().Size()});
+                ConstByteSpan {version.value().data(), version.value().Size()},
+                ConstByteSpan {algorithmIdentifier.value().data(), algorithmIdentifier.value().Size()},
+                ConstByteSpan {privateKeyOctets.value().data(), privateKeyOctets.value().Size()});
     }
 
     CryptoExpected<EncryptedPrivateKeyInfo> ParseEncryptedPrivateKeyInfo(ConstByteSpan der)
     {
         DerReader reader {der};
         auto      top = reader.ReadElement();
-        if (!top.HasValue())
+        if (!top.has_value())
         {
-            return top.Error();
+            return std::unexpected(std::move(top).error());
         }
         if (!reader.IsAtEnd())
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
-        auto sequence = NGIN::Crypto::Encoding::ReadDerSequence(reader, top.Value());
-        if (!sequence.HasValue())
+        auto sequence = NGIN::Crypto::Encoding::ReadDerSequence(reader, top.value());
+        if (!sequence.has_value())
         {
-            return sequence.Error();
+            return std::unexpected(std::move(sequence).error());
         }
 
-        auto algorithmElement = sequence.Value().ReadElement();
-        if (!algorithmElement.HasValue())
+        auto algorithmElement = sequence.value().ReadElement();
+        if (!algorithmElement.has_value())
         {
-            return algorithmElement.Error();
+            return std::unexpected(std::move(algorithmElement).error());
         }
-        auto algorithm = ParseRawAlgorithmIdentifierElement(algorithmElement.Value());
-        if (!algorithm.HasValue())
+        auto algorithm = ParseRawAlgorithmIdentifierElement(algorithmElement.value());
+        if (!algorithm.has_value())
         {
-            return algorithm.Error();
+            return std::unexpected(std::move(algorithm).error());
         }
 
-        auto encryptedDataElement = sequence.Value().ReadElement();
-        if (!encryptedDataElement.HasValue())
+        auto encryptedDataElement = sequence.value().ReadElement();
+        if (!encryptedDataElement.has_value())
         {
-            return encryptedDataElement.Error();
+            return std::unexpected(std::move(encryptedDataElement).error());
         }
-        auto encryptedData = NGIN::Crypto::Encoding::ReadDerOctetString(encryptedDataElement.Value());
-        if (!encryptedData.HasValue())
+        auto encryptedData = NGIN::Crypto::Encoding::ReadDerOctetString(encryptedDataElement.value());
+        if (!encryptedData.has_value())
         {
-            return encryptedData.Error();
+            return std::unexpected(std::move(encryptedData).error());
         }
-        if (!sequence.Value().IsAtEnd())
+        if (!sequence.value().IsAtEnd())
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
         return EncryptedPrivateKeyInfo {
-                .encryptionAlgorithm = std::move(algorithm.Value()),
-                .encryptedData       = CopyBytes(encryptedData.Value()),
+                .encryptionAlgorithm = std::move(algorithm.value()),
+                .encryptedData       = CopyBytes(encryptedData.value()),
         };
     }
 
@@ -1132,20 +1132,20 @@ namespace NGIN::Crypto::Keys
             ConstByteSpan                                 encryptedData)
     {
         auto algorithmIdentifier = EncodeRawAlgorithmIdentifier(encryptionAlgorithm);
-        if (!algorithmIdentifier.HasValue())
+        if (!algorithmIdentifier.has_value())
         {
-            return algorithmIdentifier.Error();
+            return std::unexpected(std::move(algorithmIdentifier).error());
         }
 
         auto encryptedDataOctets = NGIN::Crypto::Encoding::EncodeDerOctetString(encryptedData);
-        if (!encryptedDataOctets.HasValue())
+        if (!encryptedDataOctets.has_value())
         {
-            return encryptedDataOctets.Error();
+            return std::unexpected(std::move(encryptedDataOctets).error());
         }
 
         return EncodeSequenceFromChildren(
-                ConstByteSpan {algorithmIdentifier.Value().data(), algorithmIdentifier.Value().Size()},
-                ConstByteSpan {encryptedDataOctets.Value().data(), encryptedDataOctets.Value().Size()});
+                ConstByteSpan {algorithmIdentifier.value().data(), algorithmIdentifier.value().Size()},
+                ConstByteSpan {encryptedDataOctets.value().data(), encryptedDataOctets.value().Size()});
     }
 
     CryptoExpected<PrivateKeyInfo> DecryptEncryptedPrivateKeyInfo(
@@ -1155,26 +1155,26 @@ namespace NGIN::Crypto::Keys
             const EncryptedPrivateKeyDecryptOptions&    options)
     {
         auto parameters = ParsePbes2Parameters(encryptedPrivateKeyInfo.encryptionAlgorithm);
-        if (!parameters.HasValue())
+        if (!parameters.has_value())
         {
-            return parameters.Error();
+            return std::unexpected(std::move(parameters).error());
         }
 
-        const auto& kdf        = parameters.Value().kdf;
-        const auto& encryption = parameters.Value().encryption;
+        const auto& kdf        = parameters.value().kdf;
+        const auto& encryption = parameters.value().encryption;
         if (kdf.iterations < options.minimumPbkdf2Iterations)
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
         if (encryptedPrivateKeyInfo.encryptedData.Size() < encryption.tagLength)
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
         const auto ciphertextSize = encryptedPrivateKeyInfo.encryptedData.Size() - encryption.tagLength;
         if (ciphertextSize > options.maxPlaintextBytes)
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         auto                                derivedKey = NGIN::Crypto::Memory::SecureBuffer {encryption.keyLength};
@@ -1184,9 +1184,9 @@ namespace NGIN::Crypto::Keys
                 .iterations = kdf.iterations,
         };
         auto keyResult = NGIN::Crypto::Kdf::Pbkdf2Sha256Into(context, kdfParameters, derivedKey.AsBytes());
-        if (!keyResult.HasValue())
+        if (!keyResult.has_value())
         {
-            return keyResult.Error();
+            return std::unexpected(std::move(keyResult).error());
         }
 
         auto encryptedBytes = ConstByteSpan {
@@ -1206,20 +1206,20 @@ namespace NGIN::Crypto::Keys
                         .associatedData = {},
                         .tag            = tag,
                 });
-        if (!plaintext.HasValue())
+        if (!plaintext.has_value())
         {
-            return plaintext.Error();
+            return std::unexpected(std::move(plaintext).error());
         }
 
-        auto privateKeyInfo = ParsePrivateKeyInfo(ConstByteSpan {plaintext.Value().data(), plaintext.Value().Size()});
-        if (!privateKeyInfo.HasValue())
+        auto privateKeyInfo = ParsePrivateKeyInfo(ConstByteSpan {plaintext.value().data(), plaintext.value().Size()});
+        if (!privateKeyInfo.has_value())
         {
-            NGIN::Crypto::Memory::SecureZero(ByteSpan {plaintext.Value().data(), plaintext.Value().Size()});
-            return privateKeyInfo.Error();
+            NGIN::Crypto::Memory::SecureZero(ByteSpan {plaintext.value().data(), plaintext.value().Size()});
+            return std::unexpected(std::move(privateKeyInfo).error());
         }
 
-        NGIN::Crypto::Memory::SecureZero(ByteSpan {plaintext.Value().data(), plaintext.Value().Size()});
-        return privateKeyInfo.Value();
+        NGIN::Crypto::Memory::SecureZero(ByteSpan {plaintext.value().data(), plaintext.value().Size()});
+        return privateKeyInfo.value();
     }
 
     CryptoExpected<NGIN::Crypto::Asymmetric::Ed25519PrivateKey> ImportEd25519PrivateKey(
@@ -1227,7 +1227,7 @@ namespace NGIN::Crypto::Keys
     {
         if (privateKeyInfo.algorithm.algorithm != KeyAlgorithm::Ed25519)
         {
-            return InvalidKey();
+            return std::unexpected(InvalidKey());
         }
 
         return NGIN::Crypto::Asymmetric::Ed25519PrivateKey::FromSecretBytes(
@@ -1239,7 +1239,7 @@ namespace NGIN::Crypto::Keys
     {
         if (privateKeyInfo.algorithm.algorithm != KeyAlgorithm::X25519)
         {
-            return InvalidKey();
+            return std::unexpected(InvalidKey());
         }
 
         return NGIN::Crypto::Asymmetric::X25519PrivateKey::FromSecretBytes(
@@ -1251,7 +1251,7 @@ namespace NGIN::Crypto::Keys
     {
         if (privateKeyInfo.algorithm.algorithm != KeyAlgorithm::EcdsaP256)
         {
-            return InvalidKey();
+            return std::unexpected(InvalidKey());
         }
 
         return NGIN::Crypto::Asymmetric::EcdsaP256PrivateKey::FromSecretBytes(

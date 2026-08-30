@@ -19,7 +19,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
             options);
 
     auto context = NGIN::Crypto::Backend::CreateBestAvailableContext();
-    if (context.HasValue())
+    if (context.has_value())
     {
         constexpr std::array<NGIN::Byte, 32> key {
                 NGIN::Byte {0x70},
@@ -57,7 +57,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
         };
 
         (void) NGIN::Crypto::Tokens::OpenPasetoV4Local(
-                context.Value(),
+                context.value(),
                 input,
                 NGIN::Crypto::Memory::SecretView {NGIN::Crypto::ConstByteSpan {key.data(), key.size()}},
                 NGIN::Crypto::Tokens::PasetoValidationPolicy {

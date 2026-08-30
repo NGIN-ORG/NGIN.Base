@@ -101,9 +101,9 @@ namespace NGIN::Crypto::Memory
         {
             T                    value {};
             CryptoExpected<void> result = NGIN::Crypto::Random::Fill(ByteSpan {value.data(), value.size()});
-            if (!result.HasValue())
+            if (!result.has_value())
             {
-                return result.Error();
+                return std::unexpected(std::move(result).error());
             }
 
             return Secret {std::move(value)};

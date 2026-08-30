@@ -17,6 +17,9 @@ namespace NGIN::Memory
     class TrackingAllocator
     {
     public:
+        /// @brief Propagates whether the wrapped allocator has definitive ownership queries.
+        static constexpr bool HasPreciseOwnership = AllocatorTraits<Inner>::HasPreciseOwnershipCapability;
+
         /// @brief Constructs the decorator around a default-constructed inner allocator.
         TrackingAllocator() = default;
 
@@ -72,13 +75,6 @@ namespace NGIN::Memory
         [[nodiscard]] Ownership OwnershipOf(const void* p) const noexcept
         {
             return AllocatorTraits<Inner>::OwnershipOf(m_inner, p);
-        }
-
-        /// @brief Returns whether the inner allocator owns a pointer when that operation is available.
-        [[nodiscard]] bool Owns(const void* p) const noexcept
-            requires AllocatorOwnsPointer<Inner>
-        {
-            return m_inner.Owns(p);
         }
 
         /// @brief Returns the current allocation counters.

@@ -173,12 +173,12 @@ namespace NGIN::Crypto::Encoding
                 if (!ExtractBoundaryLabel(line, BEGIN_PREFIX, label) || !IsValidLabel(label) ||
                     !IsAllowedLabel(label, options))
                 {
-                    return ParseError();
+                    return std::unexpected(ParseError());
                 }
 
                 if (!options.allowMultipleBlocks && blocks.Size() != 0)
                 {
-                    return ParseError();
+                    return std::unexpected(ParseError());
                 }
 
                 currentLabel.assign(label);
@@ -189,7 +189,7 @@ namespace NGIN::Crypto::Encoding
 
             if (StartsWith(line, BEGIN_PREFIX))
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
             std::string_view endLabel;
@@ -197,26 +197,26 @@ namespace NGIN::Crypto::Encoding
             {
                 if (endLabel != currentLabel || encodedPayload.empty())
                 {
-                    return ParseError();
+                    return std::unexpected(ParseError());
                 }
                 if ((encodedPayload.size() % 4) != 0)
                 {
-                    return EncodingError();
+                    return std::unexpected(EncodingError());
                 }
 
                 auto decoded = DecodeBase64(encodedPayload);
-                if (!decoded.HasValue())
+                if (!decoded.has_value())
                 {
-                    return decoded.Error();
+                    return std::unexpected(std::move(decoded).error());
                 }
-                if (decoded.Value().Size() > options.maxDecodedBytes)
+                if (decoded.value().Size() > options.maxDecodedBytes)
                 {
-                    return ParseError();
+                    return std::unexpected(ParseError());
                 }
 
                 blocks.PushBack(PemBlock {
                         .label   = currentLabel,
-                        .decoded = std::move(decoded.Value()),
+                        .decoded = std::move(decoded.value()),
                 });
 
                 currentLabel.clear();
@@ -227,20 +227,20 @@ namespace NGIN::Crypto::Encoding
 
             if (line.empty())
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
             for (char character: line)
             {
                 if (!IsBase64Character(character))
                 {
-                    return EncodingError();
+                    return std::unexpected(EncodingError());
                 }
             }
 
             if (!CanFitEncodedBase64Length(encodedPayload.size() + line.size(), options.maxDecodedBytes))
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
             encodedPayload.append(line);
@@ -248,7 +248,7 @@ namespace NGIN::Crypto::Encoding
 
         if (insideBlock || blocks.Size() == 0)
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
         return blocks;

@@ -28,11 +28,11 @@ namespace NGIN::Net::TLS
     {
 #if defined(NGIN_BASE_TLS_HAS_OPENSSL)
         auto state = detail::CreateOpenSslClientContext(std::move(options));
-        if (!state.HasValue())
+        if (!state.has_value())
         {
-            return NGIN::Utilities::Unexpected(state.Error());
+            return NGIN::Utilities::Unexpected(state.error());
         }
-        return TlsContext {std::move(state.Value())};
+        return TlsContext {std::move(state.value())};
 #else
         static_cast<void>(options);
         return NGIN::Utilities::Unexpected(ProviderUnavailable());
@@ -43,11 +43,11 @@ namespace NGIN::Net::TLS
     {
 #if defined(NGIN_BASE_TLS_HAS_OPENSSL)
         auto state = detail::CreateOpenSslServerContext(std::move(options));
-        if (!state.HasValue())
+        if (!state.has_value())
         {
-            return NGIN::Utilities::Unexpected(state.Error());
+            return NGIN::Utilities::Unexpected(state.error());
         }
-        return TlsContext {std::move(state.Value())};
+        return TlsContext {std::move(state.value())};
 #else
         static_cast<void>(options);
         return NGIN::Utilities::Unexpected(ProviderUnavailable());

@@ -36,18 +36,18 @@ namespace
 TEST_CASE("IO.Process captures output, errors, arguments, and exit status", "[IO][Process]")
 {
     auto streams = NGIN::IO::RunProcess(FixtureOptions({"streams"}));
-    REQUIRE(streams.HasValue());
-    CHECK(streams.Value().exitCode == 0);
-    CHECK(streams.Value().standardOutput == "standard-output");
-    CHECK(streams.Value().standardError == "standard-error");
+    REQUIRE(streams.has_value());
+    CHECK(streams.value().exitCode == 0);
+    CHECK(streams.value().standardOutput == "standard-output");
+    CHECK(streams.value().standardError == "standard-error");
 
     auto arguments = NGIN::IO::RunProcess(FixtureOptions({"arguments", "plain", "with spaces", R"(quote\"slash\\)"}));
-    REQUIRE(arguments.HasValue());
-    CHECK(arguments.Value().standardOutput == R"(plain|with spaces|quote\"slash\\)");
+    REQUIRE(arguments.has_value());
+    CHECK(arguments.value().standardOutput == R"(plain|with spaces|quote\"slash\\)");
 
     auto exitResult = NGIN::IO::RunProcess(FixtureOptions({"exit", "23"}));
-    REQUIRE(exitResult.HasValue());
-    CHECK(exitResult.Value().exitCode == 23);
+    REQUIRE(exitResult.has_value());
+    CHECK(exitResult.value().exitCode == 23);
 }
 
 TEST_CASE("IO.Process applies environment and working-directory options", "[IO][Process]")
@@ -55,18 +55,18 @@ TEST_CASE("IO.Process applies environment and working-directory options", "[IO][
     auto environment = FixtureOptions({"environment", "NGIN_BASE_PROCESS_VALUE"});
     environment.environment.push_back({"NGIN_BASE_PROCESS_VALUE", "value with spaces"});
     const auto environmentResult = NGIN::IO::RunProcess(std::move(environment));
-    REQUIRE(environmentResult.HasValue());
-    CHECK(environmentResult.Value().standardOutput == "value with spaces");
+    REQUIRE(environmentResult.has_value());
+    CHECK(environmentResult.value().standardOutput == "value with spaces");
 
     auto workingDirectory             = FixtureOptions({"working-directory"});
     workingDirectory.workingDirectory = NGIN::IO::Path {std::filesystem::temp_directory_path().generic_string()};
     workingDirectory.executable       = NGIN::IO::Path {std::filesystem::absolute(
-                                                                std::filesystem::path {NGIN_BASE_TEST_PROCESS_FIXTURE_FILENAME})
-                                                                .generic_string()};
+                                                          std::filesystem::path {NGIN_BASE_TEST_PROCESS_FIXTURE_FILENAME})
+                                                          .generic_string()};
     const auto directoryResult        = NGIN::IO::RunProcess(std::move(workingDirectory));
-    REQUIRE(directoryResult.HasValue());
+    REQUIRE(directoryResult.has_value());
     CHECK(std::filesystem::equivalent(
-            std::filesystem::path {directoryResult.Value().standardOutput}, std::filesystem::temp_directory_path()));
+            std::filesystem::path {directoryResult.value().standardOutput}, std::filesystem::temp_directory_path()));
 }
 
 TEST_CASE("IO.Process supports observers, discarded streams, and file output", "[IO][Process]")
@@ -77,7 +77,7 @@ TEST_CASE("IO.Process supports observers, discarded streams, and file output", "
     observed.standardOutputObserver = [&](std::string_view chunk) { observedOutput.append(chunk); };
     observed.standardErrorObserver  = [&](std::string_view chunk) { observedError.append(chunk); };
     const auto observedResult       = NGIN::IO::RunProcess(std::move(observed));
-    REQUIRE(observedResult.HasValue());
+    REQUIRE(observedResult.has_value());
     CHECK(observedOutput == "standard-output");
     CHECK(observedError == "standard-error");
 
@@ -85,16 +85,16 @@ TEST_CASE("IO.Process supports observers, discarded streams, and file output", "
     discarded.standardOutput.mode = NGIN::IO::ProcessStreamMode::Discard;
     discarded.standardError.mode  = NGIN::IO::ProcessStreamMode::Discard;
     const auto discardedResult    = NGIN::IO::RunProcess(std::move(discarded));
-    REQUIRE(discardedResult.HasValue());
-    CHECK(discardedResult.Value().standardOutput.empty());
-    CHECK(discardedResult.Value().standardError.empty());
+    REQUIRE(discardedResult.has_value());
+    CHECK(discardedResult.value().standardOutput.empty());
+    CHECK(discardedResult.value().standardError.empty());
 
     const auto outputPath   = std::filesystem::current_path() / "ngin-base-process-output.txt";
     auto       file         = FixtureOptions({"streams"});
     file.standardOutput     = {NGIN::IO::ProcessStreamMode::File, NGIN::IO::Path {outputPath.generic_string()}, false};
     file.standardError.mode = NGIN::IO::ProcessStreamMode::Discard;
     const auto fileResult   = NGIN::IO::RunProcess(std::move(file));
-    REQUIRE(fileResult.HasValue());
+    REQUIRE(fileResult.has_value());
     std::ifstream output {outputPath};
     REQUIRE(output.good());
     const std::string contents {std::istreambuf_iterator<char> {output}, std::istreambuf_iterator<char> {}};
@@ -108,8 +108,8 @@ TEST_CASE("IO.Process enforces timeout, cancellation, and output limits", "[IO][
     auto timeout           = FixtureOptions({"sleep", "5000"});
     timeout.timeout        = 25ms;
     const auto timedResult = NGIN::IO::RunProcess(std::move(timeout));
-    REQUIRE(timedResult.HasValue());
-    CHECK(timedResult.Value().timedOut);
+    REQUIRE(timedResult.has_value());
+    CHECK(timedResult.value().timedOut);
 
     NGIN::Async::CancellationSource source;
     auto                            canceled = FixtureOptions({"sleep", "5000"});
@@ -119,8 +119,8 @@ TEST_CASE("IO.Process enforces timeout, cancellation, and output limits", "[IO][
         source.Cancel();
     }};
     const auto   canceledResult = NGIN::IO::RunProcess(std::move(canceled));
-    REQUIRE(canceledResult.HasValue());
-    CHECK(canceledResult.Value().canceled);
+    REQUIRE(canceledResult.has_value());
+    CHECK(canceledResult.value().canceled);
 
     const auto probeStarted  = std::chrono::steady_clock::now();
     auto       probed        = FixtureOptions({"sleep", "5000"});
@@ -128,15 +128,15 @@ TEST_CASE("IO.Process enforces timeout, cancellation, and output limits", "[IO][
         return std::chrono::steady_clock::now() - probeStarted >= 25ms;
     };
     const auto probedResult = NGIN::IO::RunProcess(std::move(probed));
-    REQUIRE(probedResult.HasValue());
-    CHECK(probedResult.Value().canceled);
+    REQUIRE(probedResult.has_value());
+    CHECK(probedResult.value().canceled);
 
     auto limited               = FixtureOptions({"spam", "10000"});
     limited.maximumOutputBytes = 128;
     const auto limitedResult   = NGIN::IO::RunProcess(std::move(limited));
-    REQUIRE(limitedResult.HasValue());
-    CHECK(limitedResult.Value().outputLimitExceeded);
-    CHECK(limitedResult.Value().standardOutput.size() == 128);
+    REQUIRE(limitedResult.has_value());
+    CHECK(limitedResult.value().outputLimitExceeded);
+    CHECK(limitedResult.value().standardOutput.size() == 128);
 }
 
 TEST_CASE("IO.Process reports invalid starts and enforces single wait", "[IO][Process]")
@@ -144,18 +144,18 @@ TEST_CASE("IO.Process reports invalid starts and enforces single wait", "[IO][Pr
     NGIN::IO::ProcessOptions missing;
     missing.executable       = NGIN::IO::Path {"__ngin_base_missing_process__"};
     const auto missingResult = NGIN::IO::Process::Start(std::move(missing));
-    REQUIRE_FALSE(missingResult.HasValue());
-    CHECK(missingResult.Error().code == NGIN::IO::ProcessErrorCode::StartFailed);
+    REQUIRE_FALSE(missingResult.has_value());
+    CHECK(missingResult.error().code == NGIN::IO::ProcessErrorCode::StartFailed);
 
     auto started = NGIN::IO::Process::Start(FixtureOptions({"exit", "0"}));
-    REQUIRE(started.HasValue());
-    auto process = std::move(started).TakeValue();
+    REQUIRE(started.has_value());
+    auto process = std::move(started).value();
     REQUIRE(process.IsValid());
     const auto firstWait = process.Wait();
-    REQUIRE(firstWait.HasValue());
+    REQUIRE(firstWait.has_value());
     const auto secondWait = process.Wait();
-    REQUIRE_FALSE(secondWait.HasValue());
-    CHECK(secondWait.Error().code == NGIN::IO::ProcessErrorCode::AlreadyWaited);
+    REQUIRE_FALSE(secondWait.has_value());
+    CHECK(secondWait.error().code == NGIN::IO::ProcessErrorCode::AlreadyWaited);
 }
 
 TEST_CASE("IO.Process async execution uses the caller-owned executor and context cancellation", "[IO][Process]")
@@ -189,8 +189,8 @@ TEST_CASE("IO.Process timeout terminates the isolated descendant tree", "[IO][Pr
     auto tree         = FixtureOptions({"process-tree", marker.string()});
     tree.timeout      = 150ms;
     const auto result = NGIN::IO::RunProcess(std::move(tree));
-    REQUIRE(result.HasValue());
-    CHECK(result.Value().timedOut);
+    REQUIRE(result.has_value());
+    CHECK(result.value().timedOut);
 
     std::this_thread::sleep_for(900ms);
     CHECK_FALSE(std::filesystem::exists(marker));

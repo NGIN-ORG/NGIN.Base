@@ -9,6 +9,8 @@
 #include <stdexcept>
 #include <type_traits>
 
+#include <NGIN/Memory/AllocatorConcept.hpp>
+#include <NGIN/Memory/detail/CheckedArithmetic.hpp>
 #include <NGIN/Primitives.hpp>
 
 namespace NGIN::Memory
@@ -16,6 +18,9 @@ namespace NGIN::Memory
     /// @brief Stateless allocator backed by the platform's aligned allocation API.
     struct SystemAllocator
     {
+        /// @brief System allocation APIs cannot precisely identify their own pointers.
+        static constexpr bool HasPreciseOwnership = false;
+
         /// @brief Returns whether a value is a nonzero power of two.
         [[nodiscard]] static bool IsPowerOfTwo(UIntSize v) noexcept
         {
@@ -44,7 +49,12 @@ namespace NGIN::Memory
             return p;
 #elif defined(__cpp_aligned_new)
             if (size % alignment != 0)// std::aligned_alloc requires multiple of alignment
-                size += alignment - (size % alignment);
+            {
+                std::size_t roundedSize = 0;
+                if (!detail::CheckedAdd(size, alignment - (size % alignment), roundedSize))
+                    return nullptr;
+                size = roundedSize;
+            }
             return std::aligned_alloc(alignment, size);
 #else
             return std::malloc(size);// best-effort
@@ -74,10 +84,10 @@ namespace NGIN::Memory
         {
             return MaxSize();
         }
-        /// @brief Returns `true` because system allocations cannot be distinguished by instance.
-        [[nodiscard]] constexpr bool Owns(const void*) const noexcept
+        /// @brief Reports unknown ownership because arbitrary system allocations are indistinguishable.
+        [[nodiscard]] constexpr Ownership OwnershipOf(const void*) const noexcept
         {
-            return true;
+            return Ownership::Unknown;
         }
     };
 }// namespace NGIN::Memory

@@ -120,7 +120,7 @@ int main()
 
     std::cout << "Object sizes: std::string=" << sizeof(std::string)
               << ", NGIN::Text::String=" << sizeof(String)
-              << ", NGIN::Text::AnsiString=" << sizeof(NGIN::Text::AnsiString)
+              << ", NGIN::Text::UTF8String=" << sizeof(NGIN::Text::UTF8String)
               << ", NGIN::Text::WString=" << sizeof(NGIN::Text::WString)
               << ", NGIN::Text::UTF16String=" << sizeof(NGIN::Text::UTF16String)
               << ", SBO24=" << sizeof(StringSBO24)

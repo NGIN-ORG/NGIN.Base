@@ -112,16 +112,16 @@ namespace
 
         auto integer = NGIN::Crypto::Encoding::EncodeDerInteger(
                 NGIN::Crypto::ConstByteSpan {valueBytes.data(), valueBytes.Size()});
-        REQUIRE(integer.HasValue());
-        return integer.Value();
+        REQUIRE(integer.has_value());
+        return integer.value();
     }
 
     [[nodiscard]] NGIN::Crypto::ByteBuffer DerOctetString(const NGIN::Crypto::ByteBuffer& bytes)
     {
         auto octets = NGIN::Crypto::Encoding::EncodeDerOctetString(
                 NGIN::Crypto::ConstByteSpan {bytes.data(), bytes.Size()});
-        REQUIRE(octets.HasValue());
-        return octets.Value();
+        REQUIRE(octets.has_value());
+        return octets.value();
     }
 
     [[nodiscard]] NGIN::Crypto::ByteBuffer DerOid(std::initializer_list<NGIN::UInt32> arcs)
@@ -136,8 +136,8 @@ namespace
         }
 
         auto oid = NGIN::Crypto::Encoding::EncodeDerObjectIdentifier(std::span<const NGIN::UInt32> {oidArcs.data(), index});
-        REQUIRE(oid.HasValue());
-        return oid.Value();
+        REQUIRE(oid.has_value());
+        return oid.value();
     }
 
     [[nodiscard]] NGIN::Crypto::ByteBuffer DerSequence(std::initializer_list<const NGIN::Crypto::ByteBuffer*> children)
@@ -150,8 +150,8 @@ namespace
 
         auto sequence = NGIN::Crypto::Encoding::EncodeDerSequence(
                 NGIN::Crypto::ConstByteSpan {encodedChildren.data(), encodedChildren.Size()});
-        REQUIRE(sequence.HasValue());
-        return sequence.Value();
+        REQUIRE(sequence.has_value());
+        return sequence.value();
     }
 
     [[nodiscard]] NGIN::Crypto::ByteBuffer AlgorithmIdentifier(
@@ -177,9 +177,9 @@ namespace
         auto nullParameters   = NGIN::Crypto::Encoding::EncodeDerElement(
                 NGIN::Crypto::Encoding::MakeDerUniversalTag(NGIN::Crypto::Encoding::DerUniversalTag::Null),
                 NGIN::Crypto::ConstByteSpan {});
-        REQUIRE(nullParameters.HasValue());
+        REQUIRE(nullParameters.has_value());
 
-        auto prf              = AlgorithmIdentifier({1, 2, 840, 113549, 2, 9}, &nullParameters.Value());
+        auto prf              = AlgorithmIdentifier({1, 2, 840, 113549, 2, 9}, &nullParameters.value());
         auto pbkdf2Parameters = DerSequence({&saltOctets, &iterationInteger, &keyLengthInteger, &prf});
         auto keyDerivation    = AlgorithmIdentifier({1, 2, 840, 113549, 1, 5, 12}, &pbkdf2Parameters);
 
@@ -200,10 +200,10 @@ TEST_CASE("SubjectPublicKeyInfo writes and parses Ed25519", "[Crypto][KeyFormat]
             NGIN::Crypto::Keys::KeyAlgorithm::Ed25519,
             NGIN::Crypto::ConstByteSpan {publicKey.data(), publicKey.Size()});
 
-    REQUIRE(der.HasValue());
-    REQUIRE(der.Value().Size() == 44);
+    REQUIRE(der.has_value());
+    REQUIRE(der.value().Size() == 44);
     RequireBytesEqual(
-            der.Value(),
+            der.value(),
             {
                     0x30,
                     0x2a,
@@ -252,22 +252,22 @@ TEST_CASE("SubjectPublicKeyInfo writes and parses Ed25519", "[Crypto][KeyFormat]
             });
 
     auto parsed = NGIN::Crypto::Keys::ParseSubjectPublicKeyInfo(
-            NGIN::Crypto::ConstByteSpan {der.Value().data(), der.Value().Size()});
+            NGIN::Crypto::ConstByteSpan {der.value().data(), der.value().Size()});
 
-    REQUIRE(parsed.HasValue());
-    REQUIRE(parsed.Value().algorithm.algorithm == NGIN::Crypto::Keys::KeyAlgorithm::Ed25519);
-    REQUIRE_FALSE(parsed.Value().algorithm.hasParameters);
-    RequireBytesEqual(parsed.Value().publicKey, publicKey);
+    REQUIRE(parsed.has_value());
+    REQUIRE(parsed.value().algorithm.algorithm == NGIN::Crypto::Keys::KeyAlgorithm::Ed25519);
+    REQUIRE_FALSE(parsed.value().algorithm.hasParameters);
+    RequireBytesEqual(parsed.value().publicKey, publicKey);
 
-    auto signatureAlgorithm = NGIN::Crypto::Keys::ToSignatureAlgorithm(parsed.Value().algorithm.algorithm);
-    REQUIRE(signatureAlgorithm.HasValue());
-    REQUIRE(signatureAlgorithm.Value() == NGIN::Crypto::SignatureAlgorithm::Ed25519);
+    auto signatureAlgorithm = NGIN::Crypto::Keys::ToSignatureAlgorithm(parsed.value().algorithm.algorithm);
+    REQUIRE(signatureAlgorithm.has_value());
+    REQUIRE(signatureAlgorithm.value() == NGIN::Crypto::SignatureAlgorithm::Ed25519);
 
-    auto imported = NGIN::Crypto::Keys::ImportEd25519PublicKey(parsed.Value());
-    REQUIRE(imported.HasValue());
-    RequireBytesEqual(imported.Value().Bytes(), publicKey);
+    auto imported = NGIN::Crypto::Keys::ImportEd25519PublicKey(parsed.value());
+    REQUIRE(imported.has_value());
+    RequireBytesEqual(imported.value().Bytes(), publicKey);
 
-    auto exported = NGIN::Crypto::Keys::ExportSubjectPublicKeyInfo(imported.Value());
+    auto exported = NGIN::Crypto::Keys::ExportSubjectPublicKeyInfo(imported.value());
     REQUIRE(exported.algorithm.algorithm == NGIN::Crypto::Keys::KeyAlgorithm::Ed25519);
     REQUIRE_FALSE(exported.algorithm.hasParameters);
     RequireBytesEqual(exported.publicKey, publicKey);
@@ -281,26 +281,26 @@ TEST_CASE("PrivateKeyInfo writes and parses X25519", "[Crypto][KeyFormat]")
             NGIN::Crypto::Keys::KeyAlgorithm::X25519,
             NGIN::Crypto::ConstByteSpan {privateKey.data(), privateKey.Size()});
 
-    REQUIRE(der.HasValue());
+    REQUIRE(der.has_value());
 
     auto parsed = NGIN::Crypto::Keys::ParsePrivateKeyInfo(
-            NGIN::Crypto::ConstByteSpan {der.Value().data(), der.Value().Size()});
+            NGIN::Crypto::ConstByteSpan {der.value().data(), der.value().Size()});
 
-    REQUIRE(parsed.HasValue());
-    REQUIRE(parsed.Value().version == 0);
-    REQUIRE(parsed.Value().algorithm.algorithm == NGIN::Crypto::Keys::KeyAlgorithm::X25519);
-    REQUIRE_FALSE(parsed.Value().algorithm.hasParameters);
-    RequireBytesEqual(parsed.Value().privateKey, privateKey);
+    REQUIRE(parsed.has_value());
+    REQUIRE(parsed.value().version == 0);
+    REQUIRE(parsed.value().algorithm.algorithm == NGIN::Crypto::Keys::KeyAlgorithm::X25519);
+    REQUIRE_FALSE(parsed.value().algorithm.hasParameters);
+    RequireBytesEqual(parsed.value().privateKey, privateKey);
 
-    auto keyAgreementAlgorithm = NGIN::Crypto::Keys::ToKeyAgreementAlgorithm(parsed.Value().algorithm.algorithm);
-    REQUIRE(keyAgreementAlgorithm.HasValue());
-    REQUIRE(keyAgreementAlgorithm.Value() == NGIN::Crypto::KeyAgreementAlgorithm::X25519);
+    auto keyAgreementAlgorithm = NGIN::Crypto::Keys::ToKeyAgreementAlgorithm(parsed.value().algorithm.algorithm);
+    REQUIRE(keyAgreementAlgorithm.has_value());
+    REQUIRE(keyAgreementAlgorithm.value() == NGIN::Crypto::KeyAgreementAlgorithm::X25519);
 
-    auto imported = NGIN::Crypto::Keys::ImportX25519PrivateKey(parsed.Value());
-    REQUIRE(imported.HasValue());
-    RequireBytesEqual(imported.Value().Bytes(), privateKey);
+    auto imported = NGIN::Crypto::Keys::ImportX25519PrivateKey(parsed.value());
+    REQUIRE(imported.has_value());
+    RequireBytesEqual(imported.value().Bytes(), privateKey);
 
-    auto exported = NGIN::Crypto::Keys::ExportPrivateKeyInfo(imported.Value());
+    auto exported = NGIN::Crypto::Keys::ExportPrivateKeyInfo(imported.value());
     REQUIRE(exported.version == 0);
     REQUIRE(exported.algorithm.algorithm == NGIN::Crypto::Keys::KeyAlgorithm::X25519);
     REQUIRE_FALSE(exported.algorithm.hasParameters);
@@ -315,26 +315,26 @@ TEST_CASE("SubjectPublicKeyInfo preserves ECDSA P-256 algorithm parameters", "[C
     auto der = NGIN::Crypto::Keys::WriteSubjectPublicKeyInfo(
             NGIN::Crypto::Keys::KeyAlgorithm::EcdsaP256,
             NGIN::Crypto::ConstByteSpan {publicKey.data(), publicKey.Size()});
-    REQUIRE(der.HasValue());
+    REQUIRE(der.has_value());
 
     auto parsed = NGIN::Crypto::Keys::ParseSubjectPublicKeyInfo(
-            NGIN::Crypto::ConstByteSpan {der.Value().data(), der.Value().Size()});
+            NGIN::Crypto::ConstByteSpan {der.value().data(), der.value().Size()});
 
-    REQUIRE(parsed.HasValue());
-    REQUIRE(parsed.Value().algorithm.algorithm == NGIN::Crypto::Keys::KeyAlgorithm::EcdsaP256);
-    REQUIRE(parsed.Value().algorithm.hasParameters);
-    RequireBytesEqual(parsed.Value().algorithm.parameters, {0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07});
-    RequireBytesEqual(parsed.Value().publicKey, publicKey);
+    REQUIRE(parsed.has_value());
+    REQUIRE(parsed.value().algorithm.algorithm == NGIN::Crypto::Keys::KeyAlgorithm::EcdsaP256);
+    REQUIRE(parsed.value().algorithm.hasParameters);
+    RequireBytesEqual(parsed.value().algorithm.parameters, {0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07});
+    RequireBytesEqual(parsed.value().publicKey, publicKey);
 
-    auto signatureAlgorithm = NGIN::Crypto::Keys::ToSignatureAlgorithm(parsed.Value().algorithm.algorithm);
-    REQUIRE(signatureAlgorithm.HasValue());
-    REQUIRE(signatureAlgorithm.Value() == NGIN::Crypto::SignatureAlgorithm::EcdsaP256Sha256);
+    auto signatureAlgorithm = NGIN::Crypto::Keys::ToSignatureAlgorithm(parsed.value().algorithm.algorithm);
+    REQUIRE(signatureAlgorithm.has_value());
+    REQUIRE(signatureAlgorithm.value() == NGIN::Crypto::SignatureAlgorithm::EcdsaP256Sha256);
 
-    auto imported = NGIN::Crypto::Keys::ImportEcdsaP256PublicKey(parsed.Value());
-    REQUIRE(imported.HasValue());
-    RequireBytesEqual(imported.Value().Bytes(), publicKey);
+    auto imported = NGIN::Crypto::Keys::ImportEcdsaP256PublicKey(parsed.value());
+    REQUIRE(imported.has_value());
+    RequireBytesEqual(imported.value().Bytes(), publicKey);
 
-    auto exported = NGIN::Crypto::Keys::ExportSubjectPublicKeyInfo(imported.Value());
+    auto exported = NGIN::Crypto::Keys::ExportSubjectPublicKeyInfo(imported.value());
     REQUIRE(exported.algorithm.algorithm == NGIN::Crypto::Keys::KeyAlgorithm::EcdsaP256);
     REQUIRE(exported.algorithm.hasParameters);
     RequireBytesEqual(exported.algorithm.parameters, {0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07});
@@ -348,22 +348,22 @@ TEST_CASE("PrivateKeyInfo imports and exports ECDSA P-256 private scalars", "[Cr
     auto der = NGIN::Crypto::Keys::WritePrivateKeyInfo(
             NGIN::Crypto::Keys::KeyAlgorithm::EcdsaP256,
             NGIN::Crypto::ConstByteSpan {privateKey.data(), privateKey.Size()});
-    REQUIRE(der.HasValue());
+    REQUIRE(der.has_value());
 
     auto parsed = NGIN::Crypto::Keys::ParsePrivateKeyInfo(
-            NGIN::Crypto::ConstByteSpan {der.Value().data(), der.Value().Size()});
-    REQUIRE(parsed.HasValue());
-    REQUIRE(parsed.Value().version == 0);
-    REQUIRE(parsed.Value().algorithm.algorithm == NGIN::Crypto::Keys::KeyAlgorithm::EcdsaP256);
-    REQUIRE(parsed.Value().algorithm.hasParameters);
-    RequireBytesEqual(parsed.Value().algorithm.parameters, {0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07});
-    RequireBytesEqual(parsed.Value().privateKey, privateKey);
+            NGIN::Crypto::ConstByteSpan {der.value().data(), der.value().Size()});
+    REQUIRE(parsed.has_value());
+    REQUIRE(parsed.value().version == 0);
+    REQUIRE(parsed.value().algorithm.algorithm == NGIN::Crypto::Keys::KeyAlgorithm::EcdsaP256);
+    REQUIRE(parsed.value().algorithm.hasParameters);
+    RequireBytesEqual(parsed.value().algorithm.parameters, {0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07});
+    RequireBytesEqual(parsed.value().privateKey, privateKey);
 
-    auto imported = NGIN::Crypto::Keys::ImportEcdsaP256PrivateKey(parsed.Value());
-    REQUIRE(imported.HasValue());
-    RequireBytesEqual(imported.Value().Bytes(), privateKey);
+    auto imported = NGIN::Crypto::Keys::ImportEcdsaP256PrivateKey(parsed.value());
+    REQUIRE(imported.has_value());
+    RequireBytesEqual(imported.value().Bytes(), privateKey);
 
-    auto exported = NGIN::Crypto::Keys::ExportPrivateKeyInfo(imported.Value());
+    auto exported = NGIN::Crypto::Keys::ExportPrivateKeyInfo(imported.value());
     REQUIRE(exported.version == 0);
     REQUIRE(exported.algorithm.algorithm == NGIN::Crypto::Keys::KeyAlgorithm::EcdsaP256);
     REQUIRE(exported.algorithm.hasParameters);
@@ -374,114 +374,114 @@ TEST_CASE("PrivateKeyInfo imports and exports ECDSA P-256 private scalars", "[Cr
 TEST_CASE("Parsed key operations reject mismatched algorithms before backend dispatch", "[Crypto][KeyFormat]")
 {
     auto context = NGIN::Crypto::Backend::CreateContext();
-    REQUIRE(context.HasValue());
+    REQUIRE(context.has_value());
 
     const auto privateKey = RepeatedByte(0x11, 32);
     auto       privateDer = NGIN::Crypto::Keys::WritePrivateKeyInfo(
             NGIN::Crypto::Keys::KeyAlgorithm::Ed25519,
             NGIN::Crypto::ConstByteSpan {privateKey.data(), privateKey.Size()});
-    REQUIRE(privateDer.HasValue());
+    REQUIRE(privateDer.has_value());
     auto privateKeyInfo = NGIN::Crypto::Keys::ParsePrivateKeyInfo(
-            NGIN::Crypto::ConstByteSpan {privateDer.Value().data(), privateDer.Value().Size()});
-    REQUIRE(privateKeyInfo.HasValue());
+            NGIN::Crypto::ConstByteSpan {privateDer.value().data(), privateDer.value().Size()});
+    REQUIRE(privateKeyInfo.has_value());
 
     const auto publicKey = RepeatedByte(0x22, 32);
     auto       publicDer = NGIN::Crypto::Keys::WriteSubjectPublicKeyInfo(
             NGIN::Crypto::Keys::KeyAlgorithm::Ed25519,
             NGIN::Crypto::ConstByteSpan {publicKey.data(), publicKey.Size()});
-    REQUIRE(publicDer.HasValue());
+    REQUIRE(publicDer.has_value());
     auto publicKeyInfo = NGIN::Crypto::Keys::ParseSubjectPublicKeyInfo(
-            NGIN::Crypto::ConstByteSpan {publicDer.Value().data(), publicDer.Value().Size()});
-    REQUIRE(publicKeyInfo.HasValue());
+            NGIN::Crypto::ConstByteSpan {publicDer.value().data(), publicDer.value().Size()});
+    REQUIRE(publicKeyInfo.has_value());
 
     const auto message = Bytes({0x01, 0x02, 0x03});
     auto       sign    = NGIN::Crypto::Keys::SignPrivateKeyInfo(
-            context.Value(),
+            context.value(),
             NGIN::Crypto::SignatureAlgorithm::EcdsaP256Sha256,
-            privateKeyInfo.Value(),
+            privateKeyInfo.value(),
             NGIN::Crypto::ConstByteSpan {message.data(), message.Size()});
-    REQUIRE_FALSE(sign.HasValue());
-    REQUIRE(sign.Error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidKey);
+    REQUIRE_FALSE(sign.has_value());
+    REQUIRE(sign.error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidKey);
 
     const auto signature = RepeatedByte(0x33, 64);
     auto       verify    = NGIN::Crypto::Keys::VerifySubjectPublicKeyInfo(
-            context.Value(),
+            context.value(),
             NGIN::Crypto::SignatureAlgorithm::EcdsaP256Sha256,
-            publicKeyInfo.Value(),
+            publicKeyInfo.value(),
             NGIN::Crypto::ConstByteSpan {message.data(), message.Size()},
             NGIN::Crypto::ConstByteSpan {signature.data(), signature.Size()});
-    REQUIRE_FALSE(verify.HasValue());
-    REQUIRE(verify.Error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidKey);
+    REQUIRE_FALSE(verify.has_value());
+    REQUIRE(verify.error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidKey);
 
     const auto ciphertext = RepeatedByte(0x44, 16);
     auto       decrypt    = NGIN::Crypto::Keys::DecryptPrivateKeyInfoRsaOaepSha256(
-            context.Value(),
-            privateKeyInfo.Value(),
+            context.value(),
+            privateKeyInfo.value(),
             NGIN::Crypto::Keys::RsaOaepPrivateKeyInfoDecryptInput {
-                    .ciphertext = NGIN::Crypto::ConstByteSpan {ciphertext.data(), ciphertext.Size()},
-                    .label      = {},
+                             .ciphertext = NGIN::Crypto::ConstByteSpan {ciphertext.data(), ciphertext.Size()},
+                             .label      = {},
             });
-    REQUIRE_FALSE(decrypt.HasValue());
-    REQUIRE(decrypt.Error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidKey);
+    REQUIRE_FALSE(decrypt.has_value());
+    REQUIRE(decrypt.error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidKey);
 }
 
 TEST_CASE("Parsed key operations sign and derive through provider-backed contexts", "[Crypto][KeyFormat]")
 {
     auto context = NGIN::Crypto::Backend::CreateContext();
-    REQUIRE(context.HasValue());
+    REQUIRE(context.has_value());
 
     const auto message = Bytes({0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65});
 
-    if (context.Value().Supports(NGIN::Crypto::SignatureAlgorithm::Ed25519))
+    if (context.value().Supports(NGIN::Crypto::SignatureAlgorithm::Ed25519))
     {
-        auto keyPair = NGIN::Crypto::Asymmetric::GenerateEd25519KeyPair(context.Value());
-        REQUIRE(keyPair.HasValue());
+        auto keyPair = NGIN::Crypto::Asymmetric::GenerateEd25519KeyPair(context.value());
+        REQUIRE(keyPair.has_value());
 
-        auto privateKeyInfo = NGIN::Crypto::Keys::ExportPrivateKeyInfo(keyPair.Value().privateKey);
-        auto publicKeyInfo  = NGIN::Crypto::Keys::ExportSubjectPublicKeyInfo(keyPair.Value().publicKey);
+        auto privateKeyInfo = NGIN::Crypto::Keys::ExportPrivateKeyInfo(keyPair.value().privateKey);
+        auto publicKeyInfo  = NGIN::Crypto::Keys::ExportSubjectPublicKeyInfo(keyPair.value().publicKey);
 
         auto signature = NGIN::Crypto::Keys::SignPrivateKeyInfo(
-                context.Value(),
+                context.value(),
                 NGIN::Crypto::SignatureAlgorithm::Ed25519,
                 privateKeyInfo,
                 NGIN::Crypto::ConstByteSpan {message.data(), message.Size()});
-        REQUIRE(signature.HasValue());
+        REQUIRE(signature.has_value());
 
         auto verified = NGIN::Crypto::Keys::VerifySubjectPublicKeyInfo(
-                context.Value(),
+                context.value(),
                 NGIN::Crypto::SignatureAlgorithm::Ed25519,
                 publicKeyInfo,
                 NGIN::Crypto::ConstByteSpan {message.data(), message.Size()},
-                NGIN::Crypto::ConstByteSpan {signature.Value().data(), signature.Value().Size()});
-        REQUIRE(verified.HasValue());
+                NGIN::Crypto::ConstByteSpan {signature.value().data(), signature.value().Size()});
+        REQUIRE(verified.has_value());
     }
 
-    if (context.Value().Supports(NGIN::Crypto::KeyAgreementAlgorithm::X25519))
+    if (context.value().Supports(NGIN::Crypto::KeyAgreementAlgorithm::X25519))
     {
-        auto alice = NGIN::Crypto::Asymmetric::GenerateX25519KeyPair(context.Value());
-        auto bob   = NGIN::Crypto::Asymmetric::GenerateX25519KeyPair(context.Value());
-        REQUIRE(alice.HasValue());
-        REQUIRE(bob.HasValue());
+        auto alice = NGIN::Crypto::Asymmetric::GenerateX25519KeyPair(context.value());
+        auto bob   = NGIN::Crypto::Asymmetric::GenerateX25519KeyPair(context.value());
+        REQUIRE(alice.has_value());
+        REQUIRE(bob.has_value());
 
-        auto alicePrivateKeyInfo = NGIN::Crypto::Keys::ExportPrivateKeyInfo(alice.Value().privateKey);
-        auto bobPrivateKeyInfo   = NGIN::Crypto::Keys::ExportPrivateKeyInfo(bob.Value().privateKey);
-        auto alicePublicKeyInfo  = NGIN::Crypto::Keys::ExportSubjectPublicKeyInfo(alice.Value().publicKey);
-        auto bobPublicKeyInfo    = NGIN::Crypto::Keys::ExportSubjectPublicKeyInfo(bob.Value().publicKey);
+        auto alicePrivateKeyInfo = NGIN::Crypto::Keys::ExportPrivateKeyInfo(alice.value().privateKey);
+        auto bobPrivateKeyInfo   = NGIN::Crypto::Keys::ExportPrivateKeyInfo(bob.value().privateKey);
+        auto alicePublicKeyInfo  = NGIN::Crypto::Keys::ExportSubjectPublicKeyInfo(alice.value().publicKey);
+        auto bobPublicKeyInfo    = NGIN::Crypto::Keys::ExportSubjectPublicKeyInfo(bob.value().publicKey);
 
         auto aliceSecret = NGIN::Crypto::Keys::DeriveX25519SharedSecret(
-                context.Value(),
+                context.value(),
                 alicePrivateKeyInfo,
                 bobPublicKeyInfo);
         auto bobSecret = NGIN::Crypto::Keys::DeriveX25519SharedSecret(
-                context.Value(),
+                context.value(),
                 bobPrivateKeyInfo,
                 alicePublicKeyInfo);
-        REQUIRE(aliceSecret.HasValue());
-        REQUIRE(bobSecret.HasValue());
-        REQUIRE(aliceSecret.Value().Bytes().size() == bobSecret.Value().Bytes().size());
-        for (NGIN::UIntSize i = 0; i < aliceSecret.Value().Bytes().size(); ++i)
+        REQUIRE(aliceSecret.has_value());
+        REQUIRE(bobSecret.has_value());
+        REQUIRE(aliceSecret.value().Bytes().size() == bobSecret.value().Bytes().size());
+        for (NGIN::UIntSize i = 0; i < aliceSecret.value().Bytes().size(); ++i)
         {
-            REQUIRE(aliceSecret.Value().Bytes()[i] == bobSecret.Value().Bytes()[i]);
+            REQUIRE(aliceSecret.value().Bytes()[i] == bobSecret.value().Bytes()[i]);
         }
     }
 }
@@ -508,28 +508,28 @@ TEST_CASE("EncryptedPrivateKeyInfo preserves algorithm parameters and encrypted 
 
     auto parsed = NGIN::Crypto::Keys::ParseEncryptedPrivateKeyInfo(
             NGIN::Crypto::ConstByteSpan {encryptedInfo.data(), encryptedInfo.Size()});
-    REQUIRE(parsed.HasValue());
-    REQUIRE(parsed.Value().encryptionAlgorithm.objectIdentifier.Size() == 3);
-    REQUIRE(parsed.Value().encryptionAlgorithm.objectIdentifier[0] == 1);
-    REQUIRE(parsed.Value().encryptionAlgorithm.objectIdentifier[1] == 2);
-    REQUIRE(parsed.Value().encryptionAlgorithm.objectIdentifier[2] == 3);
-    REQUIRE(parsed.Value().encryptionAlgorithm.hasParameters);
-    RequireBytesEqual(parsed.Value().encryptionAlgorithm.parameters, {0x05, 0x00});
-    RequireBytesEqual(parsed.Value().encryptedData, {0xaa, 0xbb, 0xcc});
+    REQUIRE(parsed.has_value());
+    REQUIRE(parsed.value().encryptionAlgorithm.objectIdentifier.Size() == 3);
+    REQUIRE(parsed.value().encryptionAlgorithm.objectIdentifier[0] == 1);
+    REQUIRE(parsed.value().encryptionAlgorithm.objectIdentifier[1] == 2);
+    REQUIRE(parsed.value().encryptionAlgorithm.objectIdentifier[2] == 3);
+    REQUIRE(parsed.value().encryptionAlgorithm.hasParameters);
+    RequireBytesEqual(parsed.value().encryptionAlgorithm.parameters, {0x05, 0x00});
+    RequireBytesEqual(parsed.value().encryptedData, {0xaa, 0xbb, 0xcc});
 
     auto written = NGIN::Crypto::Keys::WriteEncryptedPrivateKeyInfo(
-            parsed.Value().encryptionAlgorithm,
-            NGIN::Crypto::ConstByteSpan {parsed.Value().encryptedData.data(), parsed.Value().encryptedData.Size()});
-    REQUIRE(written.HasValue());
-    RequireBytesEqual(written.Value(), encryptedInfo);
+            parsed.value().encryptionAlgorithm,
+            NGIN::Crypto::ConstByteSpan {parsed.value().encryptedData.data(), parsed.value().encryptedData.Size()});
+    REQUIRE(written.has_value());
+    RequireBytesEqual(written.value(), encryptedInfo);
 }
 
 TEST_CASE("EncryptedPrivateKeyInfo decrypts PBES2 PBKDF2-SHA256 AES-256-GCM when provider supports it", "[Crypto][KeyFormat]")
 {
     auto context = NGIN::Crypto::Backend::CreateContext();
-    REQUIRE(context.HasValue());
-    if (!context.Value().Supports(NGIN::Crypto::KdfAlgorithm::Pbkdf2Sha256) ||
-        !context.Value().Supports(NGIN::Crypto::AeadAlgorithm::Aes256Gcm))
+    REQUIRE(context.has_value());
+    if (!context.value().Supports(NGIN::Crypto::KdfAlgorithm::Pbkdf2Sha256) ||
+        !context.value().Supports(NGIN::Crypto::AeadAlgorithm::Aes256Gcm))
     {
         return;
     }
@@ -538,7 +538,7 @@ TEST_CASE("EncryptedPrivateKeyInfo decrypts PBES2 PBKDF2-SHA256 AES-256-GCM when
     auto       privateKeyInfoDer = NGIN::Crypto::Keys::WritePrivateKeyInfo(
             NGIN::Crypto::Keys::KeyAlgorithm::Ed25519,
             NGIN::Crypto::ConstByteSpan {privateKey.data(), privateKey.Size()});
-    REQUIRE(privateKeyInfoDer.HasValue());
+    REQUIRE(privateKeyInfoDer.has_value());
 
     const auto password = Bytes({0x70, 0x61, 0x73, 0x73});
     const auto salt     = Bytes({0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08});
@@ -551,23 +551,23 @@ TEST_CASE("EncryptedPrivateKeyInfo decrypts PBES2 PBKDF2-SHA256 AES-256-GCM when
             .salt       = NGIN::Crypto::ConstByteSpan {salt.data(), salt.Size()},
             .iterations = 4096,
     };
-    auto keyResult = NGIN::Crypto::Kdf::Pbkdf2Sha256Into(context.Value(), kdfParameters, derivedKey.AsBytes());
-    REQUIRE(keyResult.HasValue());
+    auto keyResult = NGIN::Crypto::Kdf::Pbkdf2Sha256Into(context.value(), kdfParameters, derivedKey.AsBytes());
+    REQUIRE(keyResult.has_value());
 
     auto sealed = NGIN::Crypto::Symmetric::Seal(
-            context.Value(),
+            context.value(),
             NGIN::Crypto::AeadAlgorithm::Aes256Gcm,
             NGIN::Crypto::Symmetric::AeadSealInput {
                     .key            = NGIN::Crypto::Memory::SecretView {derivedKey.AsBytes()},
                     .nonce          = NGIN::Crypto::ConstByteSpan {nonce.data(), nonce.Size()},
-                    .plaintext      = NGIN::Crypto::ConstByteSpan {privateKeyInfoDer.Value().data(), privateKeyInfoDer.Value().Size()},
+                    .plaintext      = NGIN::Crypto::ConstByteSpan {privateKeyInfoDer.value().data(), privateKeyInfoDer.value().Size()},
                     .associatedData = {},
             });
-    REQUIRE(sealed.HasValue());
+    REQUIRE(sealed.has_value());
 
     NGIN::Crypto::ByteBuffer encryptedData;
-    AppendBytes(encryptedData, sealed.Value().ciphertext);
-    AppendBytes(encryptedData, sealed.Value().tag);
+    AppendBytes(encryptedData, sealed.value().ciphertext);
+    AppendBytes(encryptedData, sealed.value().tag);
 
     NGIN::Crypto::Keys::EncryptedPrivateKeyInfo encryptedInfo {
             .encryptionAlgorithm = NGIN::Crypto::Keys::EncryptedPrivateKeyAlgorithmIdentifier {
@@ -579,21 +579,21 @@ TEST_CASE("EncryptedPrivateKeyInfo decrypts PBES2 PBKDF2-SHA256 AES-256-GCM when
     };
 
     auto decrypted = NGIN::Crypto::Keys::DecryptEncryptedPrivateKeyInfo(
-            context.Value(),
+            context.value(),
             encryptedInfo,
             NGIN::Crypto::Memory::SecretView {NGIN::Crypto::ConstByteSpan {password.data(), password.Size()}});
-    REQUIRE(decrypted.HasValue());
-    REQUIRE(decrypted.Value().algorithm.algorithm == NGIN::Crypto::Keys::KeyAlgorithm::Ed25519);
-    RequireBytesEqual(decrypted.Value().privateKey, privateKey);
+    REQUIRE(decrypted.has_value());
+    REQUIRE(decrypted.value().algorithm.algorithm == NGIN::Crypto::Keys::KeyAlgorithm::Ed25519);
+    RequireBytesEqual(decrypted.value().privateKey, privateKey);
 
     encryptedInfo.encryptedData[encryptedInfo.encryptedData.Size() - 1] =
             static_cast<NGIN::Byte>(std::to_integer<NGIN::UInt8>(encryptedInfo.encryptedData[encryptedInfo.encryptedData.Size() - 1]) ^ 0x01u);
     auto tampered = NGIN::Crypto::Keys::DecryptEncryptedPrivateKeyInfo(
-            context.Value(),
+            context.value(),
             encryptedInfo,
             NGIN::Crypto::Memory::SecretView {NGIN::Crypto::ConstByteSpan {password.data(), password.Size()}});
-    REQUIRE_FALSE(tampered.HasValue());
-    REQUIRE(tampered.Error().Code() == NGIN::Crypto::CryptoErrorCode::AuthenticationFailed);
+    REQUIRE_FALSE(tampered.has_value());
+    REQUIRE(tampered.error().Code() == NGIN::Crypto::CryptoErrorCode::AuthenticationFailed);
 }
 
 TEST_CASE("EncryptedPrivateKeyInfo decryption enforces explicit PBES2 password policy", "[Crypto][KeyFormat]")
@@ -612,16 +612,16 @@ TEST_CASE("EncryptedPrivateKeyInfo decryption enforces explicit PBES2 password p
     };
 
     auto context = NGIN::Crypto::Backend::CreateContext();
-    REQUIRE(context.HasValue());
+    REQUIRE(context.has_value());
 
     const auto password = Bytes({0x70, 0x61, 0x73, 0x73});
     auto       rejected = NGIN::Crypto::Keys::DecryptEncryptedPrivateKeyInfo(
-            context.Value(),
+            context.value(),
             encryptedInfo,
             NGIN::Crypto::Memory::SecretView {NGIN::Crypto::ConstByteSpan {password.data(), password.Size()}},
             NGIN::Crypto::Keys::EncryptedPrivateKeyDecryptOptions {.minimumPbkdf2Iterations = 1000});
-    REQUIRE_FALSE(rejected.HasValue());
-    REQUIRE(rejected.Error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidArgument);
+    REQUIRE_FALSE(rejected.has_value());
+    REQUIRE(rejected.error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidArgument);
 }
 
 TEST_CASE("EncryptedPrivateKeyInfo rejects malformed envelopes and invalid raw parameters", "[Crypto][KeyFormat]")
@@ -645,8 +645,8 @@ TEST_CASE("EncryptedPrivateKeyInfo rejects malformed envelopes and invalid raw p
     });
     auto       parsedExtra = NGIN::Crypto::Keys::ParseEncryptedPrivateKeyInfo(
             NGIN::Crypto::ConstByteSpan {extraField.data(), extraField.Size()});
-    REQUIRE_FALSE(parsedExtra.HasValue());
-    REQUIRE(parsedExtra.Error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
+    REQUIRE_FALSE(parsedExtra.has_value());
+    REQUIRE(parsedExtra.error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
 
     auto malformedParameters = NGIN::Crypto::MakeByteBuffer(1);
     malformedParameters[0]   = NGIN::Byte {0x05};
@@ -661,15 +661,15 @@ TEST_CASE("EncryptedPrivateKeyInfo rejects malformed envelopes and invalid raw p
     auto       written       = NGIN::Crypto::Keys::WriteEncryptedPrivateKeyInfo(
             invalidIdentifier,
             NGIN::Crypto::ConstByteSpan {encryptedData.data(), encryptedData.Size()});
-    REQUIRE_FALSE(written.HasValue());
-    REQUIRE(written.Error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
+    REQUIRE_FALSE(written.has_value());
+    REQUIRE(written.error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
 
     invalidIdentifier.hasParameters = false;
     written                         = NGIN::Crypto::Keys::WriteEncryptedPrivateKeyInfo(
             invalidIdentifier,
             NGIN::Crypto::ConstByteSpan {encryptedData.data(), encryptedData.Size()});
-    REQUIRE_FALSE(written.HasValue());
-    REQUIRE(written.Error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidArgument);
+    REQUIRE_FALSE(written.has_value());
+    REQUIRE(written.error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidArgument);
 }
 
 TEST_CASE("Key format parsers reject invalid algorithm parameters and versions", "[Crypto][KeyFormat]")
@@ -725,8 +725,8 @@ TEST_CASE("Key format parsers reject invalid algorithm parameters and versions",
 
     auto invalidSpki = NGIN::Crypto::Keys::ParseSubjectPublicKeyInfo(
             NGIN::Crypto::ConstByteSpan {ed25519WithNullParameters.data(), ed25519WithNullParameters.Size()});
-    REQUIRE_FALSE(invalidSpki.HasValue());
-    REQUIRE(invalidSpki.Error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
+    REQUIRE_FALSE(invalidSpki.has_value());
+    REQUIRE(invalidSpki.error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
 
     const auto versionOnePrivateKeyInfo = Bytes({
             0x30,
@@ -749,50 +749,50 @@ TEST_CASE("Key format parsers reject invalid algorithm parameters and versions",
 
     auto invalidPrivateKey = NGIN::Crypto::Keys::ParsePrivateKeyInfo(
             NGIN::Crypto::ConstByteSpan {versionOnePrivateKeyInfo.data(), versionOnePrivateKeyInfo.Size()});
-    REQUIRE_FALSE(invalidPrivateKey.HasValue());
-    REQUIRE(invalidPrivateKey.Error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
+    REQUIRE_FALSE(invalidPrivateKey.has_value());
+    REQUIRE(invalidPrivateKey.error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
 
     auto unsupportedAgreement = NGIN::Crypto::Keys::ToKeyAgreementAlgorithm(NGIN::Crypto::Keys::KeyAlgorithm::Ed25519);
-    REQUIRE_FALSE(unsupportedAgreement.HasValue());
-    REQUIRE(unsupportedAgreement.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+    REQUIRE_FALSE(unsupportedAgreement.has_value());
+    REQUIRE(unsupportedAgreement.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
 
     auto x25519PublicKey = RepeatedByte(0x44, 32);
     auto x25519Der       = NGIN::Crypto::Keys::WriteSubjectPublicKeyInfo(
             NGIN::Crypto::Keys::KeyAlgorithm::X25519,
             NGIN::Crypto::ConstByteSpan {x25519PublicKey.data(), x25519PublicKey.Size()});
-    REQUIRE(x25519Der.HasValue());
+    REQUIRE(x25519Der.has_value());
 
     auto x25519Spki = NGIN::Crypto::Keys::ParseSubjectPublicKeyInfo(
-            NGIN::Crypto::ConstByteSpan {x25519Der.Value().data(), x25519Der.Value().Size()});
-    REQUIRE(x25519Spki.HasValue());
-    auto mismatchedPublicKey = NGIN::Crypto::Keys::ImportEd25519PublicKey(x25519Spki.Value());
-    REQUIRE_FALSE(mismatchedPublicKey.HasValue());
-    REQUIRE(mismatchedPublicKey.Error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidKey);
+            NGIN::Crypto::ConstByteSpan {x25519Der.value().data(), x25519Der.value().Size()});
+    REQUIRE(x25519Spki.has_value());
+    auto mismatchedPublicKey = NGIN::Crypto::Keys::ImportEd25519PublicKey(x25519Spki.value());
+    REQUIRE_FALSE(mismatchedPublicKey.has_value());
+    REQUIRE(mismatchedPublicKey.error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidKey);
 
     auto compressedEcdsaPublicKey = RepeatedByte(0x33, 65);
     compressedEcdsaPublicKey[0]   = NGIN::Byte {0x03};
     auto compressedEcdsaDer       = NGIN::Crypto::Keys::WriteSubjectPublicKeyInfo(
             NGIN::Crypto::Keys::KeyAlgorithm::EcdsaP256,
             NGIN::Crypto::ConstByteSpan {compressedEcdsaPublicKey.data(), compressedEcdsaPublicKey.Size()});
-    REQUIRE(compressedEcdsaDer.HasValue());
+    REQUIRE(compressedEcdsaDer.has_value());
     auto compressedEcdsaSpki = NGIN::Crypto::Keys::ParseSubjectPublicKeyInfo(
-            NGIN::Crypto::ConstByteSpan {compressedEcdsaDer.Value().data(), compressedEcdsaDer.Value().Size()});
-    REQUIRE(compressedEcdsaSpki.HasValue());
-    auto rejectedCompressedEcdsa = NGIN::Crypto::Keys::ImportEcdsaP256PublicKey(compressedEcdsaSpki.Value());
-    REQUIRE_FALSE(rejectedCompressedEcdsa.HasValue());
-    REQUIRE(rejectedCompressedEcdsa.Error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidKey);
+            NGIN::Crypto::ConstByteSpan {compressedEcdsaDer.value().data(), compressedEcdsaDer.value().Size()});
+    REQUIRE(compressedEcdsaSpki.has_value());
+    auto rejectedCompressedEcdsa = NGIN::Crypto::Keys::ImportEcdsaP256PublicKey(compressedEcdsaSpki.value());
+    REQUIRE_FALSE(rejectedCompressedEcdsa.has_value());
+    REQUIRE(rejectedCompressedEcdsa.error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidKey);
 
     auto shortEcdsaPrivateKey = RepeatedByte(0x55, 31);
     auto shortEcdsaDer        = NGIN::Crypto::Keys::WritePrivateKeyInfo(
             NGIN::Crypto::Keys::KeyAlgorithm::EcdsaP256,
             NGIN::Crypto::ConstByteSpan {shortEcdsaPrivateKey.data(), shortEcdsaPrivateKey.Size()});
-    REQUIRE(shortEcdsaDer.HasValue());
+    REQUIRE(shortEcdsaDer.has_value());
     auto shortEcdsaPrivateKeyInfo = NGIN::Crypto::Keys::ParsePrivateKeyInfo(
-            NGIN::Crypto::ConstByteSpan {shortEcdsaDer.Value().data(), shortEcdsaDer.Value().Size()});
-    REQUIRE(shortEcdsaPrivateKeyInfo.HasValue());
-    auto rejectedShortEcdsaPrivateKey = NGIN::Crypto::Keys::ImportEcdsaP256PrivateKey(shortEcdsaPrivateKeyInfo.Value());
-    REQUIRE_FALSE(rejectedShortEcdsaPrivateKey.HasValue());
-    REQUIRE(rejectedShortEcdsaPrivateKey.Error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidKey);
+            NGIN::Crypto::ConstByteSpan {shortEcdsaDer.value().data(), shortEcdsaDer.value().Size()});
+    REQUIRE(shortEcdsaPrivateKeyInfo.has_value());
+    auto rejectedShortEcdsaPrivateKey = NGIN::Crypto::Keys::ImportEcdsaP256PrivateKey(shortEcdsaPrivateKeyInfo.value());
+    REQUIRE_FALSE(rejectedShortEcdsaPrivateKey.has_value());
+    REQUIRE(rejectedShortEcdsaPrivateKey.error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidKey);
 }
 
 TEST_CASE("Key format malformed corpus rejects truncated and extra structures", "[Crypto][KeyFormat]")
@@ -808,12 +808,12 @@ TEST_CASE("Key format malformed corpus rejects truncated and extra structures", 
     {
         auto spki = NGIN::Crypto::Keys::ParseSubjectPublicKeyInfo(
                 NGIN::Crypto::ConstByteSpan {bytes.data(), bytes.Size()});
-        REQUIRE_FALSE(spki.HasValue());
-        REQUIRE(spki.Error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
+        REQUIRE_FALSE(spki.has_value());
+        REQUIRE(spki.error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
 
         auto privateKey = NGIN::Crypto::Keys::ParsePrivateKeyInfo(
                 NGIN::Crypto::ConstByteSpan {bytes.data(), bytes.Size()});
-        REQUIRE_FALSE(privateKey.HasValue());
-        REQUIRE(privateKey.Error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
+        REQUIRE_FALSE(privateKey.has_value());
+        REQUIRE(privateKey.error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
     }
 }

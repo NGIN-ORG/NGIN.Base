@@ -20,11 +20,11 @@ namespace
     [[nodiscard]] NGIN::Crypto::FixedBytes<Size> DecodeFixedHex(std::string_view text)
     {
         auto decoded = NGIN::Crypto::Encoding::DecodeHex(text);
-        REQUIRE(decoded.HasValue());
-        REQUIRE(decoded.Value().Size() == Size);
+        REQUIRE(decoded.has_value());
+        REQUIRE(decoded.value().Size() == Size);
 
         NGIN::Crypto::FixedBytes<Size> output {};
-        std::copy(decoded.Value().begin(), decoded.Value().end(), output.begin());
+        std::copy(decoded.value().begin(), decoded.value().end(), output.begin());
         return output;
     }
 
@@ -68,14 +68,14 @@ TEST_CASE("Asymmetric key wrappers validate span-sized key material", "[Crypto][
     auto invalidPrivateKey = NGIN::Crypto::Asymmetric::X25519PrivateKey::FromSecretBytes(
             NGIN::Crypto::ConstByteSpan {tooShort.data(), tooShort.size()});
 
-    REQUIRE(publicKey.HasValue());
-    REQUIRE(publicKey.Value().Bytes().size() == 32);
-    REQUIRE(privateKey.HasValue());
-    REQUIRE(privateKey.Value().Bytes().size() == 32);
-    REQUIRE_FALSE(invalidPublicKey.HasValue());
-    REQUIRE(invalidPublicKey.Error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidKey);
-    REQUIRE_FALSE(invalidPrivateKey.HasValue());
-    REQUIRE(invalidPrivateKey.Error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidKey);
+    REQUIRE(publicKey.has_value());
+    REQUIRE(publicKey.value().Bytes().size() == 32);
+    REQUIRE(privateKey.has_value());
+    REQUIRE(privateKey.value().Bytes().size() == 32);
+    REQUIRE_FALSE(invalidPublicKey.has_value());
+    REQUIRE(invalidPublicKey.error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidKey);
+    REQUIRE_FALSE(invalidPrivateKey.has_value());
+    REQUIRE(invalidPrivateKey.error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidKey);
 }
 
 TEST_CASE("Private keys and key pairs are move-only", "[Crypto][Asymmetric]")
@@ -96,8 +96,8 @@ TEST_CASE("Ed25519 key generation is backend-gated", "[Crypto][Asymmetric]")
 
     auto result = NGIN::Crypto::Asymmetric::GenerateEd25519KeyPair(context);
 
-    REQUIRE_FALSE(result.HasValue());
-    REQUIRE(result.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
 }
 
 TEST_CASE("X25519 shared secret derivation validates output size before backend support", "[Crypto][Asymmetric]")
@@ -113,43 +113,43 @@ TEST_CASE("X25519 shared secret derivation validates output size before backend 
 
     auto result = NGIN::Crypto::Asymmetric::DeriveX25519SharedSecretInto(context, privateKey, publicKey, tooSmall);
 
-    REQUIRE_FALSE(result.HasValue());
-    REQUIRE(result.Error().Code() == NGIN::Crypto::CryptoErrorCode::OutputBufferTooSmall);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().Code() == NGIN::Crypto::CryptoErrorCode::OutputBufferTooSmall);
 }
 
 TEST_CASE("X25519 generated key pairs derive matching shared secrets when backend supports them", "[Crypto][Asymmetric]")
 {
     auto context = NGIN::Crypto::Backend::CreateContext();
-    REQUIRE(context.HasValue());
-    if (!context.Value().Supports(NGIN::Crypto::KeyAgreementAlgorithm::X25519))
+    REQUIRE(context.has_value());
+    if (!context.value().Supports(NGIN::Crypto::KeyAgreementAlgorithm::X25519))
     {
         return;
     }
 
-    auto alice = NGIN::Crypto::Asymmetric::GenerateX25519KeyPair(context.Value());
-    auto bob   = NGIN::Crypto::Asymmetric::GenerateX25519KeyPair(context.Value());
-    REQUIRE(alice.HasValue());
-    REQUIRE(bob.HasValue());
+    auto alice = NGIN::Crypto::Asymmetric::GenerateX25519KeyPair(context.value());
+    auto bob   = NGIN::Crypto::Asymmetric::GenerateX25519KeyPair(context.value());
+    REQUIRE(alice.has_value());
+    REQUIRE(bob.has_value());
 
     auto aliceSecret = NGIN::Crypto::Asymmetric::DeriveX25519SharedSecret(
-            context.Value(),
-            alice.Value().privateKey,
-            bob.Value().publicKey);
+            context.value(),
+            alice.value().privateKey,
+            bob.value().publicKey);
     auto bobSecret = NGIN::Crypto::Asymmetric::DeriveX25519SharedSecret(
-            context.Value(),
-            bob.Value().privateKey,
-            alice.Value().publicKey);
+            context.value(),
+            bob.value().privateKey,
+            alice.value().publicKey);
 
-    REQUIRE(aliceSecret.HasValue());
-    REQUIRE(bobSecret.HasValue());
-    RequireBytesEqual(aliceSecret.Value().Bytes(), bobSecret.Value().Bytes());
+    REQUIRE(aliceSecret.has_value());
+    REQUIRE(bobSecret.has_value());
+    RequireBytesEqual(aliceSecret.value().Bytes(), bobSecret.value().Bytes());
 }
 
 TEST_CASE("X25519 matches RFC 7748 test vector when backend supports it", "[Crypto][Asymmetric]")
 {
     auto context = NGIN::Crypto::Backend::CreateContext();
-    REQUIRE(context.HasValue());
-    if (!context.Value().Supports(NGIN::Crypto::KeyAgreementAlgorithm::X25519))
+    REQUIRE(context.has_value());
+    if (!context.value().Supports(NGIN::Crypto::KeyAgreementAlgorithm::X25519))
     {
         return;
     }
@@ -163,10 +163,10 @@ TEST_CASE("X25519 matches RFC 7748 test vector when backend supports it", "[Cryp
     auto expectedSharedSecret = DecodeFixedHex<32>("4a5d9d5ba4ce2de1728e3bf480350f25"
                                                    "e07e21c947d19e3376f09b3c1e161742");
 
-    auto sharedSecret = NGIN::Crypto::Asymmetric::DeriveX25519SharedSecret(context.Value(), privateKey, peerPublicKey);
+    auto sharedSecret = NGIN::Crypto::Asymmetric::DeriveX25519SharedSecret(context.value(), privateKey, peerPublicKey);
 
-    REQUIRE(sharedSecret.HasValue());
-    RequireBytesEqual(sharedSecret.Value().Bytes(), expectedSharedSecret);
+    REQUIRE(sharedSecret.has_value());
+    RequireBytesEqual(sharedSecret.value().Bytes(), expectedSharedSecret);
 }
 
 TEST_CASE("X25519 contract does not fake implementation even if capability is manually enabled", "[Crypto][Asymmetric]")
@@ -186,10 +186,10 @@ TEST_CASE("X25519 contract does not fake implementation even if capability is ma
     auto deriveOwned = NGIN::Crypto::Asymmetric::DeriveX25519SharedSecret(context, privateKey, publicKey);
     auto generate    = NGIN::Crypto::Asymmetric::GenerateX25519KeyPair(context);
 
-    REQUIRE_FALSE(deriveInto.HasValue());
-    REQUIRE(deriveInto.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
-    REQUIRE_FALSE(deriveOwned.HasValue());
-    REQUIRE(deriveOwned.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
-    REQUIRE_FALSE(generate.HasValue());
-    REQUIRE(generate.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+    REQUIRE_FALSE(deriveInto.has_value());
+    REQUIRE(deriveInto.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+    REQUIRE_FALSE(deriveOwned.has_value());
+    REQUIRE(deriveOwned.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+    REQUIRE_FALSE(generate.has_value());
+    REQUIRE(generate.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
 }

@@ -55,7 +55,7 @@ namespace NGIN::Crypto::Encoding
 
             if ((text.size() % 4) == 1)
             {
-                return EncodingError();
+                return std::unexpected(EncodingError());
             }
 
             NGIN::UIntSize padding = 0;
@@ -74,14 +74,14 @@ namespace NGIN::Crypto::Encoding
                 {
                     if (i < text.size() - padding)
                     {
-                        return EncodingError();
+                        return std::unexpected(EncodingError());
                     }
                     continue;
                 }
 
                 if (DecodeValue(text[i]) < 0)
                 {
-                    return EncodingError();
+                    return std::unexpected(EncodingError());
                 }
             }
 
@@ -102,27 +102,27 @@ namespace NGIN::Crypto::Encoding
             {
                 if (remainder != 0 || padding > 2 || text.size() < 4)
                 {
-                    return EncodingError();
+                    return std::unexpected(EncodingError());
                 }
 
                 if (padding == 2 && (DecodeValue(text[text.size() - 3]) & 0x0f) != 0)
                 {
-                    return EncodingError();
+                    return std::unexpected(EncodingError());
                 }
                 if (padding == 1 && (DecodeValue(text[text.size() - 2]) & 0x03) != 0)
                 {
-                    return EncodingError();
+                    return std::unexpected(EncodingError());
                 }
 
                 decoded -= padding;
             }
             else if (remainder == 2 && (DecodeValue(text[text.size() - 1]) & 0x0f) != 0)
             {
-                return EncodingError();
+                return std::unexpected(EncodingError());
             }
             else if (remainder == 3 && (DecodeValue(text[text.size() - 1]) & 0x03) != 0)
             {
-                return EncodingError();
+                return std::unexpected(EncodingError());
             }
 
             return decoded;
@@ -149,9 +149,9 @@ namespace NGIN::Crypto::Encoding
         output.resize(Base64EncodedLength(input.size(), padding));
 
         auto result = EncodeBase64Into(input, std::span<char> {output.data(), output.size()}, padding);
-        if (!result.HasValue())
+        if (!result.has_value())
         {
-            return result.Error();
+            return std::unexpected(std::move(result).error());
         }
 
         return output;
@@ -161,7 +161,7 @@ namespace NGIN::Crypto::Encoding
     {
         if (output.size() != Base64EncodedLength(input.size(), padding))
         {
-            return OutputBufferTooSmall();
+            return std::unexpected(OutputBufferTooSmall());
         }
 
         NGIN::UIntSize inputIndex  = 0;
@@ -212,16 +212,16 @@ namespace NGIN::Crypto::Encoding
     CryptoExpected<ByteBuffer> DecodeBase64(std::string_view text)
     {
         auto decodedLength = DecodedLength(text);
-        if (!decodedLength.HasValue())
+        if (!decodedLength.has_value())
         {
-            return decodedLength.Error();
+            return std::unexpected(std::move(decodedLength).error());
         }
 
-        auto output = MakeByteBuffer(decodedLength.Value());
+        auto output = MakeByteBuffer(decodedLength.value());
         auto result = DecodeBase64Into(text, ByteSpan {output.data(), output.Size()});
-        if (!result.HasValue())
+        if (!result.has_value())
         {
-            return result.Error();
+            return std::unexpected(std::move(result).error());
         }
 
         return output;
@@ -230,13 +230,13 @@ namespace NGIN::Crypto::Encoding
     CryptoExpected<void> DecodeBase64Into(std::string_view text, ByteSpan output) noexcept
     {
         auto decodedLength = DecodedLength(text);
-        if (!decodedLength.HasValue())
+        if (!decodedLength.has_value())
         {
-            return decodedLength.Error();
+            return std::unexpected(std::move(decodedLength).error());
         }
-        if (output.size() != decodedLength.Value())
+        if (output.size() != decodedLength.value())
         {
-            return OutputBufferTooSmall();
+            return std::unexpected(OutputBufferTooSmall());
         }
 
         std::array<NGIN::UInt8, 4> quartet {};
@@ -253,7 +253,7 @@ namespace NGIN::Crypto::Encoding
             const auto value = DecodeValue(character);
             if (value < 0)
             {
-                return EncodingError();
+                return std::unexpected(EncodingError());
             }
 
             quartet[quartetSize++] = static_cast<NGIN::UInt8>(value);
@@ -277,7 +277,7 @@ namespace NGIN::Crypto::Encoding
         }
         else if (quartetSize == 1)
         {
-            return EncodingError();
+            return std::unexpected(EncodingError());
         }
 
         return {};

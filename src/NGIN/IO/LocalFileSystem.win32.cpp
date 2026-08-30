@@ -106,10 +106,10 @@ namespace NGIN::IO
                 return {};
 
             const auto wideResult = NGIN::Text::Unicode::ToUtf16(utf8, NGIN::Text::Unicode::ErrorPolicy::Strict);
-            if (!wideResult.HasValue())
+            if (!wideResult.has_value())
                 return {};
 
-            const auto& wide = wideResult.Value();
+            const auto& wide = wideResult.value();
             NativePath  result;
             result.reserve(static_cast<std::size_t>(wide.Size()));
             for (char16_t ch: wide)
@@ -132,10 +132,10 @@ namespace NGIN::IO
             const auto utf8Result = NGIN::Text::Unicode::ToUtf8(
                     std::u16string_view {reinterpret_cast<const char16_t*>(nativePath.data()), nativePath.size()},
                     NGIN::Text::Unicode::ErrorPolicy::Strict);
-            if (!utf8Result.HasValue())
+            if (!utf8Result.has_value())
                 return {};
 
-            Path path {utf8Result.Value().View()};
+            Path path {utf8Result.value().View()};
             path.Normalize();
             return path;
         }
@@ -358,9 +358,9 @@ namespace NGIN::IO
                 return Result<FileInfo>(std::move(info));
             }
 
-            const DWORD flags  = FILE_FLAG_BACKUP_SEMANTICS |
-                                 (options.symlinkMode == SymlinkMode::DoNotFollow ? FILE_FLAG_OPEN_REPARSE_POINT : 0);
-            HANDLE      handle = CreateFileW(
+            const DWORD flags = FILE_FLAG_BACKUP_SEMANTICS |
+                                (options.symlinkMode == SymlinkMode::DoNotFollow ? FILE_FLAG_OPEN_REPARSE_POINT : 0);
+            HANDLE handle = CreateFileW(
                     nativePath.c_str(),
                     FILE_READ_ATTRIBUTES,
                     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
@@ -531,10 +531,10 @@ namespace NGIN::IO
                 {
                     auto handle = std::unique_ptr<LocalFileHandle>(new LocalFileHandle());
                     auto result = handle->OpenImpl(path, options);
-                    if (!result.HasValue())
+                    if (!result.has_value())
                     {
                         return Result<std::unique_ptr<LocalFileHandle>>(
-                                NGIN::Utilities::Unexpected<IOError>(std::move(result.Error())));
+                                NGIN::Utilities::Unexpected<IOError>(std::move(result.error())));
                     }
                     return Result<std::unique_ptr<LocalFileHandle>>(std::move(handle));
                 } catch (const std::bad_alloc&)
@@ -797,17 +797,17 @@ namespace NGIN::IO
             static Result<std::unique_ptr<LocalDirectoryHandle>> Open(const Path& path) noexcept
             {
                 auto info = BuildFileInfo(path, {});
-                if (!info.HasValue())
+                if (!info.has_value())
                 {
                     return Result<std::unique_ptr<LocalDirectoryHandle>>(
-                            NGIN::Utilities::Unexpected<IOError>(std::move(info.Error())));
+                            NGIN::Utilities::Unexpected<IOError>(std::move(info.error())));
                 }
-                if (!info.Value().exists)
+                if (!info.value().exists)
                 {
                     return Result<std::unique_ptr<LocalDirectoryHandle>>(
                             NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::NotFound, "directory not found", path)));
                 }
-                if (info.Value().type != EntryType::Directory)
+                if (info.value().type != EntryType::Directory)
                 {
                     return Result<std::unique_ptr<LocalDirectoryHandle>>(
                             NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::NotDirectory, "path is not a directory", path)));
@@ -828,53 +828,53 @@ namespace NGIN::IO
             Result<bool> Exists(const Path& path) noexcept override
             {
                 auto normalized = NormalizeRelativeHandlePath(path);
-                if (!normalized.HasValue())
-                    return Result<bool>(NGIN::Utilities::Unexpected<IOError>(std::move(normalized.Error())));
-                return m_fileSystem.Exists(JoinHandlePath(m_path, normalized.Value()));
+                if (!normalized.has_value())
+                    return Result<bool>(NGIN::Utilities::Unexpected<IOError>(std::move(normalized.error())));
+                return m_fileSystem.Exists(JoinHandlePath(m_path, normalized.value()));
             }
 
             Result<FileInfo> GetInfo(const Path& path, const MetadataOptions& options) noexcept override
             {
                 auto normalized = NormalizeRelativeHandlePath(path);
-                if (!normalized.HasValue())
-                    return Result<FileInfo>(NGIN::Utilities::Unexpected<IOError>(std::move(normalized.Error())));
-                return m_fileSystem.GetInfo(JoinHandlePath(m_path, normalized.Value()), options);
+                if (!normalized.has_value())
+                    return Result<FileInfo>(NGIN::Utilities::Unexpected<IOError>(std::move(normalized.error())));
+                return m_fileSystem.GetInfo(JoinHandlePath(m_path, normalized.value()), options);
             }
 
             Result<FileHandle> OpenFile(const Path& path, const FileOpenOptions& options) noexcept override
             {
                 auto normalized = NormalizeRelativeHandlePath(path);
-                if (!normalized.HasValue())
+                if (!normalized.has_value())
                 {
-                    return Result<FileHandle>(NGIN::Utilities::Unexpected<IOError>(std::move(normalized.Error())));
+                    return Result<FileHandle>(NGIN::Utilities::Unexpected<IOError>(std::move(normalized.error())));
                 }
-                return m_fileSystem.OpenFile(JoinHandlePath(m_path, normalized.Value()), options);
+                return m_fileSystem.OpenFile(JoinHandlePath(m_path, normalized.value()), options);
             }
 
             Result<DirectoryHandle> OpenDirectory(const Path& path) noexcept override
             {
                 auto normalized = NormalizeRelativeHandlePath(path);
-                if (!normalized.HasValue())
+                if (!normalized.has_value())
                 {
-                    return Result<DirectoryHandle>(NGIN::Utilities::Unexpected<IOError>(std::move(normalized.Error())));
+                    return Result<DirectoryHandle>(NGIN::Utilities::Unexpected<IOError>(std::move(normalized.error())));
                 }
 
-                auto opened = Open(JoinHandlePath(m_path, normalized.Value()));
-                if (!opened.HasValue())
+                auto opened = Open(JoinHandlePath(m_path, normalized.value()));
+                if (!opened.has_value())
                 {
-                    return Result<DirectoryHandle>(NGIN::Utilities::Unexpected<IOError>(std::move(opened.Error())));
+                    return Result<DirectoryHandle>(NGIN::Utilities::Unexpected<IOError>(std::move(opened.error())));
                 }
 
-                return Result<DirectoryHandle>(DirectoryHandle(std::move(opened).TakeValue()));
+                return Result<DirectoryHandle>(DirectoryHandle(std::move(opened).value()));
             }
 
             ResultVoid CreateDirectory(const Path& path, const DirectoryCreateOptions& options = {}) noexcept override
             {
                 auto normalized = NormalizeRelativeHandlePath(path);
-                if (!normalized.HasValue())
-                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(normalized.Error())));
+                if (!normalized.has_value())
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(normalized.error())));
 
-                const Path resolvedPath = JoinHandlePath(m_path, normalized.Value());
+                const Path resolvedPath = JoinHandlePath(m_path, normalized.value());
                 if (options.recursive)
                     return m_fileSystem.CreateDirectories(resolvedPath, options);
                 return m_fileSystem.CreateDirectory(resolvedPath, options);
@@ -883,25 +883,25 @@ namespace NGIN::IO
             ResultVoid RemoveFile(const Path& path, const RemoveOptions& options = {}) noexcept override
             {
                 auto normalized = NormalizeRelativeHandlePath(path);
-                if (!normalized.HasValue())
-                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(normalized.Error())));
-                return m_fileSystem.RemoveFile(JoinHandlePath(m_path, normalized.Value()), options);
+                if (!normalized.has_value())
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(normalized.error())));
+                return m_fileSystem.RemoveFile(JoinHandlePath(m_path, normalized.value()), options);
             }
 
             ResultVoid RemoveDirectory(const Path& path, const RemoveOptions& options = {}) noexcept override
             {
                 auto normalized = NormalizeRelativeHandlePath(path);
-                if (!normalized.HasValue())
-                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(normalized.Error())));
-                return m_fileSystem.RemoveDirectory(JoinHandlePath(m_path, normalized.Value()), options);
+                if (!normalized.has_value())
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(normalized.error())));
+                return m_fileSystem.RemoveDirectory(JoinHandlePath(m_path, normalized.value()), options);
             }
 
             Result<Path> ReadSymlink(const Path& path) noexcept override
             {
                 auto normalized = NormalizeRelativeHandlePath(path);
-                if (!normalized.HasValue())
-                    return Result<Path>(NGIN::Utilities::Unexpected<IOError>(std::move(normalized.Error())));
-                return m_fileSystem.ReadSymlink(JoinHandlePath(m_path, normalized.Value()));
+                if (!normalized.has_value())
+                    return Result<Path>(NGIN::Utilities::Unexpected<IOError>(std::move(normalized.error())));
+                return m_fileSystem.ReadSymlink(JoinHandlePath(m_path, normalized.value()));
             }
 
         private:
@@ -931,7 +931,7 @@ namespace NGIN::IO
             if (options.ignoreIfExists && (error == ERROR_ALREADY_EXISTS || error == ERROR_FILE_EXISTS))
             {
                 auto existing = BuildFileInfo(path, {});
-                if (existing.HasValue() && existing.Value().exists && existing.Value().type == EntryType::Directory)
+                if (existing.has_value() && existing.value().exists && existing.value().type == EntryType::Directory)
                     return {};
             }
             return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(error, "CreateDirectoryW failed", path)));
@@ -947,7 +947,7 @@ namespace NGIN::IO
             if (!parent.IsEmpty() && parent.View() != normalized.View())
             {
                 auto parentCreated = CreateDirectoriesNative(parent, options);
-                if (!parentCreated.HasValue())
+                if (!parentCreated.has_value())
                     return parentCreated;
             }
 
@@ -1002,16 +1002,16 @@ namespace NGIN::IO
                         MetadataOptions metadataOptions;
                         metadataOptions.symlinkMode = options.followSymlinks ? SymlinkMode::Follow : SymlinkMode::DoNotFollow;
                         auto infoResult             = BuildFileInfo(childPath, metadataOptions);
-                        if (!infoResult.HasValue())
+                        if (!infoResult.has_value())
                         {
-                            const IOError error = std::move(infoResult.Error());
+                            const IOError error = std::move(infoResult.error());
                             FindClose(handle);
                             return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(error)));
                         }
 
-                        entry.type = infoResult.Value().type;
+                        entry.type = infoResult.value().type;
                         if (options.populateInfo)
-                            entry.info = std::move(infoResult.Value());
+                            entry.info = std::move(infoResult.value());
                     }
 
                     if (IncludeEntry(entry, options))
@@ -1020,9 +1020,9 @@ namespace NGIN::IO
                     if (options.recursive && entry.type == EntryType::Directory)
                     {
                         auto childResult = self(self, childPath);
-                        if (!childResult.HasValue())
+                        if (!childResult.has_value())
                         {
-                            const IOError error = std::move(childResult.Error());
+                            const IOError error = std::move(childResult.error());
                             FindClose(handle);
                             return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(error)));
                         }
@@ -1037,8 +1037,8 @@ namespace NGIN::IO
             };
 
             auto collectResult = collect(collect, path);
-            if (!collectResult.HasValue())
-                return Result<std::vector<DirectoryEntry>>(NGIN::Utilities::Unexpected<IOError>(std::move(collectResult.Error())));
+            if (!collectResult.has_value())
+                return Result<std::vector<DirectoryEntry>>(NGIN::Utilities::Unexpected<IOError>(std::move(collectResult.error())));
 
             SortEntries(entries, options.sortOrder);
 
@@ -1052,34 +1052,34 @@ namespace NGIN::IO
             enumerateOptions.includeSymlinks = true;
             enumerateOptions.sortOrder       = DirectorySortOrder::LexicalPath;
             auto entries                     = EnumerateEntries(path, enumerateOptions);
-            if (!entries.HasValue())
-                return Result<UInt64>(NGIN::Utilities::Unexpected<IOError>(std::move(entries.Error())));
+            if (!entries.has_value())
+                return Result<UInt64>(NGIN::Utilities::Unexpected<IOError>(std::move(entries.error())));
 
             RemoveOptions removeLeafOptions = options;
             removeLeafOptions.recursive     = false;
 
             UInt64 removed = 0;
-            auto&  values  = entries.Value();
+            auto&  values  = entries.value();
             for (auto it = values.rbegin(); it != values.rend(); ++it)
             {
                 auto entryInfo = BuildFileInfo(it->path, {});
-                if (!entryInfo.HasValue())
-                    return Result<UInt64>(NGIN::Utilities::Unexpected<IOError>(std::move(entryInfo.Error())));
+                if (!entryInfo.has_value())
+                    return Result<UInt64>(NGIN::Utilities::Unexpected<IOError>(std::move(entryInfo.error())));
 
                 ResultVoid result;
-                if (entryInfo.Value().type == EntryType::Directory)
+                if (entryInfo.value().type == EntryType::Directory)
                     result = RemoveDirectoryNative(it->path, removeLeafOptions);
                 else
                     result = RemoveFileNative(it->path, options);
-                if (!result.HasValue())
-                    return Result<UInt64>(NGIN::Utilities::Unexpected<IOError>(std::move(result.Error())));
+                if (!result.has_value())
+                    return Result<UInt64>(NGIN::Utilities::Unexpected<IOError>(std::move(result.error())));
                 ++removed;
             }
 
             auto rootInfo = BuildFileInfo(path, {});
-            if (!rootInfo.HasValue())
-                return Result<UInt64>(NGIN::Utilities::Unexpected<IOError>(std::move(rootInfo.Error())));
-            if (!rootInfo.Value().exists)
+            if (!rootInfo.has_value())
+                return Result<UInt64>(NGIN::Utilities::Unexpected<IOError>(std::move(rootInfo.error())));
+            if (!rootInfo.value().exists)
             {
                 if (options.ignoreMissing)
                     return Result<UInt64>(UInt64 {0});
@@ -1087,12 +1087,12 @@ namespace NGIN::IO
             }
 
             ResultVoid removeRoot;
-            if (rootInfo.Value().type == EntryType::Directory)
+            if (rootInfo.value().type == EntryType::Directory)
                 removeRoot = RemoveDirectoryNative(path, removeLeafOptions);
             else
                 removeRoot = RemoveFileNative(path, options);
-            if (!removeRoot.HasValue())
-                return Result<UInt64>(NGIN::Utilities::Unexpected<IOError>(std::move(removeRoot.Error())));
+            if (!removeRoot.has_value())
+                return Result<UInt64>(NGIN::Utilities::Unexpected<IOError>(std::move(removeRoot.error())));
 
             return Result<UInt64>(removed + 1);
         }
@@ -1102,8 +1102,8 @@ namespace NGIN::IO
             if (options.recursive)
             {
                 auto removed = RemoveAllNative(path, options);
-                if (!removed.HasValue())
-                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(removed.Error())));
+                if (!removed.has_value())
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(removed.error())));
                 return {};
             }
 
@@ -1122,12 +1122,12 @@ namespace NGIN::IO
                 std::vector<FileIdentity>& activeDirectories) noexcept
         {
             auto sourceInfo = BuildFileInfo(from, MetadataOptions {.symlinkMode = SymlinkMode::DoNotFollow});
-            if (!sourceInfo.HasValue())
-                return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(sourceInfo.Error())));
-            if (!sourceInfo.Value().exists)
+            if (!sourceInfo.has_value())
+                return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(sourceInfo.error())));
+            if (!sourceInfo.value().exists)
                 return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::NotFound, "source not found", from, to)));
 
-            const bool sourceIsSymlink = sourceInfo.Value().type == EntryType::Symlink;
+            const bool sourceIsSymlink = sourceInfo.value().type == EntryType::Symlink;
             if (sourceIsSymlink && options.symlinks == CopySymlinkMode::Reject)
             {
                 return ResultVoid(NGIN::Utilities::Unexpected<IOError>(
@@ -1137,20 +1137,20 @@ namespace NGIN::IO
             if (sourceIsSymlink && options.symlinks == CopySymlinkMode::Preserve)
             {
                 auto existing = BuildFileInfo(to, MetadataOptions {.symlinkMode = SymlinkMode::DoNotFollow});
-                if (!existing.HasValue())
-                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(existing.Error())));
-                if (existing.Value().exists)
+                if (!existing.has_value())
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(existing.error())));
+                if (existing.value().exists)
                 {
                     if (!options.overwriteExisting)
                         return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::AlreadyExists, "destination exists", to, from)));
                     auto removed = RemoveAllNative(to, RemoveOptions {.recursive = true, .ignoreMissing = true});
-                    if (!removed.HasValue())
-                        return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(removed.Error())));
+                    if (!removed.has_value())
+                        return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(removed.error())));
                 }
 
                 auto target = ReadReparseTarget(from);
-                if (!target.HasValue())
-                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(target.Error())));
+                if (!target.has_value())
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(target.error())));
                 const DWORD attributes = GetFileAttributesW(ToNativePath(from).c_str());
                 DWORD       flags      = attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0
                                                  ? SYMBOLIC_LINK_FLAG_DIRECTORY
@@ -1158,7 +1158,7 @@ namespace NGIN::IO
 #if defined(SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE)
                 flags |= SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE;
 #endif
-                if (CreateSymbolicLinkW(ToNativePath(to).c_str(), ToNativePath(target.Value()).c_str(), flags) != 0)
+                if (CreateSymbolicLinkW(ToNativePath(to).c_str(), ToNativePath(target.value()).c_str(), flags) != 0)
                     return {};
                 return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeWindowsError(GetLastError(), "symbolic-link copy failed", to, from)));
             }
@@ -1166,16 +1166,16 @@ namespace NGIN::IO
             if (sourceIsSymlink)
             {
                 sourceInfo = BuildFileInfo(from, MetadataOptions {.symlinkMode = SymlinkMode::Follow});
-                if (!sourceInfo.HasValue())
-                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(sourceInfo.Error())));
-                if (!sourceInfo.Value().exists || sourceInfo.Value().type == EntryType::Symlink)
+                if (!sourceInfo.has_value())
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(sourceInfo.error())));
+                if (!sourceInfo.value().exists || sourceInfo.value().type == EntryType::Symlink)
                 {
                     return ResultVoid(NGIN::Utilities::Unexpected<IOError>(
                             MakeError(IOErrorCode::NotFound, "symbolic-link target does not exist", from, to)));
                 }
             }
 
-            if (sourceInfo.Value().type == EntryType::Directory)
+            if (sourceInfo.value().type == EntryType::Directory)
             {
                 if (!options.recursive)
                 {
@@ -1183,36 +1183,36 @@ namespace NGIN::IO
                             MakeError(IOErrorCode::NotSupported, "directory copy requires recursive option", from, to)));
                 }
 
-                if (sourceInfo.Value().identity.valid)
+                if (sourceInfo.value().identity.valid)
                 {
                     const auto duplicate = std::find_if(activeDirectories.begin(), activeDirectories.end(), [&](const FileIdentity& identity) {
-                        return identity.device == sourceInfo.Value().identity.device && identity.inode == sourceInfo.Value().identity.inode;
+                        return identity.device == sourceInfo.value().identity.device && identity.inode == sourceInfo.value().identity.inode;
                     });
                     if (duplicate != activeDirectories.end())
                     {
                         return ResultVoid(NGIN::Utilities::Unexpected<IOError>(
                                 MakeError(IOErrorCode::InvalidPath, "symbolic-link cycle detected during copy", from, to)));
                     }
-                    activeDirectories.push_back(sourceInfo.Value().identity);
+                    activeDirectories.push_back(sourceInfo.value().identity);
                 }
 
                 auto destinationInfo = BuildFileInfo(to, MetadataOptions {.symlinkMode = SymlinkMode::DoNotFollow});
-                if (!destinationInfo.HasValue())
-                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(destinationInfo.Error())));
+                if (!destinationInfo.has_value())
+                    return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(destinationInfo.error())));
                 bool createdDestination = false;
-                if (destinationInfo.Value().exists && destinationInfo.Value().type != EntryType::Directory)
+                if (destinationInfo.value().exists && destinationInfo.value().type != EntryType::Directory)
                 {
                     if (!options.overwriteExisting)
                         return ResultVoid(NGIN::Utilities::Unexpected<IOError>(MakeError(IOErrorCode::AlreadyExists, "destination exists", to, from)));
                     auto removed = RemoveAllNative(to, RemoveOptions {.recursive = true, .ignoreMissing = true});
-                    if (!removed.HasValue())
-                        return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(removed.Error())));
-                    destinationInfo.Value().exists = false;
+                    if (!removed.has_value())
+                        return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(removed.error())));
+                    destinationInfo.value().exists = false;
                 }
-                if (!destinationInfo.Value().exists)
+                if (!destinationInfo.value().exists)
                 {
                     auto created = CreateDirectoryNative(to, DirectoryCreateOptions {.recursive = false, .ignoreIfExists = false});
-                    if (!created.HasValue())
+                    if (!created.has_value())
                         return created;
                     createdDestination = true;
                 }
@@ -1225,25 +1225,25 @@ namespace NGIN::IO
                                 .includeDirectories = true,
                                 .includeSymlinks    = true,
                         });
-                if (entries.HasValue())
+                if (entries.has_value())
                 {
-                    for (const auto& entry: entries.Value())
+                    for (const auto& entry: entries.value())
                     {
                         auto copied = CopyPathNative(entry.path, to.Join(entry.name.View()), options, activeDirectories);
-                        if (!copied.HasValue())
+                        if (!copied.has_value())
                         {
                             entries = Result<std::vector<DirectoryEntry>>(
-                                    NGIN::Utilities::Unexpected<IOError>(std::move(copied.Error())));
+                                    NGIN::Utilities::Unexpected<IOError>(std::move(copied.error())));
                             break;
                         }
                     }
                 }
 
-                if (sourceInfo.Value().identity.valid)
+                if (sourceInfo.value().identity.valid)
                     activeDirectories.pop_back();
-                if (!entries.HasValue())
+                if (!entries.has_value())
                 {
-                    const IOError error = std::move(entries.Error());
+                    const IOError error = std::move(entries.error());
                     if (createdDestination && options.cleanupOnFailure)
                         (void) RemoveAllNative(to, RemoveOptions {.recursive = true, .ignoreMissing = true});
                     return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(error)));
@@ -1263,16 +1263,16 @@ namespace NGIN::IO
                 return {};
             }
 
-            if (sourceInfo.Value().type != EntryType::File)
+            if (sourceInfo.value().type != EntryType::File)
             {
                 return ResultVoid(NGIN::Utilities::Unexpected<IOError>(
                         MakeError(IOErrorCode::NotSupported, "copy is unsupported for this entry type", from, to)));
             }
 
             auto destinationInfo = BuildFileInfo(to, MetadataOptions {.symlinkMode = SymlinkMode::DoNotFollow});
-            if (!destinationInfo.HasValue())
-                return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(destinationInfo.Error())));
-            const bool destinationExisted = destinationInfo.Value().exists;
+            if (!destinationInfo.has_value())
+                return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(destinationInfo.error())));
+            const bool destinationExisted = destinationInfo.value().exists;
             const BOOL failIfExists       = options.overwriteExisting ? FALSE : TRUE;
             if (CopyFileW(ToNativePath(from).c_str(), ToNativePath(to).c_str(), failIfExists) != 0)
             {
@@ -1330,7 +1330,7 @@ namespace NGIN::IO
     Result<Path> LocalFileSystem::WeaklyCanonical(const Path& path) noexcept
     {
         auto canonical = CanonicalizeExistingPath(path);
-        if (canonical.HasValue())
+        if (canonical.has_value())
             return canonical;
         return MakeAbsolutePath(path, {});
     }
@@ -1338,21 +1338,21 @@ namespace NGIN::IO
     Result<bool> LocalFileSystem::SameFile(const Path& lhs, const Path& rhs) noexcept
     {
         auto lhsInfo = BuildFileInfo(lhs, MetadataOptions {.symlinkMode = SymlinkMode::Follow});
-        if (!lhsInfo.HasValue())
-            return Result<bool>(NGIN::Utilities::Unexpected<IOError>(std::move(lhsInfo.Error())));
+        if (!lhsInfo.has_value())
+            return Result<bool>(NGIN::Utilities::Unexpected<IOError>(std::move(lhsInfo.error())));
 
         auto rhsInfo = BuildFileInfo(rhs, MetadataOptions {.symlinkMode = SymlinkMode::Follow});
-        if (!rhsInfo.HasValue())
-            return Result<bool>(NGIN::Utilities::Unexpected<IOError>(std::move(rhsInfo.Error())));
+        if (!rhsInfo.has_value())
+            return Result<bool>(NGIN::Utilities::Unexpected<IOError>(std::move(rhsInfo.error())));
 
-        if (!lhsInfo.Value().exists || !rhsInfo.Value().exists)
+        if (!lhsInfo.value().exists || !rhsInfo.value().exists)
             return Result<bool>(false);
-        if (!lhsInfo.Value().identity.valid || !rhsInfo.Value().identity.valid)
+        if (!lhsInfo.value().identity.valid || !rhsInfo.value().identity.valid)
             return Result<bool>(false);
 
         return Result<bool>(
-                lhsInfo.Value().identity.device == rhsInfo.Value().identity.device &&
-                lhsInfo.Value().identity.inode == rhsInfo.Value().identity.inode);
+                lhsInfo.value().identity.device == rhsInfo.value().identity.device &&
+                lhsInfo.value().identity.inode == rhsInfo.value().identity.inode);
     }
 
     Result<Path> LocalFileSystem::ReadSymlink(const Path& path) noexcept
@@ -1374,7 +1374,7 @@ namespace NGIN::IO
     {
         DWORD flags      = 0;
         auto  targetInfo = BuildFileInfo(target, MetadataOptions {});
-        if (targetInfo.HasValue() && targetInfo.Value().exists && targetInfo.Value().type == EntryType::Directory)
+        if (targetInfo.has_value() && targetInfo.value().exists && targetInfo.value().type == EntryType::Directory)
             flags |= SYMBOLIC_LINK_FLAG_DIRECTORY;
 #if defined(SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE)
         flags |= SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE;
@@ -1483,28 +1483,28 @@ namespace NGIN::IO
     Result<FileHandle> LocalFileSystem::OpenFile(const Path& path, const FileOpenOptions& options) noexcept
     {
         auto opened = LocalFileHandle::Open(path, options);
-        if (!opened.HasValue())
-            return Result<FileHandle>(NGIN::Utilities::Unexpected<IOError>(std::move(opened.Error())));
-        return Result<FileHandle>(FileHandle(std::move(opened).TakeValue()));
+        if (!opened.has_value())
+            return Result<FileHandle>(NGIN::Utilities::Unexpected<IOError>(std::move(opened.error())));
+        return Result<FileHandle>(FileHandle(std::move(opened).value()));
     }
 
     Result<DirectoryHandle> LocalFileSystem::OpenDirectory(const Path& path) noexcept
     {
         auto opened = LocalDirectoryHandle::Open(path);
-        if (!opened.HasValue())
-            return Result<DirectoryHandle>(NGIN::Utilities::Unexpected<IOError>(std::move(opened.Error())));
-        return Result<DirectoryHandle>(DirectoryHandle(std::move(opened).TakeValue()));
+        if (!opened.has_value())
+            return Result<DirectoryHandle>(NGIN::Utilities::Unexpected<IOError>(std::move(opened.error())));
+        return Result<DirectoryHandle>(DirectoryHandle(std::move(opened).value()));
     }
 
     Result<DirectoryEnumerator> LocalFileSystem::Enumerate(const Path& path, const EnumerateOptions& options) noexcept
     {
         auto entries = EnumerateEntries(path, options);
-        if (!entries.HasValue())
-            return Result<DirectoryEnumerator>(NGIN::Utilities::Unexpected<IOError>(std::move(entries.Error())));
+        if (!entries.has_value())
+            return Result<DirectoryEnumerator>(NGIN::Utilities::Unexpected<IOError>(std::move(entries.error())));
 
         try
         {
-            return Result<DirectoryEnumerator>(DirectoryEnumerator(std::unique_ptr<IDirectoryEnumerator>(new VectorDirectoryEnumerator(std::move(entries.Value())))));
+            return Result<DirectoryEnumerator>(DirectoryEnumerator(std::unique_ptr<IDirectoryEnumerator>(new VectorDirectoryEnumerator(std::move(entries.value())))));
         } catch (const std::bad_alloc&)
         {
             return Result<DirectoryEnumerator>(
@@ -1552,9 +1552,9 @@ namespace NGIN::IO
         if (baseDirectory.IsEmpty())
         {
             auto tempDirectory = TempDirectory();
-            if (!tempDirectory.HasValue())
-                return Result<Path>(NGIN::Utilities::Unexpected<IOError>(std::move(tempDirectory.Error())));
-            baseDirectory = std::move(tempDirectory.Value());
+            if (!tempDirectory.has_value())
+                return Result<Path>(NGIN::Utilities::Unexpected<IOError>(std::move(tempDirectory.error())));
+            baseDirectory = std::move(tempDirectory.value());
         }
 
         for (unsigned int attempt = 0; attempt < 128; ++attempt)
@@ -1578,9 +1578,9 @@ namespace NGIN::IO
         if (baseDirectory.IsEmpty())
         {
             auto tempDirectory = TempDirectory();
-            if (!tempDirectory.HasValue())
-                return Result<Path>(NGIN::Utilities::Unexpected<IOError>(std::move(tempDirectory.Error())));
-            baseDirectory = std::move(tempDirectory.Value());
+            if (!tempDirectory.has_value())
+                return Result<Path>(NGIN::Utilities::Unexpected<IOError>(std::move(tempDirectory.error())));
+            baseDirectory = std::move(tempDirectory.value());
         }
 
         wchar_t    tempBuffer[MAX_PATH] {};
@@ -1908,12 +1908,13 @@ namespace NGIN::IO
                     {
                         if (m_resumeExecutor.IsValid())
                         {
-                            m_resumeExecutor.Execute(m_awaiting);
+                            const NGIN::Execution::ScheduleResult result = m_resumeExecutor.Execute(m_awaiting);
+                            if (result)
+                            {
+                                return;
+                            }
                         }
-                        else
-                        {
-                            m_awaiting.resume();
-                        }
+                        m_awaiting.resume();
                     }
                 }
             };
@@ -1943,11 +1944,11 @@ namespace NGIN::IO
                         *backend,
                         ctx,
                         detail::NativeFileRequest {
-                                .kind        = detail::NativeFileOperationKind::Read,
-                                .handleValue = reinterpret_cast<std::uintptr_t>(state->handle),
-                                .offset      = offset,
-                                .buffer      = destination.data(),
-                                .size        = static_cast<UInt32>(destination.size()),
+                                      .kind        = detail::NativeFileOperationKind::Read,
+                                      .handleValue = reinterpret_cast<std::uintptr_t>(state->handle),
+                                      .offset      = offset,
+                                      .buffer      = destination.data(),
+                                      .size        = static_cast<UInt32>(destination.size()),
                         });
                 if (completion.status == NativeWindowsFileCompletion::Status::Canceled)
                 {
@@ -1985,8 +1986,8 @@ namespace NGIN::IO
             }
             auto result = std::move(*completion.result);
             if (!result)
-                co_return NGIN::Utilities::Unexpected<IOError>(std::move(result).TakeError());
-            co_return std::move(result).TakeValue();
+                co_return NGIN::Utilities::Unexpected<IOError>(std::move(result).error());
+            co_return std::move(result).value();
         }
 
         AsyncTask<UIntSize> LocalAsyncFileWrite(
@@ -2000,11 +2001,11 @@ namespace NGIN::IO
                         *backend,
                         ctx,
                         detail::NativeFileRequest {
-                                .kind        = detail::NativeFileOperationKind::Write,
-                                .handleValue = reinterpret_cast<std::uintptr_t>(state->handle),
-                                .offset      = offset,
-                                .buffer      = const_cast<NGIN::Byte*>(source.data()),
-                                .size        = static_cast<UInt32>(source.size()),
+                                      .kind        = detail::NativeFileOperationKind::Write,
+                                      .handleValue = reinterpret_cast<std::uintptr_t>(state->handle),
+                                      .offset      = offset,
+                                      .buffer      = const_cast<NGIN::Byte*>(source.data()),
+                                      .size        = static_cast<UInt32>(source.size()),
                         });
                 if (completion.status == NativeWindowsFileCompletion::Status::Canceled)
                 {
@@ -2038,8 +2039,8 @@ namespace NGIN::IO
             }
             auto result = std::move(*completion.result);
             if (!result)
-                co_return NGIN::Utilities::Unexpected<IOError>(std::move(result).TakeError());
-            co_return std::move(result).TakeValue();
+                co_return NGIN::Utilities::Unexpected<IOError>(std::move(result).error());
+            co_return std::move(result).value();
         }
 
         AsyncTask<UIntSize> LocalAsyncFileReadAt(const std::shared_ptr<void>& rawState,
@@ -2096,8 +2097,8 @@ namespace NGIN::IO
             }
             auto result = std::move(*completion.result);
             if (!result)
-                co_return NGIN::Utilities::Unexpected<IOError>(std::move(result).TakeError());
-            co_return std::move(result).TakeValue();
+                co_return NGIN::Utilities::Unexpected<IOError>(std::move(result).error());
+            co_return std::move(result).value();
         }
 
         AsyncTask<UIntSize> LocalAsyncFileWriteAt(const std::shared_ptr<void>& rawState,
@@ -2150,8 +2151,8 @@ namespace NGIN::IO
             }
             auto result = std::move(*completion.result);
             if (!result)
-                co_return NGIN::Utilities::Unexpected<IOError>(std::move(result).TakeError());
-            co_return std::move(result).TakeValue();
+                co_return NGIN::Utilities::Unexpected<IOError>(std::move(result).error());
+            co_return std::move(result).value();
         }
 
         AsyncTaskVoid LocalAsyncFileFlush(const std::shared_ptr<void>& rawState, NGIN::Async::TaskContext& ctx)
@@ -2200,7 +2201,7 @@ namespace NGIN::IO
             auto result = std::move(*completion.result);
             if (!result)
             {
-                co_await NGIN::Async::DomainFailure(std::move(result).TakeError());
+                co_await NGIN::Async::DomainFailure(std::move(result).error());
                 co_return;
             }
             co_return;
@@ -2319,8 +2320,8 @@ namespace NGIN::IO
             }
             auto result = std::move(*completion.result);
             if (!result)
-                co_return NGIN::Utilities::Unexpected<IOError>(std::move(result).TakeError());
-            co_return std::move(result).TakeValue();
+                co_return NGIN::Utilities::Unexpected<IOError>(std::move(result).error());
+            co_return std::move(result).value();
         }
 
         AsyncTask<FileInfo> LocalAsyncDirectoryGetInfo(const std::shared_ptr<void>& rawState,
@@ -2344,8 +2345,8 @@ namespace NGIN::IO
             }
             auto result = std::move(*completion.result);
             if (!result)
-                co_return NGIN::Utilities::Unexpected<IOError>(std::move(result).TakeError());
-            co_return std::move(result).TakeValue();
+                co_return NGIN::Utilities::Unexpected<IOError>(std::move(result).error());
+            co_return std::move(result).value();
         }
 
         AsyncTask<AsyncFileHandle> LocalAsyncDirectoryOpenFile(const std::shared_ptr<void>& rawState,
@@ -2355,10 +2356,10 @@ namespace NGIN::IO
         {
             auto state      = std::static_pointer_cast<LocalAsyncDirectoryState>(rawState);
             auto normalized = NormalizeRelativeHandlePath(path);
-            if (!normalized.HasValue())
-                co_return NGIN::Utilities::Unexpected<IOError>(std::move(normalized).TakeError());
+            if (!normalized.has_value())
+                co_return NGIN::Utilities::Unexpected<IOError>(std::move(normalized).error());
 
-            const Path resolvedPath = ResolveAsyncDirectoryPath(*state, normalized.Value());
+            const Path resolvedPath = ResolveAsyncDirectoryPath(*state, normalized.value());
             auto       completion   = co_await detail::DispatchToDriver(*state->driver, ctx, [resolvedPath, options]() mutable noexcept {
                 return OpenAsyncWindowsFile(resolvedPath, options);
             });
@@ -2374,8 +2375,8 @@ namespace NGIN::IO
             }
             auto result = std::move(*completion.result);
             if (!result)
-                co_return NGIN::Utilities::Unexpected<IOError>(std::move(result).TakeError());
-            co_return MakeAsyncFileHandle(state->driver, std::move(result).TakeValue());
+                co_return NGIN::Utilities::Unexpected<IOError>(std::move(result).error());
+            co_return MakeAsyncFileHandle(state->driver, std::move(result).value());
         }
 
         AsyncTask<AsyncDirectoryHandle> LocalAsyncDirectoryOpenDirectory(
@@ -2383,10 +2384,10 @@ namespace NGIN::IO
         {
             auto state      = std::static_pointer_cast<LocalAsyncDirectoryState>(rawState);
             auto normalized = NormalizeRelativeHandlePath(path);
-            if (!normalized.HasValue())
-                co_return NGIN::Utilities::Unexpected<IOError>(std::move(normalized).TakeError());
+            if (!normalized.has_value())
+                co_return NGIN::Utilities::Unexpected<IOError>(std::move(normalized).error());
 
-            const Path resolvedPath = ResolveAsyncDirectoryPath(*state, normalized.Value());
+            const Path resolvedPath = ResolveAsyncDirectoryPath(*state, normalized.value());
             auto       completion   = co_await detail::DispatchToDriver(*state->driver, ctx, [resolvedPath]() mutable noexcept {
                 return LocalDirectoryHandle::Open(resolvedPath);
             });
@@ -2402,11 +2403,11 @@ namespace NGIN::IO
             }
             auto result = std::move(*completion.result);
             if (!result)
-                co_return NGIN::Utilities::Unexpected<IOError>(std::move(result).TakeError());
+                co_return NGIN::Utilities::Unexpected<IOError>(std::move(result).error());
 
             auto nextState    = std::make_shared<LocalAsyncDirectoryState>();
             nextState->driver = state->driver;
-            nextState->handle = std::move(result).TakeValue();
+            nextState->handle = std::move(result).value();
             nextState->path   = resolvedPath;
             co_return AsyncDirectoryHandle(std::move(nextState), &LocalAsyncDirectoryOperations);
         }
@@ -2430,8 +2431,8 @@ namespace NGIN::IO
             }
             auto result = std::move(*completion.result);
             if (!result)
-                co_return NGIN::Utilities::Unexpected<IOError>(std::move(result).TakeError());
-            co_return std::move(result).TakeValue();
+                co_return NGIN::Utilities::Unexpected<IOError>(std::move(result).error());
+            co_return std::move(result).value();
         }
 
         const AsyncDirectoryHandle::Operations LocalAsyncDirectoryOperations {
@@ -2444,11 +2445,12 @@ namespace NGIN::IO
     }// namespace
 
     AsyncTask<AsyncFileHandle> LocalFileSystem::OpenFileAsync(
-            NGIN::Async::TaskContext& ctx, const Path& path, const FileOpenOptions& options)
+            NGIN::Async::TaskContext& ctx, Path path, FileOpenOptions options)
     {
-        auto completion = co_await detail::DispatchToDriver(*m_asyncDriver, ctx, [path, options]() mutable noexcept {
-            return OpenAsyncWindowsFile(path, options);
-        });
+        auto completion = co_await detail::DispatchToDriver(
+                *m_asyncDriver, ctx, [path = std::move(path), options]() mutable noexcept {
+                    return OpenAsyncWindowsFile(path, options);
+                });
         if (completion.IsCanceled())
         {
             co_await NGIN::Async::Canceled();
@@ -2461,14 +2463,15 @@ namespace NGIN::IO
         }
         auto opened = std::move(*completion.result);
         if (!opened)
-            co_return NGIN::Utilities::Unexpected<IOError>(std::move(opened).TakeError());
-        co_return MakeAsyncFileHandle(m_asyncDriver, std::move(opened).TakeValue());
+            co_return NGIN::Utilities::Unexpected<IOError>(std::move(opened).error());
+        co_return MakeAsyncFileHandle(m_asyncDriver, std::move(opened).value());
     }
 
     AsyncTask<AsyncDirectoryHandle> LocalFileSystem::OpenDirectoryAsync(
-            NGIN::Async::TaskContext& ctx, const Path& path)
+            NGIN::Async::TaskContext& ctx, Path path)
     {
-        auto completion = co_await detail::DispatchToDriver(*m_asyncDriver, ctx, [path]() mutable noexcept {
+        const Path normalizedPath = path.LexicallyNormal();
+        auto       completion     = co_await detail::DispatchToDriver(*m_asyncDriver, ctx, [path = std::move(path)]() mutable noexcept {
             return LocalDirectoryHandle::Open(path);
         });
         if (completion.IsCanceled())
@@ -2483,12 +2486,12 @@ namespace NGIN::IO
         }
         auto opened = std::move(*completion.result);
         if (!opened)
-            co_return NGIN::Utilities::Unexpected<IOError>(std::move(opened).TakeError());
+            co_return NGIN::Utilities::Unexpected<IOError>(std::move(opened).error());
 
         auto state    = std::make_shared<LocalAsyncDirectoryState>();
         state->driver = m_asyncDriver;
-        state->handle = std::move(opened).TakeValue();
-        state->path   = path.LexicallyNormal();
+        state->handle = std::move(opened).value();
+        state->path   = normalizedPath;
         co_return AsyncDirectoryHandle(std::move(state), &LocalAsyncDirectoryOperations);
     }
 }// namespace NGIN::IO

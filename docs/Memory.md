@@ -39,11 +39,14 @@ The key idea is: **a minimal allocator concept for hot paths**, with optional ca
 
 An allocator is any type that satisfies:
 
-- `void* Allocate(std::size_t bytes, std::size_t alignment)`
+- `void* Allocate(std::size_t bytes, std::size_t alignment) noexcept`
 - `void Deallocate(void* ptr, std::size_t bytes, std::size_t alignment) noexcept`
 
 The size/alignment parameters to `Deallocate` may be ignored by implementations, but callers should pass the same values
 they used when allocating to preserve correctness and enable instrumentation.
+
+Allocation exhaustion and unrepresentable size/alignment requests return `nullptr`. Exception-based containers and
+owning factories translate that result to `std::bad_alloc`.
 
 ### Allocator Handles and Lifetime
 
@@ -196,14 +199,17 @@ Notes:
 
 - The lock type is customizable (`Lockable`), so you can choose a spin lock for short critical sections.
 - Query methods (`MaxSize/Remaining/OwnershipOf`) are locked as well to avoid data races.
+- `WithInner(callback)` runs direct inner-allocator access while holding the wrapper lock; no unlocked inner reference
+  escapes the wrapper.
 
 ## Composite Allocators (Fallback + Routing)
 
-### `FallbackAllocator<Primary, Secondary>` (requires `Owns()`)
+### `FallbackAllocator<Primary, Secondary>` (requires precise ownership)
 
-`NGIN::Memory::FallbackAllocator` tries primary first, then secondary. It routes deallocation using `Owns()`.
+`NGIN::Memory::FallbackAllocator` tries primary first, then secondary. It routes deallocation only after one allocator
+returns `Ownership::Owns` from `OwnershipOf()`.
 
-This is only correct when both allocators provide reliable `Owns()`; the type enforces that requirement.
+Both allocators must advertise `HasPreciseOwnership`. `Ownership::Unknown` never selects a deallocation target.
 
 ### `TaggedFallbackAllocator<Primary, Secondary>` (recommended)
 
@@ -213,7 +219,10 @@ This is only correct when both allocators provide reliable `Owns()`; the type en
 - deallocation reads the header and routes without ownership queries
 - `AllocateEx` uses the `Cookie` field to expose which sub-allocator served the allocation
 
-Use this when you do not want (or cannot implement) `Owns()`.
+Use this when precise `OwnershipOf()` support is unavailable.
+
+Every pointer passed to `Deallocate` must have originated from the same tagged fallback instance. Inspecting memory
+before an arbitrary foreign pointer is not a safe ownership test, so this allocator deliberately exposes no such claim.
 
 Cost note:
 

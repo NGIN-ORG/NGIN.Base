@@ -97,7 +97,7 @@ if (!text)
     return;
 }
 
-Use(text.Value());
+Use(text.value());
 ```
 
 ### Write a text file

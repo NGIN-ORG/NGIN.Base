@@ -21,22 +21,22 @@ namespace NGIN::Crypto::Asymmetric
             const NGIN::Crypto::Backend::CryptoContext& context) noexcept
     {
         auto supported = context.EnsureSupports(KeyAgreementAlgorithm::X25519);
-        if (!supported.HasValue())
+        if (!supported.has_value())
         {
-            return supported.Error();
+            return std::unexpected(std::move(supported).error());
         }
 
         FixedBytes<32> publicKey {};
         auto           privateKey = NGIN::Crypto::Memory::FixedSecret<32> {};
         auto           result     = context.GenerateX25519KeyPairInto(publicKey, privateKey.UnsafeMutableBytes());
-        if (!result.HasValue())
+        if (!result.has_value())
         {
-            return result.Error();
+            return std::unexpected(std::move(result).error());
         }
 
         if (privateKey.Bytes().size() != X25519PrivateKey::SizeValue)
         {
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         return X25519KeyPair {
@@ -53,13 +53,13 @@ namespace NGIN::Crypto::Asymmetric
     {
         if (output.size() != GetKeyAgreementSizes(KeyAgreementAlgorithm::X25519).sharedSecretSize)
         {
-            return OutputBufferTooSmall();
+            return std::unexpected(OutputBufferTooSmall());
         }
 
         auto supported = context.EnsureSupports(KeyAgreementAlgorithm::X25519);
-        if (!supported.HasValue())
+        if (!supported.has_value())
         {
-            return supported.Error();
+            return std::unexpected(std::move(supported).error());
         }
 
         return context.DeriveX25519SharedSecretInto(
@@ -75,9 +75,9 @@ namespace NGIN::Crypto::Asymmetric
     {
         X25519SharedSecret output;
         auto               result = DeriveX25519SharedSecretInto(context, privateKey, peerPublicKey, output.UnsafeMutableBytes());
-        if (!result.HasValue())
+        if (!result.has_value())
         {
-            return result.Error();
+            return std::unexpected(std::move(result).error());
         }
 
         return output;

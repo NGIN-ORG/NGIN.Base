@@ -17,11 +17,10 @@ using NGIN::Text::String;
 
 static_assert(sizeof(NGIN::Text::String) <= 40);
 static_assert(sizeof(NGIN::Text::UTF8String) <= 40);
+static_assert(std::same_as<NGIN::Text::UTF8String::value_type, char8_t>);
 static_assert(sizeof(NGIN::Text::WString) <= 40);
 static_assert(sizeof(NGIN::Text::UTF16String) <= 40);
 static_assert(sizeof(NGIN::Text::UTF32String) <= 40);
-static_assert(sizeof(NGIN::Text::AnsiString) <= 24);
-static_assert(sizeof(NGIN::Text::AsciiString) <= 24);
 
 namespace
 {
@@ -355,8 +354,6 @@ TEST_CASE("String aliases keep heap metadata overlapped with SBO storage", "[Tex
     CHECK(sizeof(NGIN::Text::WString) <= 40U);
     CHECK(sizeof(NGIN::Text::UTF16String) <= 40U);
     CHECK(sizeof(NGIN::Text::UTF32String) <= 40U);
-    CHECK(sizeof(NGIN::Text::AnsiString) <= 24U);
-    CHECK(sizeof(NGIN::Text::AsciiString) <= 24U);
 }
 
 TEST_CASE("String handles null pointer construction", "[Text][String]")

@@ -175,8 +175,8 @@ TEST_CASE("CryptoContext reports unsupported algorithms as values", "[Crypto][Ba
 
     auto result = context.EnsureSupports(NGIN::Crypto::HashAlgorithm::Sha256);
 
-    REQUIRE_FALSE(result.HasValue());
-    REQUIRE(result.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
 }
 
 TEST_CASE("CryptoContext describes algorithm support for diagnostics", "[Crypto][Backend]")
@@ -202,49 +202,49 @@ TEST_CASE("CreateContext returns configured default backend context", "[Crypto][
 {
     auto context = NGIN::Crypto::Backend::CreateContext();
 
-    REQUIRE(context.HasValue());
-    REQUIRE(context.Value().SupportsRandom());
+    REQUIRE(context.has_value());
+    REQUIRE(context.value().SupportsRandom());
 
-    if (context.Value().Info().Name() == "openssl")
+    if (context.value().Info().Name() == "openssl")
     {
         RequireOpenSslCompatiblePackageContext(
-                context.Value(),
+                context.value(),
                 "openssl",
                 "OpenSSL libcrypto",
                 "NGIN_BASE_CRYPTO_WITH_OPENSSL",
                 "openssl");
     }
-    else if (context.Value().Info().Name() == "boringssl")
+    else if (context.value().Info().Name() == "boringssl")
     {
         RequireOpenSslCompatiblePackageContext(
-                context.Value(),
+                context.value(),
                 "boringssl",
                 "BoringSSL libcrypto",
                 "NGIN_BASE_CRYPTO_WITH_BORINGSSL",
                 "BoringSSL");
     }
-    else if (context.Value().Info().Name() == "libsodium")
+    else if (context.value().Info().Name() == "libsodium")
     {
-        RequireLibsodiumPackageContext(context.Value());
+        RequireLibsodiumPackageContext(context.value());
     }
     else
     {
-        REQUIRE(context.Value().Info().Kind() == NGIN::Crypto::Backend::BackendKind::Platform);
-        if (context.Value().Info().Name() == "cng")
+        REQUIRE(context.value().Info().Kind() == NGIN::Crypto::Backend::BackendKind::Platform);
+        if (context.value().Info().Name() == "cng")
         {
-            RequireCngPlatformContext(context.Value());
+            RequireCngPlatformContext(context.value());
         }
-        else if (context.Value().Info().Name() == "apple")
+        else if (context.value().Info().Name() == "apple")
         {
-            RequireApplePlatformContext(context.Value());
+            RequireApplePlatformContext(context.value());
         }
         else
         {
-            REQUIRE(context.Value().Info().Name() == "platform-random");
-            REQUIRE(context.Value().Info().Source() == "OS secure random");
-            REQUIRE(context.Value().Info().BuildOption() == "always");
-            REQUIRE_FALSE(context.Value().Supports(NGIN::Crypto::HashAlgorithm::Sha256));
-            auto sha256 = context.Value().DescribeSupport(NGIN::Crypto::HashAlgorithm::Sha256);
+            REQUIRE(context.value().Info().Name() == "platform-random");
+            REQUIRE(context.value().Info().Source() == "OS secure random");
+            REQUIRE(context.value().Info().BuildOption() == "always");
+            REQUIRE_FALSE(context.value().Supports(NGIN::Crypto::HashAlgorithm::Sha256));
+            auto sha256 = context.value().DescribeSupport(NGIN::Crypto::HashAlgorithm::Sha256);
             REQUIRE_FALSE(sha256.supported);
             REQUIRE(sha256.reason == "platform-random provides OS secure random only");
         }
@@ -255,21 +255,21 @@ TEST_CASE("CreatePlatformContext selects only platform capabilities", "[Crypto][
 {
     auto context = NGIN::Crypto::Backend::CreatePlatformContext();
 
-    REQUIRE(context.HasValue());
-    REQUIRE(context.Value().Info().Kind() == NGIN::Crypto::Backend::BackendKind::Platform);
-    if (context.Value().Info().Name() == "cng")
+    REQUIRE(context.has_value());
+    REQUIRE(context.value().Info().Kind() == NGIN::Crypto::Backend::BackendKind::Platform);
+    if (context.value().Info().Name() == "cng")
     {
-        RequireCngPlatformContext(context.Value());
+        RequireCngPlatformContext(context.value());
     }
-    else if (context.Value().Info().Name() == "apple")
+    else if (context.value().Info().Name() == "apple")
     {
-        RequireApplePlatformContext(context.Value());
+        RequireApplePlatformContext(context.value());
     }
     else
     {
-        REQUIRE(context.Value().Info().Name() == "platform-random");
-        REQUIRE(context.Value().SupportsRandom());
-        REQUIRE_FALSE(context.Value().Supports(NGIN::Crypto::HashAlgorithm::Sha256));
+        REQUIRE(context.value().Info().Name() == "platform-random");
+        REQUIRE(context.value().SupportsRandom());
+        REQUIRE_FALSE(context.value().Supports(NGIN::Crypto::HashAlgorithm::Sha256));
     }
 }
 
@@ -277,10 +277,10 @@ TEST_CASE("CreatePackageContext selects named package provider when available", 
 {
     auto openssl = NGIN::Crypto::Backend::CreatePackageContext("openssl");
 
-    if (openssl.HasValue())
+    if (openssl.has_value())
     {
         RequireOpenSslCompatiblePackageContext(
-                openssl.Value(),
+                openssl.value(),
                 "openssl",
                 "OpenSSL libcrypto",
                 "NGIN_BASE_CRYPTO_WITH_OPENSSL",
@@ -288,24 +288,24 @@ TEST_CASE("CreatePackageContext selects named package provider when available", 
     }
     else
     {
-        REQUIRE(openssl.Error().Code() == NGIN::Crypto::CryptoErrorCode::BackendUnavailable);
+        REQUIRE(openssl.error().Code() == NGIN::Crypto::CryptoErrorCode::BackendUnavailable);
     }
 
     auto libsodium = NGIN::Crypto::Backend::CreatePackageContext("libsodium");
-    if (libsodium.HasValue())
+    if (libsodium.has_value())
     {
-        RequireLibsodiumPackageContext(libsodium.Value());
+        RequireLibsodiumPackageContext(libsodium.value());
     }
     else
     {
-        REQUIRE(libsodium.Error().Code() == NGIN::Crypto::CryptoErrorCode::BackendUnavailable);
+        REQUIRE(libsodium.error().Code() == NGIN::Crypto::CryptoErrorCode::BackendUnavailable);
     }
 
     auto boringssl = NGIN::Crypto::Backend::CreatePackageContext("boringssl");
-    if (boringssl.HasValue())
+    if (boringssl.has_value())
     {
         RequireOpenSslCompatiblePackageContext(
-                boringssl.Value(),
+                boringssl.value(),
                 "boringssl",
                 "BoringSSL libcrypto",
                 "NGIN_BASE_CRYPTO_WITH_BORINGSSL",
@@ -313,7 +313,7 @@ TEST_CASE("CreatePackageContext selects named package provider when available", 
     }
     else
     {
-        REQUIRE(boringssl.Error().Code() == NGIN::Crypto::CryptoErrorCode::BackendUnavailable);
+        REQUIRE(boringssl.error().Code() == NGIN::Crypto::CryptoErrorCode::BackendUnavailable);
     }
 }
 
@@ -321,18 +321,18 @@ TEST_CASE("CreatePackageContext rejects unknown package provider names", "[Crypt
 {
     auto context = NGIN::Crypto::Backend::CreatePackageContext("missing-provider");
 
-    REQUIRE_FALSE(context.HasValue());
-    REQUIRE(context.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedBackend);
+    REQUIRE_FALSE(context.has_value());
+    REQUIRE(context.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedBackend);
 }
 
 TEST_CASE("CreatePackageContext reports unavailable or configured BoringSSL package provider", "[Crypto][Backend]")
 {
     auto boringssl = NGIN::Crypto::Backend::CreatePackageContext("boringssl");
 
-    if (boringssl.HasValue())
+    if (boringssl.has_value())
     {
         RequireOpenSslCompatiblePackageContext(
-                boringssl.Value(),
+                boringssl.value(),
                 "boringssl",
                 "BoringSSL libcrypto",
                 "NGIN_BASE_CRYPTO_WITH_BORINGSSL",
@@ -340,7 +340,7 @@ TEST_CASE("CreatePackageContext reports unavailable or configured BoringSSL pack
     }
     else
     {
-        REQUIRE(boringssl.Error().Code() == NGIN::Crypto::CryptoErrorCode::BackendUnavailable);
+        REQUIRE(boringssl.error().Code() == NGIN::Crypto::CryptoErrorCode::BackendUnavailable);
     }
 }
 
@@ -353,14 +353,14 @@ TEST_CASE("Backend policy can require an algorithm set at startup", "[Crypto][Ba
 
     auto context = NGIN::Crypto::Backend::CreateContext(options);
 
-    if (context.HasValue())
+    if (context.has_value())
     {
-        REQUIRE(context.Value().Supports(NGIN::Crypto::HashAlgorithm::Sha256));
-        REQUIRE(context.Value().Supports(NGIN::Crypto::MacAlgorithm::HmacSha256));
+        REQUIRE(context.value().Supports(NGIN::Crypto::HashAlgorithm::Sha256));
+        REQUIRE(context.value().Supports(NGIN::Crypto::MacAlgorithm::HmacSha256));
     }
     else
     {
-        REQUIRE(context.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+        REQUIRE(context.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
     }
 }
 
@@ -372,8 +372,8 @@ TEST_CASE("Backend policy reports unsupported platform algorithm requirements", 
 
     auto context = NGIN::Crypto::Backend::CreateContext(options);
 
-    REQUIRE_FALSE(context.HasValue());
-    REQUIRE(context.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+    REQUIRE_FALSE(context.has_value());
+    REQUIRE(context.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
 }
 
 TEST_CASE("CreateContextWithDiagnostics records rejected backend candidates", "[Crypto][Backend]")
@@ -384,7 +384,7 @@ TEST_CASE("CreateContextWithDiagnostics records rejected backend candidates", "[
 
     auto selection = NGIN::Crypto::Backend::CreateContextWithDiagnostics(options);
 
-    REQUIRE_FALSE(selection.context.HasValue());
+    REQUIRE_FALSE(selection.context.has_value());
     REQUIRE(selection.diagnostics.Count() >= 1);
 
     bool sawUnsupportedAlgorithm = false;
@@ -406,7 +406,7 @@ TEST_CASE("CreateContextWithDiagnostics records unknown package providers", "[Cr
 
     auto selection = NGIN::Crypto::Backend::CreateContextWithDiagnostics(options);
 
-    REQUIRE_FALSE(selection.context.HasValue());
+    REQUIRE_FALSE(selection.context.has_value());
     REQUIRE(selection.diagnostics.Count() == 1);
     REQUIRE(selection.diagnostics[0].backend.Name() == "unknown-package");
     REQUIRE(selection.diagnostics[0].code == NGIN::Crypto::CryptoErrorCode::UnsupportedBackend);
@@ -421,10 +421,10 @@ TEST_CASE("CreateContextWithDiagnostics records unavailable or configured Boring
 
     auto selection = NGIN::Crypto::Backend::CreateContextWithDiagnostics(options);
 
-    if (selection.context.HasValue())
+    if (selection.context.has_value())
     {
         RequireOpenSslCompatiblePackageContext(
-                selection.context.Value(),
+                selection.context.value(),
                 "boringssl",
                 "BoringSSL libcrypto",
                 "NGIN_BASE_CRYPTO_WITH_BORINGSSL",
@@ -432,7 +432,7 @@ TEST_CASE("CreateContextWithDiagnostics records unavailable or configured Boring
     }
     else
     {
-        REQUIRE(selection.context.Error().Code() == NGIN::Crypto::CryptoErrorCode::BackendUnavailable);
+        REQUIRE(selection.context.error().Code() == NGIN::Crypto::CryptoErrorCode::BackendUnavailable);
         REQUIRE(selection.diagnostics.Count() == 1);
         REQUIRE(selection.diagnostics[0].backend.Name() == "boringssl");
         REQUIRE(selection.diagnostics[0].backend.PackageName() == "BoringSSL");
@@ -449,19 +449,19 @@ TEST_CASE("Backend policy rejects FIPS requirement when no capable backend is co
 
     auto context = NGIN::Crypto::Backend::CreateContext(options);
 
-    REQUIRE_FALSE(context.HasValue());
-    REQUIRE(context.Error().Code() == NGIN::Crypto::CryptoErrorCode::PolicyRejected);
+    REQUIRE_FALSE(context.has_value());
+    REQUIRE(context.error().Code() == NGIN::Crypto::CryptoErrorCode::PolicyRejected);
 }
 
 TEST_CASE("CryptoContext fills random bytes when capability is present", "[Crypto][Backend]")
 {
     auto context = NGIN::Crypto::Backend::CreateContext();
-    REQUIRE(context.HasValue());
+    REQUIRE(context.has_value());
 
     auto bytes = NGIN::Crypto::MakeByteBuffer(16);
-    auto fill  = context.Value().FillRandom(NGIN::Crypto::ByteSpan {bytes.data(), bytes.Size()});
+    auto fill  = context.value().FillRandom(NGIN::Crypto::ByteSpan {bytes.data(), bytes.Size()});
 
-    REQUIRE(fill.HasValue());
+    REQUIRE(fill.has_value());
 }
 
 TEST_CASE("CryptoContext rejects random fill without random capability", "[Crypto][Backend]")
@@ -474,6 +474,6 @@ TEST_CASE("CryptoContext rejects random fill without random capability", "[Crypt
     auto bytes = NGIN::Crypto::MakeByteBuffer(16);
     auto fill  = context.FillRandom(NGIN::Crypto::ByteSpan {bytes.data(), bytes.Size()});
 
-    REQUIRE_FALSE(fill.HasValue());
-    REQUIRE(fill.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedBackend);
+    REQUIRE_FALSE(fill.has_value());
+    REQUIRE(fill.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedBackend);
 }

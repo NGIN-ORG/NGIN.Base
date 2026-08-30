@@ -136,7 +136,7 @@ auto connect = socket.TryConnect(
 
 if (!connect)
 {
-    if (connect.Error().code == NGIN::Net::NetErrorCode::WouldBlock)
+    if (connect.error().code == NGIN::Net::NetErrorCode::WouldBlock)
     {
         // wait for writability in your own loop, then try again
         return;
@@ -256,6 +256,8 @@ Most importantly:
 
 - `WouldBlock` means try again after readiness
 - it is not the same thing as connection failure or EOF
+- `ResourceExhausted` means the async readiness or cancellation state could
+  not be allocated; the operation was not registered
 
 ### Coroutine async style
 

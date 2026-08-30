@@ -2,6 +2,7 @@
 /// @brief Scheduler that runs coroutines inline.
 #pragma once
 
+#include <NGIN/Execution/ScheduleResult.hpp>
 #include <NGIN/Execution/WorkItem.hpp>
 
 #include <NGIN/Time/MonotonicClock.hpp>
@@ -20,13 +21,16 @@ namespace NGIN::Execution
         InlineScheduler() = default;
 
         /// @brief Invokes a work item synchronously on the calling thread.
-        void Execute(WorkItem item) noexcept
+        [[nodiscard]] ScheduleResult Execute(WorkItem item) noexcept
         {
+            if (item.IsEmpty())
+                return std::unexpected(ScheduleError::Rejected);
             item.Invoke();
+            return {};
         }
 
         /// @brief Sleeps the calling thread until `resumeAt`, then invokes the item synchronously.
-        void ExecuteAt(WorkItem item, NGIN::Time::TimePoint resumeAt)
+        [[nodiscard]] ScheduleResult ExecuteAt(WorkItem item, NGIN::Time::TimePoint resumeAt) noexcept
         {
             const NGIN::Time::TimePoint now = NGIN::Time::MonotonicClock::Now();
             if (resumeAt > now)
@@ -34,7 +38,7 @@ namespace NGIN::Execution
                 const NGIN::UInt64 delayNs = resumeAt.ToNanoseconds() - now.ToNanoseconds();
                 NGIN::Time::SleepFor(NGIN::Units::Nanoseconds(static_cast<double>(delayNs)));
             }
-            Execute(std::move(item));
+            return Execute(std::move(item));
         }
 
         /// @brief Returns `false` because inline work is never queued.

@@ -3,6 +3,24 @@ project(NGIN.Base VERSION 0.1.0 LANGUAGES CXX)
 
 cmake_policy(SET CMP0077 NEW)
 
+include(CheckCXXSourceCompiles)
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+check_cxx_source_compiles(
+  "#include <expected>
+   #include <optional>
+   int main() {
+     std::expected<int, int> result = 1;
+     std::optional<int> value = 2;
+     return result.value() + value.value() == 3 ? 0 : 1;
+   }"
+  NGIN_BASE_HAS_REQUIRED_CXX23_LIBRARY
+)
+if(NOT NGIN_BASE_HAS_REQUIRED_CXX23_LIBRARY)
+  message(FATAL_ERROR "NGIN.Base requires C++23 std::expected and std::optional support")
+endif()
+
 set(NGIN_BASE_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 set(NGIN_BASE_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}")
 

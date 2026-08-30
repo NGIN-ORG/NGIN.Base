@@ -23,6 +23,7 @@
 #include <cstring>
 #include <limits>
 #include <mutex>
+#include <new>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -54,6 +55,7 @@ namespace NGIN::Net
             std::coroutine_handle<>               continuation {};
             NGIN::Async::CancellationRegistration cancellation {};
             std::atomic<bool>                     done {false};
+            NetError                              error {};
         };
 
 #if defined(NGIN_PLATFORM_WINDOWS)
@@ -114,16 +116,51 @@ namespace NGIN::Net
 #endif
         }
 
-        void RegisterWaiter(Waiter* waiter)
+        /// Resumes inline when a live executor rejects the continuation so a
+        /// terminal network event can never strand its awaiting coroutine.
+        static void ResumeContinuation(
+                const NGIN::Execution::ExecutorRef executor,
+                const std::coroutine_handle<>      continuation) noexcept
+        {
+            if (!continuation)
+            {
+                return;
+            }
+            if (executor.IsValid())
+            {
+                const NGIN::Execution::ScheduleResult result = executor.Execute(continuation);
+                if (result)
+                {
+                    return;
+                }
+            }
+            continuation.resume();
+        }
+
+        [[nodiscard]] bool RegisterWaiter(Waiter* waiter) noexcept
         {
             std::lock_guard guard(m_mutex);
-            m_waiters.push_back(waiter);
+            try
+            {
+                m_waiters.push_back(waiter);
 #if defined(__linux__)
-            UpdateEpollOnRegisterLocked(waiter);
+                UpdateEpollOnRegisterLocked(waiter);
 #endif
 #if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
-            UpdateKqueueOnRegisterLocked(waiter);
+                UpdateKqueueOnRegisterLocked(waiter);
 #endif
+            } catch (const std::bad_alloc&)
+            {
+                const std::vector<Waiter*>::iterator iterator =
+                        std::find(m_waiters.begin(), m_waiters.end(), waiter);
+                if (iterator != m_waiters.end())
+                {
+                    *iterator = m_waiters.back();
+                    m_waiters.pop_back();
+                }
+                return false;
+            }
+            return true;
         }
 
         void UnregisterWaiter(Waiter* waiter)
@@ -164,6 +201,27 @@ namespace NGIN::Net
             }
 
             ::CancelIoEx(reinterpret_cast<HANDLE>(sock), reinterpret_cast<LPOVERLAPPED>(&op->overlapped));
+            return false;
+        }
+
+        [[nodiscard]] static bool RegisterIocpCancellation(
+                const NGIN::Async::CancellationToken& token,
+                IocpOperation&                        operation) noexcept
+        {
+            const NGIN::Async::CancellationRegistrationResult result = token.Register(
+                    operation.cancellation,
+                    operation.exec,
+                    operation.continuation,
+                    &CancelIocp,
+                    &operation);
+            if (result)
+            {
+                return true;
+            }
+            operation.error = NetError {
+                    NetErrorCode::ResourceExhausted,
+                    static_cast<int>(result.error()),
+            };
             return false;
         }
 
@@ -222,14 +280,7 @@ namespace NGIN::Net
             }
             op.cancellation.Reset();
 
-            if (op.exec.IsValid())
-            {
-                op.exec.Execute(op.continuation);
-            }
-            else if (op.continuation)
-            {
-                op.continuation.resume();
-            }
+            ResumeContinuation(op.exec, op.continuation);
         }
 
         void CompleteOperationWithError(IocpOperation& op, DWORD bytes, NetError error) noexcept
@@ -244,14 +295,7 @@ namespace NGIN::Net
             op.error = error;
             op.cancellation.Reset();
 
-            if (op.exec.IsValid())
-            {
-                op.exec.Execute(op.continuation);
-            }
-            else if (op.continuation)
-            {
-                op.continuation.resume();
-            }
+            ResumeContinuation(op.exec, op.continuation);
         }
 
         void PumpIocp(DWORD timeoutMs) noexcept
@@ -311,14 +355,7 @@ namespace NGIN::Net
             UnregisterWaiter(waiter);
             waiter->cancellation.Reset();
 
-            if (waiter->exec.IsValid())
-            {
-                waiter->exec.Execute(waiter->continuation);
-            }
-            else if (waiter->continuation)
-            {
-                waiter->continuation.resume();
-            }
+            ResumeContinuation(waiter->exec, waiter->continuation);
         }
 
         void PollOnce(int timeoutMs)
@@ -674,7 +711,7 @@ namespace NGIN::Net
 
     private:
 #if defined(__linux__)
-        void UpdateEpollOnRegisterLocked(Waiter* waiter) noexcept
+        void UpdateEpollOnRegisterLocked(Waiter* waiter)
         {
             if (m_epollFd < 0 || !waiter || !waiter->handle)
             {
@@ -781,7 +818,7 @@ namespace NGIN::Net
         }
 #endif
 #if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
-        void UpdateKqueueOnRegisterLocked(Waiter* waiter) noexcept
+        void UpdateKqueueOnRegisterLocked(Waiter* waiter)
         {
             if (m_kqueueFd < 0 || !waiter || !waiter->handle)
             {
@@ -925,14 +962,7 @@ namespace NGIN::Net
             {
                 if (!owner)
                 {
-                    if (exec.IsValid())
-                    {
-                        exec.Execute(continuation);
-                    }
-                    else
-                    {
-                        continuation.resume();
-                    }
+                    ResumeContinuation(exec, continuation);
                     return;
                 }
 
@@ -942,25 +972,55 @@ namespace NGIN::Net
                 waiter.wantWrite    = wantWrite;
                 waiter.exec         = exec;
                 waiter.continuation = continuation;
+                waiter.error        = {};
 
-                owner->RegisterWaiter(&waiter);
+                if (!owner->RegisterWaiter(&waiter))
+                {
+                    waiter.done.store(true, std::memory_order_release);
+                    waiter.error = NetError {NetErrorCode::ResourceExhausted};
+                    ResumeContinuation(exec, continuation);
+                    return;
+                }
 
-                token.Register(waiter.cancellation, exec, continuation, +[](void* ctx) noexcept -> bool {
-                                   auto* w = static_cast<Waiter*>(ctx);
-                                   bool expected = false;
-                                   if (!w->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
-                                   {
-                                       return false;
-                                   }
-                                   if (w->owner)
-                                   {
-                                       w->owner->UnregisterWaiter(w);
-                                   }
-                                   return true; }, &waiter);
+                const NGIN::Async::CancellationRegistrationResult registrationResult = token.Register(
+                        waiter.cancellation,
+                        exec,
+                        continuation,
+                        +[](void* context) noexcept -> bool {
+                            Waiter* networkWaiter = static_cast<Waiter*>(context);
+                            bool    expected      = false;
+                            if (!networkWaiter->done.compare_exchange_strong(
+                                        expected,
+                                        true,
+                                        std::memory_order_acq_rel))
+                            {
+                                return false;
+                            }
+                            if (networkWaiter->owner)
+                            {
+                                networkWaiter->owner->UnregisterWaiter(networkWaiter);
+                            }
+                            return true;
+                        },
+                        &waiter);
+                if (!registrationResult)
+                {
+                    bool expected = false;
+                    if (waiter.done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
+                    {
+                        owner->UnregisterWaiter(&waiter);
+                        waiter.error = NetError {
+                                NetErrorCode::ResourceExhausted,
+                                static_cast<int>(registrationResult.error()),
+                        };
+                        ResumeContinuation(exec, continuation);
+                    }
+                }
             }
 
-            void await_resume() noexcept
+            [[nodiscard]] NetError await_resume() const noexcept
             {
+                return waiter.error;
             }
         };
 
@@ -983,14 +1043,7 @@ namespace NGIN::Net
             {
                 if (!owner || !handle)
                 {
-                    if (exec.IsValid())
-                    {
-                        exec.Execute(continuation);
-                    }
-                    else
-                    {
-                        continuation.resume();
-                    }
+                    ResumeContinuation(exec, continuation);
                     return;
                 }
 
@@ -1022,7 +1075,11 @@ namespace NGIN::Net
                 op.buffer.buf = reinterpret_cast<char*>(const_cast<NGIN::Byte*>(data.data()));
                 op.buffer.len = static_cast<ULONG>(data.size());
 
-                token.Register(op.cancellation, exec, continuation, &CancelIocp, &op);
+                if (!RegisterIocpCancellation(token, op))
+                {
+                    owner->CompleteOperationWithError(op, 0, op.error);
+                    return;
+                }
 
                 DWORD      bytes  = 0;
                 const auto sock   = detail::ToNative(*handle);
@@ -1081,14 +1138,7 @@ namespace NGIN::Net
             {
                 if (!owner || !handle)
                 {
-                    if (exec.IsValid())
-                    {
-                        exec.Execute(continuation);
-                    }
-                    else
-                    {
-                        continuation.resume();
-                    }
+                    ResumeContinuation(exec, continuation);
                     return;
                 }
 
@@ -1120,7 +1170,11 @@ namespace NGIN::Net
                 op.buffer.buf = reinterpret_cast<char*>(destination.data());
                 op.buffer.len = static_cast<ULONG>(destination.size());
 
-                token.Register(op.cancellation, exec, continuation, &CancelIocp, &op);
+                if (!RegisterIocpCancellation(token, op))
+                {
+                    owner->CompleteOperationWithError(op, 0, op.error);
+                    return;
+                }
 
                 DWORD      bytes  = 0;
                 DWORD      flags  = 0;
@@ -1182,14 +1236,7 @@ namespace NGIN::Net
             {
                 if (!owner || !handle)
                 {
-                    if (exec.IsValid())
-                    {
-                        exec.Execute(continuation);
-                    }
-                    else
-                    {
-                        continuation.resume();
-                    }
+                    ResumeContinuation(exec, continuation);
                     return;
                 }
 
@@ -1230,7 +1277,11 @@ namespace NGIN::Net
                 op.buffer.buf = reinterpret_cast<char*>(const_cast<NGIN::Byte*>(data.data()));
                 op.buffer.len = static_cast<ULONG>(data.size());
 
-                token.Register(op.cancellation, exec, continuation, &CancelIocp, &op);
+                if (!RegisterIocpCancellation(token, op))
+                {
+                    owner->CompleteOperationWithError(op, 0, op.error);
+                    return;
+                }
 
                 DWORD      bytes  = 0;
                 const auto sock   = detail::ToNative(*handle);
@@ -1295,14 +1346,7 @@ namespace NGIN::Net
             {
                 if (!owner || !handle)
                 {
-                    if (exec.IsValid())
-                    {
-                        exec.Execute(continuation);
-                    }
-                    else
-                    {
-                        continuation.resume();
-                    }
+                    ResumeContinuation(exec, continuation);
                     return;
                 }
 
@@ -1335,7 +1379,11 @@ namespace NGIN::Net
                 op.buffer.buf = reinterpret_cast<char*>(destination.data());
                 op.buffer.len = static_cast<ULONG>(destination.size());
 
-                token.Register(op.cancellation, exec, continuation, &CancelIocp, &op);
+                if (!RegisterIocpCancellation(token, op))
+                {
+                    owner->CompleteOperationWithError(op, 0, op.error);
+                    return;
+                }
 
                 DWORD      bytes  = 0;
                 DWORD      flags  = 0;
@@ -1402,14 +1450,7 @@ namespace NGIN::Net
             {
                 if (!owner || !handle)
                 {
-                    if (exec.IsValid())
-                    {
-                        exec.Execute(continuation);
-                    }
-                    else
-                    {
-                        continuation.resume();
-                    }
+                    ResumeContinuation(exec, continuation);
                     return;
                 }
 
@@ -1448,7 +1489,11 @@ namespace NGIN::Net
                 }
                 op.addressLength = static_cast<int>(length);
 
-                token.Register(op.cancellation, exec, continuation, &CancelIocp, &op);
+                if (!RegisterIocpCancellation(token, op))
+                {
+                    owner->CompleteOperationWithError(op, 0, op.error);
+                    return;
+                }
 
                 const auto sock   = detail::ToNative(*handle);
                 const BOOL result = connectEx(sock,
@@ -1518,14 +1563,7 @@ namespace NGIN::Net
             {
                 if (!owner || !listenHandle)
                 {
-                    if (exec.IsValid())
-                    {
-                        exec.Execute(continuation);
-                    }
-                    else
-                    {
-                        continuation.resume();
-                    }
+                    ResumeContinuation(exec, continuation);
                     return;
                 }
 
@@ -1565,7 +1603,12 @@ namespace NGIN::Net
 
                 op.skipCompletionOnSuccess = owner->TrySkipCompletionOnSuccess(*listenHandle);
 
-                token.Register(op.cancellation, exec, continuation, &CancelIocp, &op);
+                if (!RegisterIocpCancellation(token, op))
+                {
+                    accepted.Close();
+                    owner->CompleteOperationWithError(op, 0, op.error);
+                    return;
+                }
 
                 DWORD       bytes        = 0;
                 const auto  listenSock   = detail::ToNative(*listenHandle);
@@ -1729,15 +1772,20 @@ namespace NGIN::Net
                                                                    NGIN::Async::CancellationToken token)
         {
             WaiterAwaiter awaiter {};
-            awaiter.owner    = &owner;
-            awaiter.handle   = &handle;
-            awaiter.wantRead = true;
-            awaiter.exec     = ctx.GetExecutor();
-            awaiter.token    = token;
-            co_await awaiter;
+            awaiter.owner            = &owner;
+            awaiter.handle           = &handle;
+            awaiter.wantRead         = true;
+            awaiter.exec             = ctx.GetExecutor();
+            awaiter.token            = token;
+            const NetError waitError = co_await awaiter;
             if (token.IsCancellationRequested())
             {
                 co_await NGIN::Async::Canceled();
+                co_return;
+            }
+            if (!waitError.IsOk())
+            {
+                co_await NGIN::Async::DomainFailure(waitError);
                 co_return;
             }
             co_return;
@@ -1749,15 +1797,20 @@ namespace NGIN::Net
                                                                    NGIN::Async::CancellationToken token)
         {
             WaiterAwaiter awaiter {};
-            awaiter.owner     = &owner;
-            awaiter.handle    = &handle;
-            awaiter.wantWrite = true;
-            awaiter.exec      = ctx.GetExecutor();
-            awaiter.token     = token;
-            co_await awaiter;
+            awaiter.owner            = &owner;
+            awaiter.handle           = &handle;
+            awaiter.wantWrite        = true;
+            awaiter.exec             = ctx.GetExecutor();
+            awaiter.token            = token;
+            const NetError waitError = co_await awaiter;
             if (token.IsCancellationRequested())
             {
                 co_await NGIN::Async::Canceled();
+                co_return;
+            }
+            if (!waitError.IsOk())
+            {
+                co_await NGIN::Async::DomainFailure(waitError);
                 co_return;
             }
             co_return;
@@ -1784,10 +1837,10 @@ namespace NGIN::Net
             }
             if (!result)
             {
-                co_await NGIN::Async::DomainFailure(result.Error());
+                co_await NGIN::Async::DomainFailure(result.error());
                 co_return 0;
             }
-            co_return std::move(result).Value();
+            co_return std::move(result).value();
         }
 
         static NGIN::Async::Task<NGIN::UInt32, NetError> SubmitReceive(NGIN::Async::TaskContext&      ctx,
@@ -1810,10 +1863,10 @@ namespace NGIN::Net
             }
             if (!result)
             {
-                co_await NGIN::Async::DomainFailure(result.Error());
+                co_await NGIN::Async::DomainFailure(result.error());
                 co_return 0;
             }
-            co_return std::move(result).Value();
+            co_return std::move(result).value();
         }
 
         static NGIN::Async::Task<NGIN::UInt32, NetError> SubmitSendTo(NGIN::Async::TaskContext&      ctx,
@@ -1838,10 +1891,10 @@ namespace NGIN::Net
             }
             if (!result)
             {
-                co_await NGIN::Async::DomainFailure(result.Error());
+                co_await NGIN::Async::DomainFailure(result.error());
                 co_return 0;
             }
-            co_return std::move(result).Value();
+            co_return std::move(result).value();
         }
 
         static NGIN::Async::Task<DatagramReceiveResult, NetError> SubmitReceiveFrom(NGIN::Async::TaskContext&      ctx,
@@ -1864,10 +1917,10 @@ namespace NGIN::Net
             }
             if (!result)
             {
-                co_await NGIN::Async::DomainFailure(result.Error());
+                co_await NGIN::Async::DomainFailure(result.error());
                 co_return DatagramReceiveResult {};
             }
-            co_return std::move(result).Value();
+            co_return std::move(result).value();
         }
 
         static NGIN::Async::Task<void, NetError> SubmitConnect(NGIN::Async::TaskContext&      ctx,
@@ -1890,7 +1943,7 @@ namespace NGIN::Net
             }
             if (!result)
             {
-                co_await NGIN::Async::DomainFailure(result.Error());
+                co_await NGIN::Async::DomainFailure(result.error());
                 co_return;
             }
             co_return;
@@ -1914,10 +1967,10 @@ namespace NGIN::Net
             }
             if (!result)
             {
-                co_await NGIN::Async::DomainFailure(result.Error());
+                co_await NGIN::Async::DomainFailure(result.error());
                 co_return SocketHandle {};
             }
-            co_return std::move(result).Value();
+            co_return std::move(result).value();
         }
 #endif
     };

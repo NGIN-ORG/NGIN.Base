@@ -212,19 +212,35 @@ namespace NGIN::Net
                     return;
                 }
 
-                RegisterCancellation(contextCancellation, state->contextRegistration, state.get());
+                const NGIN::Async::CancellationRegistrationResult contextRegistrationResult =
+                        RegisterCancellation(contextCancellation, state->contextRegistration, state.get());
+                if (!contextRegistrationResult)
+                {
+                    state->CompleteFault(NGIN::Async::MakeAsyncFault(
+                            NGIN::Async::AsyncFaultCode::CancellationRegistrationFailed,
+                            static_cast<int>(contextRegistrationResult.error())));
+                    return;
+                }
                 if (state->done.load(std::memory_order_acquire))
                 {
                     return;
                 }
-                RegisterCancellation(cancellation, state->explicitRegistration, state.get());
+                const NGIN::Async::CancellationRegistrationResult explicitRegistrationResult =
+                        RegisterCancellation(cancellation, state->explicitRegistration, state.get());
+                if (!explicitRegistrationResult)
+                {
+                    state->CompleteFault(NGIN::Async::MakeAsyncFault(
+                            NGIN::Async::AsyncFaultCode::CancellationRegistrationFailed,
+                            static_cast<int>(explicitRegistrationResult.error())));
+                    return;
+                }
                 if (state->done.load(std::memory_order_acquire))
                 {
                     return;
                 }
 
-                const auto timeout = options.timeout;
-                driverExecutor.Execute(
+                const std::optional<std::chrono::milliseconds> timeout        = options.timeout;
+                const NGIN::Execution::ScheduleResult          dispatchResult = driverExecutor.Execute(
                         [state, host = std::move(host), service = std::move(service), options = std::move(options)]() mutable {
                             if (state->done.load(std::memory_order_acquire))
                             {
@@ -240,18 +256,31 @@ namespace NGIN::Net
                                         NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::UnknownRuntimeFailure));
                             }
                         });
+                if (!dispatchResult)
+                {
+                    state->CompleteFault(NGIN::Async::MakeAsyncFault(
+                            NGIN::Async::AsyncFaultCode::SchedulerDispatchFailed,
+                            static_cast<int>(dispatchResult.error())));
+                    return;
+                }
 
                 if (timeout)
                 {
-                    const auto milliseconds = static_cast<NGIN::UInt64>(timeout->count());
-                    const auto now          = NGIN::Time::MonotonicClock::Now().ToNanoseconds();
-                    const auto maximumAdd   = (std::numeric_limits<NGIN::UInt64>::max)() - now;
-                    const auto add          = milliseconds > maximumAdd / 1'000'000ull
-                                                      ? maximumAdd
-                                                      : milliseconds * 1'000'000ull;
-                    resumeExecutor.ExecuteAt(
+                    const NGIN::UInt64                    milliseconds  = static_cast<NGIN::UInt64>(timeout->count());
+                    const NGIN::UInt64                    now           = NGIN::Time::MonotonicClock::Now().ToNanoseconds();
+                    const NGIN::UInt64                    maximumAdd    = (std::numeric_limits<NGIN::UInt64>::max)() - now;
+                    const NGIN::UInt64                    add           = milliseconds > maximumAdd / 1'000'000ull
+                                                                                  ? maximumAdd
+                                                                                  : milliseconds * 1'000'000ull;
+                    const NGIN::Execution::ScheduleResult timeoutResult = resumeExecutor.ExecuteAt(
                             [state] { state->Complete(AsyncResolveStatus::TimedOut); },
                             NGIN::Time::TimePoint::FromNanoseconds(now + add));
+                    if (!timeoutResult)
+                    {
+                        state->CompleteFault(NGIN::Async::MakeAsyncFault(
+                                NGIN::Async::AsyncFaultCode::SchedulerDispatchFailed,
+                                static_cast<int>(timeoutResult.error())));
+                    }
                 }
             }
 
@@ -276,12 +305,13 @@ namespace NGIN::Net
                     explicitRegistration.Reset();
                     if (resumeExecutor.IsValid())
                     {
-                        resumeExecutor.Execute(awaiting);
+                        const NGIN::Execution::ScheduleResult result = resumeExecutor.Execute(awaiting);
+                        if (result)
+                        {
+                            return;
+                        }
                     }
-                    else
-                    {
-                        awaiting.resume();
-                    }
+                    awaiting.resume();
                 }
 
                 void Complete(AsyncResolveStatus status) noexcept
@@ -320,12 +350,12 @@ namespace NGIN::Net
                 }
             };
 
-            static void RegisterCancellation(
+            [[nodiscard]] static NGIN::Async::CancellationRegistrationResult RegisterCancellation(
                     const NGIN::Async::CancellationToken&  token,
                     NGIN::Async::CancellationRegistration& registration,
                     State*                                 state)
             {
-                token.Register(
+                return token.Register(
                         registration,
                         {},
                         {},
@@ -377,9 +407,9 @@ namespace NGIN::Net
         hints.ai_family   = NativeFamily(options.family);
         hints.ai_socktype = NativeSocketType(options.socketType);
         hints.ai_flags    = (options.passive ? AI_PASSIVE : 0) |
-                            (options.numericHost ? AI_NUMERICHOST : 0) |
-                            (options.numericService ? AI_NUMERICSERV : 0) |
-                            (options.requestCanonicalName ? AI_CANONNAME : 0);
+                         (options.numericHost ? AI_NUMERICHOST : 0) |
+                         (options.numericService ? AI_NUMERICSERV : 0) |
+                         (options.requestCanonicalName ? AI_CANONNAME : 0);
 
         AddressInfo addresses;
         const int   result = ::getaddrinfo(
@@ -447,6 +477,13 @@ namespace NGIN::Net
         return static_cast<bool>(m_scheduler);
     }
 
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 15
+// GCC 15's coroutine lowering loses the engagement proof after the explicit
+// has_value() check below and diagnoses std::vector's move as uninitialized.
+// Keep the suppression local to the affected coroutine and compiler release.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
     NGIN::Async::Task<std::vector<ResolvedAddress>, ResolveError> ResolveAsync(
             NGIN::Async::TaskContext&      context,
             ResolverDriver&                driver,
@@ -455,7 +492,7 @@ namespace NGIN::Net
             ResolveOptions                 options,
             NGIN::Async::CancellationToken cancellation)
     {
-        auto completion = co_await ResolveAwaiter(
+        AsyncResolveCompletion completion = co_await ResolveAwaiter(
                 context,
                 driver,
                 std::move(host),
@@ -478,11 +515,14 @@ namespace NGIN::Net
                 break;
         }
 
-        auto result = std::move(*completion.result);
-        if (!result.HasValue())
+        ResolveExpected<std::vector<ResolvedAddress>> result = std::move(*completion.result);
+        if (!result.has_value())
         {
-            co_return NGIN::Utilities::Unexpected<ResolveError>(std::move(result).TakeError());
+            co_return NGIN::Utilities::Unexpected<ResolveError>(std::move(result).error());
         }
-        co_return std::move(result).TakeValue();
+        co_return std::move(result);
     }
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 15
+#pragma GCC diagnostic pop
+#endif
 }// namespace NGIN::Net

@@ -47,9 +47,9 @@ namespace NGIN::Crypto::Encoding
         output.resize(HexEncodedLength(input.size()));
 
         auto result = EncodeHexInto(input, std::span<char> {output.data(), output.size()});
-        if (!result.HasValue())
+        if (!result.has_value())
         {
-            return result.Error();
+            return std::unexpected(std::move(result).error());
         }
 
         return output;
@@ -59,7 +59,7 @@ namespace NGIN::Crypto::Encoding
     {
         if (output.size() != HexEncodedLength(input.size()))
         {
-            return OutputBufferTooSmall();
+            return std::unexpected(OutputBufferTooSmall());
         }
 
         for (NGIN::UIntSize i = 0; i < input.size(); ++i)
@@ -76,14 +76,14 @@ namespace NGIN::Crypto::Encoding
     {
         if ((text.size() % 2) != 0)
         {
-            return EncodingError();
+            return std::unexpected(EncodingError());
         }
 
         auto output = MakeByteBuffer(HexDecodedLength(text));
         auto result = DecodeHexInto(text, ByteSpan {output.data(), output.Size()});
-        if (!result.HasValue())
+        if (!result.has_value())
         {
-            return result.Error();
+            return std::unexpected(std::move(result).error());
         }
 
         return output;
@@ -93,11 +93,11 @@ namespace NGIN::Crypto::Encoding
     {
         if ((text.size() % 2) != 0)
         {
-            return EncodingError();
+            return std::unexpected(EncodingError());
         }
         if (output.size() != HexDecodedLength(text))
         {
-            return OutputBufferTooSmall();
+            return std::unexpected(OutputBufferTooSmall());
         }
 
         for (NGIN::UIntSize i = 0; i < output.size(); ++i)
@@ -106,7 +106,7 @@ namespace NGIN::Crypto::Encoding
             const auto low  = DecodeHexDigit(text[(i * 2) + 1]);
             if (high < 0 || low < 0)
             {
-                return EncodingError();
+                return std::unexpected(EncodingError());
             }
 
             output[i] = static_cast<NGIN::Byte>((high << 4) | low);

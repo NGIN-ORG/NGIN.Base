@@ -24,22 +24,22 @@ namespace NGIN::Crypto::Kdf
     {
         if (!IsValid(options))
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         auto supported = context.EnsureSupports(KdfAlgorithm::Argon2id);
-        if (!supported.HasValue())
+        if (!supported.has_value())
         {
-            return supported.Error();
+            return std::unexpected(std::move(supported).error());
         }
 
         auto encoded = context.HashPassword(password, options.memoryKiB, options.iterations, options.parallelism);
-        if (!encoded.HasValue())
+        if (!encoded.has_value())
         {
-            return encoded.Error();
+            return std::unexpected(std::move(encoded).error());
         }
 
-        return PasswordHashString {std::move(encoded.Value())};
+        return PasswordHashString {std::move(encoded.value())};
     }
 
     CryptoExpected<void> VerifyPassword(
@@ -49,13 +49,13 @@ namespace NGIN::Crypto::Kdf
     {
         if (encodedHash.empty())
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         auto supported = context.EnsureSupports(KdfAlgorithm::Argon2id);
-        if (!supported.HasValue())
+        if (!supported.has_value())
         {
-            return supported.Error();
+            return std::unexpected(std::move(supported).error());
         }
 
         return context.VerifyPasswordHash(password, encodedHash);
@@ -68,13 +68,13 @@ namespace NGIN::Crypto::Kdf
     {
         if (encodedHash.empty() || !IsValid(options))
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         auto supported = context.EnsureSupports(KdfAlgorithm::Argon2id);
-        if (!supported.HasValue())
+        if (!supported.has_value())
         {
-            return supported.Error();
+            return std::unexpected(std::move(supported).error());
         }
 
         return context.PasswordHashNeedsRehash(encodedHash, options.memoryKiB, options.iterations, options.parallelism);

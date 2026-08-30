@@ -16,12 +16,12 @@ namespace
     [[nodiscard]] NGIN::IO::Path MakeTempDir(NGIN::IO::LocalFileSystem& fs)
     {
         auto tempDirectory = fs.TempDirectory();
-        REQUIRE(tempDirectory.HasValue());
+        REQUIRE(tempDirectory.has_value());
 
         const auto uniqueValue = std::chrono::steady_clock::now().time_since_epoch().count();
-        const auto path        = tempDirectory.Value().Join("ngin_base_vfs_test_" + std::to_string(uniqueValue));
+        const auto path        = tempDirectory.value().Join("ngin_base_vfs_test_" + std::to_string(uniqueValue));
 
-        REQUIRE(fs.CreateDirectories(path).HasValue());
+        REQUIRE(fs.CreateDirectories(path).has_value());
         return path;
     }
 
@@ -30,7 +30,7 @@ namespace
         NGIN::IO::RemoveOptions options;
         options.recursive     = true;
         options.ignoreMissing = true;
-        REQUIRE(fs.RemoveDirectory(path, options).HasValue());
+        REQUIRE(fs.RemoveDirectory(path, options).has_value());
     }
 
     template<typename T>
@@ -63,38 +63,38 @@ TEST_CASE("IO.VirtualFileSystem forwards path-returning operations", "[IO][Virtu
     const auto           virtualHard    = virtualRoot.Join("hello.link");
     const auto           virtualReplace = virtualRoot.Join("replacement.txt");
 
-    REQUIRE(NGIN::IO::WriteAllText(vfs, virtualFile, "hello").HasValue());
-    REQUIRE(vfs.CreateSymlink(virtualFile, virtualLink).HasValue());
-    REQUIRE(vfs.CreateHardLink(virtualFile, virtualHard).HasValue());
+    REQUIRE(NGIN::IO::WriteAllText(vfs, virtualFile, "hello").has_value());
+    REQUIRE(vfs.CreateSymlink(virtualFile, virtualLink).has_value());
+    REQUIRE(vfs.CreateHardLink(virtualFile, virtualHard).has_value());
 
     auto canonical = vfs.Canonical(virtualLink);
-    REQUIRE(canonical.HasValue());
-    REQUIRE(canonical.Value().View() == virtualFile.View());
+    REQUIRE(canonical.has_value());
+    REQUIRE(canonical.value().View() == virtualFile.View());
 
     auto weaklyCanonical = vfs.WeaklyCanonical(virtualRoot.Join("missing/child.txt"));
-    REQUIRE(weaklyCanonical.HasValue());
-    REQUIRE(weaklyCanonical.Value().View() == virtualRoot.Join("missing/child.txt").LexicallyNormal().View());
+    REQUIRE(weaklyCanonical.has_value());
+    REQUIRE(weaklyCanonical.value().View() == virtualRoot.Join("missing/child.txt").LexicallyNormal().View());
 
     auto symlinkTarget = vfs.ReadSymlink(virtualLink);
-    REQUIRE(symlinkTarget.HasValue());
-    REQUIRE(symlinkTarget.Value().View() == virtualFile.View());
+    REQUIRE(symlinkTarget.has_value());
+    REQUIRE(symlinkTarget.value().View() == virtualFile.View());
 
     auto sameFile = vfs.SameFile(virtualFile, virtualHard);
-    REQUIRE(sameFile.HasValue());
-    REQUIRE(sameFile.Value());
+    REQUIRE(sameFile.has_value());
+    REQUIRE(sameFile.value());
 
     auto tempDirectory = vfs.CreateTempDirectory(virtualRoot, "dir_");
-    REQUIRE(tempDirectory.HasValue());
+    REQUIRE(tempDirectory.has_value());
     auto tempFile = vfs.CreateTempFile(virtualRoot, "file_");
-    REQUIRE(tempFile.HasValue());
-    REQUIRE(vfs.Exists(tempDirectory.Value()).Value());
-    REQUIRE(vfs.Exists(tempFile.Value()).Value());
+    REQUIRE(tempFile.has_value());
+    REQUIRE(vfs.Exists(tempDirectory.value()).value());
+    REQUIRE(vfs.Exists(tempFile.value()).value());
 
-    REQUIRE(NGIN::IO::WriteAllText(vfs, virtualReplace, "replacement").HasValue());
-    REQUIRE(vfs.ReplaceFile(virtualReplace, virtualFile).HasValue());
+    REQUIRE(NGIN::IO::WriteAllText(vfs, virtualReplace, "replacement").has_value());
+    REQUIRE(vfs.ReplaceFile(virtualReplace, virtualFile).has_value());
     auto text = NGIN::IO::ReadAllText(vfs, virtualFile);
-    REQUIRE(text.HasValue());
-    REQUIRE(std::string(text.Value().Data(), text.Value().Size()) == "replacement");
+    REQUIRE(text.has_value());
+    REQUIRE(std::string(text.value().Data(), text.value().Size()) == "replacement");
 
     RemoveTempDir(backingFs, realRoot);
 }
@@ -105,8 +105,8 @@ TEST_CASE("IO.VirtualFileSystem copies and moves across mounts", "[IO][VirtualFi
     const auto                root       = MakeTempDir(backingFs);
     const auto                sourceRoot = root.Join("source");
     const auto                targetRoot = root.Join("target");
-    REQUIRE(backingFs.CreateDirectories(sourceRoot).HasValue());
-    REQUIRE(backingFs.CreateDirectories(targetRoot).HasValue());
+    REQUIRE(backingFs.CreateDirectories(sourceRoot).has_value());
+    REQUIRE(backingFs.CreateDirectories(targetRoot).has_value());
 
     NGIN::IO::VirtualFileSystem vfs;
     vfs.AddMount(std::make_shared<NGIN::IO::LocalMount>(
@@ -116,36 +116,36 @@ TEST_CASE("IO.VirtualFileSystem copies and moves across mounts", "[IO][VirtualFi
 
     const NGIN::IO::Path sourceDirectory {"/source/tree"};
     const NGIN::IO::Path copiedDirectory {"/target/copied"};
-    REQUIRE(vfs.CreateDirectories(sourceDirectory.Join("nested")).HasValue());
-    REQUIRE(NGIN::IO::WriteAllText(vfs, sourceDirectory.Join("nested/data.txt"), "cross-mount").HasValue());
-    REQUIRE(vfs.CreateSymlink(NGIN::IO::Path {"nested/data.txt"}, sourceDirectory.Join("data.sym")).HasValue());
+    REQUIRE(vfs.CreateDirectories(sourceDirectory.Join("nested")).has_value());
+    REQUIRE(NGIN::IO::WriteAllText(vfs, sourceDirectory.Join("nested/data.txt"), "cross-mount").has_value());
+    REQUIRE(vfs.CreateSymlink(NGIN::IO::Path {"nested/data.txt"}, sourceDirectory.Join("data.sym")).has_value());
 
     NGIN::IO::CopyOptions recursive;
     recursive.recursive = true;
-    REQUIRE(vfs.CopyFile(sourceDirectory, copiedDirectory, recursive).HasValue());
+    REQUIRE(vfs.CopyFile(sourceDirectory, copiedDirectory, recursive).has_value());
     auto copied = NGIN::IO::ReadAllText(vfs, copiedDirectory.Join("nested/data.txt"));
-    REQUIRE(copied.HasValue());
-    REQUIRE(std::string(copied.Value().Data(), copied.Value().Size()) == "cross-mount");
+    REQUIRE(copied.has_value());
+    REQUIRE(std::string(copied.value().Data(), copied.value().Size()) == "cross-mount");
     auto copiedTarget = vfs.ReadSymlink(copiedDirectory.Join("data.sym"));
-    REQUIRE(copiedTarget.HasValue());
-    REQUIRE(copiedTarget.Value().View() == "nested/data.txt");
+    REQUIRE(copiedTarget.has_value());
+    REQUIRE(copiedTarget.value().View() == "nested/data.txt");
 
     const NGIN::IO::Path moveSource {"/source/move.txt"};
     const NGIN::IO::Path moveTarget {"/target/move.txt"};
-    REQUIRE(NGIN::IO::WriteAllText(vfs, moveSource, "source").HasValue());
-    REQUIRE(NGIN::IO::WriteAllText(vfs, moveTarget, "conflict").HasValue());
+    REQUIRE(NGIN::IO::WriteAllText(vfs, moveSource, "source").has_value());
+    REQUIRE(NGIN::IO::WriteAllText(vfs, moveTarget, "conflict").has_value());
     auto conflict = vfs.Move(moveSource, moveTarget);
-    REQUIRE_FALSE(conflict.HasValue());
-    REQUIRE(conflict.Error().code == NGIN::IO::IOErrorCode::AlreadyExists);
-    REQUIRE(vfs.Exists(moveSource).Value());
+    REQUIRE_FALSE(conflict.has_value());
+    REQUIRE(conflict.error().code == NGIN::IO::IOErrorCode::AlreadyExists);
+    REQUIRE(vfs.Exists(moveSource).value());
 
     NGIN::IO::CopyOptions overwrite;
     overwrite.overwriteExisting = true;
-    REQUIRE(vfs.Move(moveSource, moveTarget, overwrite).HasValue());
-    REQUIRE_FALSE(vfs.Exists(moveSource).Value());
+    REQUIRE(vfs.Move(moveSource, moveTarget, overwrite).has_value());
+    REQUIRE_FALSE(vfs.Exists(moveSource).value());
     auto moved = NGIN::IO::ReadAllText(vfs, moveTarget);
-    REQUIRE(moved.HasValue());
-    REQUIRE(std::string(moved.Value().Data(), moved.Value().Size()) == "source");
+    REQUIRE(moved.has_value());
+    REQUIRE(std::string(moved.value().Data(), moved.value().Size()) == "source");
 
     RemoveTempDir(backingFs, root);
 }
@@ -164,18 +164,18 @@ TEST_CASE("IO.VirtualFileSystem directory handles scope relative operations", "[
     const auto           nestedDir = virtualRoot.Join("nested");
     const auto           childDir  = nestedDir.Join("child");
 
-    REQUIRE(vfs.CreateDirectories(childDir).HasValue());
-    REQUIRE(NGIN::IO::WriteAllText(vfs, nestedDir.Join("seed.txt"), "seed").HasValue());
+    REQUIRE(vfs.CreateDirectories(childDir).has_value());
+    REQUIRE(NGIN::IO::WriteAllText(vfs, nestedDir.Join("seed.txt"), "seed").has_value());
 
     auto directory = vfs.OpenDirectory(nestedDir);
-    REQUIRE(directory.HasValue());
+    REQUIRE(directory.has_value());
 
     auto exists = directory->Exists(NGIN::IO::Path {"seed.txt"});
-    REQUIRE(exists.HasValue());
-    REQUIRE(exists.Value());
+    REQUIRE(exists.has_value());
+    REQUIRE(exists.value());
 
     auto child = directory->OpenDirectory(NGIN::IO::Path {"child"});
-    REQUIRE(child.HasValue());
+    REQUIRE(child.has_value());
 
     NGIN::IO::FileOpenOptions openOptions;
     openOptions.access      = NGIN::IO::FileAccess::Write;
@@ -183,29 +183,29 @@ TEST_CASE("IO.VirtualFileSystem directory handles scope relative operations", "[
     openOptions.disposition = NGIN::IO::FileCreateDisposition::CreateAlways;
 
     auto openedFile = directory->OpenFile(NGIN::IO::Path {"from_handle.txt"}, openOptions);
-    REQUIRE(openedFile.HasValue());
+    REQUIRE(openedFile.has_value());
 
     const std::string payload     = "virtual-dir-handle";
     const auto        writeResult = openedFile->Write({reinterpret_cast<const NGIN::Byte*>(payload.data()), payload.size()});
-    REQUIRE(writeResult.HasValue());
-    REQUIRE(writeResult.Value() == payload.size());
+    REQUIRE(writeResult.has_value());
+    REQUIRE(writeResult.value() == payload.size());
     openedFile->Close();
 
     auto writtenText = NGIN::IO::ReadAllText(vfs, nestedDir.Join("from_handle.txt"));
-    REQUIRE(writtenText.HasValue());
-    REQUIRE(std::string(writtenText.Value().Data(), writtenText.Value().Size()) == payload);
+    REQUIRE(writtenText.has_value());
+    REQUIRE(std::string(writtenText.value().Data(), writtenText.value().Size()) == payload);
 
-    REQUIRE(directory->CreateDirectory(NGIN::IO::Path {"created"}).HasValue());
-    REQUIRE(vfs.Exists(nestedDir.Join("created")).Value());
-    REQUIRE(directory->RemoveDirectory(NGIN::IO::Path {"created"}).HasValue());
-    REQUIRE_FALSE(vfs.Exists(nestedDir.Join("created")).Value());
+    REQUIRE(directory->CreateDirectory(NGIN::IO::Path {"created"}).has_value());
+    REQUIRE(vfs.Exists(nestedDir.Join("created")).value());
+    REQUIRE(directory->RemoveDirectory(NGIN::IO::Path {"created"}).has_value());
+    REQUIRE_FALSE(vfs.Exists(nestedDir.Join("created")).value());
 
-    REQUIRE(directory->RemoveFile(NGIN::IO::Path {"from_handle.txt"}).HasValue());
-    REQUIRE_FALSE(vfs.Exists(nestedDir.Join("from_handle.txt")).Value());
+    REQUIRE(directory->RemoveFile(NGIN::IO::Path {"from_handle.txt"}).has_value());
+    REQUIRE_FALSE(vfs.Exists(nestedDir.Join("from_handle.txt")).value());
 
     auto escaped = directory->Exists(NGIN::IO::Path {"../outside.txt"});
-    REQUIRE_FALSE(escaped.HasValue());
-    REQUIRE(escaped.Error().code == NGIN::IO::IOErrorCode::InvalidPath);
+    REQUIRE_FALSE(escaped.has_value());
+    REQUIRE(escaped.error().code == NGIN::IO::IOErrorCode::InvalidPath);
 
     RemoveTempDir(backingFs, realRoot);
 }
@@ -222,7 +222,7 @@ TEST_CASE("IO.VirtualFileSystem async file operations use value handles", "[IO][
 
     const auto        virtualFile = NGIN::IO::Path {"/v"}.Join("async.txt");
     const std::string payload     = "virtual async payload";
-    REQUIRE(NGIN::IO::WriteAllText(vfs, virtualFile, payload).HasValue());
+    REQUIRE(NGIN::IO::WriteAllText(vfs, virtualFile, payload).has_value());
 
     NGIN::IO::FileSystemDriver driver;
     auto                       ctx = driver.MakeTaskContext();
@@ -260,8 +260,8 @@ TEST_CASE("IO.VirtualFileSystem async file operations use value handles", "[IO][
     REQUIRE(copyResult.Succeeded());
 
     auto copiedText = NGIN::IO::ReadAllText(vfs, copiedVirtual);
-    REQUIRE(copiedText.HasValue());
-    REQUIRE(std::string(copiedText.Value().Data(), copiedText.Value().Size()) == payload);
+    REQUIRE(copiedText.has_value());
+    REQUIRE(std::string(copiedText.value().Data(), copiedText.value().Size()) == payload);
 
     RemoveTempDir(backingFs, realRoot);
 }
@@ -279,8 +279,8 @@ TEST_CASE("IO.VirtualFileSystem async directory handles stay mount scoped", "[IO
     const auto virtualDir  = NGIN::IO::Path {"/v"}.Join("nested");
     const auto virtualFile = virtualDir.Join("inside.txt");
 
-    REQUIRE(backingFs.CreateDirectories(realRoot.Join("nested")).HasValue());
-    REQUIRE(NGIN::IO::WriteAllText(vfs, virtualFile, "inside").HasValue());
+    REQUIRE(backingFs.CreateDirectories(realRoot.Join("nested")).has_value());
+    REQUIRE(NGIN::IO::WriteAllText(vfs, virtualFile, "inside").has_value());
 
     NGIN::IO::FileSystemDriver driver;
     auto                       ctx = driver.MakeTaskContext();
@@ -318,8 +318,8 @@ TEST_CASE("IO.VirtualFileSystem async copy crosses mounts and cleans canceled de
     const auto                root       = MakeTempDir(backingFs);
     const auto                sourceRoot = root.Join("async-source");
     const auto                targetRoot = root.Join("async-target");
-    REQUIRE(backingFs.CreateDirectories(sourceRoot).HasValue());
-    REQUIRE(backingFs.CreateDirectories(targetRoot).HasValue());
+    REQUIRE(backingFs.CreateDirectories(sourceRoot).has_value());
+    REQUIRE(backingFs.CreateDirectories(targetRoot).has_value());
 
     NGIN::IO::VirtualFileSystem vfs;
     vfs.AddMount(std::make_shared<NGIN::IO::LocalMount>(
@@ -327,8 +327,8 @@ TEST_CASE("IO.VirtualFileSystem async copy crosses mounts and cleans canceled de
     vfs.AddMount(std::make_shared<NGIN::IO::LocalMount>(
             targetRoot, NGIN::IO::MountPoint {.virtualPrefix = NGIN::IO::Path {"/target"}}));
 
-    REQUIRE(vfs.CreateDirectories(NGIN::IO::Path {"/source/tree/nested"}).HasValue());
-    REQUIRE(NGIN::IO::WriteAllText(vfs, NGIN::IO::Path {"/source/tree/nested/data.txt"}, "async-cross-mount").HasValue());
+    REQUIRE(vfs.CreateDirectories(NGIN::IO::Path {"/source/tree/nested"}).has_value());
+    REQUIRE(NGIN::IO::WriteAllText(vfs, NGIN::IO::Path {"/source/tree/nested/data.txt"}, "async-cross-mount").has_value());
 
     NGIN::IO::FileSystemDriver driver;
     auto                       ctx = driver.MakeTaskContext();
@@ -339,8 +339,8 @@ TEST_CASE("IO.VirtualFileSystem async copy crosses mounts and cleans canceled de
     auto copied = RunAsyncTask(copyTask, ctx);
     REQUIRE(copied.Succeeded());
     auto text = NGIN::IO::ReadAllText(vfs, NGIN::IO::Path {"/target/tree/nested/data.txt"});
-    REQUIRE(text.HasValue());
-    REQUIRE(std::string(text.Value().Data(), text.Value().Size()) == "async-cross-mount");
+    REQUIRE(text.has_value());
+    REQUIRE(std::string(text.value().Data(), text.value().Size()) == "async-cross-mount");
 
     NGIN::Async::CancellationSource cancellation;
     cancellation.Cancel();
@@ -352,7 +352,7 @@ TEST_CASE("IO.VirtualFileSystem async copy crosses mounts and cleans canceled de
             recursive);
     auto canceled = RunAsyncTask(canceledTask, canceledContext);
     REQUIRE(canceled.IsCanceled());
-    REQUIRE_FALSE(vfs.Exists(NGIN::IO::Path {"/target/canceled"}).Value());
+    REQUIRE_FALSE(vfs.Exists(NGIN::IO::Path {"/target/canceled"}).value());
 
     RemoveTempDir(backingFs, root);
 }

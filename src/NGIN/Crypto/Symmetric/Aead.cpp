@@ -33,11 +33,11 @@ namespace NGIN::Crypto::Symmetric
         {
             if (key.Size() != AeadKeySize(algorithm))
             {
-                return InvalidKey();
+                return std::unexpected(InvalidKey());
             }
             if (nonce.size() != AeadNonceSize(algorithm))
             {
-                return InvalidNonce();
+                return std::unexpected(InvalidNonce());
             }
 
             return {};
@@ -53,19 +53,19 @@ namespace NGIN::Crypto::Symmetric
     {
         if (ciphertext.size() != input.plaintext.size() || tag.size() != AeadTagSize(algorithm))
         {
-            return OutputBufferTooSmall();
+            return std::unexpected(OutputBufferTooSmall());
         }
 
         auto common = ValidateCommon(algorithm, input.key, input.nonce);
-        if (!common.HasValue())
+        if (!common.has_value())
         {
-            return common.Error();
+            return std::unexpected(std::move(common).error());
         }
 
         auto supported = context.EnsureSupports(algorithm);
-        if (!supported.HasValue())
+        if (!supported.has_value())
         {
-            return supported.Error();
+            return std::unexpected(std::move(supported).error());
         }
 
         return context.AeadSealInto(
@@ -86,23 +86,23 @@ namespace NGIN::Crypto::Symmetric
     {
         if (plaintext.size() != input.ciphertext.size())
         {
-            return OutputBufferTooSmall();
+            return std::unexpected(OutputBufferTooSmall());
         }
         if (input.tag.size() != AeadTagSize(algorithm))
         {
-            return InvalidTag();
+            return std::unexpected(InvalidTag());
         }
 
         auto common = ValidateCommon(algorithm, input.key, input.nonce);
-        if (!common.HasValue())
+        if (!common.has_value())
         {
-            return common.Error();
+            return std::unexpected(std::move(common).error());
         }
 
         auto supported = context.EnsureSupports(algorithm);
-        if (!supported.HasValue())
+        if (!supported.has_value())
         {
-            return supported.Error();
+            return std::unexpected(std::move(supported).error());
         }
 
         return context.AeadOpenInto(
@@ -131,9 +131,9 @@ namespace NGIN::Crypto::Symmetric
                 input,
                 ByteSpan {output.ciphertext.data(), output.ciphertext.Size()},
                 ByteSpan {output.tag.data(), output.tag.size()});
-        if (!result.HasValue())
+        if (!result.has_value())
         {
-            return result.Error();
+            return std::unexpected(std::move(result).error());
         }
 
         return output;
@@ -146,9 +146,9 @@ namespace NGIN::Crypto::Symmetric
     {
         auto output = MakeByteBuffer(input.ciphertext.size());
         auto result = OpenInto(context, algorithm, input, ByteSpan {output.data(), output.Size()});
-        if (!result.HasValue())
+        if (!result.has_value())
         {
-            return result.Error();
+            return std::unexpected(std::move(result).error());
         }
 
         return output;

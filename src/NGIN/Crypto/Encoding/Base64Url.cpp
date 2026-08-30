@@ -35,7 +35,7 @@ namespace NGIN::Crypto::Encoding
         {
             if ((text.size() % 4) == 1)
             {
-                return EncodingError();
+                return std::unexpected(EncodingError());
             }
 
             std::string normalized;
@@ -53,7 +53,7 @@ namespace NGIN::Crypto::Encoding
 
                 if (seenPadding)
                 {
-                    return EncodingError();
+                    return std::unexpected(EncodingError());
                 }
 
                 if (character == '-')
@@ -66,7 +66,7 @@ namespace NGIN::Crypto::Encoding
                 }
                 else if (character == '+' || character == '/')
                 {
-                    return EncodingError();
+                    return std::unexpected(EncodingError());
                 }
                 else
                 {
@@ -83,7 +83,7 @@ namespace NGIN::Crypto::Encoding
             }
             else if ((normalized.size() % 4) != 0)
             {
-                return EncodingError();
+                return std::unexpected(EncodingError());
             }
 
             return normalized;
@@ -93,21 +93,21 @@ namespace NGIN::Crypto::Encoding
     CryptoExpected<std::string> EncodeBase64Url(ConstByteSpan input, Base64Padding padding)
     {
         auto output = EncodeBase64(input, padding);
-        if (!output.HasValue())
+        if (!output.has_value())
         {
-            return output.Error();
+            return std::unexpected(std::move(output).error());
         }
 
-        ConvertStandardToUrl(std::span<char> {output.Value().data(), output.Value().size()});
+        ConvertStandardToUrl(std::span<char> {output.value().data(), output.value().size()});
         return output;
     }
 
     CryptoExpected<void> EncodeBase64UrlInto(ConstByteSpan input, std::span<char> output, Base64Padding padding) noexcept
     {
         auto result = EncodeBase64Into(input, output, padding);
-        if (!result.HasValue())
+        if (!result.has_value())
         {
-            return result.Error();
+            return std::unexpected(std::move(result).error());
         }
 
         ConvertStandardToUrl(output);
@@ -117,36 +117,36 @@ namespace NGIN::Crypto::Encoding
     CryptoExpected<ByteBuffer> DecodeBase64Url(std::string_view text)
     {
         auto normalized = NormalizeUrlInput(text);
-        if (!normalized.HasValue())
+        if (!normalized.has_value())
         {
-            return normalized.Error();
+            return std::unexpected(std::move(normalized).error());
         }
 
-        return DecodeBase64(normalized.Value());
+        return DecodeBase64(normalized.value());
     }
 
     CryptoExpected<void> DecodeBase64UrlInto(std::string_view text, ByteSpan output)
     {
         auto normalized = NormalizeUrlInput(text);
-        if (!normalized.HasValue())
+        if (!normalized.has_value())
         {
-            return normalized.Error();
+            return std::unexpected(std::move(normalized).error());
         }
 
-        auto decoded = DecodeBase64(normalized.Value());
-        if (!decoded.HasValue())
+        auto decoded = DecodeBase64(normalized.value());
+        if (!decoded.has_value())
         {
-            return decoded.Error();
+            return std::unexpected(std::move(decoded).error());
         }
 
-        if (output.size() != decoded.Value().Size())
+        if (output.size() != decoded.value().Size())
         {
-            return OutputBufferTooSmall();
+            return std::unexpected(OutputBufferTooSmall());
         }
 
         for (NGIN::UIntSize i = 0; i < output.size(); ++i)
         {
-            output[i] = decoded.Value()[i];
+            output[i] = decoded.value()[i];
         }
 
         return {};

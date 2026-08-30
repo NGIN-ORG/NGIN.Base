@@ -210,7 +210,7 @@ namespace NGIN::Crypto::Backend
         {
             if (!NGIN::Crypto::Random::IsAvailable())
             {
-                return BackendUnavailable();
+                return std::unexpected(BackendUnavailable());
             }
 
             BackendCapabilities capabilities;
@@ -254,24 +254,24 @@ namespace NGIN::Crypto::Backend
                 BackendSelectionDiagnostics*  diagnostics  = nullptr,
                 BackendInfo                   fallbackInfo = {}) noexcept
         {
-            if (!candidate.HasValue())
+            if (!candidate.has_value())
             {
-                AddDiagnostic(diagnostics, fallbackInfo, candidate.Error(), CandidateFailureReason(candidate.Error().Code()));
+                AddDiagnostic(diagnostics, fallbackInfo, candidate.error(), CandidateFailureReason(candidate.error().Code()));
                 return candidate;
             }
 
-            if (!MeetsRequirements(candidate.Value(), options))
+            if (!MeetsRequirements(candidate.value(), options))
             {
-                auto error = RequirementFailure(candidate.Value(), options);
+                auto error = RequirementFailure(candidate.value(), options);
                 AddDiagnostic(
                         diagnostics,
-                        candidate.Value().Info(),
+                        candidate.value().Info(),
                         error,
-                        RequirementFailureReason(candidate.Value(), options));
-                return error;
+                        RequirementFailureReason(candidate.value(), options));
+                return std::unexpected(std::move(error));
             }
 
-            return candidate.Value();
+            return candidate.value();
         }
 
         [[nodiscard]] CryptoExpected<CryptoContext> MakeNamedPackageContext(
@@ -284,7 +284,7 @@ namespace NGIN::Crypto::Backend
                 return detail::CreateOpenSslContext(options);
 #else
                 (void) options;
-                return BackendUnavailable();
+                return std::unexpected(BackendUnavailable());
 #endif
             }
 
@@ -294,7 +294,7 @@ namespace NGIN::Crypto::Backend
                 return detail::CreateLibsodiumContext(options);
 #else
                 (void) options;
-                return BackendUnavailable();
+                return std::unexpected(BackendUnavailable());
 #endif
             }
 
@@ -304,11 +304,11 @@ namespace NGIN::Crypto::Backend
                 return detail::CreateBoringSslContext(options);
 #else
                 (void) options;
-                return BackendUnavailable();
+                return std::unexpected(BackendUnavailable());
 #endif
             }
 
-            return UnsupportedBackend();
+            return std::unexpected(UnsupportedBackend());
         }
 
         [[nodiscard]] CryptoExpected<CryptoContext> MakeAnyPackageContext(const BackendOptions& options) noexcept
@@ -325,7 +325,7 @@ namespace NGIN::Crypto::Backend
 #elif defined(NGIN_BASE_CRYPTO_HAS_LIBSODIUM)
             return detail::CreateLibsodiumContext(options);
 #else
-            return BackendUnavailable();
+            return std::unexpected(BackendUnavailable());
 #endif
         }
 
@@ -335,14 +335,14 @@ namespace NGIN::Crypto::Backend
         {
 #if defined(NGIN_BASE_CRYPTO_HAS_CNG)
             auto cng = SelectIfUsable(detail::CreateCngContext(options), options, diagnostics, CngInfo());
-            if (cng.HasValue())
+            if (cng.has_value())
             {
                 return cng;
             }
 #endif
 #if defined(NGIN_BASE_CRYPTO_HAS_APPLE)
             auto apple = SelectIfUsable(detail::CreateAppleContext(options), options, diagnostics, AppleInfo());
-            if (apple.HasValue())
+            if (apple.has_value())
             {
                 return apple;
             }
@@ -366,7 +366,7 @@ namespace NGIN::Crypto::Backend
 
 #if defined(NGIN_BASE_CRYPTO_HAS_OPENSSL)
             auto openssl = SelectIfUsable(detail::CreateOpenSslContext(options), options, diagnostics, OpenSslInfo());
-            if (openssl.HasValue())
+            if (openssl.has_value())
             {
                 return openssl;
             }
@@ -375,7 +375,7 @@ namespace NGIN::Crypto::Backend
 #if defined(NGIN_BASE_CRYPTO_HAS_BORINGSSL)
             auto boringssl =
                     SelectIfUsable(detail::CreateBoringSslContext(options), options, diagnostics, BoringSslInfo());
-            if (boringssl.HasValue())
+            if (boringssl.has_value())
             {
                 return boringssl;
             }
@@ -384,7 +384,7 @@ namespace NGIN::Crypto::Backend
 #if defined(NGIN_BASE_CRYPTO_HAS_LIBSODIUM)
             auto libsodium =
                     SelectIfUsable(detail::CreateLibsodiumContext(options), options, diagnostics, LibsodiumInfo());
-            if (libsodium.HasValue())
+            if (libsodium.has_value())
             {
                 return libsodium;
             }
@@ -398,7 +398,7 @@ namespace NGIN::Crypto::Backend
     {
         if (!SupportsRandom())
         {
-            return CryptoError {CryptoErrorCode::UnsupportedBackend};
+            return std::unexpected(CryptoError {CryptoErrorCode::UnsupportedBackend});
         }
 
 #if defined(NGIN_BASE_CRYPTO_HAS_LIBSODIUM)
@@ -424,9 +424,9 @@ namespace NGIN::Crypto::Backend
             ByteSpan      output) const noexcept
     {
         auto supported = EnsureSupports(algorithm);
-        if (!supported.HasValue())
+        if (!supported.has_value())
         {
-            return supported.Error();
+            return std::unexpected(std::move(supported).error());
         }
 
 #if defined(NGIN_BASE_CRYPTO_HAS_CNG)
@@ -455,7 +455,7 @@ namespace NGIN::Crypto::Backend
         (void) output;
 #endif
 
-        return UnsupportedAlgorithm();
+        return std::unexpected(UnsupportedAlgorithm());
     }
 
     CryptoExpected<void> CryptoContext::MacInto(
@@ -465,9 +465,9 @@ namespace NGIN::Crypto::Backend
             ByteSpan                         output) const noexcept
     {
         auto supported = EnsureSupports(algorithm);
-        if (!supported.HasValue())
+        if (!supported.has_value())
         {
-            return supported.Error();
+            return std::unexpected(std::move(supported).error());
         }
 
 #if defined(NGIN_BASE_CRYPTO_HAS_CNG)
@@ -497,7 +497,7 @@ namespace NGIN::Crypto::Backend
         (void) output;
 #endif
 
-        return UnsupportedAlgorithm();
+        return std::unexpected(UnsupportedAlgorithm());
     }
 
     CryptoExpected<void> CryptoContext::HkdfInto(
@@ -508,9 +508,9 @@ namespace NGIN::Crypto::Backend
             ByteSpan                         output) const noexcept
     {
         auto supported = EnsureSupports(algorithm);
-        if (!supported.HasValue())
+        if (!supported.has_value())
         {
-            return supported.Error();
+            return std::unexpected(std::move(supported).error());
         }
 
 #if defined(NGIN_BASE_CRYPTO_HAS_OPENSSL_COMPAT)
@@ -525,7 +525,7 @@ namespace NGIN::Crypto::Backend
         (void) output;
 #endif
 
-        return UnsupportedAlgorithm();
+        return std::unexpected(UnsupportedAlgorithm());
     }
 
     CryptoExpected<void> CryptoContext::Pbkdf2Into(
@@ -536,9 +536,9 @@ namespace NGIN::Crypto::Backend
             ByteSpan                         output) const noexcept
     {
         auto supported = EnsureSupports(algorithm);
-        if (!supported.HasValue())
+        if (!supported.has_value())
         {
-            return supported.Error();
+            return std::unexpected(std::move(supported).error());
         }
 
 #if defined(NGIN_BASE_CRYPTO_HAS_CNG)
@@ -569,7 +569,7 @@ namespace NGIN::Crypto::Backend
         (void) output;
 #endif
 
-        return UnsupportedAlgorithm();
+        return std::unexpected(UnsupportedAlgorithm());
     }
 
     CryptoExpected<void> CryptoContext::Argon2idInto(
@@ -581,9 +581,9 @@ namespace NGIN::Crypto::Backend
             ByteSpan                         output) const noexcept
     {
         auto supported = EnsureSupports(KdfAlgorithm::Argon2id);
-        if (!supported.HasValue())
+        if (!supported.has_value())
         {
-            return supported.Error();
+            return std::unexpected(std::move(supported).error());
         }
 
 #if defined(NGIN_BASE_CRYPTO_HAS_LIBSODIUM)
@@ -600,7 +600,7 @@ namespace NGIN::Crypto::Backend
         (void) output;
 #endif
 
-        return UnsupportedAlgorithm();
+        return std::unexpected(UnsupportedAlgorithm());
     }
 
     CryptoExpected<std::string> CryptoContext::HashPassword(
@@ -610,9 +610,9 @@ namespace NGIN::Crypto::Backend
             NGIN::UInt32                     parallelism) const
     {
         auto supported = EnsureSupports(KdfAlgorithm::Argon2id);
-        if (!supported.HasValue())
+        if (!supported.has_value())
         {
-            return supported.Error();
+            return std::unexpected(std::move(supported).error());
         }
 
 #if defined(NGIN_BASE_CRYPTO_HAS_LIBSODIUM)
@@ -627,7 +627,7 @@ namespace NGIN::Crypto::Backend
         (void) parallelism;
 #endif
 
-        return UnsupportedAlgorithm();
+        return std::unexpected(UnsupportedAlgorithm());
     }
 
     CryptoExpected<void> CryptoContext::VerifyPasswordHash(
@@ -635,9 +635,9 @@ namespace NGIN::Crypto::Backend
             std::string_view                 encodedHash) const noexcept
     {
         auto supported = EnsureSupports(KdfAlgorithm::Argon2id);
-        if (!supported.HasValue())
+        if (!supported.has_value())
         {
-            return supported.Error();
+            return std::unexpected(std::move(supported).error());
         }
 
 #if defined(NGIN_BASE_CRYPTO_HAS_LIBSODIUM)
@@ -650,7 +650,7 @@ namespace NGIN::Crypto::Backend
         (void) encodedHash;
 #endif
 
-        return UnsupportedAlgorithm();
+        return std::unexpected(UnsupportedAlgorithm());
     }
 
     CryptoExpected<bool> CryptoContext::PasswordHashNeedsRehash(
@@ -660,9 +660,9 @@ namespace NGIN::Crypto::Backend
             NGIN::UInt32     parallelism) const noexcept
     {
         auto supported = EnsureSupports(KdfAlgorithm::Argon2id);
-        if (!supported.HasValue())
+        if (!supported.has_value())
         {
-            return supported.Error();
+            return std::unexpected(std::move(supported).error());
         }
 
 #if defined(NGIN_BASE_CRYPTO_HAS_LIBSODIUM)
@@ -677,7 +677,7 @@ namespace NGIN::Crypto::Backend
         (void) parallelism;
 #endif
 
-        return UnsupportedAlgorithm();
+        return std::unexpected(UnsupportedAlgorithm());
     }
 
     CryptoExpected<void> CryptoContext::AeadSealInto(
@@ -690,9 +690,9 @@ namespace NGIN::Crypto::Backend
             ByteSpan                         tag) const noexcept
     {
         auto supported = EnsureSupports(algorithm);
-        if (!supported.HasValue())
+        if (!supported.has_value())
         {
-            return supported.Error();
+            return std::unexpected(std::move(supported).error());
         }
 
 #if defined(NGIN_BASE_CRYPTO_HAS_CNG)
@@ -725,7 +725,7 @@ namespace NGIN::Crypto::Backend
         (void) tag;
 #endif
 
-        return UnsupportedAlgorithm();
+        return std::unexpected(UnsupportedAlgorithm());
     }
 
     CryptoExpected<void> CryptoContext::AeadOpenInto(
@@ -738,9 +738,9 @@ namespace NGIN::Crypto::Backend
             ByteSpan                         plaintext) const noexcept
     {
         auto supported = EnsureSupports(algorithm);
-        if (!supported.HasValue())
+        if (!supported.has_value())
         {
-            return supported.Error();
+            return std::unexpected(std::move(supported).error());
         }
 
 #if defined(NGIN_BASE_CRYPTO_HAS_CNG)
@@ -773,7 +773,7 @@ namespace NGIN::Crypto::Backend
         (void) plaintext;
 #endif
 
-        return UnsupportedAlgorithm();
+        return std::unexpected(UnsupportedAlgorithm());
     }
 
     CryptoExpected<void> CryptoContext::GenerateEd25519KeyPairInto(
@@ -781,9 +781,9 @@ namespace NGIN::Crypto::Backend
             ByteSpan privateKey) const noexcept
     {
         auto supported = EnsureSupports(SignatureAlgorithm::Ed25519);
-        if (!supported.HasValue())
+        if (!supported.has_value())
         {
-            return supported.Error();
+            return std::unexpected(std::move(supported).error());
         }
 
 #if defined(NGIN_BASE_CRYPTO_HAS_OPENSSL_COMPAT)
@@ -805,7 +805,7 @@ namespace NGIN::Crypto::Backend
         (void) privateKey;
 #endif
 
-        return UnsupportedAlgorithm();
+        return std::unexpected(UnsupportedAlgorithm());
     }
 
     CryptoExpected<void> CryptoContext::SignInto(
@@ -815,9 +815,9 @@ namespace NGIN::Crypto::Backend
             ByteSpan                         signature) const noexcept
     {
         auto supported = EnsureSupports(algorithm);
-        if (!supported.HasValue())
+        if (!supported.has_value())
         {
-            return supported.Error();
+            return std::unexpected(std::move(supported).error());
         }
 
 #if defined(NGIN_BASE_CRYPTO_HAS_OPENSSL_COMPAT)
@@ -840,7 +840,7 @@ namespace NGIN::Crypto::Backend
         (void) signature;
 #endif
 
-        return UnsupportedAlgorithm();
+        return std::unexpected(UnsupportedAlgorithm());
     }
 
     CryptoExpected<void> CryptoContext::VerifySignature(
@@ -850,9 +850,9 @@ namespace NGIN::Crypto::Backend
             ConstByteSpan      signature) const noexcept
     {
         auto supported = EnsureSupports(algorithm);
-        if (!supported.HasValue())
+        if (!supported.has_value())
         {
-            return supported.Error();
+            return std::unexpected(std::move(supported).error());
         }
 
 #if defined(NGIN_BASE_CRYPTO_HAS_OPENSSL_COMPAT)
@@ -875,7 +875,7 @@ namespace NGIN::Crypto::Backend
         (void) signature;
 #endif
 
-        return UnsupportedAlgorithm();
+        return std::unexpected(UnsupportedAlgorithm());
     }
 
     CryptoExpected<ByteBuffer> CryptoContext::RsaPssSha256Sign(
@@ -883,9 +883,9 @@ namespace NGIN::Crypto::Backend
             ConstByteSpan                    message) const
     {
         auto supported = EnsureSupports(SignatureAlgorithm::RsaPssSha256);
-        if (!supported.HasValue())
+        if (!supported.has_value())
         {
-            return supported.Error();
+            return std::unexpected(std::move(supported).error());
         }
 
 #if defined(NGIN_BASE_CRYPTO_HAS_OPENSSL_COMPAT)
@@ -898,7 +898,7 @@ namespace NGIN::Crypto::Backend
         (void) message;
 #endif
 
-        return UnsupportedAlgorithm();
+        return std::unexpected(UnsupportedAlgorithm());
     }
 
     CryptoExpected<void> CryptoContext::RsaPssSha256Verify(
@@ -907,9 +907,9 @@ namespace NGIN::Crypto::Backend
             ConstByteSpan signature) const noexcept
     {
         auto supported = EnsureSupports(SignatureAlgorithm::RsaPssSha256);
-        if (!supported.HasValue())
+        if (!supported.has_value())
         {
-            return supported.Error();
+            return std::unexpected(std::move(supported).error());
         }
 
 #if defined(NGIN_BASE_CRYPTO_HAS_OPENSSL_COMPAT)
@@ -923,7 +923,7 @@ namespace NGIN::Crypto::Backend
         (void) signature;
 #endif
 
-        return UnsupportedAlgorithm();
+        return std::unexpected(UnsupportedAlgorithm());
     }
 
     CryptoExpected<ByteBuffer> CryptoContext::RsaOaepSha256Encrypt(
@@ -932,9 +932,9 @@ namespace NGIN::Crypto::Backend
             ConstByteSpan label) const
     {
         auto supported = EnsureSupports(AsymmetricEncryptionAlgorithm::RsaOaepSha256);
-        if (!supported.HasValue())
+        if (!supported.has_value())
         {
-            return supported.Error();
+            return std::unexpected(std::move(supported).error());
         }
 
 #if defined(NGIN_BASE_CRYPTO_HAS_OPENSSL_COMPAT)
@@ -948,7 +948,7 @@ namespace NGIN::Crypto::Backend
         (void) label;
 #endif
 
-        return UnsupportedAlgorithm();
+        return std::unexpected(UnsupportedAlgorithm());
     }
 
     CryptoExpected<ByteBuffer> CryptoContext::RsaOaepSha256Decrypt(
@@ -957,9 +957,9 @@ namespace NGIN::Crypto::Backend
             ConstByteSpan                    label) const
     {
         auto supported = EnsureSupports(AsymmetricEncryptionAlgorithm::RsaOaepSha256);
-        if (!supported.HasValue())
+        if (!supported.has_value())
         {
-            return supported.Error();
+            return std::unexpected(std::move(supported).error());
         }
 
 #if defined(NGIN_BASE_CRYPTO_HAS_OPENSSL_COMPAT)
@@ -973,7 +973,7 @@ namespace NGIN::Crypto::Backend
         (void) label;
 #endif
 
-        return UnsupportedAlgorithm();
+        return std::unexpected(UnsupportedAlgorithm());
     }
 
     CryptoExpected<void> CryptoContext::GenerateX25519KeyPairInto(
@@ -981,9 +981,9 @@ namespace NGIN::Crypto::Backend
             ByteSpan privateKey) const noexcept
     {
         auto supported = EnsureSupports(KeyAgreementAlgorithm::X25519);
-        if (!supported.HasValue())
+        if (!supported.has_value())
         {
-            return supported.Error();
+            return std::unexpected(std::move(supported).error());
         }
 
 #if defined(NGIN_BASE_CRYPTO_HAS_OPENSSL_COMPAT)
@@ -1005,7 +1005,7 @@ namespace NGIN::Crypto::Backend
         (void) privateKey;
 #endif
 
-        return UnsupportedAlgorithm();
+        return std::unexpected(UnsupportedAlgorithm());
     }
 
     CryptoExpected<void> CryptoContext::DeriveX25519SharedSecretInto(
@@ -1014,9 +1014,9 @@ namespace NGIN::Crypto::Backend
             ByteSpan                         output) const noexcept
     {
         auto supported = EnsureSupports(KeyAgreementAlgorithm::X25519);
-        if (!supported.HasValue())
+        if (!supported.has_value())
         {
-            return supported.Error();
+            return std::unexpected(std::move(supported).error());
         }
 
 #if defined(NGIN_BASE_CRYPTO_HAS_OPENSSL_COMPAT)
@@ -1039,7 +1039,7 @@ namespace NGIN::Crypto::Backend
         (void) output;
 #endif
 
-        return UnsupportedAlgorithm();
+        return std::unexpected(UnsupportedAlgorithm());
     }
 
     CryptoExpected<CryptoContext> CreateContext(const BackendOptions& options) noexcept
@@ -1065,7 +1065,7 @@ namespace NGIN::Crypto::Backend
                 };
             case BackendPolicy::PreferPlatformThenPackages: {
                 auto platform = SelectPlatform(options, &diagnostics);
-                if (platform.HasValue())
+                if (platform.has_value())
                 {
                     return BackendContextSelection {
                             .context     = platform,
@@ -1073,7 +1073,7 @@ namespace NGIN::Crypto::Backend
                     };
                 }
                 auto package = SelectPackage(options, &diagnostics);
-                if (package.HasValue())
+                if (package.has_value())
                 {
                     return BackendContextSelection {
                             .context     = package,
@@ -1081,14 +1081,14 @@ namespace NGIN::Crypto::Backend
                     };
                 }
                 return BackendContextSelection {
-                        .context     = platform.Error(),
+                        .context     = std::unexpected(std::move(platform).error()),
                         .diagnostics = diagnostics,
                 };
             }
             case BackendPolicy::PreferPackagesThenPlatform:
             case BackendPolicy::RequireAlgorithmSet: {
                 auto package = SelectPackage(options, &diagnostics);
-                if (package.HasValue())
+                if (package.has_value())
                 {
                     return BackendContextSelection {
                             .context     = package,
@@ -1096,28 +1096,28 @@ namespace NGIN::Crypto::Backend
                     };
                 }
                 auto platform = SelectPlatform(options, &diagnostics);
-                if (platform.HasValue())
+                if (platform.has_value())
                 {
                     return BackendContextSelection {
                             .context     = platform,
                             .diagnostics = diagnostics,
                     };
                 }
-                if (platform.Error().Code() == CryptoErrorCode::UnsupportedAlgorithm)
+                if (platform.error().Code() == CryptoErrorCode::UnsupportedAlgorithm)
                 {
                     return BackendContextSelection {
-                            .context     = platform.Error(),
+                            .context     = std::unexpected(std::move(platform).error()),
                             .diagnostics = diagnostics,
                     };
                 }
                 return BackendContextSelection {
-                        .context     = package.Error(),
+                        .context     = std::unexpected(std::move(package).error()),
                         .diagnostics = diagnostics,
                 };
             }
             case BackendPolicy::RequireFipsCapable: {
                 auto package = SelectPackage(options, &diagnostics);
-                if (package.HasValue())
+                if (package.has_value())
                 {
                     return BackendContextSelection {
                             .context     = package,
@@ -1125,7 +1125,7 @@ namespace NGIN::Crypto::Backend
                     };
                 }
                 auto platform = SelectPlatform(options, &diagnostics);
-                if (platform.HasValue())
+                if (platform.has_value())
                 {
                     return BackendContextSelection {
                             .context     = platform,
@@ -1133,14 +1133,14 @@ namespace NGIN::Crypto::Backend
                     };
                 }
                 return BackendContextSelection {
-                        .context     = PolicyRejected(),
+                        .context     = std::unexpected(PolicyRejected()),
                         .diagnostics = diagnostics,
                 };
             }
         }
 
         return BackendContextSelection {
-                .context     = PolicyRejected(),
+                .context     = std::unexpected(PolicyRejected()),
                 .diagnostics = diagnostics,
         };
     }

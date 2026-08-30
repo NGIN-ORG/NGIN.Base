@@ -502,8 +502,8 @@ namespace NGIN::Serialization::XML
                 };
                 auto id = AddNode(context, node);
                 if (!id)
-                    return Failure<void>(std::move(id.Error()));
-                auto child = AddChild(context, *parentElement, id.Value());
+                    return Failure<void>(std::move(id.error()));
+                auto child = AddChild(context, *parentElement, id.value());
                 if (!child)
                     return child;
             }
@@ -519,8 +519,8 @@ namespace NGIN::Serialization::XML
             context.cursor.Advance(2);
             auto target = ParseName(context);
             if (!target)
-                return Failure<void>(std::move(target.Error()));
-            const auto targetText = context.state->Text(target.Value());
+                return Failure<void>(std::move(target.error()));
+            const auto targetText = context.state->Text(target.value());
             const bool reservedXml =
                     targetText.size() == 3 &&
                     (targetText[0] == 'x' || targetText[0] == 'X') &&
@@ -562,15 +562,15 @@ namespace NGIN::Serialization::XML
             {
                 detail::NodeRecord node {
                         .kind = NodeKind::ProcessingInstruction,
-                        .name = target.Value(),
+                        .name = target.value(),
                         .text = context.state->StoreText(
                                 context.state->source.substr(bodyStart, body.size())),
                         .span = context.state->MakeSpan(start, context.cursor.Offset()),
                 };
                 auto id = AddNode(context, node);
                 if (!id)
-                    return Failure<void>(std::move(id.Error()));
-                auto child = AddChild(context, *parentElement, id.Value());
+                    return Failure<void>(std::move(id.error()));
+                auto child = AddChild(context, *parentElement, id.value());
                 if (!child)
                     return child;
             }
@@ -641,7 +641,7 @@ namespace NGIN::Serialization::XML
             if (!name)
             {
                 --context.depth;
-                return Failure<NodeId>(std::move(name.Error()));
+                return Failure<NodeId>(std::move(name.error()));
             }
 
             constexpr auto maxIndex       = (std::numeric_limits<UInt32>::max)();
@@ -688,7 +688,7 @@ namespace NGIN::Serialization::XML
                     if (!attributeName)
                     {
                         --context.depth;
-                        return Failure<NodeId>(std::move(attributeName.Error()));
+                        return Failure<NodeId>(std::move(attributeName.error()));
                     }
                     const UIntSize attributeNameEnd = context.cursor.Offset();
                     for (UIntSize index = attributeBegin;
@@ -696,7 +696,7 @@ namespace NGIN::Serialization::XML
                          ++index)
                     {
                         const auto& previous = context.state->attributes[index];
-                        if (context.state->Text(previous.name) == context.state->Text(attributeName.Value()))
+                        if (context.state->Text(previous.name) == context.state->Text(attributeName.value()))
                         {
                             --context.depth;
                             auto error    = MakeErrorAt(context,
@@ -754,7 +754,7 @@ namespace NGIN::Serialization::XML
                     if (!value)
                     {
                         --context.depth;
-                        return Failure<NodeId>(std::move(value.Error()));
+                        return Failure<NodeId>(std::move(value.error()));
                     }
                     context.cursor.Advance();
                     if (context.state->attributes.size() >= context.state->limits.maxMembers ||
@@ -768,8 +768,8 @@ namespace NGIN::Serialization::XML
                                                            context.cursor.Offset()));
                     }
                     context.state->attributes.push_back(detail::AttributeRecord {
-                            .name      = attributeName.Value(),
-                            .value     = value.Value(),
+                            .name      = attributeName.value(),
+                            .value     = value.value(),
                             .span      = context.state->MakeSpan(attributeStart, context.cursor.Offset()),
                             .valueSpan = context.state->MakeSpan(valueStart, valueEnd),
                     });
@@ -798,7 +798,7 @@ namespace NGIN::Serialization::XML
             try
             {
                 context.state->elements.push_back(detail::ElementRecord {
-                        .name       = name.Value(),
+                        .name       = name.value(),
                         .attributes = detail::TableRange {
                                 static_cast<UInt32>(attributeBegin),
                                 static_cast<UInt32>(
@@ -836,7 +836,7 @@ namespace NGIN::Serialization::XML
                         if (!closeName)
                         {
                             --context.depth;
-                            return Failure<NodeId>(std::move(closeName.Error()));
+                            return Failure<NodeId>(std::move(closeName.error()));
                         }
                         SkipWhitespace(context);
                         if (context.cursor.Peek() != '>')
@@ -846,7 +846,7 @@ namespace NGIN::Serialization::XML
                                     context, ParseErrorCode::InvalidToken, "Expected '>' after XML end tag"));
                         }
                         context.cursor.Advance();
-                        if (context.state->Text(closeName.Value()) != context.state->Text(name.Value()))
+                        if (context.state->Text(closeName.value()) != context.state->Text(name.value()))
                         {
                             --context.depth;
                             return Failure<NodeId>(MakeErrorAt(context,
@@ -864,7 +864,7 @@ namespace NGIN::Serialization::XML
                         if (!result)
                         {
                             --context.depth;
-                            return Failure<NodeId>(std::move(result.Error()));
+                            return Failure<NodeId>(std::move(result.error()));
                         }
                         continue;
                     }
@@ -895,13 +895,13 @@ namespace NGIN::Serialization::XML
                         if (!id)
                         {
                             --context.depth;
-                            return Failure<NodeId>(std::move(id.Error()));
+                            return Failure<NodeId>(std::move(id.error()));
                         }
-                        auto child = AddChild(context, elementIndex, id.Value());
+                        auto child = AddChild(context, elementIndex, id.value());
                         if (!child)
                         {
                             --context.depth;
-                            return Failure<NodeId>(std::move(child.Error()));
+                            return Failure<NodeId>(std::move(child.error()));
                         }
                         continue;
                     }
@@ -911,7 +911,7 @@ namespace NGIN::Serialization::XML
                         if (!result)
                         {
                             --context.depth;
-                            return Failure<NodeId>(std::move(result.Error()));
+                            return Failure<NodeId>(std::move(result.error()));
                         }
                         continue;
                     }
@@ -928,13 +928,13 @@ namespace NGIN::Serialization::XML
                         if (!childNode)
                         {
                             --context.depth;
-                            return Failure<NodeId>(std::move(childNode.Error()));
+                            return Failure<NodeId>(std::move(childNode.error()));
                         }
-                        auto child = AddChild(context, elementIndex, childNode.Value());
+                        auto child = AddChild(context, elementIndex, childNode.value());
                         if (!child)
                         {
                             --context.depth;
-                            return Failure<NodeId>(std::move(child.Error()));
+                            return Failure<NodeId>(std::move(child.error()));
                         }
                         continue;
                     }
@@ -963,23 +963,23 @@ namespace NGIN::Serialization::XML
                     if (!text)
                     {
                         --context.depth;
-                        return Failure<NodeId>(std::move(text.Error()));
+                        return Failure<NodeId>(std::move(text.error()));
                     }
                     auto id = AddNode(context, detail::NodeRecord {
                                                        .kind = NodeKind::Text,
-                                                       .text = text.Value(),
+                                                       .text = text.value(),
                                                        .span = context.state->MakeSpan(textStart, textEnd),
                                                });
                     if (!id)
                     {
                         --context.depth;
-                        return Failure<NodeId>(std::move(id.Error()));
+                        return Failure<NodeId>(std::move(id.error()));
                     }
-                    auto child = AddChild(context, elementIndex, id.Value());
+                    auto child = AddChild(context, elementIndex, id.value());
                     if (!child)
                     {
                         --context.depth;
-                        return Failure<NodeId>(std::move(child.Error()));
+                        return Failure<NodeId>(std::move(child.error()));
                     }
                 }
             }
@@ -1039,7 +1039,7 @@ namespace NGIN::Serialization::XML
             {
                 auto declaration = ParseProcessingInstruction(context, std::nullopt, true);
                 if (!declaration)
-                    return Failure<DocumentType>(std::move(declaration.Error()));
+                    return Failure<DocumentType>(std::move(declaration.error()));
             }
 
             bool sawDoctype = false;
@@ -1050,13 +1050,13 @@ namespace NGIN::Serialization::XML
                 {
                     auto comment = ParseComment(context, std::nullopt);
                     if (!comment)
-                        return Failure<DocumentType>(std::move(comment.Error()));
+                        return Failure<DocumentType>(std::move(comment.error()));
                 }
                 else if (StartsWith(context, "<?"))
                 {
                     auto instruction = ParseProcessingInstruction(context, std::nullopt, false);
                     if (!instruction)
-                        return Failure<DocumentType>(std::move(instruction.Error()));
+                        return Failure<DocumentType>(std::move(instruction.error()));
                 }
                 else if (StartsWith(context, "<!DOCTYPE"))
                 {
@@ -1067,7 +1067,7 @@ namespace NGIN::Serialization::XML
                     sawDoctype   = true;
                     auto doctype = ParseDoctype(context);
                     if (!doctype)
-                        return Failure<DocumentType>(std::move(doctype.Error()));
+                        return Failure<DocumentType>(std::move(doctype.error()));
                 }
                 else
                 {
@@ -1080,8 +1080,8 @@ namespace NGIN::Serialization::XML
                         MakeError(context, ParseErrorCode::InvalidDocumentStructure, "XML document requires one root element"));
             auto root = ParseElement(context);
             if (!root)
-                return Failure<DocumentType>(std::move(root.Error()));
-            state->root = root.Value();
+                return Failure<DocumentType>(std::move(root.error()));
+            state->root = root.value();
 
             while (true)
             {
@@ -1090,13 +1090,13 @@ namespace NGIN::Serialization::XML
                 {
                     auto comment = ParseComment(context, std::nullopt);
                     if (!comment)
-                        return Failure<DocumentType>(std::move(comment.Error()));
+                        return Failure<DocumentType>(std::move(comment.error()));
                 }
                 else if (StartsWith(context, "<?"))
                 {
                     auto instruction = ParseProcessingInstruction(context, std::nullopt, false);
                     if (!instruction)
-                        return Failure<DocumentType>(std::move(instruction.Error()));
+                        return Failure<DocumentType>(std::move(instruction.error()));
                 }
                 else
                 {
@@ -1212,7 +1212,7 @@ namespace NGIN::Serialization::XML
             auto parsed          = ParseState<Document>(
                     std::move(state), syntaxOptions, scratch, &syntax->tokens);
             if (!parsed)
-                return Failure<SyntaxDocument>(std::move(parsed.Error()));
+                return Failure<SyntaxDocument>(std::move(parsed.error()));
             syntax->valid = true;
             return SyntaxDocument {std::move(syntax)};
         } catch (const std::bad_alloc&)

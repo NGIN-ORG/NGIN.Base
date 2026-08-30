@@ -29,6 +29,8 @@ option(NGIN_BASE_ENABLE_LTO "Enable Link Time Optimization for Release/RelWithDe
 option(NGIN_BASE_STRICT_WARNINGS "Enable extra warning flags" ON)
 option(NGIN_BASE_ALL_FEATURES "Convenience: enable tests + examples + benchmarks" OFF)
 option(NGIN_BASE_EXPORT_COMPILE_COMMANDS "Generate compile_commands.json" ON)
+option(NGIN_BASE_CAPTURE_EXCEPTION_STACKTRACE
+  "Capture NGIN exception stack traces eagerly at their construction site" OFF)
 option(NGIN_BASE_CRYPTO_WITH_CNG "Enable Windows CNG-backed crypto algorithms" ${_ngin_base_crypto_cng_default})
 option(NGIN_BASE_CRYPTO_WITH_APPLE "Enable Apple CommonCrypto-backed crypto algorithms" ${_ngin_base_crypto_apple_default})
 option(NGIN_BASE_CRYPTO_WITH_OPENSSL "Enable optional OpenSSL-backed crypto algorithms" OFF)

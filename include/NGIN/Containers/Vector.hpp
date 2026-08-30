@@ -8,8 +8,11 @@
 #include <NGIN/Defines.hpp>
 #include <NGIN/Memory/AllocatorConcept.hpp>
 #include <NGIN/Memory/SystemAllocator.hpp>
+#include <NGIN/Memory/detail/CheckedArithmetic.hpp>
+#include <NGIN/Memory/detail/ConstructionGuard.hpp>
 #include <NGIN/Meta/TypeTraits.hpp>
 #include <NGIN/Primitives.hpp>
+#include <algorithm>
 #include <concepts>
 #include <cstddef>
 #include <cstring>
@@ -51,19 +54,14 @@ namespace NGIN::Containers
         /// @param alloc Allocator to store in the vector.
         Vector(std::initializer_list<T> init, Alloc alloc = Alloc {}) : m_alloc(std::move(alloc))
         {
-            Reserve(init.size());
-            for (const T& v: init)
-                ::new (&m_data[m_size++]) T(v);
+            InitializeFromCopy(init.begin(), init.size());
         }
 
         /// @brief Copy-constructs the elements and allocator from another vector.
         /// @param other Vector to copy.
         Vector(const Vector& other) : m_alloc(other.m_alloc)
         {
-            Reserve(other.m_size);
-            for (std::size_t i = 0; i < other.m_size; ++i)
-                ::new (&m_data[i]) T(other.m_data[i]);
-            m_size = other.m_size;
+            InitializeFromCopy(other.m_data, other.m_size);
         }
         /// @brief Replaces the contents with a copy of another vector.
         /// @param other Vector to copy.
@@ -136,26 +134,53 @@ namespace NGIN::Containers
         /// @brief Push by copy.
         T& PushBack(const T& value)
         {
-            EnsureCapacityForOne();
-            ::new (&m_data[m_size]) T(value);
-            return m_data[m_size++];
+            if (m_size == m_capacity)
+            {
+                T staged(value);
+                Reserve(NextCapacity(MinimumCapacityForOne()));
+                std::construct_at(m_data + m_size, std::move(staged));
+            }
+            else
+            {
+                std::construct_at(m_data + m_size, value);
+            }
+            ++m_size;
+            return m_data[m_size - 1];
         }
 
         /// @brief Push by move.
         T& PushBack(T&& value)
         {
-            EnsureCapacityForOne();
-            ::new (&m_data[m_size]) T(std::move(value));
-            return m_data[m_size++];
+            if (m_size == m_capacity)
+            {
+                T staged(std::move(value));
+                Reserve(NextCapacity(MinimumCapacityForOne()));
+                std::construct_at(m_data + m_size, std::move(staged));
+            }
+            else
+            {
+                std::construct_at(m_data + m_size, std::move(value));
+            }
+            ++m_size;
+            return m_data[m_size - 1];
         }
 
         /// @brief In-place construct at the end.
         template<typename... Args>
         T& EmplaceBack(Args&&... args)
         {
-            EnsureCapacityForOne();
-            ::new (&m_data[m_size]) T(std::forward<Args>(args)...);
-            return m_data[m_size++];
+            if (m_size == m_capacity)
+            {
+                T staged(std::forward<Args>(args)...);
+                Reserve(NextCapacity(MinimumCapacityForOne()));
+                std::construct_at(m_data + m_size, std::move(staged));
+            }
+            else
+            {
+                std::construct_at(m_data + m_size, std::forward<Args>(args)...);
+            }
+            ++m_size;
+            return m_data[m_size - 1];
         }
 
         /// @brief Insert by copy at index (shifts elements right).
@@ -163,29 +188,8 @@ namespace NGIN::Containers
         {
             if (index > m_size)
                 throw std::out_of_range("Vector::PushAt: index out of range");
-            EnsureCapacityForOne();
-            if (index == m_size)
-            {
-                ::new (&m_data[m_size++]) T(value);
-                return;
-            }
-            const std::size_t tailCount = m_size - index;
-            if constexpr (Meta::TypeTraits<T>::IsBitwiseRelocatable())
-            {
-                std::memmove(static_cast<void*>(m_data + index + 1), static_cast<void*>(m_data + index), tailCount * sizeof(T));
-                ::new (&m_data[index]) T(value);
-                ++m_size;
-            }
-            else
-            {
-                // Create space at end then shift via move assignment (basic guarantee).
-                ::new (&m_data[m_size]) T(std::move(m_data[m_size - 1]));
-                for (std::size_t i = m_size - 1; i > index; --i)
-                    m_data[i] = std::move(m_data[i - 1]);
-                m_data[index].~T();
-                ::new (&m_data[index]) T(value);
-                ++m_size;
-            }
+            T staged(value);
+            InsertPrepared(index, std::move(staged));
         }
 
         /// @brief Insert by move at index (shifts elements right).
@@ -193,28 +197,8 @@ namespace NGIN::Containers
         {
             if (index > m_size)
                 throw std::out_of_range("Vector::PushAt: index out of range");
-            EnsureCapacityForOne();
-            if (index == m_size)
-            {
-                ::new (&m_data[m_size++]) T(std::move(value));
-                return;
-            }
-            const std::size_t tailCount = m_size - index;
-            if constexpr (Meta::TypeTraits<T>::IsBitwiseRelocatable())
-            {
-                std::memmove(static_cast<void*>(m_data + index + 1), static_cast<void*>(m_data + index), tailCount * sizeof(T));
-                ::new (&m_data[index]) T(std::move(value));
-                ++m_size;
-            }
-            else
-            {
-                ::new (&m_data[m_size]) T(std::move(m_data[m_size - 1]));
-                for (std::size_t i = m_size - 1; i > index; --i)
-                    m_data[i] = std::move(m_data[i - 1]);
-                m_data[index].~T();
-                ::new (&m_data[index]) T(std::move(value));
-                ++m_size;
-            }
+            T staged(std::move(value));
+            InsertPrepared(index, std::move(staged));
         }
 
         /// @brief In-place insert at index (shifts elements right).
@@ -223,28 +207,8 @@ namespace NGIN::Containers
         {
             if (index > m_size)
                 throw std::out_of_range("Vector::EmplaceAt: index out of range");
-            EnsureCapacityForOne();
-            if (index == m_size)
-            {
-                ::new (&m_data[m_size++]) T(std::forward<Args>(args)...);
-                return;
-            }
-            const std::size_t tailCount = m_size - index;
-            if constexpr (Meta::TypeTraits<T>::IsBitwiseRelocatable())
-            {
-                std::memmove(static_cast<void*>(m_data + index + 1), static_cast<void*>(m_data + index), tailCount * sizeof(T));
-                ::new (&m_data[index]) T(std::forward<Args>(args)...);
-                ++m_size;
-            }
-            else
-            {
-                ::new (&m_data[m_size]) T(std::move(m_data[m_size - 1]));
-                for (std::size_t i = m_size - 1; i > index; --i)
-                    m_data[i] = std::move(m_data[i - 1]);
-                m_data[index].~T();
-                ::new (&m_data[index]) T(std::forward<Args>(args)...);
-                ++m_size;
-            }
+            T staged(std::forward<Args>(args)...);
+            InsertPrepared(index, std::move(staged));
         }
 
         /// @brief Pop the last element.
@@ -295,45 +259,35 @@ namespace NGIN::Containers
         {
             if (newCapacity <= m_capacity)
                 return;
-            if (newCapacity > (std::numeric_limits<std::size_t>::max() / (sizeof(T) ? sizeof(T) : 1)))
-                throw std::length_error("Vector::Reserve size overflow");
-            void* mem = m_alloc.Allocate(newCapacity * sizeof(T), alignof(T));
-            if (!mem)
-                throw std::bad_alloc();
-            T*       newData = static_cast<T*>(mem);
-            UIntSize i       = 0;
-            try
+            const std::size_t                            allocationBytes = StorageBytes(newCapacity);
+            T*                                           newData         = AllocateStorage(newCapacity);
+            NGIN::Memory::detail::AllocationGuard<Alloc> allocationGuard {
+                    m_alloc, newData, allocationBytes, alignof(T)};
+            NGIN::Memory::detail::ConstructionGuard<T> constructionGuard {newData};
+
+            if constexpr (Meta::TypeTraits<T>::IsBitwiseRelocatable())
             {
-                if constexpr (Meta::TypeTraits<T>::IsBitwiseRelocatable())
-                {
-                    if (m_size)
-                        std::memcpy(newData, m_data, m_size * sizeof(T));
-                }
-                else if constexpr (std::is_nothrow_move_constructible_v<T> || !std::is_copy_constructible_v<T>)
-                {
-                    for (; i < m_size; ++i)
-                        ::new (&newData[i]) T(std::move(m_data[i]));
-                }
-                else
-                {
-                    for (; i < m_size; ++i)
-                        ::new (&newData[i]) T(m_data[i]);
-                }
-            } catch (...)
-            {
-                for (UIntSize j = 0; j < i; ++j)
-                    newData[j].~T();
-                m_alloc.Deallocate(newData, newCapacity * sizeof(T), alignof(T));
-                throw;
+                if (m_size)
+                    std::memcpy(newData, m_data, m_size * sizeof(T));
             }
+            else
+            {
+                for (UIntSize index = 0; index < m_size; ++index)
+                {
+                    ConstructRelocated(newData + index, m_data[index]);
+                    constructionGuard.Increment();
+                }
+            }
+
             if constexpr (!Meta::TypeTraits<T>::IsBitwiseRelocatable())
-            {
                 DestroyElements(m_data, m_size);
-            }
             if (m_data)
                 m_alloc.Deallocate(m_data, m_capacity * sizeof(T), alignof(T));
+
             m_data     = newData;
             m_capacity = newCapacity;
+            constructionGuard.Release();
+            allocationGuard.Release();
         }
 
         /// @brief Shrink capacity to match size.
@@ -352,43 +306,33 @@ namespace NGIN::Containers
                 return;
             }
             // Heuristic: only shrink if wasting more than 50%
-            if (m_capacity < m_size * 2)
+            if ((m_capacity - m_size) < m_size)
                 return;
-            void* mem = m_alloc.Allocate(m_size * sizeof(T), alignof(T));
-            if (!mem)
-                throw std::bad_alloc();
-            T* newData = static_cast<T*>(mem);
+            const std::size_t                            allocationBytes = StorageBytes(m_size);
+            T*                                           newData         = AllocateStorage(m_size);
+            NGIN::Memory::detail::AllocationGuard<Alloc> allocationGuard {
+                    m_alloc, newData, allocationBytes, alignof(T)};
+            NGIN::Memory::detail::ConstructionGuard<T> constructionGuard {newData};
+
             if constexpr (Meta::TypeTraits<T>::IsBitwiseRelocatable())
             {
                 std::memcpy(newData, m_data, m_size * sizeof(T));
             }
             else
             {
-                UIntSize i = 0;
-                try
+                for (UIntSize index = 0; index < m_size; ++index)
                 {
-                    if constexpr (std::is_nothrow_move_constructible_v<T> || !std::is_copy_constructible_v<T>)
-                    {
-                        for (; i < m_size; ++i)
-                            ::new (&newData[i]) T(std::move(m_data[i]));
-                    }
-                    else
-                    {
-                        for (; i < m_size; ++i)
-                            ::new (&newData[i]) T(m_data[i]);
-                    }
-                } catch (...)
-                {
-                    for (UIntSize j = 0; j < i; ++j)
-                        newData[j].~T();
-                    m_alloc.Deallocate(newData, m_size * sizeof(T), alignof(T));
-                    throw;
+                    ConstructRelocated(newData + index, m_data[index]);
+                    constructionGuard.Increment();
                 }
                 DestroyElements(m_data, m_size);
             }
+
             m_alloc.Deallocate(m_data, m_capacity * sizeof(T), alignof(T));
             m_data     = newData;
             m_capacity = m_size;
+            constructionGuard.Release();
+            allocationGuard.Release();
         }
 
         //=== Observers ===//
@@ -471,12 +415,12 @@ namespace NGIN::Containers
         /// @brief Returns an iterator one past the final element.
         [[nodiscard]] T* end() noexcept
         {
-            return m_data + m_size;
+            return m_data ? m_data + m_size : nullptr;
         }
         /// @brief Returns an iterator one past the final element.
         [[nodiscard]] const T* end() const noexcept
         {
-            return m_data + m_size;
+            return m_data ? m_data + m_size : nullptr;
         }
 
     private:
@@ -525,47 +469,180 @@ namespace NGIN::Containers
         template<typename SourceType>
         static void ConstructElements(T* destination, SourceType* source, UIntSize count)
         {
-            UIntSize i = 0;
-            try
+            NGIN::Memory::detail::ConstructionGuard<T> constructionGuard {destination};
+            if constexpr (Meta::TypeTraits<T>::IsBitwiseRelocatable() &&
+                          std::is_same_v<std::remove_cv_t<SourceType>, T>)
             {
-                if constexpr (Meta::TypeTraits<T>::IsBitwiseRelocatable() &&
-                              std::is_same_v<std::remove_cv_t<SourceType>, T>)
-                {
-                    if (count != 0)
-                        std::memcpy(destination, source, count * sizeof(T));
-                }
-                else if constexpr (std::is_const_v<SourceType>)
-                {
-                    for (; i < count; ++i)
-                        ::new (&destination[i]) T(source[i]);
-                }
-                else if constexpr (std::is_nothrow_move_constructible_v<T> || !std::is_copy_constructible_v<T>)
-                {
-                    for (; i < count; ++i)
-                        ::new (&destination[i]) T(std::move(source[i]));
-                }
-                else
-                {
-                    for (; i < count; ++i)
-                        ::new (&destination[i]) T(source[i]);
-                }
-            } catch (...)
-            {
-                if constexpr (!Meta::TypeTraits<T>::IsBitwiseRelocatable())
-                {
-                    for (UIntSize j = 0; j < i; ++j)
-                        destination[j].~T();
-                }
-                throw;
+                if (count != 0)
+                    std::memcpy(destination, source, count * sizeof(T));
             }
+            else
+            {
+                for (UIntSize index = 0; index < count; ++index)
+                {
+                    if constexpr (std::is_const_v<SourceType>)
+                        std::construct_at(destination + index, source[index]);
+                    else
+                        ConstructRelocated(destination + index, source[index]);
+                    constructionGuard.Increment();
+                }
+            }
+            constructionGuard.Release();
+        }
+
+        [[nodiscard]] static std::size_t StorageBytes(const UIntSize capacity)
+        {
+            std::size_t bytes = 0;
+            if (!NGIN::Memory::detail::CheckedMultiply(capacity, sizeof(T), bytes))
+                throw std::length_error("Vector storage size overflow");
+            return bytes;
         }
 
         T* AllocateStorage(UIntSize capacity)
         {
-            void* mem = m_alloc.Allocate(capacity * sizeof(T), alignof(T));
+            const std::size_t bytes = StorageBytes(capacity);
+            void*             mem   = m_alloc.Allocate(bytes, alignof(T));
             if (!mem)
                 throw std::bad_alloc();
             return static_cast<T*>(mem);
+        }
+
+        void InitializeFromCopy(const T* source, const UIntSize count)
+        {
+            if (count == 0)
+                return;
+
+            const std::size_t                            allocationBytes = StorageBytes(count);
+            T*                                           newData         = AllocateStorage(count);
+            NGIN::Memory::detail::AllocationGuard<Alloc> allocationGuard {
+                    m_alloc, newData, allocationBytes, alignof(T)};
+            ConstructElements(newData, source, count);
+
+            m_data     = newData;
+            m_size     = count;
+            m_capacity = count;
+            allocationGuard.Release();
+        }
+
+        static void ConstructRelocated(T* destination, T& source)
+        {
+            if constexpr (std::is_nothrow_move_constructible_v<T> || !std::is_copy_constructible_v<T>)
+                std::construct_at(destination, std::move(source));
+            else
+                std::construct_at(destination, source);
+        }
+
+        [[nodiscard]] UIntSize NextCapacity(const UIntSize minimum) const
+        {
+            const UIntSize maximum = (std::numeric_limits<std::size_t>::max)() / sizeof(T);
+            if (minimum > maximum)
+                throw std::length_error("Vector capacity overflow");
+
+            if (m_capacity == 0)
+                return minimum > 1 ? minimum : 1;
+
+            std::size_t candidate = 0;
+            if (!NGIN::Memory::detail::CheckedAdd(m_capacity, m_capacity >> 1, candidate) ||
+                !NGIN::Memory::detail::CheckedAdd(candidate, 1, candidate))
+            {
+                candidate = maximum;
+            }
+            if (candidate < minimum)
+                candidate = minimum;
+            if (candidate > maximum)
+                candidate = maximum;
+            return candidate;
+        }
+
+        [[nodiscard]] UIntSize MinimumCapacityForOne() const
+        {
+            const UIntSize maximum = (std::numeric_limits<std::size_t>::max)() / sizeof(T);
+            if (m_size == maximum)
+                throw std::length_error("Vector capacity overflow");
+            return m_size + 1;
+        }
+
+        void InsertPrepared(const UIntSize index, T&& staged)
+        {
+            if (index == m_size)
+            {
+                if (m_size == m_capacity)
+                    Reserve(NextCapacity(MinimumCapacityForOne()));
+                std::construct_at(m_data + m_size, std::move(staged));
+                ++m_size;
+                return;
+            }
+
+            if (m_size < m_capacity)
+            {
+                if constexpr (Meta::TypeTraits<T>::IsBitwiseRelocatable() &&
+                              std::is_nothrow_move_constructible_v<T>)
+                {
+                    const UIntSize tailCount = m_size - index;
+                    std::memmove(
+                            static_cast<void*>(m_data + index + 1),
+                            static_cast<void*>(m_data + index),
+                            tailCount * sizeof(T));
+                    std::construct_at(m_data + index, std::move(staged));
+                    ++m_size;
+                    return;
+                }
+                else if constexpr (std::is_nothrow_move_constructible_v<T> &&
+                                   std::is_nothrow_move_assignable_v<T>)
+                {
+                    std::construct_at(m_data + m_size, std::move(m_data[m_size - 1]));
+                    for (UIntSize position = m_size - 1; position > index; --position)
+                        m_data[position] = std::move(m_data[position - 1]);
+                    m_data[index] = std::move(staged);
+                    ++m_size;
+                    return;
+                }
+            }
+
+            const UIntSize newCapacity =
+                    m_size == m_capacity ? NextCapacity(MinimumCapacityForOne()) : m_capacity;
+            const std::size_t                            allocationBytes = StorageBytes(newCapacity);
+            T*                                           newData         = AllocateStorage(newCapacity);
+            NGIN::Memory::detail::AllocationGuard<Alloc> allocationGuard {
+                    m_alloc, newData, allocationBytes, alignof(T)};
+
+            if constexpr (Meta::TypeTraits<T>::IsBitwiseRelocatable())
+            {
+                NGIN::Memory::detail::ObjectConstructionGuard<T> insertedGuard {newData + index};
+                std::construct_at(newData + index, std::move(staged));
+                insertedGuard.MarkConstructed();
+                if (index > 0)
+                    std::memcpy(newData, m_data, index * sizeof(T));
+                const UIntSize suffixCount = m_size - index;
+                if (suffixCount > 0)
+                    std::memcpy(newData + index + 1, m_data + index, suffixCount * sizeof(T));
+                insertedGuard.Release();
+            }
+            else
+            {
+                NGIN::Memory::detail::ConstructionGuard<T> constructionGuard {newData};
+                for (UIntSize sourceIndex = 0; sourceIndex < index; ++sourceIndex)
+                {
+                    ConstructRelocated(newData + sourceIndex, m_data[sourceIndex]);
+                    constructionGuard.Increment();
+                }
+                std::construct_at(newData + index, std::move(staged));
+                constructionGuard.Increment();
+                for (UIntSize sourceIndex = index; sourceIndex < m_size; ++sourceIndex)
+                {
+                    ConstructRelocated(newData + sourceIndex + 1, m_data[sourceIndex]);
+                    constructionGuard.Increment();
+                }
+                constructionGuard.Release();
+                DestroyElements(m_data, m_size);
+            }
+
+            if (m_data)
+                m_alloc.Deallocate(m_data, m_capacity * sizeof(T), alignof(T));
+            m_data     = newData;
+            m_capacity = newCapacity;
+            ++m_size;
+            allocationGuard.Release();
         }
 
         void AssignFromCopy(const Vector& other)
@@ -574,51 +651,38 @@ namespace NGIN::Containers
             {
                 ReleaseStorage();
                 m_alloc = other.m_alloc;
-                if (other.m_size == 0)
-                    return;
-
-                m_data = AllocateStorage(other.m_size);
-                try
-                {
-                    ConstructElements(m_data, other.m_data, other.m_size);
-                    m_size     = other.m_size;
-                    m_capacity = other.m_size;
-                } catch (...)
-                {
-                    m_alloc.Deallocate(m_data, other.m_size * sizeof(T), alignof(T));
-                    m_data = nullptr;
-                    throw;
-                }
+                InitializeFromCopy(other.m_data, other.m_size);
                 return;
             }
 
             if (other.m_size > m_capacity)
             {
-                T* newData = AllocateStorage(other.m_size);
-                try
-                {
-                    ConstructElements(newData, other.m_data, other.m_size);
-                } catch (...)
-                {
-                    m_alloc.Deallocate(newData, other.m_size * sizeof(T), alignof(T));
-                    throw;
-                }
+                T*                                           newData = AllocateStorage(other.m_size);
+                NGIN::Memory::detail::AllocationGuard<Alloc> allocationGuard {
+                        m_alloc, newData, StorageBytes(other.m_size), alignof(T)};
+                ConstructElements(newData, other.m_data, other.m_size);
 
                 ReleaseStorage();
                 m_data     = newData;
                 m_size     = other.m_size;
                 m_capacity = other.m_size;
+                allocationGuard.Release();
                 return;
             }
 
-            UIntSize i = 0;
-            for (; i < m_size && i < other.m_size; ++i)
-                m_data[i] = other.m_data[i];
-            for (; i < other.m_size; ++i)
-                ::new (&m_data[i]) T(other.m_data[i]);
+            const UIntSize originalSize = m_size;
+            const UIntSize commonSize   = (std::min) (m_size, other.m_size);
+            UIntSize       index        = 0;
+            for (; index < commonSize; ++index)
+                m_data[index] = other.m_data[index];
+            for (; index < other.m_size; ++index)
+            {
+                std::construct_at(m_data + index, other.m_data[index]);
+                ++m_size;
+            }
 
-            if (m_size > other.m_size)
-                DestroyElements(m_data + other.m_size, m_size - other.m_size);
+            if (originalSize > other.m_size)
+                DestroyElements(m_data + other.m_size, originalSize - other.m_size);
 
             m_size = other.m_size;
         }
@@ -627,46 +691,37 @@ namespace NGIN::Containers
         {
             if (other.m_size > m_capacity)
             {
-                T* newData = AllocateStorage(other.m_size);
-                try
-                {
-                    ConstructElements(newData, other.m_data, other.m_size);
-                } catch (...)
-                {
-                    m_alloc.Deallocate(newData, other.m_size * sizeof(T), alignof(T));
-                    throw;
-                }
+                T*                                           newData = AllocateStorage(other.m_size);
+                NGIN::Memory::detail::AllocationGuard<Alloc> allocationGuard {
+                        m_alloc, newData, StorageBytes(other.m_size), alignof(T)};
+                ConstructElements(newData, other.m_data, other.m_size);
 
                 ReleaseStorage();
                 m_data     = newData;
                 m_size     = other.m_size;
                 m_capacity = other.m_size;
+                allocationGuard.Release();
             }
             else
             {
-                UIntSize i = 0;
-                for (; i < m_size && i < other.m_size; ++i)
-                    m_data[i] = std::move(other.m_data[i]);
-                for (; i < other.m_size; ++i)
-                    ::new (&m_data[i]) T(std::move(other.m_data[i]));
-                if (m_size > other.m_size)
-                    DestroyElements(m_data + other.m_size, m_size - other.m_size);
+                const UIntSize originalSize = m_size;
+                const UIntSize commonSize   = (std::min) (m_size, other.m_size);
+                UIntSize       index        = 0;
+                for (; index < commonSize; ++index)
+                    m_data[index] = std::move(other.m_data[index]);
+                for (; index < other.m_size; ++index)
+                {
+                    std::construct_at(m_data + index, std::move(other.m_data[index]));
+                    ++m_size;
+                }
+                if (originalSize > other.m_size)
+                    DestroyElements(m_data + other.m_size, originalSize - other.m_size);
                 m_size = other.m_size;
             }
 
             other.Clear();
         }
 
-        void EnsureCapacityForOne()
-        {
-            if (m_size < m_capacity)
-                return;
-            // 1.5x growth (capacity + capacity/2 + 1 to ensure progress) with overflow guard
-            std::size_t next = m_capacity ? m_capacity + (m_capacity >> 1) + 1 : 1;
-            if (next < m_capacity)// overflow
-                next = m_capacity + 1;
-            Reserve(next);
-        }
         NGIN_NO_UNIQUE_ADDRESS Alloc m_alloc {};
         T*                           m_data {nullptr};
         UIntSize                     m_size {0};

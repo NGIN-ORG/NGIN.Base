@@ -35,8 +35,11 @@ namespace NGIN::IO::detail
     template<typename TResult, typename TOperation>
     class DriverDispatchAwaiter
     {
+        static_assert(std::is_nothrow_move_constructible_v<TResult>,
+                      "driver dispatch results must be movable into shared completion state without throwing");
+
     public:
-        DriverDispatchAwaiter(FileSystemDriver& driver, NGIN::Async::TaskContext& ctx, TOperation operation) noexcept
+        DriverDispatchAwaiter(FileSystemDriver& driver, NGIN::Async::TaskContext& ctx, TOperation operation)
             : m_driver(driver), m_resumeExecutor(ctx.GetExecutor()), m_cancellation(ctx.GetCancellationToken()), m_operation(std::move(operation)), m_state(std::make_shared<State>())
         {
         }
@@ -63,7 +66,7 @@ namespace NGIN::IO::detail
                 return;
             }
 
-            m_cancellation.Register(
+            const NGIN::Async::CancellationRegistrationResult registrationResult = m_cancellation.Register(
                     m_state->registration,
                     {},
                     {},
@@ -77,16 +80,39 @@ namespace NGIN::IO::detail
                         return false;
                     },
                     m_state.get());
+            if (!registrationResult)
+            {
+                NGIN::Async::AsyncFault fault =
+                        NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::CancellationRegistrationFailed);
+                fault.native = static_cast<int>(registrationResult.error());
+                CompleteWithFault(std::move(fault));
+                return;
+            }
 
-            auto state     = m_state;
-            auto operation = std::move(m_operation);
-            m_driver.GetExecutor().Execute([state, operation = std::move(operation)]() mutable noexcept {
-                if (state->done.load(std::memory_order_acquire))
-                {
-                    return;
-                }
-                state->CompleteResult(operation());
-            });
+            std::shared_ptr<State>                state          = m_state;
+            TOperation                            operation      = std::move(m_operation);
+            const NGIN::Execution::ScheduleResult scheduleResult = m_driver.GetExecutor().Execute(
+                    [state, operation = std::move(operation)]() mutable noexcept {
+                        if (state->done.load(std::memory_order_acquire))
+                        {
+                            return;
+                        }
+                        try
+                        {
+                            state->CompleteResult(operation());
+                        } catch (...)
+                        {
+                            state->CompleteFault(NGIN::Async::MakeAsyncFault(
+                                    NGIN::Async::AsyncFaultCode::UnknownRuntimeFailure));
+                        }
+                    });
+            if (!scheduleResult)
+            {
+                NGIN::Async::AsyncFault fault =
+                        NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::SchedulerDispatchFailed);
+                fault.native = static_cast<int>(scheduleResult.error());
+                CompleteWithFault(std::move(fault));
+            }
         }
 
         DriverCompletion<TResult> await_resume() noexcept
@@ -110,12 +136,13 @@ namespace NGIN::IO::detail
                 {
                     if (resumeExecutor.IsValid())
                     {
-                        resumeExecutor.Execute(awaiting);
+                        const NGIN::Execution::ScheduleResult result = resumeExecutor.Execute(awaiting);
+                        if (result)
+                        {
+                            return;
+                        }
                     }
-                    else
-                    {
-                        awaiting.resume();
-                    }
+                    awaiting.resume();
                 }
             }
 
@@ -176,7 +203,7 @@ namespace NGIN::IO::detail
     };
 
     template<typename TOperation>
-    auto DispatchToDriver(FileSystemDriver& driver, NGIN::Async::TaskContext& ctx, TOperation operation) noexcept
+    auto DispatchToDriver(FileSystemDriver& driver, NGIN::Async::TaskContext& ctx, TOperation operation)
     {
         using ResultType = std::invoke_result_t<TOperation&>;
         return DriverDispatchAwaiter<ResultType, TOperation>(driver, ctx, std::move(operation));

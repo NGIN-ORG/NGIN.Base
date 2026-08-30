@@ -10,9 +10,9 @@ namespace NGIN::Crypto::Random
     {
         auto buffer = MakeByteBuffer(size);
         auto fill   = Fill(ByteSpan {buffer.data(), buffer.Size()});
-        if (!fill.HasValue())
+        if (!fill.has_value())
         {
-            return fill.Error();
+            return std::unexpected(std::move(fill).error());
         }
         return buffer;
     }
@@ -23,9 +23,9 @@ namespace NGIN::Crypto::Random
     {
         FixedBytes<Size> output {};
         auto             fill = Fill(ByteSpan {output.data(), output.size()});
-        if (!fill.HasValue())
+        if (!fill.has_value())
         {
-            return fill.Error();
+            return std::unexpected(std::move(fill).error());
         }
         return output;
     }

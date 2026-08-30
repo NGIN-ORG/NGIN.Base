@@ -7,9 +7,9 @@ namespace NGIN::Crypto::Asymmetric
             const RsaPssSha256SignInput&                input)
     {
         auto supported = context.EnsureSupports(SignatureAlgorithm::RsaPssSha256);
-        if (!supported.HasValue())
+        if (!supported.has_value())
         {
-            return supported.Error();
+            return std::unexpected(std::move(supported).error());
         }
 
         return context.RsaPssSha256Sign(input.privateKeyDer, input.message);
@@ -20,9 +20,9 @@ namespace NGIN::Crypto::Asymmetric
             const RsaPssSha256VerifyInput&              input) noexcept
     {
         auto supported = context.EnsureSupports(SignatureAlgorithm::RsaPssSha256);
-        if (!supported.HasValue())
+        if (!supported.has_value())
         {
-            return supported.Error();
+            return std::unexpected(std::move(supported).error());
         }
 
         return context.RsaPssSha256Verify(input.publicKeyDer, input.message, input.signature);
@@ -33,9 +33,9 @@ namespace NGIN::Crypto::Asymmetric
             const RsaOaepSha256EncryptInput&            input)
     {
         auto supported = context.EnsureSupports(AsymmetricEncryptionAlgorithm::RsaOaepSha256);
-        if (!supported.HasValue())
+        if (!supported.has_value())
         {
-            return supported.Error();
+            return std::unexpected(std::move(supported).error());
         }
 
         return context.RsaOaepSha256Encrypt(input.publicKeyDer, input.plaintext, input.label);
@@ -46,9 +46,9 @@ namespace NGIN::Crypto::Asymmetric
             const RsaOaepSha256DecryptInput&            input)
     {
         auto supported = context.EnsureSupports(AsymmetricEncryptionAlgorithm::RsaOaepSha256);
-        if (!supported.HasValue())
+        if (!supported.has_value())
         {
-            return supported.Error();
+            return std::unexpected(std::move(supported).error());
         }
 
         return context.RsaOaepSha256Decrypt(input.privateKeyDer, input.ciphertext, input.label);

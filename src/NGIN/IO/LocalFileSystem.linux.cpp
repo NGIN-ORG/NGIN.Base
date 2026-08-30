@@ -98,12 +98,13 @@ namespace NGIN::IO
                     {
                         if (m_resumeExecutor.IsValid())
                         {
-                            m_resumeExecutor.Execute(m_awaiting);
+                            const NGIN::Execution::ScheduleResult result = m_resumeExecutor.Execute(m_awaiting);
+                            if (result)
+                            {
+                                return;
+                            }
                         }
-                        else
-                        {
-                            m_awaiting.resume();
-                        }
+                        m_awaiting.resume();
                     }
                 }
             };
@@ -171,8 +172,8 @@ namespace NGIN::IO
             }
             auto result = std::move(*completion.result);
             if (!result)
-                co_return NGIN::Utilities::Unexpected<IOError>(std::move(result).TakeError());
-            co_return std::move(result).TakeValue();
+                co_return NGIN::Utilities::Unexpected<IOError>(std::move(result).error());
+            co_return std::move(result).value();
         }
 
         AsyncTask<UIntSize> LocalAsyncFileWrite(
@@ -224,8 +225,8 @@ namespace NGIN::IO
             }
             auto result = std::move(*completion.result);
             if (!result)
-                co_return NGIN::Utilities::Unexpected<IOError>(std::move(result).TakeError());
-            co_return std::move(result).TakeValue();
+                co_return NGIN::Utilities::Unexpected<IOError>(std::move(result).error());
+            co_return std::move(result).value();
         }
 
         AsyncTask<UIntSize> LocalAsyncFileReadAt(const std::shared_ptr<void>& rawState,
@@ -279,8 +280,8 @@ namespace NGIN::IO
             }
             auto result = std::move(*completion.result);
             if (!result)
-                co_return NGIN::Utilities::Unexpected<IOError>(std::move(result).TakeError());
-            co_return std::move(result).TakeValue();
+                co_return NGIN::Utilities::Unexpected<IOError>(std::move(result).error());
+            co_return std::move(result).value();
         }
 
         AsyncTask<UIntSize> LocalAsyncFileWriteAt(const std::shared_ptr<void>& rawState,
@@ -334,8 +335,8 @@ namespace NGIN::IO
             }
             auto result = std::move(*completion.result);
             if (!result)
-                co_return NGIN::Utilities::Unexpected<IOError>(std::move(result).TakeError());
-            co_return std::move(result).TakeValue();
+                co_return NGIN::Utilities::Unexpected<IOError>(std::move(result).error());
+            co_return std::move(result).value();
         }
 
         AsyncTaskVoid LocalAsyncFileFlush(const std::shared_ptr<void>& rawState, NGIN::Async::TaskContext& ctx)
@@ -384,7 +385,7 @@ namespace NGIN::IO
             auto result = std::move(*completion.result);
             if (!result)
             {
-                co_await NGIN::Async::DomainFailure(std::move(result).TakeError());
+                co_await NGIN::Async::DomainFailure(std::move(result).error());
                 co_return;
             }
             co_return;
@@ -447,7 +448,7 @@ namespace NGIN::IO
             auto result = std::move(*completion.result);
             if (!result)
             {
-                co_await NGIN::Async::DomainFailure(std::move(result).TakeError());
+                co_await NGIN::Async::DomainFailure(std::move(result).error());
                 co_return;
             }
             co_return;
@@ -488,11 +489,12 @@ namespace NGIN::IO
     }
 
     AsyncTask<AsyncFileHandle> LocalFileSystem::OpenFileAsync(
-            NGIN::Async::TaskContext& ctx, const Path& path, const FileOpenOptions& options)
+            NGIN::Async::TaskContext& ctx, Path path, FileOpenOptions options)
     {
-        auto completion = co_await detail::DispatchToDriver(*m_asyncDriver, ctx, [path, options]() mutable noexcept {
-            return detail::OpenAsyncPosixFile(path, options);
-        });
+        auto completion = co_await detail::DispatchToDriver(
+                *m_asyncDriver, ctx, [path = std::move(path), options]() mutable noexcept {
+                    return detail::OpenAsyncPosixFile(path, options);
+                });
 
         if (completion.IsCanceled())
         {
@@ -506,10 +508,10 @@ namespace NGIN::IO
         auto opened = std::move(*completion.result);
         if (!opened)
         {
-            co_return std::move(opened).TakeError();
+            co_return std::move(opened).error();
         }
 
-        co_return detail::MakeAsyncPosixFileHandle(m_asyncDriver, std::move(opened).TakeValue());
+        co_return detail::MakeAsyncPosixFileHandle(m_asyncDriver, std::move(opened).value());
     }
 }// namespace NGIN::IO
 

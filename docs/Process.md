@@ -56,7 +56,7 @@ options.timeout = std::chrono::seconds {5};
 auto result = NGIN::IO::RunProcess(std::move(options));
 if (!result)
 {
-    Report(result.Error().message);
+    Report(result.error().message);
     return;
 }
 

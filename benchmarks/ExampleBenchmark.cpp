@@ -172,7 +172,8 @@ int main()
 
 
     // Run all benchmarks and print results
-    auto results = Benchmark::RunAll<Milliseconds>();
+    const std::vector<NGIN::BenchmarkResult<NGIN::Units::Milliseconds>> results =
+            Benchmark::RunAll<NGIN::Units::Milliseconds>();
     Benchmark::PrintSummaryTable(std::cout, results);
 
     return 0;

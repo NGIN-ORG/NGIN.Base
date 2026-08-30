@@ -20,9 +20,9 @@ int main()
     using NGIN::Units::Milliseconds;
 
     auto context = NGIN::Crypto::Backend::CreateBestAvailableContext();
-    if (!context.HasValue())
+    if (!context.has_value())
     {
-        std::cerr << "CreateBestAvailableContext failed: " << context.Error().Message() << '\n';
+        std::cerr << "CreateBestAvailableContext failed: " << context.error().Message() << '\n';
         return 1;
     }
 
@@ -32,35 +32,35 @@ int main()
         input[i] = static_cast<NGIN::Byte>(i & 0xffU);
     }
 
-    if (context.Value().Supports(NGIN::Crypto::HashAlgorithm::Sha256))
+    if (context.value().Supports(NGIN::Crypto::HashAlgorithm::Sha256))
     {
         NGIN::Crypto::Hashing::Sha256Digest digest {};
 
         Benchmark::Register([&](BenchmarkContext& ctx) {
             ctx.start();
-            auto result = NGIN::Crypto::Hashing::Sha256Into(context.Value(), Bytes(input), digest);
-            ctx.doNotOptimize(result.HasValue());
+            auto result = NGIN::Crypto::Hashing::Sha256Into(context.value(), Bytes(input), digest);
+            ctx.doNotOptimize(result.has_value());
             ctx.stop();
         },
                             "Crypto SHA-256 into 4 KiB");
 
         Benchmark::Register([&](BenchmarkContext& ctx) {
             ctx.start();
-            auto result = NGIN::Crypto::Hashing::Sha256(context.Value(), Bytes(input));
-            ctx.doNotOptimize(result.HasValue());
+            auto result = NGIN::Crypto::Hashing::Sha256(context.value(), Bytes(input));
+            ctx.doNotOptimize(result.has_value());
             ctx.stop();
         },
                             "Crypto SHA-256 owned 4 KiB");
     }
 
-    if (context.Value().Supports(NGIN::Crypto::HashAlgorithm::Sha512))
+    if (context.value().Supports(NGIN::Crypto::HashAlgorithm::Sha512))
     {
         NGIN::Crypto::Hashing::Sha512Digest digest {};
 
         Benchmark::Register([&](BenchmarkContext& ctx) {
             ctx.start();
-            auto result = NGIN::Crypto::Hashing::Sha512Into(context.Value(), Bytes(input), digest);
-            ctx.doNotOptimize(result.HasValue());
+            auto result = NGIN::Crypto::Hashing::Sha512Into(context.value(), Bytes(input), digest);
+            ctx.doNotOptimize(result.has_value());
             ctx.stop();
         },
                             "Crypto SHA-512 into 4 KiB");

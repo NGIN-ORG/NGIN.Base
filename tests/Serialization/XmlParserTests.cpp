@@ -28,7 +28,7 @@ TEST_CASE("XML parser exposes allocation-free semantic queries", "[serialization
 {
     auto parsed = Parse(R"(<root id="42"><child>A &amp; B</child><child><![CDATA[x<y]]></child></root>)");
     REQUIRE(parsed);
-    const auto root = parsed.Value().Root();
+    const auto root = parsed.value().Root();
     REQUIRE(root.Name() == "root");
     REQUIRE(root.Attribute("id"));
     CHECK(root.Attribute("id")->Value() == "42");
@@ -49,8 +49,8 @@ TEST_CASE("XML owning and borrowed documents make source lifetime explicit", "[s
 {
     auto owned = XML::Parse(OwnedTextBuffer {std::string {"<root><child/></root>"}});
     REQUIRE(owned);
-    const auto    rootBeforeMove = owned.Value().Root();
-    XML::Document moved          = std::move(owned.Value());
+    const auto    rootBeforeMove = owned.value().Root();
+    XML::Document moved          = std::move(owned.value());
     CHECK(rootBeforeMove.FirstChild("child"));
     CHECK(moved.Root().FirstChild("child"));
 
@@ -58,7 +58,7 @@ TEST_CASE("XML owning and borrowed documents make source lifetime explicit", "[s
     ParseScratch scratch;
     auto         borrowed = XML::ParseBorrowed(BorrowedTextView {source}, scratch);
     REQUIRE(borrowed);
-    CHECK(borrowed.Value().SourceText().data() == source.data());
+    CHECK(borrowed.value().SourceText().data() == source.data());
 }
 
 TEST_CASE("XML in-situ parsing decodes into the owned source buffer",
@@ -68,14 +68,14 @@ TEST_CASE("XML in-situ parsing decodes into the owned source buffer",
             MutableTextBuffer {R"(<root value="A &amp; B">line&#10;two&#x21;</root>)"});
     REQUIRE(parsed);
 
-    const auto root  = parsed.Value().Root();
+    const auto root  = parsed.value().Root();
     const auto value = root.Attribute("value");
     REQUIRE(value);
     CHECK(value->Value() == "A & B");
     REQUIRE(root.FirstText());
     CHECK(*root.FirstText() == "line\ntwo!");
 
-    const auto source = parsed.Value().SourceText();
+    const auto source = parsed.value().SourceText();
     CHECK(value->Value().data() >= source.data());
     CHECK(value->Value().data() < source.data() + source.size());
     CHECK(root.FirstText()->data() >= source.data());
@@ -96,8 +96,8 @@ TEST_CASE("XML parser rejects duplicate attributes and malformed lexical constru
 {
     auto duplicate = Parse(R"(<a x="1" x="2"/>)");
     REQUIRE_FALSE(duplicate);
-    CHECK(duplicate.Error().code == ParseErrorCode::DuplicateName);
-    CHECK(duplicate.Error().related.has_value());
+    CHECK(duplicate.error().code == ParseErrorCode::DuplicateName);
+    CHECK(duplicate.error().related.has_value());
 
     CHECK_FALSE(Parse(R"(<a x=unquoted/>)"));
     CHECK_FALSE(Parse(R"(<a x="unterminated/>)"));
@@ -111,15 +111,15 @@ TEST_CASE("XML semantic trivia policy explicitly controls comments and processin
 {
     auto discarded = Parse("<root><!--note--><?tool ok?></root>");
     REQUIRE(discarded);
-    CHECK(discarded.Value().Root().Children().Empty());
+    CHECK(discarded.value().Root().Children().Empty());
 
     XML::ParseOptions options;
     options.trivia = XML::TriviaPolicy::Preserve;
     auto preserved = Parse("<root><!--note--><?tool ok?></root>", options);
     REQUIRE(preserved);
-    REQUIRE(preserved.Value().Root().Children().Size() == 2);
-    CHECK(preserved.Value().Root().Children()[0].Kind() == XML::NodeKind::Comment);
-    CHECK(preserved.Value().Root().Children()[1].Kind() ==
+    REQUIRE(preserved.value().Root().Children().Size() == 2);
+    CHECK(preserved.value().Root().Children()[0].Kind() == XML::NodeKind::Comment);
+    CHECK(preserved.value().Root().Children()[1].Kind() ==
           XML::NodeKind::ProcessingInstruction);
 }
 
@@ -127,9 +127,9 @@ TEST_CASE("XML entities are always interpreted and invalid references rejected",
 {
     auto parsed = Parse(R"(<a value="&quot;&#x1F600;&quot;">&lt;&#65;&amp;</a>)");
     REQUIRE(parsed);
-    CHECK(parsed.Value().Root().Attribute("value")->Value() ==
+    CHECK(parsed.value().Root().Attribute("value")->Value() ==
           std::string_view("\"\xF0\x9F\x98\x80\"", 6));
-    CHECK(*parsed.Value().Root().FirstText() == "<A&");
+    CHECK(*parsed.value().Root().FirstText() == "<A&");
 
     CHECK_FALSE(Parse("<a>&unknown;</a>"));
     CHECK_FALSE(Parse("<a>&#0;</a>"));
@@ -153,7 +153,7 @@ TEST_CASE("XML parser applies depth and resource limits", "[serialization][xml][
     limits.maxDepth = 2;
     auto parsed     = Parse("<a><b><c/></b></a>", {}, limits);
     REQUIRE_FALSE(parsed);
-    CHECK(parsed.Error().code == ParseErrorCode::DepthExceeded);
+    CHECK(parsed.error().code == ParseErrorCode::DepthExceeded);
 
     limits            = {};
     limits.maxMembers = 1;
@@ -168,10 +168,10 @@ TEST_CASE("XML syntax documents preserve comments and formatting byte-for-byte",
             "<root x='1'>\r\n  <child />\r\n</root>\r\n";
     auto syntax = XML::ParseSyntax(OwnedTextBuffer {source});
     REQUIRE(syntax);
-    REQUIRE(syntax.Value().Tokens().size() >= 6);
-    auto written = XML::Writer::Write(syntax.Value());
+    REQUIRE(syntax.value().Tokens().size() >= 6);
+    auto written = XML::Writer::Write(syntax.value());
     REQUIRE(written);
-    CHECK(written.Value() == source);
+    CHECK(written.value() == source);
 }
 
 TEST_CASE("XML builder and semantic writer escape and round-trip content", "[serialization][xml][writer]")
@@ -180,18 +180,18 @@ TEST_CASE("XML builder and semantic writer escape and round-trip content", "[ser
     auto         text = builder.Text("A < B & C");
     REQUIRE(text);
     const std::array attributes {XML::Attribute {"quote", "\"yes\" & more"}};
-    const std::array children {text.Value()};
+    const std::array children {text.value()};
     auto             root = builder.Element("root", attributes, children);
     REQUIRE(root);
-    auto document = builder.Finish(root.Value());
+    auto document = builder.Finish(root.value());
     REQUIRE(document);
 
-    auto written = XML::Writer::Write(document.Value());
+    auto written = XML::Writer::Write(document.value());
     REQUIRE(written);
-    CHECK(written.Value() == R"(<root quote="&quot;yes&quot; &amp; more">A &lt; B &amp; C</root>)");
-    auto reparsed = Parse(written.Value());
+    CHECK(written.value() == R"(<root quote="&quot;yes&quot; &amp; more">A &lt; B &amp; C</root>)");
+    auto reparsed = Parse(written.value());
     REQUIRE(reparsed);
-    CHECK(*reparsed.Value().Root().FirstText() == "A < B & C");
+    CHECK(*reparsed.value().Root().FirstText() == "A < B & C");
 }
 
 TEST_CASE("XML builder rejects invalid profile characters", "[serialization][xml][builder]")
@@ -209,15 +209,15 @@ TEST_CASE("XML builder enforces single-parent child ownership",
     auto         child = builder.Element("child", {}, {});
     REQUIRE(child);
 
-    const std::array duplicateChildren {child.Value(), child.Value()};
+    const std::array duplicateChildren {child.value(), child.value()};
     CHECK_FALSE(builder.Element("duplicate", {}, duplicateChildren));
 
-    const std::array children {child.Value()};
+    const std::array children {child.value()};
     auto             firstParent = builder.Element("first", {}, children);
     REQUIRE(firstParent);
     CHECK_FALSE(builder.Element("second", {}, children));
-    CHECK_FALSE(builder.Finish(child.Value()));
-    CHECK(builder.Finish(firstParent.Value()));
+    CHECK_FALSE(builder.Finish(child.value()));
+    CHECK(builder.Finish(firstParent.value()));
 }
 
 TEST_CASE("XML stream writer validates structure and escapes profile content",
@@ -327,22 +327,22 @@ TEST_CASE("XML event parser reports duplicate attributes and resource limits",
     auto duplicate = XML::EventParser::ParseContiguous(
             BorrowedTextView {R"(<root x="1" x="2"/>)"}, handler, scratch);
     REQUIRE_FALSE(duplicate);
-    CHECK(duplicate.Error().code == ParseErrorCode::DuplicateName);
-    CHECK(duplicate.Error().related.has_value());
+    CHECK(duplicate.error().code == ParseErrorCode::DuplicateName);
+    CHECK(duplicate.error().related.has_value());
 
     ParseLimits limits;
     limits.maxDepth = 1;
     auto depth      = XML::EventParser::ParseContiguous(
             BorrowedTextView {"<root><child/></root>"}, handler, scratch, {}, limits);
     REQUIRE_FALSE(depth);
-    CHECK(depth.Error().code == ParseErrorCode::DepthExceeded);
+    CHECK(depth.error().code == ParseErrorCode::DepthExceeded);
 
     limits          = {};
     limits.maxNodes = 1;
     auto nodes      = XML::EventParser::ParseContiguous(
             BorrowedTextView {"<root><child/></root>"}, handler, scratch, {}, limits);
     REQUIRE_FALSE(nodes);
-    CHECK(nodes.Error().code == ParseErrorCode::LimitExceeded);
+    CHECK(nodes.error().code == ParseErrorCode::LimitExceeded);
 }
 
 TEST_CASE("XML event parser preserves handler control flow",
@@ -355,10 +355,10 @@ TEST_CASE("XML event parser preserves handler control flow",
     auto stopped = XML::EventParser::ParseContiguous(
             BorrowedTextView {"<root/>"}, stoppingHandler, scratch);
     REQUIRE_FALSE(stopped);
-    CHECK(stopped.Error().code == ParseErrorCode::HandlerRejected);
-    CHECK(stopped.Error().consumerContext == 42);
-    CHECK(stopped.Error().span.begin == 0);
-    CHECK(stopped.Error().span.end == 5);
+    CHECK(stopped.error().code == ParseErrorCode::HandlerRejected);
+    CHECK(stopped.error().consumerContext == 42);
+    CHECK(stopped.error().span.begin == 0);
+    CHECK(stopped.error().span.end == 5);
 }
 
 TEST_CASE("XML memory accounting enforces retained DOM limits",
@@ -366,17 +366,17 @@ TEST_CASE("XML memory accounting enforces retained DOM limits",
 {
     auto baseline = Parse("<root><item/><item/><nested><value/></nested></root>");
     REQUIRE(baseline);
-    REQUIRE(baseline.Value().MemoryCommitted() > 0);
-    CHECK(baseline.Value().MemoryUsed() <= baseline.Value().MemoryCommitted());
-    CHECK(baseline.Value().PeakMemoryCommitted() >= baseline.Value().MemoryCommitted());
-    CHECK(baseline.Value().AllocationCount() > 0);
+    REQUIRE(baseline.value().MemoryCommitted() > 0);
+    CHECK(baseline.value().MemoryUsed() <= baseline.value().MemoryCommitted());
+    CHECK(baseline.value().PeakMemoryCommitted() >= baseline.value().MemoryCommitted());
+    CHECK(baseline.value().AllocationCount() > 0);
 
     ParseLimits limits;
-    limits.maxTotalMemoryBytes = baseline.Value().MemoryCommitted() - 1;
+    limits.maxTotalMemoryBytes = baseline.value().MemoryCommitted() - 1;
     auto limited               = XML::Parse(
             OwnedTextBuffer {"<root><item/><item/><nested><value/></nested></root>"},
             {},
             limits);
     REQUIRE_FALSE(limited);
-    CHECK(limited.Error().code == ParseErrorCode::LimitExceeded);
+    CHECK(limited.error().code == ParseErrorCode::LimitExceeded);
 }

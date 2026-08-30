@@ -21,6 +21,7 @@ namespace NGIN::Net
         HostUnreachable,
         MessageTooLarge,
         PermissionDenied,
+        ResourceExhausted,
         InvalidArgument,
         NameNotFound,
         ServiceNotFound,
@@ -77,6 +78,8 @@ namespace NGIN::Net
                 return std::make_error_code(std::errc::message_size);
             case NetErrorCode::PermissionDenied:
                 return std::make_error_code(std::errc::permission_denied);
+            case NetErrorCode::ResourceExhausted:
+                return std::make_error_code(std::errc::no_buffer_space);
             case NetErrorCode::InvalidArgument:
                 return std::make_error_code(std::errc::invalid_argument);
             case NetErrorCode::NameNotFound:

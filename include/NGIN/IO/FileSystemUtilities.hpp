@@ -33,11 +33,11 @@ namespace NGIN::IO
 
     /// @brief Asynchronously reads an entire file into a byte vector.
     NGIN_IO_API AsyncTask<NGIN::Containers::Vector<NGIN::Byte>> ReadAllBytesAsync(
-            IAsyncFileSystem& fs, NGIN::Async::TaskContext& ctx, const Path& path);
+            IAsyncFileSystem& fs, NGIN::Async::TaskContext& ctx, Path path);
     /// @brief Asynchronously replaces a file with the supplied bytes.
     NGIN_IO_API AsyncTaskVoid WriteAllBytesAsync(
-            IAsyncFileSystem& fs, NGIN::Async::TaskContext& ctx, const Path& path, std::span<const NGIN::Byte> bytes);
+            IAsyncFileSystem& fs, NGIN::Async::TaskContext& ctx, Path path, std::span<const NGIN::Byte> bytes);
     /// @brief Asynchronously copies one file to another filesystem path.
     NGIN_IO_API AsyncTaskVoid CopyFileAsync(
-            IAsyncFileSystem& fs, NGIN::Async::TaskContext& ctx, const Path& from, const Path& to, const CopyOptions& options = {});
+            IAsyncFileSystem& fs, NGIN::Async::TaskContext& ctx, Path from, Path to, CopyOptions options = {});
 }// namespace NGIN::IO

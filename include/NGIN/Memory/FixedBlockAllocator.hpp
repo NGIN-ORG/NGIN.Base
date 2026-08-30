@@ -10,6 +10,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <type_traits>
 #include <utility>
 
@@ -38,10 +39,15 @@ namespace NGIN::Memory
         static_assert(Alignment >= alignof(FreeNode));
 
         static constexpr std::size_t PayloadSize = (std::max) (BlockSize, sizeof(FreeNode));
-        static constexpr std::size_t Stride      = (PayloadSize + Alignment - 1) & ~(Alignment - 1);
-        static constexpr std::size_t SlabSize    = Stride * BlockCount;
+        static_assert(PayloadSize <= (std::numeric_limits<std::size_t>::max)() - (Alignment - 1));
+        static constexpr std::size_t Stride = (PayloadSize + Alignment - 1) & ~(Alignment - 1);
+        static_assert(BlockCount <= (std::numeric_limits<std::size_t>::max)() / Stride);
+        static constexpr std::size_t SlabSize = Stride * BlockCount;
 
     public:
+        /// @brief Fixed slabs provide an exact address-range ownership answer.
+        static constexpr bool HasPreciseOwnership = true;
+
         /// @brief Acquires and initializes the fixed slab from an upstream allocator.
         /// @param upstream Allocator stored by the pool.
         explicit FixedBlockAllocator(Upstream upstream = {})
@@ -59,15 +65,14 @@ namespace NGIN::Memory
         auto operator=(const FixedBlockAllocator&) -> FixedBlockAllocator& = delete;
 
         /// @brief Transfers slab ownership from another allocator.
-        FixedBlockAllocator(FixedBlockAllocator&& other) noexcept
-            requires std::is_nothrow_move_constructible_v<Upstream>
+        FixedBlockAllocator(FixedBlockAllocator&& other) noexcept(std::is_nothrow_move_constructible_v<Upstream>)
             : m_upstream(std::move(other.m_upstream)), m_base(std::exchange(other.m_base, nullptr)), m_free(std::exchange(other.m_free, nullptr)), m_available(std::exchange(other.m_available, 0)), m_invalidDeallocations(std::exchange(other.m_invalidDeallocations, 0)), m_allocated(std::exchange(other.m_allocated, std::array<bool, BlockCount> {}))
         {
         }
 
         /// @brief Releases the current slab and transfers ownership from another allocator.
-        auto operator=(FixedBlockAllocator&& other) noexcept -> FixedBlockAllocator&
-            requires(std::is_nothrow_move_assignable_v<Upstream>)
+        auto operator=(FixedBlockAllocator&& other) noexcept(std::is_nothrow_move_assignable_v<Upstream>)
+                -> FixedBlockAllocator&
         {
             if (this != &other)
             {
@@ -134,19 +139,21 @@ namespace NGIN::Memory
             return {pointer, pointer ? BlockSize : 0, pointer ? Alignment : 0};
         }
 
-        /// @brief Returns whether an address lies anywhere within the owned slab.
-        [[nodiscard]] bool Owns(const void* pointer) const noexcept
+        /// @brief Classifies whether an address lies anywhere within the owned slab.
+        [[nodiscard]] Ownership OwnershipOf(const void* pointer) const noexcept
         {
             if (!m_base || !pointer)
-                return false;
-            const std::byte* bytes = static_cast<const std::byte*>(pointer);
-            return bytes >= m_base && bytes < m_base + SlabSize;
+                return Ownership::DoesNotOwn;
+            const std::uintptr_t address = reinterpret_cast<std::uintptr_t>(pointer);
+            const std::uintptr_t begin   = reinterpret_cast<std::uintptr_t>(m_base);
+            const std::uintptr_t end     = begin + SlabSize;
+            return address >= begin && address < end ? Ownership::Owns : Ownership::DoesNotOwn;
         }
 
         /// @brief Returns whether an address is the start of one of this pool's blocks.
         [[nodiscard]] bool IsBlockStart(const void* pointer) const noexcept
         {
-            if (!Owns(pointer))
+            if (OwnershipOf(pointer) != Ownership::Owns)
                 return false;
             return static_cast<std::size_t>(static_cast<const std::byte*>(pointer) - m_base) % Stride == 0;
         }

@@ -11,11 +11,14 @@
 #include <NGIN/Async/WhenAll.hpp>
 #include <NGIN/Async/WhenAny.hpp>
 #include <NGIN/Execution/CooperativeScheduler.hpp>
+#include <NGIN/Execution/ExecutorRef.hpp>
 #include <NGIN/Execution/Fiber.hpp>
 #include <NGIN/Execution/FiberScheduler.hpp>
 #include <NGIN/Execution/InlineScheduler.hpp>
+#include <NGIN/Execution/ScheduleResult.hpp>
 #include <NGIN/Execution/ThisFiber.hpp>
 #include <NGIN/Execution/ThisThread.hpp>
 #include <NGIN/Execution/Thread.hpp>
 #include <NGIN/Execution/ThreadName.hpp>
 #include <NGIN/Execution/ThreadPoolScheduler.hpp>
+#include <NGIN/Execution/WorkItem.hpp>

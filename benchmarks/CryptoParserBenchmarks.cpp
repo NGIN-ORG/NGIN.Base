@@ -62,7 +62,7 @@ int main()
                                                                     .allowedLabels   = {"CERTIFICATE"},
                                                                     .maxDecodedBytes = 1024,
                                                             });
-        ctx.doNotOptimize(blocks.HasValue());
+        ctx.doNotOptimize(blocks.has_value());
         ctx.stop();
     },
                         "Crypto PEM parse");
@@ -71,24 +71,24 @@ int main()
         ctx.start();
         NGIN::Crypto::Encoding::DerReader reader {Bytes(der)};
         auto                              sequence = reader.ReadElement();
-        if (sequence.HasValue())
+        if (sequence.has_value())
         {
-            auto childReader = reader.EnterConstructed(sequence.Value());
-            if (childReader.HasValue())
+            auto childReader = reader.EnterConstructed(sequence.value());
+            if (childReader.has_value())
             {
-                while (!childReader.Value().IsAtEnd())
+                while (!childReader.value().IsAtEnd())
                 {
-                    auto element = childReader.Value().ReadElement();
-                    ctx.doNotOptimize(element.HasValue());
-                    if (!element.HasValue())
+                    auto element = childReader.value().ReadElement();
+                    ctx.doNotOptimize(element.has_value());
+                    if (!element.has_value())
                     {
                         break;
                     }
                 }
             }
-            ctx.doNotOptimize(childReader.HasValue());
+            ctx.doNotOptimize(childReader.has_value());
         }
-        ctx.doNotOptimize(sequence.HasValue());
+        ctx.doNotOptimize(sequence.has_value());
         ctx.stop();
     },
                         "Crypto DER TLV walk");
@@ -96,7 +96,7 @@ int main()
     Benchmark::Register([&](BenchmarkContext& ctx) {
         ctx.start();
         auto parsed = NGIN::Crypto::Tokens::ParseJwtCompact(jwt);
-        ctx.doNotOptimize(parsed.HasValue());
+        ctx.doNotOptimize(parsed.has_value());
         ctx.stop();
     },
                         "Crypto JWT compact parse");
@@ -104,7 +104,7 @@ int main()
     Benchmark::Register([&](BenchmarkContext& ctx) {
         ctx.start();
         auto parsed = NGIN::Crypto::Tokens::ParsePasetoV4Public(paseto);
-        ctx.doNotOptimize(parsed.HasValue());
+        ctx.doNotOptimize(parsed.has_value());
         ctx.stop();
     },
                         "Crypto PASETO v4.public parse");

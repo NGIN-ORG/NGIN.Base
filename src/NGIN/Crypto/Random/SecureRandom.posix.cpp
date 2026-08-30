@@ -18,7 +18,7 @@ namespace NGIN::Crypto::Random
         const int fd = open("/dev/urandom", O_RDONLY);
         if (fd < 0)
         {
-            return EntropyUnavailableError(errno);
+            return std::unexpected(EntropyUnavailableError(errno));
         }
 
         auto* bytes     = output.data();
@@ -36,13 +36,13 @@ namespace NGIN::Crypto::Random
 
                 const auto error = errno;
                 close(fd);
-                return EntropyUnavailableError(error);
+                return std::unexpected(EntropyUnavailableError(error));
             }
 
             if (received == 0)
             {
                 close(fd);
-                return EntropyUnavailableError();
+                return std::unexpected(EntropyUnavailableError());
             }
 
             const auto receivedSize = static_cast<NGIN::UIntSize>(received);

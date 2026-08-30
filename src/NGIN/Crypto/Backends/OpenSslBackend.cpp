@@ -179,14 +179,14 @@ namespace NGIN::Crypto::Backend::detail
             EVP_PKEY_CTX* context = EVP_PKEY_CTX_new_id(keyType, nullptr);
             if (context == nullptr)
             {
-                return InternalError();
+                return std::unexpected(InternalError());
             }
 
             EVP_PKEY* key = nullptr;
             if (EVP_PKEY_keygen_init(context) <= 0 || EVP_PKEY_keygen(context, &key) <= 0 || key == nullptr)
             {
                 EVP_PKEY_CTX_free(context);
-                return InternalError();
+                return std::unexpected(InternalError());
             }
 
             auto publicKeySize  = publicKey.size();
@@ -196,7 +196,7 @@ namespace NGIN::Crypto::Backend::detail
             {
                 EVP_PKEY_free(key);
                 EVP_PKEY_CTX_free(context);
-                return InternalError();
+                return std::unexpected(InternalError());
             }
 
             EVP_PKEY_free(key);
@@ -218,9 +218,9 @@ namespace NGIN::Crypto::Backend::detail
         {
             FixedBytes<32> digest {};
             auto           result = HashOpenSsl(HashAlgorithm::Sha256, input, ByteSpan {digest.data(), digest.size()});
-            if (!result.HasValue())
+            if (!result.has_value())
             {
-                return result.Error();
+                return std::unexpected(std::move(result).error());
             }
 
             return digest;
@@ -231,33 +231,33 @@ namespace NGIN::Crypto::Backend::detail
             EcKeyPtr key {EC_KEY_new_by_curve_name(NID_X9_62_prime256v1), EC_KEY_free};
             if (key == nullptr)
             {
-                return InternalError();
+                return std::unexpected(InternalError());
             }
 
             BnPtr privateScalar {BN_bin2bn(DataOrNull(privateKey), static_cast<int>(privateKey.size()), nullptr), BN_free};
             if (privateScalar == nullptr || EC_KEY_set_private_key(key.get(), privateScalar.get()) != 1)
             {
-                return InvalidKey();
+                return std::unexpected(InvalidKey());
             }
 
             const EC_GROUP* group = EC_KEY_get0_group(key.get());
             if (group == nullptr)
             {
-                return InternalError();
+                return std::unexpected(InternalError());
             }
 
             EcPointPtr   publicPoint {EC_POINT_new(group), EC_POINT_free};
             BnContextPtr bnContext {BN_CTX_new(), BN_CTX_free};
             if (publicPoint == nullptr || bnContext == nullptr)
             {
-                return InternalError();
+                return std::unexpected(InternalError());
             }
 
             if (EC_POINT_mul(group, publicPoint.get(), privateScalar.get(), nullptr, nullptr, bnContext.get()) != 1 ||
                 EC_KEY_set_public_key(key.get(), publicPoint.get()) != 1 ||
                 EC_KEY_check_key(key.get()) != 1)
             {
-                return InvalidKey();
+                return std::unexpected(InvalidKey());
             }
 
             return key;
@@ -268,20 +268,20 @@ namespace NGIN::Crypto::Backend::detail
             EcKeyPtr key {EC_KEY_new_by_curve_name(NID_X9_62_prime256v1), EC_KEY_free};
             if (key == nullptr)
             {
-                return InternalError();
+                return std::unexpected(InternalError());
             }
 
             const EC_GROUP* group = EC_KEY_get0_group(key.get());
             if (group == nullptr)
             {
-                return InternalError();
+                return std::unexpected(InternalError());
             }
 
             EcPointPtr   publicPoint {EC_POINT_new(group), EC_POINT_free};
             BnContextPtr bnContext {BN_CTX_new(), BN_CTX_free};
             if (publicPoint == nullptr || bnContext == nullptr)
             {
-                return InternalError();
+                return std::unexpected(InternalError());
             }
 
             if (EC_POINT_oct2point(
@@ -293,7 +293,7 @@ namespace NGIN::Crypto::Backend::detail
                 EC_KEY_set_public_key(key.get(), publicPoint.get()) != 1 ||
                 EC_KEY_check_key(key.get()) != 1)
             {
-                return InvalidKey();
+                return std::unexpected(InvalidKey());
             }
 
             return key;
@@ -304,7 +304,7 @@ namespace NGIN::Crypto::Backend::detail
             EcdsaSigPtr ecdsaSignature {ECDSA_SIG_new(), ECDSA_SIG_free};
             if (ecdsaSignature == nullptr)
             {
-                return InternalError();
+                return std::unexpected(InternalError());
             }
 
             BnPtr r {BN_bin2bn(
@@ -319,12 +319,12 @@ namespace NGIN::Crypto::Backend::detail
                      BN_free};
             if (r == nullptr || s == nullptr)
             {
-                return InternalError();
+                return std::unexpected(InternalError());
             }
 
             if (ECDSA_SIG_set0(ecdsaSignature.get(), r.get(), s.get()) != 1)
             {
-                return InvalidKey();
+                return std::unexpected(InvalidKey());
             }
             r.release();
             s.release();
@@ -341,13 +341,13 @@ namespace NGIN::Crypto::Backend::detail
             ECDSA_SIG_get0(signature, &r, &s);
             if (r == nullptr || s == nullptr)
             {
-                return InternalError();
+                return std::unexpected(InternalError());
             }
 
             if (BN_bn2binpad(r, reinterpret_cast<unsigned char*>(output.data()), 32) != 32 ||
                 BN_bn2binpad(s, reinterpret_cast<unsigned char*>(output.data() + 32), 32) != 32)
             {
-                return InternalError();
+                return std::unexpected(InternalError());
             }
 
             return {};
@@ -359,11 +359,11 @@ namespace NGIN::Crypto::Backend::detail
             const auto keyBytes = privateKeyDer.Bytes();
             if (keyBytes.empty())
             {
-                return InvalidKey();
+                return std::unexpected(InvalidKey());
             }
             if (!FitsOpenSslLong(keyBytes.size()))
             {
-                return InvalidKey();
+                return std::unexpected(InvalidKey());
             }
 
             const auto* cursor = reinterpret_cast<const unsigned char*>(keyBytes.data());
@@ -371,7 +371,7 @@ namespace NGIN::Crypto::Backend::detail
             EvpPkeyPtr  key {d2i_AutoPrivateKey(nullptr, &cursor, static_cast<long>(keyBytes.size())), EVP_PKEY_free};
             if (key == nullptr || cursor != end)
             {
-                return InvalidKey();
+                return std::unexpected(InvalidKey());
             }
 
             return key;
@@ -381,11 +381,11 @@ namespace NGIN::Crypto::Backend::detail
         {
             if (publicKeyDer.empty())
             {
-                return InvalidKey();
+                return std::unexpected(InvalidKey());
             }
             if (!FitsOpenSslLong(publicKeyDer.size()))
             {
-                return InvalidKey();
+                return std::unexpected(InvalidKey());
             }
 
             const auto* cursor = reinterpret_cast<const unsigned char*>(publicKeyDer.data());
@@ -393,7 +393,7 @@ namespace NGIN::Crypto::Backend::detail
             EvpPkeyPtr  key {d2i_PUBKEY(nullptr, &cursor, static_cast<long>(publicKeyDer.size())), EVP_PKEY_free};
             if (key == nullptr || cursor != end)
             {
-                return InvalidKey();
+                return std::unexpected(InvalidKey());
             }
 
             return key;
@@ -406,7 +406,7 @@ namespace NGIN::Crypto::Backend::detail
                 EVP_PKEY_CTX_set_rsa_mgf1_md(context, EVP_sha256()) <= 0 ||
                 EVP_PKEY_CTX_set_rsa_pss_saltlen(context, 32) <= 0)
             {
-                return InvalidKey();
+                return std::unexpected(InvalidKey());
             }
 
             return {};
@@ -420,7 +420,7 @@ namespace NGIN::Crypto::Backend::detail
                 EVP_PKEY_CTX_set_rsa_oaep_md(context, EVP_sha256()) <= 0 ||
                 EVP_PKEY_CTX_set_rsa_mgf1_md(context, EVP_sha256()) <= 0)
             {
-                return InvalidKey();
+                return std::unexpected(InvalidKey());
             }
 
             if (label.empty())
@@ -429,13 +429,13 @@ namespace NGIN::Crypto::Backend::detail
             }
             if (!FitsOpenSslInt(label.size()))
             {
-                return InvalidArgument();
+                return std::unexpected(InvalidArgument());
             }
 
             void* labelCopy = OPENSSL_malloc(label.size());
             if (labelCopy == nullptr)
             {
-                return InternalError();
+                return std::unexpected(InternalError());
             }
             std::memcpy(labelCopy, label.data(), label.size());
 
@@ -445,7 +445,7 @@ namespace NGIN::Crypto::Backend::detail
                         static_cast<int>(label.size())) <= 0)
             {
                 OPENSSL_free(labelCopy);
-                return InvalidKey();
+                return std::unexpected(InvalidKey());
             }
 
             return {};
@@ -526,7 +526,7 @@ namespace NGIN::Crypto::Backend::detail
         }
         if (!FitsOpenSslInt(output.size()))
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         return RAND_bytes(reinterpret_cast<unsigned char*>(output.data()), static_cast<int>(output.size())) == 1
@@ -542,32 +542,32 @@ namespace NGIN::Crypto::Backend::detail
         const EVP_MD* digest = SelectDigest(algorithm);
         if (digest == nullptr)
         {
-            return UnsupportedAlgorithm();
+            return std::unexpected(UnsupportedAlgorithm());
         }
 
         EVP_MD_CTX* context = EVP_MD_CTX_new();
         if (context == nullptr)
         {
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         if (EVP_DigestInit_ex(context, digest, nullptr) != 1)
         {
             EVP_MD_CTX_free(context);
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         if (!input.empty() && EVP_DigestUpdate(context, input.data(), input.size()) != 1)
         {
             EVP_MD_CTX_free(context);
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         unsigned int produced = 0;
         if (EVP_DigestFinal_ex(context, reinterpret_cast<unsigned char*>(output.data()), &produced) != 1)
         {
             EVP_MD_CTX_free(context);
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         EVP_MD_CTX_free(context);
@@ -583,13 +583,13 @@ namespace NGIN::Crypto::Backend::detail
         const EVP_MD* digest = SelectDigest(algorithm);
         if (digest == nullptr)
         {
-            return UnsupportedAlgorithm();
+            return std::unexpected(UnsupportedAlgorithm());
         }
 
         const auto keyBytes = key.Bytes();
         if (!FitsOpenSslInt(keyBytes.size()))
         {
-            return InvalidKey();
+            return std::unexpected(InvalidKey());
         }
 
         const auto* keyData   = keyBytes.empty() ? nullptr : reinterpret_cast<const unsigned char*>(keyBytes.data());
@@ -606,7 +606,7 @@ namespace NGIN::Crypto::Backend::detail
                 &produced);
         if (result == nullptr)
         {
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         return static_cast<NGIN::UIntSize>(produced) == output.size() ? CryptoExpected<void> {} : InternalError();
@@ -622,17 +622,17 @@ namespace NGIN::Crypto::Backend::detail
         const EVP_MD* digest = SelectDigest(algorithm);
         if (digest == nullptr || (algorithm != KdfAlgorithm::HkdfSha256 && algorithm != KdfAlgorithm::HkdfSha512))
         {
-            return UnsupportedAlgorithm();
+            return std::unexpected(UnsupportedAlgorithm());
         }
         if (!FitsOpenSslInt(inputKeyMaterial.Size()) || !FitsOpenSslInt(salt.size()) || !FitsOpenSslInt(info.size()))
         {
-            return InvalidKey();
+            return std::unexpected(InvalidKey());
         }
 
         EVP_PKEY_CTX* context = EVP_PKEY_CTX_new_id(EVP_PKEY_HKDF, nullptr);
         if (context == nullptr)
         {
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         const auto  inputBytes = inputKeyMaterial.Bytes();
@@ -647,7 +647,7 @@ namespace NGIN::Crypto::Backend::detail
                     static_cast<int>(inputBytes.size())) <= 0)
         {
             EVP_PKEY_CTX_free(context);
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         if (!salt.empty() &&
@@ -657,7 +657,7 @@ namespace NGIN::Crypto::Backend::detail
                     static_cast<int>(salt.size())) <= 0)
         {
             EVP_PKEY_CTX_free(context);
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         if (!info.empty() &&
@@ -667,14 +667,14 @@ namespace NGIN::Crypto::Backend::detail
                     static_cast<int>(info.size())) <= 0)
         {
             EVP_PKEY_CTX_free(context);
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         auto outputSize = output.size();
         if (EVP_PKEY_derive(context, reinterpret_cast<unsigned char*>(output.data()), &outputSize) <= 0)
         {
             EVP_PKEY_CTX_free(context);
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         EVP_PKEY_CTX_free(context);
@@ -691,17 +691,17 @@ namespace NGIN::Crypto::Backend::detail
         const EVP_MD* digest = SelectDigest(algorithm);
         if (digest == nullptr || (algorithm != KdfAlgorithm::Pbkdf2Sha256 && algorithm != KdfAlgorithm::Pbkdf2Sha512))
         {
-            return UnsupportedAlgorithm();
+            return std::unexpected(UnsupportedAlgorithm());
         }
         if (!FitsOpenSslInt(password.Size()))
         {
-            return InvalidKey();
+            return std::unexpected(InvalidKey());
         }
         if (!FitsOpenSslInt(salt.size()) ||
             !FitsOpenSslInt(output.size()) ||
             iterations > static_cast<NGIN::UInt32>(std::numeric_limits<int>::max()))
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         const auto  passwordBytes = password.Bytes();
@@ -735,12 +735,12 @@ namespace NGIN::Crypto::Backend::detail
         const EVP_AEAD* aead = SelectBoringSslAead(algorithm);
         if (aead == nullptr)
         {
-            return UnsupportedAlgorithm();
+            return std::unexpected(UnsupportedAlgorithm());
         }
         if (key.Bytes().size() != EVP_AEAD_key_length(aead) || nonce.size() != EVP_AEAD_nonce_length(aead) ||
             tag.size() > EVP_AEAD_max_tag_len(aead))
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         EVP_AEAD_CTX context;
@@ -753,7 +753,7 @@ namespace NGIN::Crypto::Backend::detail
                     tag.size(),
                     nullptr) != 1)
         {
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         NGIN::UIntSize tagLength = 0;
@@ -788,12 +788,12 @@ namespace NGIN::Crypto::Backend::detail
         const EVP_AEAD* aead = SelectBoringSslAead(algorithm);
         if (aead == nullptr)
         {
-            return UnsupportedAlgorithm();
+            return std::unexpected(UnsupportedAlgorithm());
         }
         if (key.Bytes().size() != EVP_AEAD_key_length(aead) || nonce.size() != EVP_AEAD_nonce_length(aead) ||
             tag.size() > EVP_AEAD_max_tag_len(aead))
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         EVP_AEAD_CTX context;
@@ -806,7 +806,7 @@ namespace NGIN::Crypto::Backend::detail
                     tag.size(),
                     nullptr) != 1)
         {
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         const auto result = EVP_AEAD_CTX_open_gather(
@@ -825,7 +825,7 @@ namespace NGIN::Crypto::Backend::detail
         if (result != 1)
         {
             NGIN::Crypto::Memory::SecureZero(plaintext);
-            return AuthenticationFailed();
+            return std::unexpected(AuthenticationFailed());
         }
 
         return {};
@@ -850,17 +850,17 @@ namespace NGIN::Crypto::Backend::detail
         const EVP_CIPHER* cipher = SelectCipher(algorithm);
         if (cipher == nullptr)
         {
-            return UnsupportedAlgorithm();
+            return std::unexpected(UnsupportedAlgorithm());
         }
         if (!FitsOpenSslInt(plaintext.size()) || !FitsOpenSslInt(associatedData.size()))
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         EVP_CIPHER_CTX* context = EVP_CIPHER_CTX_new();
         if (context == nullptr)
         {
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         const auto keyBytes = key.Bytes();
@@ -877,7 +877,7 @@ namespace NGIN::Crypto::Backend::detail
                     reinterpret_cast<const unsigned char*>(nonce.data())) != 1)
         {
             EVP_CIPHER_CTX_free(context);
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         if (!associatedData.empty() &&
@@ -889,7 +889,7 @@ namespace NGIN::Crypto::Backend::detail
                     static_cast<int>(associatedData.size())) != 1)
         {
             EVP_CIPHER_CTX_free(context);
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         if (!plaintext.empty() &&
@@ -901,14 +901,14 @@ namespace NGIN::Crypto::Backend::detail
                     static_cast<int>(plaintext.size())) != 1)
         {
             EVP_CIPHER_CTX_free(context);
-            return InternalError();
+            return std::unexpected(InternalError());
         }
         total += produced;
 
         if (EVP_EncryptFinal_ex(context, reinterpret_cast<unsigned char*>(ciphertext.data()) + total, &produced) != 1)
         {
             EVP_CIPHER_CTX_free(context);
-            return InternalError();
+            return std::unexpected(InternalError());
         }
         total += produced;
 
@@ -916,7 +916,7 @@ namespace NGIN::Crypto::Backend::detail
             EVP_CIPHER_CTX_ctrl(context, EVP_CTRL_GCM_GET_TAG, static_cast<int>(tag.size()), tag.data()) != 1)
         {
             EVP_CIPHER_CTX_free(context);
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         EVP_CIPHER_CTX_free(context);
@@ -941,17 +941,17 @@ namespace NGIN::Crypto::Backend::detail
         const EVP_CIPHER* cipher = SelectCipher(algorithm);
         if (cipher == nullptr)
         {
-            return UnsupportedAlgorithm();
+            return std::unexpected(UnsupportedAlgorithm());
         }
         if (!FitsOpenSslInt(ciphertext.size()) || !FitsOpenSslInt(associatedData.size()))
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         EVP_CIPHER_CTX* context = EVP_CIPHER_CTX_new();
         if (context == nullptr)
         {
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         const auto keyBytes = key.Bytes();
@@ -968,7 +968,7 @@ namespace NGIN::Crypto::Backend::detail
                     reinterpret_cast<const unsigned char*>(nonce.data())) != 1)
         {
             EVP_CIPHER_CTX_free(context);
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         if (!associatedData.empty() &&
@@ -980,7 +980,7 @@ namespace NGIN::Crypto::Backend::detail
                     static_cast<int>(associatedData.size())) != 1)
         {
             EVP_CIPHER_CTX_free(context);
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         if (!ciphertext.empty() &&
@@ -993,7 +993,7 @@ namespace NGIN::Crypto::Backend::detail
         {
             EVP_CIPHER_CTX_free(context);
             NGIN::Crypto::Memory::SecureZero(plaintext);
-            return InternalError();
+            return std::unexpected(InternalError());
         }
         total += produced;
 
@@ -1005,14 +1005,14 @@ namespace NGIN::Crypto::Backend::detail
         {
             EVP_CIPHER_CTX_free(context);
             NGIN::Crypto::Memory::SecureZero(plaintext);
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         if (EVP_DecryptFinal_ex(context, reinterpret_cast<unsigned char*>(plaintext.data()) + total, &produced) != 1)
         {
             EVP_CIPHER_CTX_free(context);
             NGIN::Crypto::Memory::SecureZero(plaintext);
-            return AuthenticationFailed();
+            return std::unexpected(AuthenticationFailed());
         }
         total += produced;
 
@@ -1037,30 +1037,30 @@ namespace NGIN::Crypto::Backend::detail
         {
             if (algorithm != SignatureAlgorithm::EcdsaP256Sha256)
             {
-                return UnsupportedAlgorithm();
+                return std::unexpected(UnsupportedAlgorithm());
             }
 
             auto key = CreateP256PrivateKey(privateKey.Bytes());
-            if (!key.HasValue())
+            if (!key.has_value())
             {
-                return key.Error();
+                return std::unexpected(std::move(key).error());
             }
 
             auto digest = Sha256DigestOpenSsl(message);
-            if (!digest.HasValue())
+            if (!digest.has_value())
             {
-                return digest.Error();
+                return std::unexpected(std::move(digest).error());
             }
 
             EcdsaSigPtr ecdsaSignature {
                     ECDSA_do_sign(
-                            reinterpret_cast<const unsigned char*>(digest.Value().data()),
-                            static_cast<int>(digest.Value().size()),
-                            key.Value().get()),
+                            reinterpret_cast<const unsigned char*>(digest.value().data()),
+                            static_cast<int>(digest.value().size()),
+                            key.value().get()),
                     ECDSA_SIG_free};
             if (ecdsaSignature == nullptr)
             {
-                return InternalError();
+                return std::unexpected(InternalError());
             }
 
             return OpenSslP256SignatureToRaw(ecdsaSignature.get(), signature);
@@ -1074,14 +1074,14 @@ namespace NGIN::Crypto::Backend::detail
                 privateKeyBytes.size());
         if (key == nullptr)
         {
-            return InvalidKey();
+            return std::unexpected(InvalidKey());
         }
 
         EVP_MD_CTX* context = EVP_MD_CTX_new();
         if (context == nullptr)
         {
             EVP_PKEY_free(key);
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         auto signatureSize = signature.size();
@@ -1090,7 +1090,7 @@ namespace NGIN::Crypto::Backend::detail
         {
             EVP_MD_CTX_free(context);
             EVP_PKEY_free(key);
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         EVP_MD_CTX_free(context);
@@ -1108,41 +1108,41 @@ namespace NGIN::Crypto::Backend::detail
         {
             if (algorithm != SignatureAlgorithm::EcdsaP256Sha256)
             {
-                return UnsupportedAlgorithm();
+                return std::unexpected(UnsupportedAlgorithm());
             }
 
             auto key = CreateP256PublicKey(publicKey);
-            if (!key.HasValue())
+            if (!key.has_value())
             {
-                return key.Error();
+                return std::unexpected(std::move(key).error());
             }
 
             auto ecdsaSignature = RawP256SignatureToOpenSsl(signature);
-            if (!ecdsaSignature.HasValue())
+            if (!ecdsaSignature.has_value())
             {
-                return ecdsaSignature.Error();
+                return std::unexpected(std::move(ecdsaSignature).error());
             }
 
             auto digest = Sha256DigestOpenSsl(message);
-            if (!digest.HasValue())
+            if (!digest.has_value())
             {
-                return digest.Error();
+                return std::unexpected(std::move(digest).error());
             }
 
             const int result = ECDSA_do_verify(
-                    reinterpret_cast<const unsigned char*>(digest.Value().data()),
-                    static_cast<int>(digest.Value().size()),
-                    ecdsaSignature.Value().get(),
-                    key.Value().get());
+                    reinterpret_cast<const unsigned char*>(digest.value().data()),
+                    static_cast<int>(digest.value().size()),
+                    ecdsaSignature.value().get(),
+                    key.value().get());
             if (result == 1)
             {
                 return {};
             }
             if (result == 0)
             {
-                return AuthenticationFailed();
+                return std::unexpected(AuthenticationFailed());
             }
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         EVP_PKEY* key = EVP_PKEY_new_raw_public_key(
@@ -1152,21 +1152,21 @@ namespace NGIN::Crypto::Backend::detail
                 publicKey.size());
         if (key == nullptr)
         {
-            return InvalidKey();
+            return std::unexpected(InvalidKey());
         }
 
         EVP_MD_CTX* context = EVP_MD_CTX_new();
         if (context == nullptr)
         {
             EVP_PKEY_free(key);
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         if (EVP_DigestVerifyInit(context, nullptr, nullptr, nullptr, key) != 1)
         {
             EVP_MD_CTX_free(context);
             EVP_PKEY_free(key);
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         const int result = EVP_DigestVerify(context, DataOrNull(signature), signature.size(), DataOrNull(message), message.size());
@@ -1179,9 +1179,9 @@ namespace NGIN::Crypto::Backend::detail
         }
         if (result == 0)
         {
-            return AuthenticationFailed();
+            return std::unexpected(AuthenticationFailed());
         }
-        return InternalError();
+        return std::unexpected(InternalError());
     }
 
     CryptoExpected<ByteBuffer> RsaPssSha256SignOpenSsl(
@@ -1189,32 +1189,32 @@ namespace NGIN::Crypto::Backend::detail
             ConstByteSpan                    message)
     {
         auto key = DecodePrivateKeyDer(privateKeyDer);
-        if (!key.HasValue())
+        if (!key.has_value())
         {
-            return key.Error();
+            return std::unexpected(std::move(key).error());
         }
 
         auto digest = Sha256DigestOpenSsl(message);
-        if (!digest.HasValue())
+        if (!digest.has_value())
         {
-            return digest.Error();
+            return std::unexpected(std::move(digest).error());
         }
 
-        EvpPkeyCtxPtr context {EVP_PKEY_CTX_new(key.Value().get(), nullptr), EVP_PKEY_CTX_free};
+        EvpPkeyCtxPtr context {EVP_PKEY_CTX_new(key.value().get(), nullptr), EVP_PKEY_CTX_free};
         if (context == nullptr)
         {
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         if (EVP_PKEY_sign_init(context.get()) <= 0)
         {
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         auto configured = ConfigureRsaPssContext(context.get());
-        if (!configured.HasValue())
+        if (!configured.has_value())
         {
-            return configured.Error();
+            return std::unexpected(std::move(configured).error());
         }
 
         auto signatureSize = NGIN::UIntSize {0};
@@ -1222,10 +1222,10 @@ namespace NGIN::Crypto::Backend::detail
                     context.get(),
                     nullptr,
                     &signatureSize,
-                    reinterpret_cast<const unsigned char*>(digest.Value().data()),
-                    digest.Value().size()) <= 0)
+                    reinterpret_cast<const unsigned char*>(digest.value().data()),
+                    digest.value().size()) <= 0)
         {
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         auto signature = MakeByteBuffer(signatureSize);
@@ -1233,10 +1233,10 @@ namespace NGIN::Crypto::Backend::detail
                     context.get(),
                     reinterpret_cast<unsigned char*>(signature.data()),
                     &signatureSize,
-                    reinterpret_cast<const unsigned char*>(digest.Value().data()),
-                    digest.Value().size()) <= 0)
+                    reinterpret_cast<const unsigned char*>(digest.value().data()),
+                    digest.value().size()) <= 0)
         {
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         while (signature.Size() > signatureSize)
@@ -1253,49 +1253,49 @@ namespace NGIN::Crypto::Backend::detail
             ConstByteSpan signature) noexcept
     {
         auto key = DecodePublicKeyDer(publicKeyDer);
-        if (!key.HasValue())
+        if (!key.has_value())
         {
-            return key.Error();
+            return std::unexpected(std::move(key).error());
         }
 
         auto digest = Sha256DigestOpenSsl(message);
-        if (!digest.HasValue())
+        if (!digest.has_value())
         {
-            return digest.Error();
+            return std::unexpected(std::move(digest).error());
         }
 
-        EvpPkeyCtxPtr context {EVP_PKEY_CTX_new(key.Value().get(), nullptr), EVP_PKEY_CTX_free};
+        EvpPkeyCtxPtr context {EVP_PKEY_CTX_new(key.value().get(), nullptr), EVP_PKEY_CTX_free};
         if (context == nullptr)
         {
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         if (EVP_PKEY_verify_init(context.get()) <= 0)
         {
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         auto configured = ConfigureRsaPssContext(context.get());
-        if (!configured.HasValue())
+        if (!configured.has_value())
         {
-            return configured.Error();
+            return std::unexpected(std::move(configured).error());
         }
 
         const int result = EVP_PKEY_verify(
                 context.get(),
                 DataOrNull(signature),
                 signature.size(),
-                reinterpret_cast<const unsigned char*>(digest.Value().data()),
-                digest.Value().size());
+                reinterpret_cast<const unsigned char*>(digest.value().data()),
+                digest.value().size());
         if (result == 1)
         {
             return {};
         }
         if (result == 0)
         {
-            return AuthenticationFailed();
+            return std::unexpected(AuthenticationFailed());
         }
-        return InternalError();
+        return std::unexpected(InternalError());
     }
 
     CryptoExpected<ByteBuffer> RsaOaepSha256EncryptOpenSsl(
@@ -1304,26 +1304,26 @@ namespace NGIN::Crypto::Backend::detail
             ConstByteSpan label)
     {
         auto key = DecodePublicKeyDer(publicKeyDer);
-        if (!key.HasValue())
+        if (!key.has_value())
         {
-            return key.Error();
+            return std::unexpected(std::move(key).error());
         }
 
-        EvpPkeyCtxPtr context {EVP_PKEY_CTX_new(key.Value().get(), nullptr), EVP_PKEY_CTX_free};
+        EvpPkeyCtxPtr context {EVP_PKEY_CTX_new(key.value().get(), nullptr), EVP_PKEY_CTX_free};
         if (context == nullptr)
         {
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         if (EVP_PKEY_encrypt_init(context.get()) <= 0)
         {
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         auto result = ConfigureRsaOaepContext(context.get(), label);
-        if (!result.HasValue())
+        if (!result.has_value())
         {
-            return result.Error();
+            return std::unexpected(std::move(result).error());
         }
 
         auto ciphertextSize = NGIN::UIntSize {0};
@@ -1334,7 +1334,7 @@ namespace NGIN::Crypto::Backend::detail
                     DataOrNull(plaintext),
                     plaintext.size()) <= 0)
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         auto ciphertext = MakeByteBuffer(ciphertextSize);
@@ -1345,7 +1345,7 @@ namespace NGIN::Crypto::Backend::detail
                     DataOrNull(plaintext),
                     plaintext.size()) <= 0)
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         while (ciphertext.Size() > ciphertextSize)
@@ -1362,26 +1362,26 @@ namespace NGIN::Crypto::Backend::detail
             ConstByteSpan                    label)
     {
         auto key = DecodePrivateKeyDer(privateKeyDer);
-        if (!key.HasValue())
+        if (!key.has_value())
         {
-            return key.Error();
+            return std::unexpected(std::move(key).error());
         }
 
-        EvpPkeyCtxPtr context {EVP_PKEY_CTX_new(key.Value().get(), nullptr), EVP_PKEY_CTX_free};
+        EvpPkeyCtxPtr context {EVP_PKEY_CTX_new(key.value().get(), nullptr), EVP_PKEY_CTX_free};
         if (context == nullptr)
         {
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         if (EVP_PKEY_decrypt_init(context.get()) <= 0)
         {
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         auto result = ConfigureRsaOaepContext(context.get(), label);
-        if (!result.HasValue())
+        if (!result.has_value())
         {
-            return result.Error();
+            return std::unexpected(std::move(result).error());
         }
 
         auto plaintextSize = NGIN::UIntSize {0};
@@ -1392,7 +1392,7 @@ namespace NGIN::Crypto::Backend::detail
                     DataOrNull(ciphertext),
                     ciphertext.size()) <= 0)
         {
-            return AuthenticationFailed();
+            return std::unexpected(AuthenticationFailed());
         }
 
         auto plaintext = MakeByteBuffer(plaintextSize);
@@ -1404,7 +1404,7 @@ namespace NGIN::Crypto::Backend::detail
                     ciphertext.size()) <= 0)
         {
             NGIN::Crypto::Memory::SecureZero(ByteSpan {plaintext.data(), plaintext.Size()});
-            return AuthenticationFailed();
+            return std::unexpected(AuthenticationFailed());
         }
 
         while (plaintext.Size() > plaintextSize)
@@ -1435,7 +1435,7 @@ namespace NGIN::Crypto::Backend::detail
                 privateKeyBytes.size());
         if (privatePkey == nullptr)
         {
-            return InvalidKey();
+            return std::unexpected(InvalidKey());
         }
 
         EVP_PKEY* peerPkey = EVP_PKEY_new_raw_public_key(
@@ -1446,7 +1446,7 @@ namespace NGIN::Crypto::Backend::detail
         if (peerPkey == nullptr)
         {
             EVP_PKEY_free(privatePkey);
-            return InvalidKey();
+            return std::unexpected(InvalidKey());
         }
 
         EVP_PKEY_CTX* context = EVP_PKEY_CTX_new(privatePkey, nullptr);
@@ -1454,7 +1454,7 @@ namespace NGIN::Crypto::Backend::detail
         {
             EVP_PKEY_free(peerPkey);
             EVP_PKEY_free(privatePkey);
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         auto outputSize = output.size();
@@ -1465,7 +1465,7 @@ namespace NGIN::Crypto::Backend::detail
             EVP_PKEY_CTX_free(context);
             EVP_PKEY_free(peerPkey);
             EVP_PKEY_free(privatePkey);
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         EVP_PKEY_CTX_free(context);

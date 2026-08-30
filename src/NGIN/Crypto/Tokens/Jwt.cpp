@@ -55,14 +55,14 @@ namespace NGIN::Crypto::Tokens
             const auto number = value.TryDouble();
             if (!number || !std::isfinite(*number))
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
             const auto whole = std::trunc(*number);
             if (*number != whole || whole < static_cast<NGIN::F64>(std::numeric_limits<NGIN::Int64>::min()) ||
                 whole > static_cast<NGIN::F64>(std::numeric_limits<NGIN::Int64>::max()))
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
             return static_cast<NGIN::Int64>(whole);
@@ -88,26 +88,26 @@ namespace NGIN::Crypto::Tokens
             }
             if (algorithm == "none")
             {
-                return PolicyRejected();
+                return std::unexpected(PolicyRejected());
             }
 
-            return UnsupportedAlgorithm();
+            return std::unexpected(UnsupportedAlgorithm());
         }
 
         [[nodiscard]] CryptoExpected<JwtAlgorithm> ParseHeaderAlgorithm(std::string_view headerJson)
         {
             auto document = NGIN::Serialization::JSON::Parser::Parse(
                     NGIN::Serialization::OwnedTextBuffer {headerJson});
-            if (!document.HasValue() || !document.Value().Root().IsObject())
+            if (!document.has_value() || !document.value().Root().IsObject())
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
-            const auto object = *document.Value().Root().TryObject();
+            const auto object = *document.value().Root().TryObject();
             const auto alg    = object.Find("alg");
             if (!alg || !alg->IsString())
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
             return ParseAlgorithm(*alg->TryString());
@@ -117,19 +117,19 @@ namespace NGIN::Crypto::Tokens
         {
             auto document = NGIN::Serialization::JSON::Parser::Parse(
                     NGIN::Serialization::OwnedTextBuffer {payloadJson});
-            if (!document.HasValue() || !document.Value().Root().IsObject())
+            if (!document.has_value() || !document.value().Root().IsObject())
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
-            const auto object = *document.Value().Root().TryObject();
+            const auto object = *document.value().Root().TryObject();
             JwtClaims  claims;
 
             if (const auto value = object.Find("iss"))
             {
                 if (!value->IsString())
                 {
-                    return ParseError();
+                    return std::unexpected(ParseError());
                 }
                 claims.issuer    = std::string {*value->TryString()};
                 claims.hasIssuer = true;
@@ -139,7 +139,7 @@ namespace NGIN::Crypto::Tokens
             {
                 if (!value->IsString())
                 {
-                    return ParseError();
+                    return std::unexpected(ParseError());
                 }
                 claims.subject    = std::string {*value->TryString()};
                 claims.hasSubject = true;
@@ -158,47 +158,47 @@ namespace NGIN::Crypto::Tokens
                     {
                         if (!item.IsString())
                         {
-                            return ParseError();
+                            return std::unexpected(ParseError());
                         }
                         claims.audiences.PushBack(std::string {*item.TryString()});
                     }
                 }
                 else
                 {
-                    return ParseError();
+                    return std::unexpected(ParseError());
                 }
             }
 
             if (const auto value = object.Find("exp"))
             {
                 auto number = JsonNumberToInt64(*value);
-                if (!number.HasValue())
+                if (!number.has_value())
                 {
-                    return number.Error();
+                    return std::unexpected(std::move(number).error());
                 }
-                claims.expirationTime    = number.Value();
+                claims.expirationTime    = number.value();
                 claims.hasExpirationTime = true;
             }
 
             if (const auto value = object.Find("nbf"))
             {
                 auto number = JsonNumberToInt64(*value);
-                if (!number.HasValue())
+                if (!number.has_value())
                 {
-                    return number.Error();
+                    return std::unexpected(std::move(number).error());
                 }
-                claims.notBefore    = number.Value();
+                claims.notBefore    = number.value();
                 claims.hasNotBefore = true;
             }
 
             if (const auto value = object.Find("iat"))
             {
                 auto number = JsonNumberToInt64(*value);
-                if (!number.HasValue())
+                if (!number.has_value())
                 {
-                    return number.Error();
+                    return std::unexpected(std::move(number).error());
                 }
-                claims.issuedAt    = number.Value();
+                claims.issuedAt    = number.value();
                 claims.hasIssuedAt = true;
             }
 
@@ -239,12 +239,12 @@ namespace NGIN::Crypto::Tokens
         {
             auto document = NGIN::Serialization::JSON::Parser::Parse(
                     NGIN::Serialization::OwnedTextBuffer {token.payloadJson});
-            if (!document.HasValue() || !document.Value().Root().IsObject())
+            if (!document.has_value() || !document.value().Root().IsObject())
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
-            return std::move(document.Value());
+            return std::move(document.value());
         }
 
         [[nodiscard]] CryptoExpected<void> ValidateClaims(const JwtClaims& claims, const JwtValidationPolicy& policy) noexcept
@@ -253,7 +253,7 @@ namespace NGIN::Crypto::Tokens
             {
                 if (!HasClaim(claims, required))
                 {
-                    return PolicyRejected();
+                    return std::unexpected(PolicyRejected());
                 }
             }
 
@@ -261,7 +261,7 @@ namespace NGIN::Crypto::Tokens
             {
                 if (!claims.hasIssuer || claims.issuer != policy.expectedIssuer)
                 {
-                    return PolicyRejected();
+                    return std::unexpected(PolicyRejected());
                 }
             }
 
@@ -278,25 +278,25 @@ namespace NGIN::Crypto::Tokens
                 }
                 if (!found)
                 {
-                    return PolicyRejected();
+                    return std::unexpected(PolicyRejected());
                 }
             }
 
             if (policy.requireExpiration && !claims.hasExpirationTime)
             {
-                return PolicyRejected();
+                return std::unexpected(PolicyRejected());
             }
 
             const auto now  = policy.currentUnixTimeSeconds;
             const auto skew = policy.allowedClockSkewSeconds;
             if (now != 0 && policy.validateExpiration && claims.hasExpirationTime && now > claims.expirationTime + skew)
             {
-                return PolicyRejected();
+                return std::unexpected(PolicyRejected());
             }
 
             if (now != 0 && policy.validateNotBefore && claims.hasNotBefore && now + skew < claims.notBefore)
             {
-                return PolicyRejected();
+                return std::unexpected(PolicyRejected());
             }
 
             return {};
@@ -330,13 +330,13 @@ namespace NGIN::Crypto::Tokens
         const auto firstDot = token.find('.');
         if (firstDot == std::string_view::npos)
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
         const auto secondDot = token.find('.', firstDot + 1);
         if (secondDot == std::string_view::npos || token.find('.', secondDot + 1) != std::string_view::npos)
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
         const auto encodedHeader    = token.substr(0, firstDot);
@@ -345,87 +345,87 @@ namespace NGIN::Crypto::Tokens
 
         if (encodedHeader.empty() || encodedPayload.empty())
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
         auto header = NGIN::Crypto::Encoding::DecodeBase64Url(encodedHeader);
-        if (!header.HasValue())
+        if (!header.has_value())
         {
-            return header.Error();
+            return std::unexpected(std::move(header).error());
         }
-        if (header.Value().Size() > options.maxHeaderBytes)
+        if (header.value().Size() > options.maxHeaderBytes)
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
         auto payload = NGIN::Crypto::Encoding::DecodeBase64Url(encodedPayload);
-        if (!payload.HasValue())
+        if (!payload.has_value())
         {
-            return payload.Error();
+            return std::unexpected(std::move(payload).error());
         }
-        if (payload.Value().Size() > options.maxPayloadBytes)
+        if (payload.value().Size() > options.maxPayloadBytes)
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
         auto signature = NGIN::Crypto::Encoding::DecodeBase64Url(encodedSignature);
-        if (!signature.HasValue())
+        if (!signature.has_value())
         {
-            return signature.Error();
+            return std::unexpected(std::move(signature).error());
         }
-        if (signature.Value().Size() > options.maxSignatureBytes)
+        if (signature.value().Size() > options.maxSignatureBytes)
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
-        auto headerJson  = CopyToString(ConstByteSpan {header.Value().data(), header.Value().Size()});
-        auto payloadJson = CopyToString(ConstByteSpan {payload.Value().data(), payload.Value().Size()});
+        auto headerJson  = CopyToString(ConstByteSpan {header.value().data(), header.value().Size()});
+        auto payloadJson = CopyToString(ConstByteSpan {payload.value().data(), payload.value().Size()});
 
         auto algorithm = ParseHeaderAlgorithm(headerJson);
-        if (!algorithm.HasValue())
+        if (!algorithm.has_value())
         {
-            return algorithm.Error();
+            return std::unexpected(std::move(algorithm).error());
         }
 
         auto claims = ParseClaims(payloadJson);
-        if (!claims.HasValue())
+        if (!claims.has_value())
         {
-            return claims.Error();
+            return std::unexpected(std::move(claims).error());
         }
 
         return JwtCompactToken {
-                .algorithm    = algorithm.Value(),
+                .algorithm    = algorithm.value(),
                 .headerJson   = std::move(headerJson),
                 .payloadJson  = std::move(payloadJson),
                 .signingInput = std::string {token.substr(0, secondDot)},
-                .signature    = std::move(signature.Value()),
-                .claims       = std::move(claims.Value()),
+                .signature    = std::move(signature.value()),
+                .claims       = std::move(claims.value()),
         };
     }
 
     CryptoExpected<bool> HasJwtClaim(const JwtCompactToken& token, std::string_view name)
     {
         auto document = ParsePayloadDocument(token);
-        if (!document.HasValue())
+        if (!document.has_value())
         {
-            return document.Error();
+            return std::unexpected(std::move(document).error());
         }
 
-        return document.Value().Root().TryObject()->Find(name).has_value();
+        return document.value().Root().TryObject()->Find(name).has_value();
     }
 
     CryptoExpected<std::string> GetJwtStringClaim(const JwtCompactToken& token, std::string_view name)
     {
         auto document = ParsePayloadDocument(token);
-        if (!document.HasValue())
+        if (!document.has_value())
         {
-            return document.Error();
+            return std::unexpected(std::move(document).error());
         }
 
-        const auto value = document.Value().Root().TryObject()->Find(name);
+        const auto value = document.value().Root().TryObject()->Find(name);
         if (!value || !value->IsString())
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         return std::string {*value->TryString()};
@@ -434,15 +434,15 @@ namespace NGIN::Crypto::Tokens
     CryptoExpected<NGIN::Int64> GetJwtInt64Claim(const JwtCompactToken& token, std::string_view name)
     {
         auto document = ParsePayloadDocument(token);
-        if (!document.HasValue())
+        if (!document.has_value())
         {
-            return document.Error();
+            return std::unexpected(std::move(document).error());
         }
 
-        const auto value = document.Value().Root().TryObject()->Find(name);
+        const auto value = document.value().Root().TryObject()->Find(name);
         if (!value || !value->IsNumber())
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         return JsonNumberToInt64(*value);
@@ -451,15 +451,15 @@ namespace NGIN::Crypto::Tokens
     CryptoExpected<bool> GetJwtBoolClaim(const JwtCompactToken& token, std::string_view name)
     {
         auto document = ParsePayloadDocument(token);
-        if (!document.HasValue())
+        if (!document.has_value())
         {
-            return document.Error();
+            return std::unexpected(std::move(document).error());
         }
 
-        const auto value = document.Value().Root().TryObject()->Find(name);
+        const auto value = document.value().Root().TryObject()->Find(name);
         if (!value || !value->IsBool())
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         return *value->TryBool();
@@ -472,34 +472,34 @@ namespace NGIN::Crypto::Tokens
             const JwtValidationPolicy&                  policy)
     {
         auto parsed = ParseJwtCompact(token, policy.parseOptions);
-        if (!parsed.HasValue())
+        if (!parsed.has_value())
         {
-            return parsed.Error();
+            return std::unexpected(std::move(parsed).error());
         }
 
-        if (parsed.Value().algorithm != key.algorithm || !AlgorithmAllowed(parsed.Value().algorithm, policy))
+        if (parsed.value().algorithm != key.algorithm || !AlgorithmAllowed(parsed.value().algorithm, policy))
         {
-            return PolicyRejected();
+            return std::unexpected(PolicyRejected());
         }
 
-        auto claims = ValidateClaims(parsed.Value().claims, policy);
-        if (!claims.HasValue())
+        auto claims = ValidateClaims(parsed.value().claims, policy);
+        if (!claims.has_value())
         {
-            return claims.Error();
+            return std::unexpected(std::move(claims).error());
         }
 
-        switch (parsed.Value().algorithm)
+        switch (parsed.value().algorithm)
         {
             case JwtAlgorithm::Hs256: {
                 auto result = NGIN::Crypto::Mac::VerifyMac(
                         context,
                         MacAlgorithm::HmacSha256,
                         key.hmacKey,
-                        StringBytes(parsed.Value().signingInput),
-                        ConstByteSpan {parsed.Value().signature.data(), parsed.Value().signature.Size()});
-                if (!result.HasValue())
+                        StringBytes(parsed.value().signingInput),
+                        ConstByteSpan {parsed.value().signature.data(), parsed.value().signature.Size()});
+                if (!result.has_value())
                 {
-                    return result.Error();
+                    return std::unexpected(std::move(result).error());
                 }
                 break;
             }
@@ -508,15 +508,15 @@ namespace NGIN::Crypto::Tokens
                         context,
                         NGIN::Crypto::Asymmetric::RsaPssSha256VerifyInput {
                                 .publicKeyDer = key.publicKey,
-                                .message      = StringBytes(parsed.Value().signingInput),
+                                .message      = StringBytes(parsed.value().signingInput),
                                 .signature    = ConstByteSpan {
-                                        parsed.Value().signature.data(),
-                                        parsed.Value().signature.Size(),
+                                        parsed.value().signature.data(),
+                                        parsed.value().signature.Size(),
                                 },
                         });
-                if (!result.HasValue())
+                if (!result.has_value())
                 {
-                    return result.Error();
+                    return std::unexpected(std::move(result).error());
                 }
                 break;
             }
@@ -526,15 +526,15 @@ namespace NGIN::Crypto::Tokens
                         SignatureAlgorithm::EcdsaP256Sha256,
                         NGIN::Crypto::Signatures::VerifyInput {
                                 .publicKey = key.publicKey,
-                                .message   = StringBytes(parsed.Value().signingInput),
+                                .message   = StringBytes(parsed.value().signingInput),
                                 .signature = ConstByteSpan {
-                                        parsed.Value().signature.data(),
-                                        parsed.Value().signature.Size(),
+                                        parsed.value().signature.data(),
+                                        parsed.value().signature.Size(),
                                 },
                         });
-                if (!result.HasValue())
+                if (!result.has_value())
                 {
-                    return result.Error();
+                    return std::unexpected(std::move(result).error());
                 }
                 break;
             }
@@ -544,15 +544,15 @@ namespace NGIN::Crypto::Tokens
                         SignatureAlgorithm::Ed25519,
                         NGIN::Crypto::Signatures::VerifyInput {
                                 .publicKey = key.publicKey,
-                                .message   = StringBytes(parsed.Value().signingInput),
+                                .message   = StringBytes(parsed.value().signingInput),
                                 .signature = ConstByteSpan {
-                                        parsed.Value().signature.data(),
-                                        parsed.Value().signature.Size(),
+                                        parsed.value().signature.data(),
+                                        parsed.value().signature.Size(),
                                 },
                         });
-                if (!result.HasValue())
+                if (!result.has_value())
                 {
-                    return result.Error();
+                    return std::unexpected(std::move(result).error());
                 }
                 break;
             }

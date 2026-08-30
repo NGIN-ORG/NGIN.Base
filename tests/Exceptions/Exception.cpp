@@ -13,6 +13,10 @@ namespace NGIN::Exceptions
     {
         const Exception exception {"failure"};
         CHECK(std::string_view {exception.GetMessage()} == "failure");
+        CHECK_NOTHROW(exception.GetStacktrace());
+#if !NGIN_BASE_CAPTURE_EXCEPTION_STACKTRACE
+        CHECK(exception.GetStacktrace().empty());
+#endif
     }
 
     TEST_CASE("NotSupportedException supports empty and NGIN string messages", "[Exceptions]")

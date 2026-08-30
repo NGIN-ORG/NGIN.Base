@@ -287,8 +287,9 @@ namespace NGIN::Async
 
                 if (toResume && executor.IsValid())
                 {
-                    executor.Execute(toResume);
-                    return std::noop_coroutine();
+                    const NGIN::Execution::ScheduleResult result = executor.Execute(toResume);
+                    if (result)
+                        return std::noop_coroutine();
                 }
 
                 return toResume;
@@ -420,7 +421,9 @@ namespace NGIN::Async
                 {
                     if (concurrentExecutor.IsValid())
                     {
-                        concurrentExecutor.Execute(concurrentConsumer);
+                        const NGIN::Execution::ScheduleResult result = concurrentExecutor.Execute(concurrentConsumer);
+                        if (!result)
+                            concurrentConsumer.resume();
                     }
                     else
                     {
@@ -429,7 +432,7 @@ namespace NGIN::Async
                     return awaiting;
                 }
 
-                context.GetCancellationToken().Register(
+                const CancellationRegistrationResult registrationResult = context.GetCancellationToken().Register(
                         cancellationRegistration,
                         {},
                         {},
@@ -453,7 +456,9 @@ namespace NGIN::Async
                             {
                                 if (executor.IsValid())
                                 {
-                                    executor.Execute(toResume);
+                                    const NGIN::Execution::ScheduleResult result = executor.Execute(toResume);
+                                    if (!result)
+                                        toResume.resume();
                                 }
                                 else
                                 {
@@ -463,6 +468,17 @@ namespace NGIN::Async
                             return false;
                         },
                         &promise);
+                if (!registrationResult)
+                {
+                    NGIN::Sync::LockGuard guard(promise.lock);
+                    AsyncFault            registrationFault;
+                    registrationFault.code   = AsyncFaultCode::CancellationRegistrationFailed;
+                    registrationFault.native = static_cast<int>(registrationResult.error());
+                    promise.fault            = std::move(registrationFault);
+                    promise.completed        = true;
+                    promise.consumer         = {};
+                    return awaiting;
+                }
 
                 return generator.m_handle;
             }

@@ -79,19 +79,19 @@ namespace NGIN::Crypto::Keys
         if (algorithm == SignatureAlgorithm::Ed25519)
         {
             auto privateKey = ImportEd25519PrivateKey(privateKeyInfo);
-            if (!privateKey.HasValue())
+            if (!privateKey.has_value())
             {
-                return privateKey.Error();
+                return std::unexpected(std::move(privateKey).error());
             }
-            auto signature = NGIN::Crypto::Asymmetric::SignEd25519(context, privateKey.Value(), message);
-            if (!signature.HasValue())
+            auto signature = NGIN::Crypto::Asymmetric::SignEd25519(context, privateKey.value(), message);
+            if (!signature.has_value())
             {
-                return signature.Error();
+                return std::unexpected(std::move(signature).error());
             }
 
             ByteBuffer output;
-            output.Reserve(signature.Value().size());
-            for (NGIN::Byte byte: signature.Value())
+            output.Reserve(signature.value().size());
+            for (NGIN::Byte byte: signature.value())
             {
                 output.PushBack(byte);
             }
@@ -101,19 +101,19 @@ namespace NGIN::Crypto::Keys
         if (algorithm == SignatureAlgorithm::EcdsaP256Sha256)
         {
             auto privateKey = ImportEcdsaP256PrivateKey(privateKeyInfo);
-            if (!privateKey.HasValue())
+            if (!privateKey.has_value())
             {
-                return privateKey.Error();
+                return std::unexpected(std::move(privateKey).error());
             }
-            auto signature = NGIN::Crypto::Asymmetric::SignEcdsaP256Sha256(context, privateKey.Value(), message);
-            if (!signature.HasValue())
+            auto signature = NGIN::Crypto::Asymmetric::SignEcdsaP256Sha256(context, privateKey.value(), message);
+            if (!signature.has_value())
             {
-                return signature.Error();
+                return std::unexpected(std::move(signature).error());
             }
 
             ByteBuffer output;
-            output.Reserve(signature.Value().size());
-            for (NGIN::Byte byte: signature.Value())
+            output.Reserve(signature.value().size());
+            for (NGIN::Byte byte: signature.value())
             {
                 output.PushBack(byte);
             }
@@ -124,17 +124,17 @@ namespace NGIN::Crypto::Keys
         {
             if (privateKeyInfo.algorithm.algorithm != KeyAlgorithm::Rsa)
             {
-                return detail::KeyOperationInvalidKey();
+                return std::unexpected(detail::KeyOperationInvalidKey());
             }
 
             auto privateKeyDer = WritePrivateKeyInfo(
                     KeyAlgorithm::Rsa,
                     ConstByteSpan {privateKeyInfo.privateKey.data(), privateKeyInfo.privateKey.Size()});
-            if (!privateKeyDer.HasValue())
+            if (!privateKeyDer.has_value())
             {
-                return privateKeyDer.Error();
+                return std::unexpected(std::move(privateKeyDer).error());
             }
-            detail::ScopedPrivateKeyDer scopedPrivateKeyDer {std::move(privateKeyDer.Value())};
+            detail::ScopedPrivateKeyDer scopedPrivateKeyDer {std::move(privateKeyDer.value())};
 
             return NGIN::Crypto::Asymmetric::SignRsaPssSha256(
                     context,
@@ -144,7 +144,7 @@ namespace NGIN::Crypto::Keys
                     });
         }
 
-        return detail::KeyOperationUnsupportedAlgorithm();
+        return std::unexpected(detail::KeyOperationUnsupportedAlgorithm());
     }
 
     /// @brief Verifies a signature using an algorithm-compatible parsed public-key envelope.
@@ -158,13 +158,13 @@ namespace NGIN::Crypto::Keys
         if (algorithm == SignatureAlgorithm::Ed25519)
         {
             auto publicKey = ImportEd25519PublicKey(publicKeyInfo);
-            if (!publicKey.HasValue())
+            if (!publicKey.has_value())
             {
-                return publicKey.Error();
+                return std::unexpected(std::move(publicKey).error());
             }
             if (signature.size() != NGIN::Crypto::Signatures::SignatureSize(SignatureAlgorithm::Ed25519))
             {
-                return CryptoError {CryptoErrorCode::InvalidTag};
+                return std::unexpected(CryptoError {CryptoErrorCode::InvalidTag});
             }
 
             NGIN::Crypto::Signatures::Ed25519Signature typedSignature {};
@@ -173,19 +173,19 @@ namespace NGIN::Crypto::Keys
                 typedSignature[i] = signature[i];
             }
 
-            return NGIN::Crypto::Asymmetric::VerifyEd25519(context, publicKey.Value(), message, typedSignature);
+            return NGIN::Crypto::Asymmetric::VerifyEd25519(context, publicKey.value(), message, typedSignature);
         }
 
         if (algorithm == SignatureAlgorithm::EcdsaP256Sha256)
         {
             auto publicKey = ImportEcdsaP256PublicKey(publicKeyInfo);
-            if (!publicKey.HasValue())
+            if (!publicKey.has_value())
             {
-                return publicKey.Error();
+                return std::unexpected(std::move(publicKey).error());
             }
             if (signature.size() != NGIN::Crypto::Signatures::SignatureSize(SignatureAlgorithm::EcdsaP256Sha256))
             {
-                return CryptoError {CryptoErrorCode::InvalidTag};
+                return std::unexpected(CryptoError {CryptoErrorCode::InvalidTag});
             }
 
             NGIN::Crypto::Asymmetric::EcdsaP256Sha256Signature typedSignature {};
@@ -194,34 +194,34 @@ namespace NGIN::Crypto::Keys
                 typedSignature[i] = signature[i];
             }
 
-            return NGIN::Crypto::Asymmetric::VerifyEcdsaP256Sha256(context, publicKey.Value(), message, typedSignature);
+            return NGIN::Crypto::Asymmetric::VerifyEcdsaP256Sha256(context, publicKey.value(), message, typedSignature);
         }
 
         if (algorithm == SignatureAlgorithm::RsaPssSha256)
         {
             if (publicKeyInfo.algorithm.algorithm != KeyAlgorithm::Rsa)
             {
-                return detail::KeyOperationInvalidKey();
+                return std::unexpected(detail::KeyOperationInvalidKey());
             }
 
             auto publicKeyDer = WriteSubjectPublicKeyInfo(
                     KeyAlgorithm::Rsa,
                     ConstByteSpan {publicKeyInfo.publicKey.data(), publicKeyInfo.publicKey.Size()});
-            if (!publicKeyDer.HasValue())
+            if (!publicKeyDer.has_value())
             {
-                return publicKeyDer.Error();
+                return std::unexpected(std::move(publicKeyDer).error());
             }
 
             return NGIN::Crypto::Asymmetric::VerifyRsaPssSha256(
                     context,
                     NGIN::Crypto::Asymmetric::RsaPssSha256VerifyInput {
-                            .publicKeyDer = ConstByteSpan {publicKeyDer.Value().data(), publicKeyDer.Value().Size()},
+                            .publicKeyDer = ConstByteSpan {publicKeyDer.value().data(), publicKeyDer.value().Size()},
                             .message      = message,
                             .signature    = signature,
                     });
         }
 
-        return detail::KeyOperationUnsupportedAlgorithm();
+        return std::unexpected(detail::KeyOperationUnsupportedAlgorithm());
     }
 
     /// @brief Encrypts plaintext with an RSA SubjectPublicKeyInfo using OAEP SHA-256.
@@ -232,21 +232,21 @@ namespace NGIN::Crypto::Keys
     {
         if (publicKeyInfo.algorithm.algorithm != KeyAlgorithm::Rsa)
         {
-            return detail::KeyOperationInvalidKey();
+            return std::unexpected(detail::KeyOperationInvalidKey());
         }
 
         auto publicKeyDer = WriteSubjectPublicKeyInfo(
                 KeyAlgorithm::Rsa,
                 ConstByteSpan {publicKeyInfo.publicKey.data(), publicKeyInfo.publicKey.Size()});
-        if (!publicKeyDer.HasValue())
+        if (!publicKeyDer.has_value())
         {
-            return publicKeyDer.Error();
+            return std::unexpected(std::move(publicKeyDer).error());
         }
 
         return NGIN::Crypto::Asymmetric::EncryptRsaOaepSha256(
                 context,
                 NGIN::Crypto::Asymmetric::RsaOaepSha256EncryptInput {
-                        .publicKeyDer = ConstByteSpan {publicKeyDer.Value().data(), publicKeyDer.Value().Size()},
+                        .publicKeyDer = ConstByteSpan {publicKeyDer.value().data(), publicKeyDer.value().Size()},
                         .plaintext    = input.plaintext,
                         .label        = input.label,
                 });
@@ -260,17 +260,17 @@ namespace NGIN::Crypto::Keys
     {
         if (privateKeyInfo.algorithm.algorithm != KeyAlgorithm::Rsa)
         {
-            return detail::KeyOperationInvalidKey();
+            return std::unexpected(detail::KeyOperationInvalidKey());
         }
 
         auto privateKeyDer = WritePrivateKeyInfo(
                 KeyAlgorithm::Rsa,
                 ConstByteSpan {privateKeyInfo.privateKey.data(), privateKeyInfo.privateKey.Size()});
-        if (!privateKeyDer.HasValue())
+        if (!privateKeyDer.has_value())
         {
-            return privateKeyDer.Error();
+            return std::unexpected(std::move(privateKeyDer).error());
         }
-        detail::ScopedPrivateKeyDer scopedPrivateKeyDer {std::move(privateKeyDer.Value())};
+        detail::ScopedPrivateKeyDer scopedPrivateKeyDer {std::move(privateKeyDer.value())};
 
         return NGIN::Crypto::Asymmetric::DecryptRsaOaepSha256(
                 context,
@@ -288,16 +288,16 @@ namespace NGIN::Crypto::Keys
             const SubjectPublicKeyInfo&                 peerPublicKeyInfo) noexcept
     {
         auto privateKey = ImportX25519PrivateKey(privateKeyInfo);
-        if (!privateKey.HasValue())
+        if (!privateKey.has_value())
         {
-            return privateKey.Error();
+            return std::unexpected(std::move(privateKey).error());
         }
         auto publicKey = ImportX25519PublicKey(peerPublicKeyInfo);
-        if (!publicKey.HasValue())
+        if (!publicKey.has_value())
         {
-            return publicKey.Error();
+            return std::unexpected(std::move(publicKey).error());
         }
 
-        return NGIN::Crypto::Asymmetric::DeriveX25519SharedSecret(context, privateKey.Value(), publicKey.Value());
+        return NGIN::Crypto::Asymmetric::DeriveX25519SharedSecret(context, privateKey.value(), publicKey.value());
     }
 }// namespace NGIN::Crypto::Keys

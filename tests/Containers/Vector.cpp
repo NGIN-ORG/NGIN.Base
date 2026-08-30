@@ -1,10 +1,13 @@
 /// @file VectorTest.cpp
 /// @brief Tests for NGIN::Containers::Vector using Catch2.
 
+#include "../Support/FailureInjection.hpp"
 #include <NGIN/Containers/Vector.hpp>
 #include <NGIN/Memory/SystemAllocator.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <cstddef>
+#include <memory>
+#include <stdexcept>
 #include <string>
 
 using NGIN::Containers::Vector;
@@ -347,4 +350,111 @@ TEST_CASE("Vector handles non-POD types", "[Containers][Vector]")
 
     Vector<NonPod> moved(std::move(vec));
     CHECK(moved.Size() == 2U);
+}
+
+TEST_CASE("Vector copy construction rolls back partially constructed elements", "[Containers][Vector]")
+{
+    NGIN::Tests::FailureCountdown   failures;
+    NGIN::Tests::LifetimeStatistics statistics;
+
+    {
+        Vector<NGIN::Tests::ThrowingValue> source;
+        source.EmplaceBack(1, failures, statistics);
+        source.EmplaceBack(2, failures, statistics);
+        source.EmplaceBack(3, failures, statistics);
+        REQUIRE(statistics.live == 3);
+
+        failures.Arm(1);
+        CHECK_THROWS_AS(
+                Vector<NGIN::Tests::ThrowingValue>(source),
+                std::runtime_error);
+        CHECK(statistics.live == 3);
+        CHECK(source.Size() == 3U);
+        failures.Disable();
+    }
+
+    CHECK(statistics.live == 0);
+    CHECK(statistics.constructions == statistics.destructions);
+}
+
+TEST_CASE("Vector copy assignment tracks extras when construction throws", "[Containers][Vector]")
+{
+    NGIN::Tests::FailureCountdown   failures;
+    NGIN::Tests::LifetimeStatistics statistics;
+
+    {
+        Vector<NGIN::Tests::ThrowingValue> source;
+        source.EmplaceBack(10, failures, statistics);
+        source.EmplaceBack(20, failures, statistics);
+        source.EmplaceBack(30, failures, statistics);
+
+        Vector<NGIN::Tests::ThrowingValue> target(8);
+        target.EmplaceBack(1, failures, statistics);
+
+        failures.Arm(2);
+        CHECK_THROWS_AS(target = source, std::runtime_error);
+        CHECK(target.Size() == 2U);
+        CHECK(statistics.live == source.Size() + target.Size());
+        failures.Disable();
+    }
+
+    CHECK(statistics.live == 0);
+    CHECK(statistics.constructions == statistics.destructions);
+}
+
+TEST_CASE("Vector indexed insertion remains valid when relocation throws", "[Containers][Vector]")
+{
+    NGIN::Tests::FailureCountdown   failures;
+    NGIN::Tests::LifetimeStatistics statistics;
+
+    {
+        Vector<NGIN::Tests::ThrowingValue> values(4);
+        values.EmplaceBack(1, failures, statistics);
+        values.EmplaceBack(2, failures, statistics);
+        values.EmplaceBack(3, failures, statistics);
+        NGIN::Tests::ThrowingValue inserted {9, failures, statistics};
+
+        failures.Arm(1);
+        CHECK_THROWS_AS(values.PushAt(1, inserted), std::runtime_error);
+        REQUIRE(values.Size() == 3U);
+        CHECK(values[0].Value() == 1);
+        CHECK(values[1].Value() == 2);
+        CHECK(values[2].Value() == 3);
+        CHECK(statistics.live == 4);
+        failures.Disable();
+    }
+
+    CHECK(statistics.live == 0);
+    CHECK(statistics.constructions == statistics.destructions);
+}
+
+TEST_CASE("Vector stages self-referential append across growth", "[Containers][Vector]")
+{
+    Vector<std::string> values(1);
+    values.PushBack("self");
+
+    values.PushBack(values[0]);
+
+    REQUIRE(values.Size() == 2U);
+    CHECK(values[0] == "self");
+    CHECK(values[1] == "self");
+}
+
+TEST_CASE("Vector empty iterators avoid null pointer arithmetic", "[Containers][Vector]")
+{
+    Vector<int> values;
+    CHECK(values.begin() == nullptr);
+    CHECK(values.end() == nullptr);
+}
+
+TEST_CASE("Vector translates allocator exhaustion to bad_alloc", "[Containers][Vector]")
+{
+    using Allocator                           = NGIN::Tests::FailureAllocator<>;
+    std::shared_ptr<Allocator::State> state   = std::make_shared<Allocator::State>();
+    state->successfulAllocationsBeforeFailure = 0;
+    Allocator allocator {state};
+
+    CHECK_THROWS_AS((Vector<int, Allocator>(4, allocator)), std::bad_alloc);
+    CHECK(state->allocations == 0);
+    CHECK(state->deallocations == 0);
 }

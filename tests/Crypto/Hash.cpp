@@ -52,8 +52,8 @@ TEST_CASE("HashInto checks output size before backend support", "[Crypto][Hash]"
             NGIN::Crypto::ConstByteSpan {},
             output);
 
-    REQUIRE_FALSE(result.HasValue());
-    REQUIRE(result.Error().Code() == NGIN::Crypto::CryptoErrorCode::OutputBufferTooSmall);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().Code() == NGIN::Crypto::CryptoErrorCode::OutputBufferTooSmall);
 }
 
 TEST_CASE("Hash returns unsupported algorithm when context lacks capability", "[Crypto][Hash]")
@@ -65,8 +65,8 @@ TEST_CASE("Hash returns unsupported algorithm when context lacks capability", "[
 
     auto result = NGIN::Crypto::Hashing::Hash(context, NGIN::Crypto::HashAlgorithm::Sha256, NGIN::Crypto::ConstByteSpan {});
 
-    REQUIRE_FALSE(result.HasValue());
-    REQUIRE(result.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
 }
 
 TEST_CASE("Hash contract does not fake implementation even if capability is manually enabled", "[Crypto][Hash]")
@@ -81,16 +81,16 @@ TEST_CASE("Hash contract does not fake implementation even if capability is manu
 
     auto result = NGIN::Crypto::Hashing::Sha256(context, NGIN::Crypto::ConstByteSpan {});
 
-    REQUIRE_FALSE(result.HasValue());
-    REQUIRE(result.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
 }
 
 TEST_CASE("Hash computes SHA-256 and SHA-512 vectors when backend supports them", "[Crypto][Hash]")
 {
     auto context = NGIN::Crypto::Backend::CreateContext();
-    REQUIRE(context.HasValue());
+    REQUIRE(context.has_value());
 
-    if (!context.Value().Supports(NGIN::Crypto::HashAlgorithm::Sha256) || !context.Value().Supports(NGIN::Crypto::HashAlgorithm::Sha512))
+    if (!context.value().Supports(NGIN::Crypto::HashAlgorithm::Sha256) || !context.value().Supports(NGIN::Crypto::HashAlgorithm::Sha512))
     {
         SUCCEED("SHA vector test requires a hash-capable backend such as optional OpenSSL.");
         return;
@@ -99,8 +99,8 @@ TEST_CASE("Hash computes SHA-256 and SHA-512 vectors when backend supports them"
     constexpr std::string_view MESSAGE {"abc"};
     auto                       input = std::as_bytes(std::span {MESSAGE.data(), MESSAGE.size()});
 
-    auto sha256 = NGIN::Crypto::Hashing::Sha256(context.Value(), input);
-    auto sha512 = NGIN::Crypto::Hashing::Sha512(context.Value(), input);
+    auto sha256 = NGIN::Crypto::Hashing::Sha256(context.value(), input);
+    auto sha512 = NGIN::Crypto::Hashing::Sha512(context.value(), input);
 
     auto expectedSha256 = NGIN::Crypto::Encoding::DecodeHex(
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
@@ -108,15 +108,15 @@ TEST_CASE("Hash computes SHA-256 and SHA-512 vectors when backend supports them"
             "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a"
             "2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f");
 
-    REQUIRE(sha256.HasValue());
-    REQUIRE(sha512.HasValue());
-    REQUIRE(expectedSha256.HasValue());
-    REQUIRE(expectedSha512.HasValue());
+    REQUIRE(sha256.has_value());
+    REQUIRE(sha512.has_value());
+    REQUIRE(expectedSha256.has_value());
+    REQUIRE(expectedSha512.has_value());
 
     RequireBytesEqual(
-            NGIN::Crypto::ConstByteSpan {sha256.Value().data(), sha256.Value().size()},
-            NGIN::Crypto::ConstByteSpan {expectedSha256.Value().data(), expectedSha256.Value().Size()});
+            NGIN::Crypto::ConstByteSpan {sha256.value().data(), sha256.value().size()},
+            NGIN::Crypto::ConstByteSpan {expectedSha256.value().data(), expectedSha256.value().Size()});
     RequireBytesEqual(
-            NGIN::Crypto::ConstByteSpan {sha512.Value().data(), sha512.Value().size()},
-            NGIN::Crypto::ConstByteSpan {expectedSha512.Value().data(), expectedSha512.Value().Size()});
+            NGIN::Crypto::ConstByteSpan {sha512.value().data(), sha512.value().size()},
+            NGIN::Crypto::ConstByteSpan {expectedSha512.value().data(), expectedSha512.value().Size()});
 }

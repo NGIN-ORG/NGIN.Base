@@ -102,8 +102,8 @@ namespace NGIN::Serialization::JSON
                 NGIN::Utilities::Expected<BorrowedDocument, ParseDiagnostic> parsed =
                         ParseBorrowed(input, scratch, options, limits);
                 if (!parsed)
-                    return NGIN::Utilities::Unexpected<ParseDiagnostic>(std::move(parsed.Error()));
-                return Emit(parsed.Value().Root(), handler);
+                    return NGIN::Utilities::Unexpected<ParseDiagnostic>(std::move(parsed.error()));
+                return Emit(parsed.value().Root(), handler);
             }
 
             return detail::ParseEventsContiguous(
@@ -308,7 +308,7 @@ namespace NGIN::Serialization::JSON
             NGIN::Utilities::Expected<BorrowedDocument, ParseDiagnostic> validated =
                     ParseBorrowed(input, *m_scratch, m_options, completionLimits);
             if (!validated)
-                return Fail(std::move(validated.Error()));
+                return Fail(std::move(validated.error()));
 
             UIntSize eventCount = 0;
             auto     forwarding = [this, &eventCount](const Event& event) {
@@ -318,7 +318,7 @@ namespace NGIN::Serialization::JSON
             NGIN::Utilities::Expected<void, ParseDiagnostic> emitted = EventParser::ParseContiguous(
                     input, forwarding, *m_scratch, m_options, completionLimits);
             if (!emitted)
-                return Fail(std::move(emitted.Error()));
+                return Fail(std::move(emitted.error()));
             m_complete = true;
             return {.status = IncrementalParseStatus::Complete, .eventsProduced = eventCount};
         }

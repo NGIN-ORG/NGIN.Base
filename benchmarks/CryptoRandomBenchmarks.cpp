@@ -12,9 +12,9 @@ int main()
     using NGIN::Units::Milliseconds;
 
     auto context = NGIN::Crypto::Backend::CreateBestAvailableContext();
-    if (!context.HasValue())
+    if (!context.has_value())
     {
-        std::cerr << "CreateBestAvailableContext failed: " << context.Error().Message() << '\n';
+        std::cerr << "CreateBestAvailableContext failed: " << context.error().Message() << '\n';
         return 1;
     }
 
@@ -23,28 +23,28 @@ int main()
 
     Benchmark::Register([&](BenchmarkContext& ctx) {
         ctx.start();
-        auto result = context.Value().FillRandom(random32);
-        ctx.doNotOptimize(result.HasValue());
+        auto result = context.value().FillRandom(random32);
+        ctx.doNotOptimize(result.has_value());
         ctx.stop();
     },
                         "Crypto FillRandom 32 bytes");
 
     Benchmark::Register([&](BenchmarkContext& ctx) {
         ctx.start();
-        auto result = context.Value().FillRandom(random256);
-        ctx.doNotOptimize(result.HasValue());
+        auto result = context.value().FillRandom(random256);
+        ctx.doNotOptimize(result.has_value());
         ctx.stop();
     },
                         "Crypto FillRandom 256 bytes");
 
     Benchmark::Register([&](BenchmarkContext& ctx) {
         ctx.start();
-        auto token = NGIN::Crypto::Tokens::GenerateBase64Url(context.Value(), {
+        auto token = NGIN::Crypto::Tokens::GenerateBase64Url(context.value(), {
                                                                                       .byteLength          = 32,
                                                                                       .minimumEntropyBytes = 16,
                                                                                       .encoding            = NGIN::Crypto::Tokens::TokenEncoding::Base64Url,
                                                                               });
-        ctx.doNotOptimize(token.HasValue());
+        ctx.doNotOptimize(token.has_value());
         ctx.stop();
     },
                         "Crypto Base64Url token 32 bytes");

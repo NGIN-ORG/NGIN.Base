@@ -22,12 +22,12 @@ Important semantics:
 - `Size()` counts code units, not code points or grapheme clusters
 - `operator[]`, `At()`, `Substr()`, `Find()`, and `RFind()` are code-unit based
 - UTF aliases such as `UTF8String` and `UTF16String` do not imply validation
+- `UTF8String` stores `char8_t`; use `AsBytes()` for a zero-copy byte view and
+  `UTF8FromBytes()` for an explicit copy from byte-oriented text
 
 Common aliases in [`include/NGIN/Text/String.hpp`](../include/NGIN/Text/String.hpp):
 
 - `String`
-- `AnsiString`
-- `AsciiString`
 - `UTF8String`
 - `UTF16String`
 - `UTF32String`
@@ -56,10 +56,10 @@ Strict-mode APIs return `NGIN::Utilities::Expected<..., ConversionError>` so the
 #include <NGIN/Text/String.hpp>
 #include <NGIN/Text/Unicode.hpp>
 
-NGIN::Text::UTF8String utf8("Hello \xF0\x9F\x98\x80");
+NGIN::Text::UTF8String utf8(u8"Hello 😀");
 
 auto utf16 = NGIN::Text::Unicode::ToUtf16(utf8.View());
-if (!utf16.HasValue())
+if (!utf16.has_value())
 {
     return;
 }

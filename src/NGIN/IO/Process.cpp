@@ -551,9 +551,9 @@ namespace NGIN::IO
             }
 
             auto streams = OpenStreams(options);
-            if (!streams.HasValue())
+            if (!streams.has_value())
             {
-                return UnexpectedProcessError<std::unique_ptr<Impl>>(std::move(streams).TakeError());
+                return UnexpectedProcessError<std::unique_ptr<Impl>>(std::move(streams).error());
             }
 
             auto environment = BuildEnvironment(options);
@@ -569,9 +569,9 @@ namespace NGIN::IO
             STARTUPINFOW startup {};
             startup.cb         = sizeof(startup);
             startup.dwFlags    = STARTF_USESTDHANDLES;
-            startup.hStdInput  = streams.Value().input;
-            startup.hStdOutput = streams.Value().output;
-            startup.hStdError  = streams.Value().error;
+            startup.hStdInput  = streams.value().input;
+            startup.hStdOutput = streams.value().output;
+            startup.hStdError  = streams.value().error;
 
             PROCESS_INFORMATION processInfo {};
             DWORD               flags = CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT;
@@ -655,10 +655,10 @@ namespace NGIN::IO
             implementation->options            = std::move(options);
             implementation->process            = processInfo.hProcess;
             implementation->job                = job;
-            implementation->standardOutputRead = streams.Value().outputRead;
-            implementation->standardErrorRead  = streams.Value().errorRead;
-            streams.Value().outputRead         = nullptr;
-            streams.Value().errorRead          = nullptr;
+            implementation->standardOutputRead = streams.value().outputRead;
+            implementation->standardErrorRead  = streams.value().errorRead;
+            streams.value().outputRead         = nullptr;
+            streams.value().errorRead          = nullptr;
             return ProcessExpected<std::unique_ptr<Impl>> {std::move(implementation)};
         }
 
@@ -1093,9 +1093,9 @@ namespace NGIN::IO
             }
 
             auto streams = OpenStreams(options);
-            if (!streams.HasValue())
+            if (!streams.has_value())
             {
-                return UnexpectedProcessError<std::unique_ptr<Impl>>(std::move(streams).TakeError());
+                return UnexpectedProcessError<std::unique_ptr<Impl>>(std::move(streams).error());
             }
 
             int errorPipe[2] {-1, -1};
@@ -1135,23 +1135,23 @@ namespace NGIN::IO
                     (void) ::write(errorPipe[1], &childError, sizeof(childError));
                     std::_Exit(126);
                 }
-                if (::dup2(streams.Value().input, STDIN_FILENO) < 0 ||
-                    ::dup2(streams.Value().output, STDOUT_FILENO) < 0 ||
-                    ::dup2(streams.Value().error, STDERR_FILENO) < 0)
+                if (::dup2(streams.value().input, STDIN_FILENO) < 0 ||
+                    ::dup2(streams.value().output, STDOUT_FILENO) < 0 ||
+                    ::dup2(streams.value().error, STDERR_FILENO) < 0)
                 {
                     const auto childError = errno;
                     (void) ::write(errorPipe[1], &childError, sizeof(childError));
                     std::_Exit(126);
                 }
-                if (streams.Value().outputRead >= 0)
+                if (streams.value().outputRead >= 0)
                 {
-                    ::close(streams.Value().outputRead);
+                    ::close(streams.value().outputRead);
                 }
-                if (streams.Value().errorRead >= 0)
+                if (streams.value().errorRead >= 0)
                 {
-                    ::close(streams.Value().errorRead);
+                    ::close(streams.value().errorRead);
                 }
-                for (const int descriptor: streams.Value().ownedChildDescriptors)
+                for (const int descriptor: streams.value().ownedChildDescriptors)
                 {
                     if (descriptor > STDERR_FILENO)
                     {
@@ -1192,28 +1192,28 @@ namespace NGIN::IO
                         "failed to start child process"));
             }
 
-            if (streams.Value().outputRead >= 0)
+            if (streams.value().outputRead >= 0)
             {
                 (void) ::fcntl(
-                        streams.Value().outputRead,
+                        streams.value().outputRead,
                         F_SETFL,
-                        ::fcntl(streams.Value().outputRead, F_GETFL) | O_NONBLOCK);
+                        ::fcntl(streams.value().outputRead, F_GETFL) | O_NONBLOCK);
             }
-            if (streams.Value().errorRead >= 0)
+            if (streams.value().errorRead >= 0)
             {
                 (void) ::fcntl(
-                        streams.Value().errorRead,
+                        streams.value().errorRead,
                         F_SETFL,
-                        ::fcntl(streams.Value().errorRead, F_GETFL) | O_NONBLOCK);
+                        ::fcntl(streams.value().errorRead, F_GETFL) | O_NONBLOCK);
             }
 
             auto implementation                = std::make_unique<Impl>();
             implementation->options            = std::move(options);
             implementation->processId          = processId;
-            implementation->standardOutputRead = streams.Value().outputRead;
-            implementation->standardErrorRead  = streams.Value().errorRead;
-            streams.Value().outputRead         = -1;
-            streams.Value().errorRead          = -1;
+            implementation->standardOutputRead = streams.value().outputRead;
+            implementation->standardErrorRead  = streams.value().errorRead;
+            streams.value().outputRead         = -1;
+            streams.value().errorRead          = -1;
             return ProcessExpected<std::unique_ptr<Impl>> {std::move(implementation)};
         }
 
@@ -1430,11 +1430,11 @@ namespace NGIN::IO
         try
         {
             auto implementation = Impl::Start(std::move(options));
-            if (!implementation.HasValue())
+            if (!implementation.has_value())
             {
-                return UnexpectedProcessError<Process>(std::move(implementation).TakeError());
+                return UnexpectedProcessError<Process>(std::move(implementation).error());
             }
-            return ProcessExpected<Process> {Process {std::move(implementation).TakeValue()}};
+            return ProcessExpected<Process> {Process {std::move(implementation).value()}};
         } catch (const std::bad_alloc&)
         {
             return UnexpectedProcessError<Process>(MakeProcessError(
@@ -1518,11 +1518,11 @@ namespace NGIN::IO
     ProcessExpected<ProcessResult> RunProcess(ProcessOptions options)
     {
         auto process = Process::Start(std::move(options));
-        if (!process.HasValue())
+        if (!process.has_value())
         {
-            return UnexpectedProcessError<ProcessResult>(std::move(process).TakeError());
+            return UnexpectedProcessError<ProcessResult>(std::move(process).error());
         }
-        return process.Value().Wait();
+        return process.value().Wait();
     }
 
     NGIN::Async::Task<ProcessResult, ProcessError>
@@ -1532,8 +1532,8 @@ namespace NGIN::IO
         const auto processCancellation = options.cancellation;
         auto       cancellationProbe   = std::move(options.cancellationProbe);
         options.cancellationProbe      = [contextCancellation,
-                                          processCancellation,
-                                          cancellationProbe = std::move(cancellationProbe)] {
+                                     processCancellation,
+                                     cancellationProbe = std::move(cancellationProbe)] {
             return contextCancellation.IsCancellationRequested() ||
                    processCancellation.IsCancellationRequested() ||
                    (cancellationProbe && cancellationProbe());
@@ -1541,10 +1541,10 @@ namespace NGIN::IO
 
         co_await context.YieldNow();
         auto result = RunProcess(std::move(options));
-        if (!result.HasValue())
+        if (!result.has_value())
         {
-            co_return NGIN::Utilities::Unexpected<ProcessError>(std::move(result).TakeError());
+            co_return NGIN::Utilities::Unexpected<ProcessError>(std::move(result).error());
         }
-        co_return std::move(result).TakeValue();
+        co_return std::move(result).value();
     }
 }// namespace NGIN::IO

@@ -21,3 +21,8 @@ not direct application entry points.
 
 All public contract headers compile independently in
 `NGINBasePublicHeaderChecks`.
+
+`Exception` stores its stack trace at construction time when
+`NGIN_BASE_CAPTURE_EXCEPTION_STACKTRACE=ON`. The option defaults to `OFF`
+because stack-trace capture may allocate and increase exception-construction
+latency; with capture disabled, `GetStacktrace()` returns an empty trace.

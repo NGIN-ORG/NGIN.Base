@@ -73,38 +73,47 @@ namespace NGIN::Memory
     template<class A>
     concept AllocatorConcept =
             requires(A a, std::size_t n, std::size_t align, void* p) {
-                { a.Allocate(n, align) } -> std::same_as<void*>;
+                { a.Allocate(n, align) } noexcept -> std::same_as<void*>;
                 { a.Deallocate(p, n, align) } noexcept;
             };
 
-    /// @brief Detects allocators that can report whether they own a pointer.
-    /// @details A positive result enables safe deallocation routing in composite
-    /// allocators. Absence of this capability is treated as unknown ownership.
+    /// @brief Detects allocators that return a tri-state pointer-ownership result.
+    /// @details Absence of this capability is treated as unknown ownership.
     template<class A>
-    concept AllocatorOwnsPointer =
+    concept AllocatorReportsOwnership =
             requires(const A a, const void* p) {
-                { a.Owns(p) } -> std::convertible_to<bool>;
+                { a.OwnershipOf(p) } noexcept -> std::same_as<Ownership>;
             };
+
+    /// @brief Detects allocators whose ownership query always returns a definitive answer.
+    /// @details Composite routing requires this stronger capability. An allocator
+    /// such as `SystemAllocator` can expose `OwnershipOf()` while deliberately
+    /// declining to claim precise ownership.
+    template<class A>
+    concept AllocatorReportsPreciseOwnership =
+            AllocatorReportsOwnership<A> && requires {
+                { A::HasPreciseOwnership } -> std::convertible_to<bool>;
+            } && A::HasPreciseOwnership;
 
     /// @brief Detects allocators that expose an upper bound for allocation size.
     template<class A>
     concept AllocatorReportsMaxSize =
             requires(const A a) {
-                { a.MaxSize() } -> std::same_as<std::size_t>;
+                { a.MaxSize() } noexcept -> std::same_as<std::size_t>;
             };
 
     /// @brief Detects allocators that can report currently available bytes.
     template<class A>
     concept AllocatorReportsRemainingBytes =
             requires(const A a) {
-                { a.Remaining() } -> std::same_as<std::size_t>;
+                { a.Remaining() } noexcept -> std::same_as<std::size_t>;
             };
 
     /// @brief Detects allocators that return rich allocation metadata from AllocateEx.
     template<class A>
     concept ExtendedAllocatorConcept =
             requires(A a, std::size_t n, std::size_t align) {
-                { a.AllocateEx(n, align) } -> std::same_as<MemoryBlock>;
+                { a.AllocateEx(n, align) } noexcept -> std::same_as<MemoryBlock>;
             };
 
     /// @brief Capability adapter for allocator implementations.
@@ -114,8 +123,10 @@ namespace NGIN::Memory
     template<class A>
     struct AllocatorTraits
     {
-        /// @brief True when @p A provides @c Owns(const void*).
-        static constexpr bool HasOwnsPointerCapability = AllocatorOwnsPointer<A>;
+        /// @brief True when @p A provides a tri-state ownership query.
+        static constexpr bool HasOwnershipCapability = AllocatorReportsOwnership<A>;
+        /// @brief True when @p A guarantees that ownership queries are definitive.
+        static constexpr bool HasPreciseOwnershipCapability = AllocatorReportsPreciseOwnership<A>;
         /// @brief True when @p A provides @c MaxSize().
         static constexpr bool HasMaxSizeCapability = AllocatorReportsMaxSize<A>;
         /// @brief True when @p A provides @c Remaining().
@@ -160,22 +171,14 @@ namespace NGIN::Memory
         /// routing decisions.
         static Ownership OwnershipOf(const A& allocator, const void* pointer) noexcept
         {
-            if constexpr (HasOwnsPointerCapability)
+            if constexpr (HasOwnershipCapability)
             {
-                return allocator.Owns(pointer) ? Ownership::Owns : Ownership::DoesNotOwn;
+                return allocator.OwnershipOf(pointer);
             }
             else
             {
                 return Ownership::Unknown;
             }
-        }
-
-        /// @brief Returns true only when the allocator positively reports ownership.
-        /// @details Unknown ownership maps to false, making this safe for boolean routing
-        /// checks that must avoid accidental deallocation through the wrong allocator.
-        static bool Owns(const A& allocator, const void* pointer) noexcept
-        {
-            return OwnershipOf(allocator, pointer) == Ownership::Owns;
         }
 
         /// @brief Allocates memory and returns a MemoryBlock regardless of allocator richness.

@@ -15,14 +15,15 @@ namespace NGIN::Async
     /// @brief Categorizes runtime failures that are outside a task's typed error domain.
     enum class AsyncFaultCode : NGIN::UInt16
     {
-        None = 0,                  ///< No runtime failure occurred.
-        InvalidTaskUsage,          ///< A task or operation was consumed in an invalid state.
-        InvalidContinuationState,  ///< A coroutine continuation violated task ownership rules.
-        SchedulerDispatchFailed,   ///< The scheduler could not dispatch task work.
-        ContinuationDispatchFailed,///< A completed task could not dispatch its continuation.
-        RuntimeInvariantViolation, ///< An internal asynchronous runtime invariant was violated.
-        UnhandledException,        ///< User code allowed an exception to escape a coroutine.
-        UnknownRuntimeFailure,     ///< A runtime failure could not be classified more precisely.
+        None = 0,                      ///< No runtime failure occurred.
+        InvalidTaskUsage,              ///< A task or operation was consumed in an invalid state.
+        InvalidContinuationState,      ///< A coroutine continuation violated task ownership rules.
+        SchedulerDispatchFailed,       ///< The scheduler could not dispatch task work.
+        ContinuationDispatchFailed,    ///< A completed task could not dispatch its continuation.
+        CancellationRegistrationFailed,///< Cancellation callback state could not be registered.
+        RuntimeInvariantViolation,     ///< An internal asynchronous runtime invariant was violated.
+        UnhandledException,            ///< User code allowed an exception to escape a coroutine.
+        UnknownRuntimeFailure,         ///< A runtime failure could not be classified more precisely.
     };
 
     /// @brief Describes an asynchronous runtime failure independently of domain errors and cancellation.

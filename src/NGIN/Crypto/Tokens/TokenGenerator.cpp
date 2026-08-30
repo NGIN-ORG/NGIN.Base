@@ -26,11 +26,11 @@ namespace NGIN::Crypto::Tokens
         {
             if (byteLength == 0)
             {
-                return InvalidArgument();
+                return std::unexpected(InvalidArgument());
             }
             if (byteLength < minimumEntropyBytes)
             {
-                return PolicyRejected();
+                return std::unexpected(PolicyRejected());
             }
 
             return {};
@@ -43,16 +43,16 @@ namespace NGIN::Crypto::Tokens
             NGIN::UIntSize                              minimumEntropyBytes)
     {
         auto valid = ValidateTokenSize(byteLength, minimumEntropyBytes);
-        if (!valid.HasValue())
+        if (!valid.has_value())
         {
-            return valid.Error();
+            return std::unexpected(std::move(valid).error());
         }
 
         auto output = MakeByteBuffer(byteLength);
         auto random = context.FillRandom(ByteSpan {output.data(), output.Size()});
-        if (!random.HasValue())
+        if (!random.has_value())
         {
-            return random.Error();
+            return std::unexpected(std::move(random).error());
         }
 
         return output;
@@ -70,7 +70,7 @@ namespace NGIN::Crypto::Tokens
                 return GenerateHex(context, options);
         }
 
-        return InvalidArgument();
+        return std::unexpected(InvalidArgument());
     }
 
     CryptoExpected<SecureToken> GenerateHex(
@@ -78,18 +78,18 @@ namespace NGIN::Crypto::Tokens
             const TokenOptions&                         options)
     {
         auto bytes = GenerateBytes(context, options.byteLength, options.minimumEntropyBytes);
-        if (!bytes.HasValue())
+        if (!bytes.has_value())
         {
-            return bytes.Error();
+            return std::unexpected(std::move(bytes).error());
         }
 
-        auto encoded = NGIN::Crypto::Encoding::EncodeHex(ConstByteSpan {bytes.Value().data(), bytes.Value().Size()});
-        if (!encoded.HasValue())
+        auto encoded = NGIN::Crypto::Encoding::EncodeHex(ConstByteSpan {bytes.value().data(), bytes.value().Size()});
+        if (!encoded.has_value())
         {
-            return encoded.Error();
+            return std::unexpected(std::move(encoded).error());
         }
 
-        return SecureToken {std::move(encoded.Value())};
+        return SecureToken {std::move(encoded.value())};
     }
 
     CryptoExpected<SecureToken> GenerateBase64Url(
@@ -97,17 +97,17 @@ namespace NGIN::Crypto::Tokens
             const TokenOptions&                         options)
     {
         auto bytes = GenerateBytes(context, options.byteLength, options.minimumEntropyBytes);
-        if (!bytes.HasValue())
+        if (!bytes.has_value())
         {
-            return bytes.Error();
+            return std::unexpected(std::move(bytes).error());
         }
 
-        auto encoded = NGIN::Crypto::Encoding::EncodeBase64Url(ConstByteSpan {bytes.Value().data(), bytes.Value().Size()});
-        if (!encoded.HasValue())
+        auto encoded = NGIN::Crypto::Encoding::EncodeBase64Url(ConstByteSpan {bytes.value().data(), bytes.value().Size()});
+        if (!encoded.has_value())
         {
-            return encoded.Error();
+            return std::unexpected(std::move(encoded).error());
         }
 
-        return SecureToken {std::move(encoded.Value())};
+        return SecureToken {std::move(encoded.value())};
     }
 }// namespace NGIN::Crypto::Tokens

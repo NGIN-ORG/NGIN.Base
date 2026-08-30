@@ -57,8 +57,8 @@ TEST_CASE("FixedSecret Generate fills fixed-size secret bytes", "[Crypto][Secret
 
     auto key = Key::Generate();
 
-    REQUIRE(key.HasValue());
-    REQUIRE(key.Value().Bytes().size() == 16);
+    REQUIRE(key.has_value());
+    REQUIRE(key.value().Bytes().size() == 16);
 }
 
 TEST_CASE("DynamicSecret names secure dynamic byte storage", "[Crypto][Secret]")

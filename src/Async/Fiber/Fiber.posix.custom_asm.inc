@@ -35,36 +35,40 @@ namespace NGIN::Execution::detail
 #endif
 
 #if NGIN_EXECUTION_DETAIL_HAS_ASAN
-        extern "C"
-        {
-            void __sanitizer_start_switch_fiber(void** fakeStackSave, const void* stackBottom, std::size_t stackSize);
-            void __sanitizer_finish_switch_fiber(void* fakeStackSave, const void** oldStackBottom, std::size_t* oldStackSize);
+        extern "C" {
+        void __sanitizer_start_switch_fiber(void** fakeStackSave, const void* stackBottom, std::size_t stackSize);
+        void __sanitizer_finish_switch_fiber(void* fakeStackSave, const void** oldStackBottom, std::size_t* oldStackSize);
         }
 #endif
     }// namespace
 
     struct FiberState
     {
-        FiberContext                      context {};
-        FiberContext*                     callerContext {nullptr};
+        FiberContext                          context {};
+        FiberContext*                         callerContext {nullptr};
         NGIN::Execution::ThisThread::ThreadId ownerThreadId {0};
-        NGIN::Execution::FiberAllocatorRef allocator {};
-        Fiber::Job                        job {};
-        Byte*                             stackAllocationBase {nullptr};
-        UIntSize                          stackAllocationSize {0};
-        Byte*                             stackBase {nullptr};
-        UIntSize                          stackSize {Fiber::DEFAULT_STACK_SIZE};
-        UIntSize                          stackAlignment {16};
-        std::exception_ptr                exception;
-        bool                              running = false;
-        bool                              stackUsesMmap = false;
-        void*                             asanFakeStack {nullptr};
+        NGIN::Execution::FiberAllocatorRef    allocator {};
+        Fiber::Job                            job {};
+        Byte*                                 stackAllocationBase {nullptr};
+        UIntSize                              stackAllocationSize {0};
+        Byte*                                 stackBase {nullptr};
+        UIntSize                              stackSize {Fiber::DEFAULT_STACK_SIZE};
+        UIntSize                              stackAlignment {16};
+        std::exception_ptr                    exception;
+        bool                                  running       = false;
+        bool                                  stackUsesMmap = false;
+        void*                                 asanFakeStack {nullptr};
     };
 
     namespace
     {
-        thread_local FiberState* currentFiber = nullptr;
+        thread_local FiberState* currentFiber           = nullptr;
         thread_local bool        mainContextInitialized = false;
+#if NGIN_EXECUTION_DETAIL_HAS_ASAN
+        // ASan associates a fake stack with every suspended stack context. The
+        // native thread stack needs storage just like each FiberState does.
+        thread_local void* mainAsanFakeStack = nullptr;
+#endif
 
         constexpr UIntSize AlignUp(UIntSize value, UIntSize alignment) noexcept
         {
@@ -91,6 +95,14 @@ namespace NGIN::Execution::detail
 
         [[noreturn]] void FiberTrampoline()
         {
+#if NGIN_EXECUTION_DETAIL_HAS_ASAN
+            // The first context switch cannot finish in ResumeFiber because it
+            // has not returned there yet. Complete it on the new fiber stack
+            // before this fiber can initiate a yield.
+            const void* oldBottom = nullptr;
+            std::size_t oldSize   = 0;
+            __sanitizer_finish_switch_fiber(currentFiber->asanFakeStack, &oldBottom, &oldSize);
+#endif
             for (;;)
             {
                 if (currentFiber == nullptr)
@@ -152,7 +164,7 @@ namespace NGIN::Execution::detail
 
         [[noreturn]] void ThrowErrno(const char* message)
         {
-            (void)message;
+            (void) message;
             std::terminate();
         }
     }// namespace
@@ -172,20 +184,20 @@ namespace NGIN::Execution::detail
             std::terminate();
         }
 
-        auto* state = ::new (stateMem) FiberState {};
-        state->allocator     = options.allocator;
-        state->ownerThreadId = NGIN::Execution::ThisThread::GetId();
-        state->stackSize     = options.stackSize == 0 ? Fiber::DEFAULT_STACK_SIZE : options.stackSize;
+        auto* state           = ::new (stateMem) FiberState {};
+        state->allocator      = options.allocator;
+        state->ownerThreadId  = NGIN::Execution::ThisThread::GetId();
+        state->stackSize      = options.stackSize == 0 ? Fiber::DEFAULT_STACK_SIZE : options.stackSize;
         state->stackAlignment = 16;
 
         if (options.guardPages)
         {
-            auto pageSize = static_cast<long>(::sysconf(_SC_PAGESIZE));
-            UIntSize page = pageSize > 0 ? static_cast<UIntSize>(pageSize) : 4096uz;
+            auto     pageSize = static_cast<long>(::sysconf(_SC_PAGESIZE));
+            UIntSize page     = pageSize > 0 ? static_cast<UIntSize>(pageSize) : 4096uz;
 
-            UIntSize guardSize = options.guardSize != 0 ? options.guardSize : page;
-            guardSize          = AlignUp(guardSize, page);
-            state->stackSize   = AlignUp(state->stackSize, page);
+            UIntSize guardSize       = options.guardSize != 0 ? options.guardSize : page;
+            guardSize                = AlignUp(guardSize, page);
+            state->stackSize         = AlignUp(state->stackSize, page);
             const UIntSize totalSize = guardSize + state->stackSize;
 
             int mmapFlags = MAP_PRIVATE;
@@ -237,10 +249,10 @@ namespace NGIN::Execution::detail
         auto rsp = AlignDown(stackTop, 16);
         rsp -= 8;
         *reinterpret_cast<std::uintptr_t*>(rsp) = reinterpret_cast<std::uintptr_t>(&FiberTrampolineReturn);
-        state->context.rsp = static_cast<std::uint64_t>(rsp);
-        state->context.rip = reinterpret_cast<std::uint64_t>(&FiberTrampoline);
+        state->context.rsp                      = static_cast<std::uint64_t>(rsp);
+        state->context.rip                      = reinterpret_cast<std::uint64_t>(&FiberTrampoline);
 #elif defined(__aarch64__)
-        auto sp = AlignDown(stackTop, 16);
+        auto sp            = AlignDown(stackTop, 16);
         state->context.sp  = static_cast<std::uint64_t>(sp);
         state->context.pc  = reinterpret_cast<std::uint64_t>(&FiberTrampoline);
         state->context.x30 = reinterpret_cast<std::uint64_t>(&FiberTrampolineReturn);
@@ -315,11 +327,13 @@ namespace NGIN::Execution::detail
         FiberContext caller {};
         state->callerContext = &caller;
 #if NGIN_EXECUTION_DETAIL_HAS_ASAN
-        const void*   oldBottom = nullptr;
-        std::size_t   oldSize   = 0;
-        __sanitizer_start_switch_fiber(&state->asanFakeStack, state->stackBase, static_cast<std::size_t>(state->stackSize));
+        void** callerFakeStack = previousFiber != nullptr ? &previousFiber->asanFakeStack : &mainAsanFakeStack;
+        __sanitizer_start_switch_fiber(
+                callerFakeStack, state->stackBase, static_cast<std::size_t>(state->stackSize));
         NGIN_FiberContextSwitch(&caller, &state->context);
-        __sanitizer_finish_switch_fiber(state->asanFakeStack, &oldBottom, &oldSize);
+        const void* oldBottom = nullptr;
+        std::size_t oldSize   = 0;
+        __sanitizer_finish_switch_fiber(*callerFakeStack, &oldBottom, &oldSize);
 #else
         NGIN_FiberContextSwitch(&caller, &state->context);
 #endif
@@ -359,8 +373,8 @@ namespace NGIN::Execution::detail
         }
 
 #if NGIN_EXECUTION_DETAIL_HAS_ASAN
-        const void*   oldBottom = nullptr;
-        std::size_t   oldSize   = 0;
+        const void* oldBottom = nullptr;
+        std::size_t oldSize   = 0;
         __sanitizer_start_switch_fiber(&currentFiber->asanFakeStack, nullptr, 0);
         NGIN_FiberContextSwitch(&currentFiber->context, currentFiber->callerContext);
         __sanitizer_finish_switch_fiber(currentFiber->asanFakeStack, &oldBottom, &oldSize);

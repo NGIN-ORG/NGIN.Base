@@ -38,8 +38,8 @@ namespace
     [[nodiscard]] NGIN::Crypto::ByteBuffer DecodeHex(std::string_view text)
     {
         auto decoded = NGIN::Crypto::Encoding::DecodeHex(text);
-        REQUIRE(decoded.HasValue());
-        return decoded.Value();
+        REQUIRE(decoded.has_value());
+        return decoded.value();
     }
 
     [[nodiscard]] NGIN::Crypto::ConstByteSpan Bytes(std::string_view text) noexcept
@@ -76,7 +76,7 @@ TEST_CASE("KeyDerivationParameters tags HKDF algorithms", "[Crypto][Kdf]")
 TEST_CASE("DeriveKeyInto rejects empty output", "[Crypto][Kdf]")
 {
     auto context = NGIN::Crypto::Backend::CreateContext();
-    REQUIRE(context.HasValue());
+    REQUIRE(context.has_value());
 
     NGIN::Crypto::Kdf::HkdfParameters hkdf {
             .inputKeyMaterial = TestSecret(),
@@ -84,16 +84,16 @@ TEST_CASE("DeriveKeyInto rejects empty output", "[Crypto][Kdf]")
             .info             = NGIN::Crypto::ConstByteSpan {},
     };
 
-    auto result = NGIN::Crypto::Kdf::HkdfSha256Into(context.Value(), hkdf, NGIN::Crypto::ByteSpan {});
+    auto result = NGIN::Crypto::Kdf::HkdfSha256Into(context.value(), hkdf, NGIN::Crypto::ByteSpan {});
 
-    REQUIRE_FALSE(result.HasValue());
-    REQUIRE(result.Error().Code() == NGIN::Crypto::CryptoErrorCode::OutputBufferTooSmall);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().Code() == NGIN::Crypto::CryptoErrorCode::OutputBufferTooSmall);
 }
 
 TEST_CASE("DeriveKeyInto rejects invalid PBKDF2 parameters", "[Crypto][Kdf]")
 {
     auto context = NGIN::Crypto::Backend::CreateContext();
-    REQUIRE(context.HasValue());
+    REQUIRE(context.has_value());
 
     NGIN::Crypto::Kdf::Pbkdf2Parameters pbkdf2 {
             .password   = TestSecret(),
@@ -102,16 +102,16 @@ TEST_CASE("DeriveKeyInto rejects invalid PBKDF2 parameters", "[Crypto][Kdf]")
     };
     std::array<NGIN::Byte, 16> output {};
 
-    auto result = NGIN::Crypto::Kdf::Pbkdf2Sha256Into(context.Value(), pbkdf2, output);
+    auto result = NGIN::Crypto::Kdf::Pbkdf2Sha256Into(context.value(), pbkdf2, output);
 
-    REQUIRE_FALSE(result.HasValue());
-    REQUIRE(result.Error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidArgument);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidArgument);
 }
 
 TEST_CASE("DeriveKeyInto rejects invalid Argon2id parameters", "[Crypto][Kdf]")
 {
     auto context = NGIN::Crypto::Backend::CreateContext();
-    REQUIRE(context.HasValue());
+    REQUIRE(context.has_value());
 
     NGIN::Crypto::Kdf::Argon2idParameters argon2id {
             .password    = TestSecret(),
@@ -122,10 +122,10 @@ TEST_CASE("DeriveKeyInto rejects invalid Argon2id parameters", "[Crypto][Kdf]")
     };
     std::array<NGIN::Byte, 16> output {};
 
-    auto result = NGIN::Crypto::Kdf::Argon2idInto(context.Value(), argon2id, output);
+    auto result = NGIN::Crypto::Kdf::Argon2idInto(context.value(), argon2id, output);
 
-    REQUIRE_FALSE(result.HasValue());
-    REQUIRE(result.Error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidArgument);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidArgument);
 }
 
 TEST_CASE("DeriveKey returns unsupported algorithm when context lacks capability", "[Crypto][Kdf]")
@@ -146,8 +146,8 @@ TEST_CASE("DeriveKey returns unsupported algorithm when context lacks capability
             NGIN::Crypto::Kdf::KeyDerivationParameters {NGIN::Crypto::KdfAlgorithm::HkdfSha256, hkdf},
             32);
 
-    REQUIRE_FALSE(result.HasValue());
-    REQUIRE(result.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
 }
 
 TEST_CASE("Password hash helpers validate options and unsupported contexts", "[Crypto][Kdf]")
@@ -165,8 +165,8 @@ TEST_CASE("Password hash helpers validate options and unsupported contexts", "[C
                     .iterations  = 2,
                     .parallelism = 1,
             });
-    REQUIRE_FALSE(invalid.HasValue());
-    REQUIRE(invalid.Error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidArgument);
+    REQUIRE_FALSE(invalid.has_value());
+    REQUIRE(invalid.error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidArgument);
 
     auto unsupported = NGIN::Crypto::Kdf::HashPassword(
             context,
@@ -176,15 +176,15 @@ TEST_CASE("Password hash helpers validate options and unsupported contexts", "[C
                     .iterations  = 2,
                     .parallelism = 1,
             });
-    REQUIRE_FALSE(unsupported.HasValue());
-    REQUIRE(unsupported.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+    REQUIRE_FALSE(unsupported.has_value());
+    REQUIRE(unsupported.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
 
     auto verify = NGIN::Crypto::Kdf::VerifyPassword(
             context,
             NGIN::Crypto::Memory::SecretView {Bytes("password")},
             "$argon2id$v=19$m=32768,t=2,p=1$invalid$invalid");
-    REQUIRE_FALSE(verify.HasValue());
-    REQUIRE(verify.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+    REQUIRE_FALSE(verify.has_value());
+    REQUIRE(verify.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
 }
 
 TEST_CASE("KDF one-shot helpers preserve unsupported errors", "[Crypto][Kdf]")
@@ -210,21 +210,21 @@ TEST_CASE("KDF one-shot helpers preserve unsupported errors", "[Crypto][Kdf]")
     auto pbkdf2Bytes  = NGIN::Crypto::Kdf::Pbkdf2Sha256(context, pbkdf2, 32);
     auto pbkdf2Secret = NGIN::Crypto::Kdf::Pbkdf2Sha256Secret<32>(context, pbkdf2);
 
-    REQUIRE_FALSE(hkdfBytes.HasValue());
-    REQUIRE(hkdfBytes.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
-    REQUIRE_FALSE(hkdfSecret.HasValue());
-    REQUIRE(hkdfSecret.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
-    REQUIRE_FALSE(pbkdf2Bytes.HasValue());
-    REQUIRE(pbkdf2Bytes.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
-    REQUIRE_FALSE(pbkdf2Secret.HasValue());
-    REQUIRE(pbkdf2Secret.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+    REQUIRE_FALSE(hkdfBytes.has_value());
+    REQUIRE(hkdfBytes.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+    REQUIRE_FALSE(hkdfSecret.has_value());
+    REQUIRE(hkdfSecret.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+    REQUIRE_FALSE(pbkdf2Bytes.has_value());
+    REQUIRE(pbkdf2Bytes.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+    REQUIRE_FALSE(pbkdf2Secret.has_value());
+    REQUIRE(pbkdf2Secret.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
 }
 
 TEST_CASE("HKDF-SHA256 matches RFC 5869 test vector when backend supports it", "[Crypto][Kdf]")
 {
     auto context = NGIN::Crypto::Backend::CreateContext();
-    REQUIRE(context.HasValue());
-    if (!context.Value().Supports(NGIN::Crypto::KdfAlgorithm::HkdfSha256))
+    REQUIRE(context.has_value());
+    if (!context.value().Supports(NGIN::Crypto::KdfAlgorithm::HkdfSha256))
     {
         return;
     }
@@ -247,34 +247,34 @@ TEST_CASE("HKDF-SHA256 matches RFC 5869 test vector when backend supports it", "
     };
 
     auto output = NGIN::Crypto::Kdf::DeriveKey(
-            context.Value(),
+            context.value(),
             NGIN::Crypto::Kdf::KeyDerivationParameters {NGIN::Crypto::KdfAlgorithm::HkdfSha256, hkdf},
             expected.Size());
 
-    REQUIRE(output.HasValue());
+    REQUIRE(output.has_value());
     RequireBytesEqual(
-            NGIN::Crypto::ConstByteSpan {output.Value().data(), output.Value().Size()},
+            NGIN::Crypto::ConstByteSpan {output.value().data(), output.value().Size()},
             NGIN::Crypto::ConstByteSpan {expected.data(), expected.Size()});
 
-    auto oneShot = NGIN::Crypto::Kdf::HkdfSha256(context.Value(), hkdf, expected.Size());
-    REQUIRE(oneShot.HasValue());
+    auto oneShot = NGIN::Crypto::Kdf::HkdfSha256(context.value(), hkdf, expected.Size());
+    REQUIRE(oneShot.has_value());
     RequireBytesEqual(
-            NGIN::Crypto::ConstByteSpan {oneShot.Value().data(), oneShot.Value().Size()},
+            NGIN::Crypto::ConstByteSpan {oneShot.value().data(), oneShot.value().Size()},
             NGIN::Crypto::ConstByteSpan {expected.data(), expected.Size()});
 
-    auto secret = NGIN::Crypto::Kdf::HkdfSha256Secret<42>(context.Value(), hkdf);
-    REQUIRE(secret.HasValue());
+    auto secret = NGIN::Crypto::Kdf::HkdfSha256Secret<42>(context.value(), hkdf);
+    REQUIRE(secret.has_value());
     RequireBytesEqual(
-            secret.Value().Bytes(),
+            secret.value().Bytes(),
             NGIN::Crypto::ConstByteSpan {expected.data(), expected.Size()});
 }
 
 TEST_CASE("PBKDF2-HMAC-SHA256 and SHA512 match known-answer vectors when backend supports them", "[Crypto][Kdf]")
 {
     auto context = NGIN::Crypto::Backend::CreateContext();
-    REQUIRE(context.HasValue());
-    if (!context.Value().Supports(NGIN::Crypto::KdfAlgorithm::Pbkdf2Sha256) ||
-        !context.Value().Supports(NGIN::Crypto::KdfAlgorithm::Pbkdf2Sha512))
+    REQUIRE(context.has_value());
+    if (!context.value().Supports(NGIN::Crypto::KdfAlgorithm::Pbkdf2Sha256) ||
+        !context.value().Supports(NGIN::Crypto::KdfAlgorithm::Pbkdf2Sha512))
     {
         return;
     }
@@ -293,31 +293,31 @@ TEST_CASE("PBKDF2-HMAC-SHA256 and SHA512 match known-answer vectors when backend
     };
 
     auto sha256Output = NGIN::Crypto::Kdf::DeriveKey(
-            context.Value(),
+            context.value(),
             NGIN::Crypto::Kdf::KeyDerivationParameters {NGIN::Crypto::KdfAlgorithm::Pbkdf2Sha256, parameters},
             expectedSha256.Size());
     auto sha512Output = NGIN::Crypto::Kdf::DeriveKey(
-            context.Value(),
+            context.value(),
             NGIN::Crypto::Kdf::KeyDerivationParameters {NGIN::Crypto::KdfAlgorithm::Pbkdf2Sha512, parameters},
             expectedSha512.Size());
-    auto sha256OneShot = NGIN::Crypto::Kdf::Pbkdf2Sha256(context.Value(), parameters, expectedSha256.Size());
-    auto sha512Secret  = NGIN::Crypto::Kdf::Pbkdf2Sha512Secret<64>(context.Value(), parameters);
+    auto sha256OneShot = NGIN::Crypto::Kdf::Pbkdf2Sha256(context.value(), parameters, expectedSha256.Size());
+    auto sha512Secret  = NGIN::Crypto::Kdf::Pbkdf2Sha512Secret<64>(context.value(), parameters);
 
-    REQUIRE(sha256Output.HasValue());
-    REQUIRE(sha512Output.HasValue());
-    REQUIRE(sha256OneShot.HasValue());
-    REQUIRE(sha512Secret.HasValue());
+    REQUIRE(sha256Output.has_value());
+    REQUIRE(sha512Output.has_value());
+    REQUIRE(sha256OneShot.has_value());
+    REQUIRE(sha512Secret.has_value());
     RequireBytesEqual(
-            NGIN::Crypto::ConstByteSpan {sha256Output.Value().data(), sha256Output.Value().Size()},
+            NGIN::Crypto::ConstByteSpan {sha256Output.value().data(), sha256Output.value().Size()},
             NGIN::Crypto::ConstByteSpan {expectedSha256.data(), expectedSha256.Size()});
     RequireBytesEqual(
-            NGIN::Crypto::ConstByteSpan {sha512Output.Value().data(), sha512Output.Value().Size()},
+            NGIN::Crypto::ConstByteSpan {sha512Output.value().data(), sha512Output.value().Size()},
             NGIN::Crypto::ConstByteSpan {expectedSha512.data(), expectedSha512.Size()});
     RequireBytesEqual(
-            NGIN::Crypto::ConstByteSpan {sha256OneShot.Value().data(), sha256OneShot.Value().Size()},
+            NGIN::Crypto::ConstByteSpan {sha256OneShot.value().data(), sha256OneShot.value().Size()},
             NGIN::Crypto::ConstByteSpan {expectedSha256.data(), expectedSha256.Size()});
     RequireBytesEqual(
-            sha512Secret.Value().Bytes(),
+            sha512Secret.value().Bytes(),
             NGIN::Crypto::ConstByteSpan {expectedSha512.data(), expectedSha512.Size()});
 }
 
@@ -340,8 +340,8 @@ TEST_CASE("KDF contract does not fake implementation even if capability is manua
             context,
             NGIN::Crypto::Kdf::KeyDerivationParameters {NGIN::Crypto::KdfAlgorithm::HkdfSha256, hkdf});
 
-    REQUIRE_FALSE(result.HasValue());
-    REQUIRE(result.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
 
     auto passwordHash = NGIN::Crypto::Kdf::HashPassword(
             context,
@@ -351,14 +351,14 @@ TEST_CASE("KDF contract does not fake implementation even if capability is manua
                     .iterations  = 2,
                     .parallelism = 1,
             });
-    REQUIRE_FALSE(passwordHash.HasValue());
-    REQUIRE(passwordHash.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+    REQUIRE_FALSE(passwordHash.has_value());
+    REQUIRE(passwordHash.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
 }
 
 TEST_CASE("Password hash strings use libsodium Argon2id when provider supports it", "[Crypto][Kdf]")
 {
     auto context = NGIN::Crypto::Backend::CreatePackageContext("libsodium");
-    if (!context.HasValue())
+    if (!context.has_value())
     {
         return;
     }
@@ -370,40 +370,40 @@ TEST_CASE("Password hash strings use libsodium Argon2id when provider supports i
     };
 
     auto password = NGIN::Crypto::Memory::SecretView {Bytes("correct horse battery staple")};
-    auto hash     = NGIN::Crypto::Kdf::HashPassword(context.Value(), password, options);
-    REQUIRE(hash.HasValue());
-    REQUIRE_FALSE(hash.Value().Empty());
-    REQUIRE(hash.Value().Value().starts_with("$argon2id$"));
+    auto hash     = NGIN::Crypto::Kdf::HashPassword(context.value(), password, options);
+    REQUIRE(hash.has_value());
+    REQUIRE_FALSE(hash.value().Empty());
+    REQUIRE(hash.value().Value().starts_with("$argon2id$"));
 
-    auto verified = NGIN::Crypto::Kdf::VerifyPassword(context.Value(), password, hash.Value().Value());
-    REQUIRE(verified.HasValue());
+    auto verified = NGIN::Crypto::Kdf::VerifyPassword(context.value(), password, hash.value().Value());
+    REQUIRE(verified.has_value());
 
     auto rejected = NGIN::Crypto::Kdf::VerifyPassword(
-            context.Value(),
+            context.value(),
             NGIN::Crypto::Memory::SecretView {Bytes("wrong password")},
-            hash.Value().Value());
-    REQUIRE_FALSE(rejected.HasValue());
-    REQUIRE(rejected.Error().Code() == NGIN::Crypto::CryptoErrorCode::AuthenticationFailed);
+            hash.value().Value());
+    REQUIRE_FALSE(rejected.has_value());
+    REQUIRE(rejected.error().Code() == NGIN::Crypto::CryptoErrorCode::AuthenticationFailed);
 
-    auto sameCost = NGIN::Crypto::Kdf::PasswordHashNeedsRehash(context.Value(), hash.Value().Value(), options);
-    REQUIRE(sameCost.HasValue());
-    REQUIRE_FALSE(sameCost.Value());
+    auto sameCost = NGIN::Crypto::Kdf::PasswordHashNeedsRehash(context.value(), hash.value().Value(), options);
+    REQUIRE(sameCost.has_value());
+    REQUIRE_FALSE(sameCost.value());
 
     auto strongerCost = NGIN::Crypto::Kdf::PasswordHashNeedsRehash(
-            context.Value(),
-            hash.Value().Value(),
+            context.value(),
+            hash.value().Value(),
             NGIN::Crypto::Kdf::PasswordHashOptions {
                     .memoryKiB   = 32,
                     .iterations  = 3,
                     .parallelism = 1,
             });
-    REQUIRE(strongerCost.HasValue());
-    REQUIRE(strongerCost.Value());
+    REQUIRE(strongerCost.has_value());
+    REQUIRE(strongerCost.value());
 
     auto malformed = NGIN::Crypto::Kdf::VerifyPassword(
-            context.Value(),
+            context.value(),
             password,
             "$pbkdf2$not-an-argon2id-hash");
-    REQUIRE_FALSE(malformed.HasValue());
-    REQUIRE(malformed.Error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
+    REQUIRE_FALSE(malformed.has_value());
+    REQUIRE(malformed.error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
 }

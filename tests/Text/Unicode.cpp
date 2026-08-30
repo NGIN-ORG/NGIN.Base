@@ -59,23 +59,23 @@ TEST_CASE("Unicode conversion policies are explicit", "[Text][Unicode]")
     const std::string invalidUtf8("\xF0\x28\x8C\x28", 4);
 
     const auto strict = ToUtf32(invalidUtf8, ErrorPolicy::Strict);
-    REQUIRE_FALSE(strict.HasValue());
-    CHECK(strict.Error().error == EncodingError::InvalidSequence);
-    CHECK(strict.Error().inputOffset == 0U);
+    REQUIRE_FALSE(strict.has_value());
+    CHECK(strict.error().error == EncodingError::InvalidSequence);
+    CHECK(strict.error().inputOffset == 0U);
 
     const auto replace = ToUtf32(invalidUtf8, ErrorPolicy::Replace);
-    REQUIRE(replace.HasValue());
-    CHECK(replace.Value().Size() == 4U);
-    CHECK(replace.Value()[0] == static_cast<char32_t>(0xFFFD));
-    CHECK(replace.Value()[1] == U'(');
-    CHECK(replace.Value()[2] == static_cast<char32_t>(0xFFFD));
-    CHECK(replace.Value()[3] == U'(');
+    REQUIRE(replace.has_value());
+    CHECK(replace.value().Size() == 4U);
+    CHECK(replace.value()[0] == static_cast<char32_t>(0xFFFD));
+    CHECK(replace.value()[1] == U'(');
+    CHECK(replace.value()[2] == static_cast<char32_t>(0xFFFD));
+    CHECK(replace.value()[3] == U'(');
 
     const auto skip = ToUtf32(invalidUtf8, ErrorPolicy::Skip);
-    REQUIRE(skip.HasValue());
-    CHECK(skip.Value().Size() == 2U);
-    CHECK(skip.Value()[0] == U'(');
-    CHECK(skip.Value()[1] == U'(');
+    REQUIRE(skip.has_value());
+    CHECK(skip.value().Size() == 2U);
+    CHECK(skip.value()[0] == U'(');
+    CHECK(skip.value()[1] == U'(');
 }
 
 TEST_CASE("Unicode round-trips UTF-8 UTF-16 and UTF-32", "[Text][Unicode]")
@@ -85,25 +85,29 @@ TEST_CASE("Unicode round-trips UTF-8 UTF-16 and UTF-32", "[Text][Unicode]")
     const std::string source("Hello \xC3\xA5\xF0\x9F\x98\x80", 12);
 
     const auto utf16 = ToUtf16(source, ErrorPolicy::Strict);
-    REQUIRE(utf16.HasValue());
+    REQUIRE(utf16.has_value());
 
     const auto utf32 = ToUtf32(source, ErrorPolicy::Strict);
-    REQUIRE(utf32.HasValue());
+    REQUIRE(utf32.has_value());
 
-    const auto backToUtf8From16 = ToUtf8(std::u16string_view {utf16.Value().Data(), utf16.Value().Size()}, ErrorPolicy::Strict);
-    REQUIRE(backToUtf8From16.HasValue());
-    CHECK(backToUtf8From16.Value().View() == source);
+    const auto backToUtf8From16 = ToUtf8(std::u16string_view {utf16.value().Data(), utf16.value().Size()}, ErrorPolicy::Strict);
+    REQUIRE(backToUtf8From16.has_value());
+    CHECK(NGIN::Text::AsBytes(backToUtf8From16.value().View()) == source);
 
-    const auto backToUtf8From32 = ToUtf8(std::u32string_view {utf32.Value().Data(), utf32.Value().Size()}, ErrorPolicy::Strict);
-    REQUIRE(backToUtf8From32.HasValue());
-    CHECK(backToUtf8From32.Value().View() == source);
+    const auto backToUtf8From32 = ToUtf8(std::u32string_view {utf32.value().Data(), utf32.value().Size()}, ErrorPolicy::Strict);
+    REQUIRE(backToUtf8From32.has_value());
+    CHECK(NGIN::Text::AsBytes(backToUtf8From32.value().View()) == source);
+
+    const NGIN::Text::UTF8String copied = NGIN::Text::UTF8FromBytes(source);
+    CHECK(NGIN::Text::AsBytes(copied.View()) == source);
+    REQUIRE(ToUtf32(copied.View()).has_value());
 }
 
 TEST_CASE("Unicode UTF-8 view iterates code points and tracks strict errors", "[Text][Unicode]")
 {
     using namespace NGIN::Text::Unicode;
 
-    Utf8View valid(std::string_view("A\xF0\x9F\x98\x80\xC3\xA5", 7));
+    Utf8View               valid(std::string_view("A\xF0\x9F\x98\x80\xC3\xA5", 7));
     std::vector<CodePoint> codePoints;
     for (CodePoint cp: valid)
         codePoints.push_back(cp);
@@ -118,9 +122,9 @@ TEST_CASE("Unicode UTF-8 view iterates code points and tracks strict errors", "[
     CHECK(strictInvalid.HasError());
     CHECK(strictInvalid.GetError().error == EncodingError::UnexpectedEnd);
 
-    const char        invalidWithSuffixBytes[] {static_cast<char>(0xE2), static_cast<char>(0x82), 'A'};
-    const std::string invalidWithSuffix(invalidWithSuffixBytes, sizeof(invalidWithSuffixBytes));
-    Utf8View          replaceInvalid(invalidWithSuffix, ErrorPolicy::Replace);
+    const char             invalidWithSuffixBytes[] {static_cast<char>(0xE2), static_cast<char>(0x82), 'A'};
+    const std::string      invalidWithSuffix(invalidWithSuffixBytes, sizeof(invalidWithSuffixBytes));
+    Utf8View               replaceInvalid(invalidWithSuffix, ErrorPolicy::Replace);
     std::vector<CodePoint> replaced;
     for (CodePoint cp: replaceInvalid)
         replaced.push_back(cp);
@@ -128,7 +132,7 @@ TEST_CASE("Unicode UTF-8 view iterates code points and tracks strict errors", "[
     CHECK(replaced[0] == static_cast<CodePoint>(0xFFFD));
     CHECK(replaced[1] == U'A');
 
-    Utf8View skipInvalid(invalidWithSuffix, ErrorPolicy::Skip);
+    Utf8View               skipInvalid(invalidWithSuffix, ErrorPolicy::Skip);
     std::vector<CodePoint> skipped;
     for (CodePoint cp: skipInvalid)
         skipped.push_back(cp);
@@ -141,8 +145,8 @@ TEST_CASE("Unicode helpers count code points and handle BOMs", "[Text][Unicode]"
     using namespace NGIN::Text::Unicode;
 
     const auto count = CountCodePoints(std::string_view("A\xF0\x9F\x98\x80\xC3\xA5", 7));
-    REQUIRE(count.HasValue());
-    CHECK(count.Value() == 3U);
+    REQUIRE(count.has_value());
+    CHECK(count.value() == 3U);
 
     CHECK(IsAscii("ASCII"));
     CHECK_FALSE(IsAscii(std::string_view("\xC3\xA5", 2)));

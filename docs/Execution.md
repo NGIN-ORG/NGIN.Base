@@ -17,5 +17,11 @@ and no global scheduler or worker pool is created behind the caller's back.
 Cancellation is a terminal async state, distinct from a domain error and from
 an unexpected exception/fault.
 
+Immediate and timed submission return `ScheduleResult`, an
+`std::expected<void, ScheduleError>`. Callers must handle invalid executor
+references, stopped or rejected schedulers, and queue/resource exhaustion.
+Successful submission is trivial and allocation-free; constructing a
+heap-backed `WorkItem` before submission can still allocate.
+
 See [Async](Async.md) for task composition and [Synchronization](Sync.md) for
 cross-thread coordination.

@@ -8,6 +8,7 @@
 
 #include <array>
 #include <cstddef>
+#include <limits>
 #include <type_traits>
 #include <utility>
 
@@ -37,6 +38,8 @@ namespace NGIN::Memory
 
         static constexpr std::size_t                Alignment = alignof(std::max_align_t);
         static constexpr std::array<std::size_t, 6> Sizes {16, 32, 64, 128, 256, 512};
+        static constexpr std::size_t                BytesPerClassSet = 16 + 32 + 64 + 128 + 256 + 512;
+        static_assert(BlocksPerClass <= (std::numeric_limits<std::size_t>::max)() / BytesPerClassSet);
 
         [[nodiscard]] static consteval std::size_t ComputeSlabSize()
         {
@@ -49,6 +52,9 @@ namespace NGIN::Memory
         static constexpr std::size_t SlabSize = ComputeSlabSize();
 
     public:
+        /// @brief Segregated slabs precisely recognize the starts of their blocks.
+        static constexpr bool HasPreciseOwnership = true;
+
         /// @brief Acquires and initializes the combined slab from an upstream allocator.
         explicit SegregatedPoolAllocator(Upstream upstream = {})
             : m_upstream(std::move(upstream))
@@ -65,15 +71,15 @@ namespace NGIN::Memory
         auto operator=(const SegregatedPoolAllocator&) -> SegregatedPoolAllocator& = delete;
 
         /// @brief Transfers slab ownership from another allocator.
-        SegregatedPoolAllocator(SegregatedPoolAllocator&& other) noexcept
-            requires std::is_nothrow_move_constructible_v<Upstream>
+        SegregatedPoolAllocator(SegregatedPoolAllocator&& other) noexcept(
+                std::is_nothrow_move_constructible_v<Upstream>)
             : m_upstream(std::move(other.m_upstream)), m_base(std::exchange(other.m_base, nullptr)), m_classes(std::move(other.m_classes)), m_invalidDeallocations(std::exchange(other.m_invalidDeallocations, 0))
         {
         }
 
         /// @brief Releases the current slab and transfers ownership from another allocator.
-        auto operator=(SegregatedPoolAllocator&& other) noexcept -> SegregatedPoolAllocator&
-            requires std::is_nothrow_move_assignable_v<Upstream>
+        auto operator=(SegregatedPoolAllocator&& other) noexcept(std::is_nothrow_move_assignable_v<Upstream>)
+                -> SegregatedPoolAllocator&
         {
             if (this != &other)
             {
@@ -153,10 +159,10 @@ namespace NGIN::Memory
             return {pointer, state ? state->blockSize : bytes, Alignment};
         }
 
-        /// @brief Returns whether a pointer is the start of a block in any size class.
-        [[nodiscard]] bool Owns(const void* pointer) const noexcept
+        /// @brief Classifies whether a pointer is the start of a block in any size class.
+        [[nodiscard]] Ownership OwnershipOf(const void* pointer) const noexcept
         {
-            return ClassForPointer(pointer) != nullptr;
+            return ClassForPointer(pointer) ? Ownership::Owns : Ownership::DoesNotOwn;
         }
 
         /// @brief Returns the largest request served by the allocator.

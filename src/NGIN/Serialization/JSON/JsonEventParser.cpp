@@ -644,14 +644,14 @@ namespace NGIN::Serialization::JSON::detail
                     }
                     auto key = ParseString(context);
                     if (!key)
-                        return Failure<void>(std::move(key.Error()));
+                        return Failure<void>(std::move(key.error()));
 
                     const SeenKey* duplicate = nullptr;
                     if (context.options.duplicateKeys != DuplicateKeyPolicy::Preserve)
                     {
                         const auto found = std::find_if(
                                 keys.begin(), keys.end(), [&](const SeenKey& candidate) {
-                                    return candidate.value == key.Value().value;
+                                    return candidate.value == key.value().value;
                                 });
                         if (found != keys.end())
                             duplicate = &*found;
@@ -663,8 +663,8 @@ namespace NGIN::Serialization::JSON::detail
                                 context,
                                 ParseErrorCode::DuplicateName,
                                 "Duplicate JSON object key",
-                                key.Value().span.begin,
-                                key.Value().span.end);
+                                key.value().span.begin,
+                                key.value().span.end);
                         error.related = duplicate->span;
                         return Failure<void>(std::move(error));
                     }
@@ -680,8 +680,8 @@ namespace NGIN::Serialization::JSON::detail
                                     context,
                                     ParseErrorCode::LimitExceeded,
                                     "JSON object member limit exceeded",
-                                    key.Value().span.begin,
-                                    key.Value().span.end));
+                                    key.value().span.begin,
+                                    key.value().span.end));
                         }
                         ++context.memberCount;
                         if (context.options.duplicateKeys != DuplicateKeyPolicy::Preserve)
@@ -689,8 +689,8 @@ namespace NGIN::Serialization::JSON::detail
                             try
                             {
                                 keys.push_back(SeenKey {
-                                        .value = key.Value().value,
-                                        .span  = key.Value().span,
+                                        .value = key.value().value,
+                                        .span  = key.value().span,
                                 });
                             } catch (const std::bad_alloc&)
                             {
@@ -698,8 +698,8 @@ namespace NGIN::Serialization::JSON::detail
                                         context,
                                         ParseErrorCode::OutOfMemory,
                                         "JSON event key tracking allocation failed",
-                                        key.Value().span.begin,
-                                        key.Value().span.end));
+                                        key.value().span.begin,
+                                        key.value().span.end));
                             }
                         }
                     }
@@ -720,8 +720,8 @@ namespace NGIN::Serialization::JSON::detail
                             context,
                             Event {
                                     .kind = EventKind::Key,
-                                    .span = key.Value().span,
-                                    .text = key.Value().value,
+                                    .span = key.value().span,
+                                    .text = key.value().value,
                             },
                             emit && keepMember);
                     if (!keyResult)
@@ -945,13 +945,13 @@ namespace NGIN::Serialization::JSON::detail
                     return counted;
                 auto string = ParseString(context);
                 if (!string)
-                    return Failure<void>(std::move(string.Error()));
+                    return Failure<void>(std::move(string.error()));
                 return Deliver(
                         context,
                         Event {
                                 .kind = EventKind::String,
-                                .span = string.Value().span,
-                                .text = string.Value().value,
+                                .span = string.value().span,
+                                .text = string.value().value,
                         },
                         emit);
             }

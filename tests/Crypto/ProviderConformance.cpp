@@ -68,8 +68,8 @@ namespace
         }
 
         auto decoded = NGIN::Crypto::Encoding::DecodeHex(text);
-        REQUIRE(decoded.HasValue());
-        return decoded.Value();
+        REQUIRE(decoded.has_value());
+        return decoded.value();
     }
 
     template<NGIN::UIntSize Size>
@@ -125,8 +125,8 @@ namespace
 
         constexpr std::string_view MESSAGE {"unsupported"};
         auto                       result = NGIN::Crypto::Hashing::Hash(context, algorithm, Bytes(MESSAGE));
-        REQUIRE_FALSE(result.HasValue());
-        REQUIRE(result.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
     }
 
     void RequireUnsupportedMac(const NGIN::Crypto::Backend::CryptoContext& context, NGIN::Crypto::MacAlgorithm algorithm)
@@ -142,8 +142,8 @@ namespace
                 algorithm,
                 NGIN::Crypto::Memory::SecretView {Bytes(key)},
                 Bytes("unsupported"));
-        REQUIRE_FALSE(result.HasValue());
-        REQUIRE(result.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
     }
 
     void RequireUnsupportedKdf(const NGIN::Crypto::Backend::CryptoContext& context, NGIN::Crypto::KdfAlgorithm algorithm)
@@ -182,8 +182,8 @@ namespace
                         context,
                         NGIN::Crypto::Kdf::KeyDerivationParameters {algorithm, hkdf},
                         32);
-                REQUIRE_FALSE(result.HasValue());
-                REQUIRE(result.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+                REQUIRE_FALSE(result.has_value());
+                REQUIRE(result.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
                 return;
             }
             case NGIN::Crypto::KdfAlgorithm::Pbkdf2Sha256:
@@ -192,8 +192,8 @@ namespace
                         context,
                         NGIN::Crypto::Kdf::KeyDerivationParameters {algorithm, pbkdf2},
                         32);
-                REQUIRE_FALSE(result.HasValue());
-                REQUIRE(result.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+                REQUIRE_FALSE(result.has_value());
+                REQUIRE(result.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
                 return;
             }
             case NGIN::Crypto::KdfAlgorithm::Argon2id: {
@@ -201,8 +201,8 @@ namespace
                         context,
                         NGIN::Crypto::Kdf::KeyDerivationParameters {argon2id},
                         32);
-                REQUIRE_FALSE(result.HasValue());
-                REQUIRE(result.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+                REQUIRE_FALSE(result.has_value());
+                REQUIRE(result.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
                 return;
             }
         }
@@ -237,8 +237,8 @@ namespace
                 input,
                 MutableBytes(cipher),
                 MutableBytes(tag));
-        REQUIRE_FALSE(result.HasValue());
-        REQUIRE(result.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
     }
 
     void RunRandomConformance(const NGIN::Crypto::Backend::CryptoContext& context)
@@ -250,7 +250,7 @@ namespace
 
         auto bytes = NGIN::Crypto::MakeByteBuffer(32);
         auto fill  = context.FillRandom(MutableBytes(bytes));
-        REQUIRE(fill.HasValue());
+        REQUIRE(fill.has_value());
     }
 
     void RunHashConformance(const NGIN::Crypto::Backend::CryptoContext& context)
@@ -265,8 +265,8 @@ namespace
             auto digest   = NGIN::Crypto::Hashing::Hash(context, vector.algorithm, Bytes(vector.message));
             auto expected = DecodeHex(vector.expectedHex);
 
-            REQUIRE(digest.HasValue());
-            RequireBytesEqual(Bytes(digest.Value()), Bytes(expected));
+            REQUIRE(digest.has_value());
+            RequireBytesEqual(Bytes(digest.value()), Bytes(expected));
         }
 
         RequireUnsupportedHash(context, NGIN::Crypto::HashAlgorithm::Sha3_256);
@@ -291,8 +291,8 @@ namespace
                     Bytes(vector.message));
             auto expected = DecodeHex(vector.expectedHex);
 
-            REQUIRE(mac.HasValue());
-            RequireBytesEqual(Bytes(mac.Value()), Bytes(expected));
+            REQUIRE(mac.has_value());
+            RequireBytesEqual(Bytes(mac.value()), Bytes(expected));
 
             auto verified = NGIN::Crypto::Mac::VerifyMac(
                     context,
@@ -300,7 +300,7 @@ namespace
                     NGIN::Crypto::Memory::SecretView {Bytes(key)},
                     Bytes(vector.message),
                     Bytes(expected));
-            REQUIRE(verified.HasValue());
+            REQUIRE(verified.has_value());
         }
 
         RequireUnsupportedMac(context, NGIN::Crypto::MacAlgorithm::HmacSha256);
@@ -331,8 +331,8 @@ namespace
                     context,
                     NGIN::Crypto::Kdf::KeyDerivationParameters {vector.algorithm, hkdf},
                     expected.Size());
-            REQUIRE(output.HasValue());
-            RequireBytesEqual(Bytes(output.Value()), Bytes(expected));
+            REQUIRE(output.has_value());
+            RequireBytesEqual(Bytes(output.value()), Bytes(expected));
         }
 
         for (const auto& vector: NGIN::Crypto::Tests::ProviderVectors::PBKDF2_VECTORS)
@@ -353,8 +353,8 @@ namespace
                     context,
                     NGIN::Crypto::Kdf::KeyDerivationParameters {vector.algorithm, pbkdf2},
                     expected.Size());
-            REQUIRE(output.HasValue());
-            RequireBytesEqual(Bytes(output.Value()), Bytes(expected));
+            REQUIRE(output.has_value());
+            RequireBytesEqual(Bytes(output.value()), Bytes(expected));
         }
 
         for (const auto& vector: NGIN::Crypto::Tests::ProviderVectors::ARGON2ID_VECTORS)
@@ -379,8 +379,8 @@ namespace
                     context,
                     NGIN::Crypto::Kdf::KeyDerivationParameters {argon2id},
                     expected.Size());
-            REQUIRE(output.HasValue());
-            RequireBytesEqual(Bytes(output.Value()), Bytes(expected));
+            REQUIRE(output.has_value());
+            RequireBytesEqual(Bytes(output.value()), Bytes(expected));
         }
 
         RequireUnsupportedKdf(context, NGIN::Crypto::KdfAlgorithm::HkdfSha256);
@@ -414,31 +414,31 @@ namespace
             };
 
             auto sealed = NGIN::Crypto::Symmetric::Seal(context, vector.algorithm, sealInput);
-            REQUIRE(sealed.HasValue());
-            RequireBytesEqual(Bytes(sealed.Value().ciphertext), Bytes(expectedCipher));
+            REQUIRE(sealed.has_value());
+            RequireBytesEqual(Bytes(sealed.value().ciphertext), Bytes(expectedCipher));
             RequireBytesEqual(
-                    NGIN::Crypto::ConstByteSpan {sealed.Value().tag.data(), sealed.Value().tag.size()},
+                    NGIN::Crypto::ConstByteSpan {sealed.value().tag.data(), sealed.value().tag.size()},
                     Bytes(expectedTag));
 
             NGIN::Crypto::Symmetric::AeadOpenInput openInput {
                     .key            = NGIN::Crypto::Memory::SecretView {Bytes(key)},
                     .nonce          = Bytes(nonce),
-                    .ciphertext     = Bytes(sealed.Value().ciphertext),
+                    .ciphertext     = Bytes(sealed.value().ciphertext),
                     .associatedData = Bytes(associatedData),
-                    .tag            = NGIN::Crypto::ConstByteSpan {sealed.Value().tag.data(), sealed.Value().tag.size()},
+                    .tag            = NGIN::Crypto::ConstByteSpan {sealed.value().tag.data(), sealed.value().tag.size()},
             };
 
             auto opened = NGIN::Crypto::Symmetric::Open(context, vector.algorithm, openInput);
-            REQUIRE(opened.HasValue());
-            RequireBytesEqual(Bytes(opened.Value()), Bytes(plaintext));
+            REQUIRE(opened.has_value());
+            RequireBytesEqual(Bytes(opened.value()), Bytes(plaintext));
 
-            auto badTag = sealed.Value().tag;
+            auto badTag = sealed.value().tag;
             badTag[0] ^= NGIN::Byte {0x01};
             openInput.tag = NGIN::Crypto::ConstByteSpan {badTag.data(), badTag.size()};
 
             auto rejected = NGIN::Crypto::Symmetric::Open(context, vector.algorithm, openInput);
-            REQUIRE_FALSE(rejected.HasValue());
-            REQUIRE(rejected.Error().Code() == NGIN::Crypto::CryptoErrorCode::AuthenticationFailed);
+            REQUIRE_FALSE(rejected.has_value());
+            REQUIRE(rejected.error().Code() == NGIN::Crypto::CryptoErrorCode::AuthenticationFailed);
         }
 
         RequireUnsupportedAead(context, NGIN::Crypto::AeadAlgorithm::Aes128Gcm);
@@ -457,8 +457,8 @@ namespace
             auto privateKey =
                     NGIN::Crypto::Asymmetric::Ed25519PrivateKey::FromBytes(DecodeFixedHex<32>(ed25519Vector.privateKeyHex));
             auto result = NGIN::Crypto::Asymmetric::SignEd25519(context, privateKey, Bytes(ed25519Message));
-            REQUIRE_FALSE(result.HasValue());
-            REQUIRE(result.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+            REQUIRE_FALSE(result.has_value());
+            REQUIRE(result.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
         }
         else
         {
@@ -469,19 +469,19 @@ namespace
             auto expectedSignature = DecodeFixedHex<64>(ed25519Vector.signatureHex);
 
             auto signature = NGIN::Crypto::Asymmetric::SignEd25519(context, privateKey, Bytes(ed25519Message));
-            REQUIRE(signature.HasValue());
-            RequireBytesEqual(signature.Value(), expectedSignature);
+            REQUIRE(signature.has_value());
+            RequireBytesEqual(signature.value(), expectedSignature);
 
             auto verified =
                     NGIN::Crypto::Asymmetric::VerifyEd25519(context, publicKey, Bytes(ed25519Message), expectedSignature);
-            REQUIRE(verified.HasValue());
+            REQUIRE(verified.has_value());
 
             auto tamperedSignature = expectedSignature;
             tamperedSignature[0] ^= NGIN::Byte {0x01};
             auto rejected =
                     NGIN::Crypto::Asymmetric::VerifyEd25519(context, publicKey, Bytes(ed25519Message), tamperedSignature);
-            REQUIRE_FALSE(rejected.HasValue());
-            REQUIRE(rejected.Error().Code() == NGIN::Crypto::CryptoErrorCode::AuthenticationFailed);
+            REQUIRE_FALSE(rejected.has_value());
+            REQUIRE(rejected.error().Code() == NGIN::Crypto::CryptoErrorCode::AuthenticationFailed);
         }
 
         const auto& ecdsaVector     = NGIN::Crypto::Tests::ProviderVectors::ECDSA_P256_SHA256_REGRESSION;
@@ -506,8 +506,8 @@ namespace
                     context,
                     NGIN::Crypto::SignatureAlgorithm::EcdsaP256Sha256,
                     ecdsaSignInput);
-            REQUIRE_FALSE(result.HasValue());
-            REQUIRE(result.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+            REQUIRE_FALSE(result.has_value());
+            REQUIRE(result.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
         }
         else
         {
@@ -515,21 +515,21 @@ namespace
                     context,
                     NGIN::Crypto::SignatureAlgorithm::EcdsaP256Sha256,
                     ecdsaVerifyInput);
-            REQUIRE(verified.HasValue());
+            REQUIRE(verified.has_value());
 
             auto signedMessage = NGIN::Crypto::Signatures::Sign(
                     context,
                     NGIN::Crypto::SignatureAlgorithm::EcdsaP256Sha256,
                     ecdsaSignInput);
-            REQUIRE(signedMessage.HasValue());
-            REQUIRE(signedMessage.Value().Size() == 64);
+            REQUIRE(signedMessage.has_value());
+            REQUIRE(signedMessage.value().Size() == 64);
 
-            ecdsaVerifyInput.signature = Bytes(signedMessage.Value());
+            ecdsaVerifyInput.signature = Bytes(signedMessage.value());
             auto generatedVerified     = NGIN::Crypto::Signatures::Verify(
                     context,
                     NGIN::Crypto::SignatureAlgorithm::EcdsaP256Sha256,
                     ecdsaVerifyInput);
-            REQUIRE(generatedVerified.HasValue());
+            REQUIRE(generatedVerified.has_value());
 
             auto tamperedSignature = ecdsaSignature;
             tamperedSignature[0] ^= NGIN::Byte {0x01};
@@ -538,8 +538,8 @@ namespace
                     context,
                     NGIN::Crypto::SignatureAlgorithm::EcdsaP256Sha256,
                     ecdsaVerifyInput);
-            REQUIRE_FALSE(rejected.HasValue());
-            REQUIRE(rejected.Error().Code() == NGIN::Crypto::CryptoErrorCode::AuthenticationFailed);
+            REQUIRE_FALSE(rejected.has_value());
+            REQUIRE(rejected.error().Code() == NGIN::Crypto::CryptoErrorCode::AuthenticationFailed);
         }
 
         const auto& rsaVector        = NGIN::Crypto::Tests::ProviderVectors::RSA_PSS_SHA256_REGRESSION;
@@ -561,28 +561,28 @@ namespace
         if (!context.Supports(NGIN::Crypto::SignatureAlgorithm::RsaPssSha256))
         {
             auto result = NGIN::Crypto::Asymmetric::SignRsaPssSha256(context, rsaSignInput);
-            REQUIRE_FALSE(result.HasValue());
-            REQUIRE(result.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+            REQUIRE_FALSE(result.has_value());
+            REQUIRE(result.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
         }
         else
         {
             auto verified = NGIN::Crypto::Asymmetric::VerifyRsaPssSha256(context, rsaVerifyInput);
-            REQUIRE(verified.HasValue());
+            REQUIRE(verified.has_value());
 
             auto generated = NGIN::Crypto::Asymmetric::SignRsaPssSha256(context, rsaSignInput);
-            REQUIRE(generated.HasValue());
-            REQUIRE(generated.Value().Size() == rsaSignature.Size());
+            REQUIRE(generated.has_value());
+            REQUIRE(generated.value().Size() == rsaSignature.Size());
 
-            rsaVerifyInput.signature = Bytes(generated.Value());
+            rsaVerifyInput.signature = Bytes(generated.value());
             auto generatedVerified   = NGIN::Crypto::Asymmetric::VerifyRsaPssSha256(context, rsaVerifyInput);
-            REQUIRE(generatedVerified.HasValue());
+            REQUIRE(generatedVerified.has_value());
 
-            auto tamperedSignature = generated.Value();
+            auto tamperedSignature = generated.value();
             tamperedSignature[0] ^= NGIN::Byte {0x01};
             rsaVerifyInput.signature = Bytes(tamperedSignature);
             auto rejected            = NGIN::Crypto::Asymmetric::VerifyRsaPssSha256(context, rsaVerifyInput);
-            REQUIRE_FALSE(rejected.HasValue());
-            REQUIRE(rejected.Error().Code() == NGIN::Crypto::CryptoErrorCode::AuthenticationFailed);
+            REQUIRE_FALSE(rejected.has_value());
+            REQUIRE(rejected.error().Code() == NGIN::Crypto::CryptoErrorCode::AuthenticationFailed);
         }
 
         NGIN::Crypto::Asymmetric::RsaOaepSha256EncryptInput rsaEncryptInput {
@@ -594,28 +594,28 @@ namespace
         if (!context.Supports(NGIN::Crypto::AsymmetricEncryptionAlgorithm::RsaOaepSha256))
         {
             auto result = NGIN::Crypto::Asymmetric::EncryptRsaOaepSha256(context, rsaEncryptInput);
-            REQUIRE_FALSE(result.HasValue());
-            REQUIRE(result.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+            REQUIRE_FALSE(result.has_value());
+            REQUIRE(result.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
         }
         else
         {
             auto ciphertext = NGIN::Crypto::Asymmetric::EncryptRsaOaepSha256(context, rsaEncryptInput);
-            REQUIRE(ciphertext.HasValue());
-            REQUIRE(ciphertext.Value().Size() == rsaSignature.Size());
+            REQUIRE(ciphertext.has_value());
+            REQUIRE(ciphertext.value().Size() == rsaSignature.Size());
 
             NGIN::Crypto::Asymmetric::RsaOaepSha256DecryptInput rsaDecryptInput {
                     .privateKeyDer = NGIN::Crypto::Memory::SecretView {Bytes(rsaPrivateKeyDer)},
-                    .ciphertext    = Bytes(ciphertext.Value()),
+                    .ciphertext    = Bytes(ciphertext.value()),
                     .label         = rsaEncryptInput.label,
             };
             auto plaintext = NGIN::Crypto::Asymmetric::DecryptRsaOaepSha256(context, rsaDecryptInput);
-            REQUIRE(plaintext.HasValue());
-            RequireBytesEqual(Bytes(plaintext.Value()), Bytes(rsaMessage));
+            REQUIRE(plaintext.has_value());
+            RequireBytesEqual(Bytes(plaintext.value()), Bytes(rsaMessage));
 
             rsaDecryptInput.label = Bytes("wrong-label");
             auto rejected         = NGIN::Crypto::Asymmetric::DecryptRsaOaepSha256(context, rsaDecryptInput);
-            REQUIRE_FALSE(rejected.HasValue());
-            REQUIRE(rejected.Error().Code() == NGIN::Crypto::CryptoErrorCode::AuthenticationFailed);
+            REQUIRE_FALSE(rejected.has_value());
+            REQUIRE(rejected.error().Code() == NGIN::Crypto::CryptoErrorCode::AuthenticationFailed);
         }
     }
 
@@ -629,16 +629,16 @@ namespace
         if (!context.Supports(NGIN::Crypto::KeyAgreementAlgorithm::X25519))
         {
             auto result = NGIN::Crypto::Asymmetric::DeriveX25519SharedSecret(context, privateKey, peerPublicKey);
-            REQUIRE_FALSE(result.HasValue());
-            REQUIRE(result.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+            REQUIRE_FALSE(result.has_value());
+            REQUIRE(result.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
             return;
         }
 
         auto expectedSharedSecret = DecodeFixedHex<32>(vector.sharedSecretHex);
         auto sharedSecret         = NGIN::Crypto::Asymmetric::DeriveX25519SharedSecret(context, privateKey, peerPublicKey);
 
-        REQUIRE(sharedSecret.HasValue());
-        RequireBytesEqual(sharedSecret.Value().Bytes(), expectedSharedSecret);
+        REQUIRE(sharedSecret.has_value());
+        RequireBytesEqual(sharedSecret.value().Bytes(), expectedSharedSecret);
     }
 
     void RunOutputBufferConformance(const NGIN::Crypto::Backend::CryptoContext& context)
@@ -649,8 +649,8 @@ namespace
                 NGIN::Crypto::HashAlgorithm::Sha256,
                 NGIN::Crypto::ConstByteSpan {},
                 hashOutput);
-        REQUIRE_FALSE(hash.HasValue());
-        REQUIRE(hash.Error().Code() == NGIN::Crypto::CryptoErrorCode::OutputBufferTooSmall);
+        REQUIRE_FALSE(hash.has_value());
+        REQUIRE(hash.error().Code() == NGIN::Crypto::CryptoErrorCode::OutputBufferTooSmall);
 
         auto key = ZeroSecret<32>();
         auto mac = NGIN::Crypto::Mac::MacInto(
@@ -659,8 +659,8 @@ namespace
                 NGIN::Crypto::Memory::SecretView {key.Bytes()},
                 NGIN::Crypto::ConstByteSpan {},
                 hashOutput);
-        REQUIRE_FALSE(mac.HasValue());
-        REQUIRE(mac.Error().Code() == NGIN::Crypto::CryptoErrorCode::OutputBufferTooSmall);
+        REQUIRE_FALSE(mac.has_value());
+        REQUIRE(mac.error().Code() == NGIN::Crypto::CryptoErrorCode::OutputBufferTooSmall);
 
         auto nonce     = ZeroBytes<12>();
         auto plaintext = ZeroBytes<16>();
@@ -680,8 +680,8 @@ namespace
                 input,
                 tooSmall,
                 tag);
-        REQUIRE_FALSE(seal.HasValue());
-        REQUIRE(seal.Error().Code() == NGIN::Crypto::CryptoErrorCode::OutputBufferTooSmall);
+        REQUIRE_FALSE(seal.has_value());
+        REQUIRE(seal.error().Code() == NGIN::Crypto::CryptoErrorCode::OutputBufferTooSmall);
     }
 
     void RunProviderConformance(const NGIN::Crypto::Backend::CryptoContext& context)
@@ -713,15 +713,15 @@ TEST_CASE("Configured providers satisfy crypto conformance vectors", "[Crypto][P
         DYNAMIC_SECTION("provider " << provider.name)
         {
             auto context = provider.create();
-            if (!context.HasValue())
+            if (!context.has_value())
             {
                 REQUIRE(
-                        (context.Error().Code() == NGIN::Crypto::CryptoErrorCode::BackendUnavailable ||
-                         context.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedBackend));
+                        (context.error().Code() == NGIN::Crypto::CryptoErrorCode::BackendUnavailable ||
+                         context.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedBackend));
                 return;
             }
 
-            RunProviderConformance(context.Value());
+            RunProviderConformance(context.value());
         }
     }
 }

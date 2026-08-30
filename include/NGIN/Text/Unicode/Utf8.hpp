@@ -69,6 +69,14 @@ namespace NGIN::Text::Unicode
         return DecodeResult {codePoint, expectedUnits, EncodingError::None};
     }
 
+    /// @brief Decodes one UTF-8 sequence from `char8_t` code-unit storage.
+    [[nodiscard]] inline DecodeResult DecodeUtf8(std::u8string_view input, UIntSize offset = 0) noexcept
+    {
+        return DecodeUtf8(
+                std::string_view {reinterpret_cast<const char*>(input.data()), input.size()},
+                offset);
+    }
+
     /// @brief Encodes one code point as UTF-8.
     ///
     /// @param codePoint Unicode scalar value to encode. Invalid values are sanitized to U+FFFD.
@@ -103,8 +111,52 @@ namespace NGIN::Text::Unicode
         return 4;
     }
 
+    /// @brief Encodes one code point into `char8_t` UTF-8 code-unit storage.
+    [[nodiscard]] inline constexpr UIntSize EncodeUtf8(CodePoint codePoint, char8_t* out) noexcept
+    {
+        const CodePoint value = detail::SanitizeForEncoding(codePoint);
+        if (value <= 0x7F)
+        {
+            out[0] = static_cast<char8_t>(value);
+            return 1;
+        }
+        if (value <= 0x7FF)
+        {
+            out[0] = static_cast<char8_t>(0xC0u | static_cast<unsigned>(value >> 6u));
+            out[1] = static_cast<char8_t>(0x80u | static_cast<unsigned>(value & 0x3Fu));
+            return 2;
+        }
+        if (value <= 0xFFFF)
+        {
+            out[0] = static_cast<char8_t>(0xE0u | static_cast<unsigned>(value >> 12u));
+            out[1] = static_cast<char8_t>(0x80u | static_cast<unsigned>((value >> 6u) & 0x3Fu));
+            out[2] = static_cast<char8_t>(0x80u | static_cast<unsigned>(value & 0x3Fu));
+            return 3;
+        }
+
+        out[0] = static_cast<char8_t>(0xF0u | static_cast<unsigned>(value >> 18u));
+        out[1] = static_cast<char8_t>(0x80u | static_cast<unsigned>((value >> 12u) & 0x3Fu));
+        out[2] = static_cast<char8_t>(0x80u | static_cast<unsigned>((value >> 6u) & 0x3Fu));
+        out[3] = static_cast<char8_t>(0x80u | static_cast<unsigned>(value & 0x3Fu));
+        return 4;
+    }
+
     /// @brief Returns whether the entire byte range is valid UTF-8.
     [[nodiscard]] inline constexpr bool IsValidUtf8(std::string_view input) noexcept
+    {
+        UIntSize offset = 0;
+        while (offset < input.size())
+        {
+            const DecodeResult decoded = DecodeUtf8(input, offset);
+            if (decoded.error != EncodingError::None)
+                return false;
+            offset += decoded.unitsConsumed;
+        }
+        return true;
+    }
+
+    /// @brief Returns whether the entire `char8_t` range is valid UTF-8.
+    [[nodiscard]] inline bool IsValidUtf8(std::u8string_view input) noexcept
     {
         UIntSize offset = 0;
         while (offset < input.size())

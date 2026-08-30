@@ -8,7 +8,6 @@
 #include <NGIN/IO/DirectoryEnumerator.hpp>
 #include <NGIN/IO/DirectoryHandle.hpp>
 #include <NGIN/IO/DynamicLibrary.hpp>
-#include <NGIN/IO/File.hpp>
 #include <NGIN/IO/FileHandle.hpp>
 #include <NGIN/IO/FileSystemDriver.hpp>
 #include <NGIN/IO/FileSystemUtilities.hpp>

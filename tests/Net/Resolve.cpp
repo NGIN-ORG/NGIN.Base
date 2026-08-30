@@ -20,9 +20,9 @@ TEST_CASE("Net.Resolve resolves numeric loopback without external network access
     options.numericService = true;
 
     const auto result = NGIN::Net::Resolve("127.0.0.1", "8080", options);
-    REQUIRE(result.HasValue());
-    REQUIRE_FALSE(result.Value().empty());
-    for (const auto& address: result.Value())
+    REQUIRE(result.has_value());
+    REQUIRE_FALSE(result.value().empty());
+    for (const auto& address: result.value())
     {
         CHECK(address.endpoint.address == NGIN::Net::IpAddress::LoopbackV4());
         CHECK(address.endpoint.port == 8080);
@@ -38,22 +38,22 @@ TEST_CASE("Net.Resolve applies address-family filters and preserves resolver dia
     v6.numericHost      = true;
     v6.numericService   = true;
     const auto v6Result = NGIN::Net::Resolve("::1", "53", v6);
-    REQUIRE(v6Result.HasValue());
-    REQUIRE_FALSE(v6Result.Value().empty());
-    CHECK(v6Result.Value().front().endpoint.address == NGIN::Net::IpAddress::LoopbackV6());
-    CHECK(v6Result.Value().front().socketType == NGIN::Net::ResolveSocketType::Datagram);
+    REQUIRE(v6Result.has_value());
+    REQUIRE_FALSE(v6Result.value().empty());
+    CHECK(v6Result.value().front().endpoint.address == NGIN::Net::IpAddress::LoopbackV6());
+    CHECK(v6Result.value().front().socketType == NGIN::Net::ResolveSocketType::Datagram);
 
     NGIN::Net::ResolveOptions numeric;
     numeric.numericHost = true;
     const auto missing  = NGIN::Net::Resolve("not-a-numeric-address", "80", numeric);
-    REQUIRE_FALSE(missing.HasValue());
-    CHECK(missing.Error().network.code == NGIN::Net::NetErrorCode::NameNotFound);
-    CHECK(missing.Error().resolverCode != 0);
-    CHECK_FALSE(missing.Error().diagnostic.empty());
+    REQUIRE_FALSE(missing.has_value());
+    CHECK(missing.error().network.code == NGIN::Net::NetErrorCode::NameNotFound);
+    CHECK(missing.error().resolverCode != 0);
+    CHECK_FALSE(missing.error().diagnostic.empty());
 
     const auto invalid = NGIN::Net::Resolve("", "");
-    REQUIRE_FALSE(invalid.HasValue());
-    CHECK(invalid.Error().network.code == NGIN::Net::NetErrorCode::InvalidArgument);
+    REQUIRE_FALSE(invalid.has_value());
+    CHECK(invalid.error().network.code == NGIN::Net::NetErrorCode::InvalidArgument);
 }
 
 TEST_CASE("Net.Resolve async work uses its explicit driver and caller executor", "[Net][Resolve]")

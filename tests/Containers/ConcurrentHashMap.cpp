@@ -128,7 +128,7 @@ TEST_CASE("ConcurrentHashMap foreach enumerates inserted values", "[Containers][
     CHECK(items[2] == std::pair<int, int> {3, 300});
 }
 
-TEST_CASE("ConcurrentHashMap snapshot foreach matches foreach", "[Containers][ConcurrentHashMap]")
+TEST_CASE("ConcurrentHashMap weakly consistent foreach matches foreach without writers", "[Containers][ConcurrentHashMap]")
 {
     IntMap<NGIN::Containers::ReclamationPolicy::LocalEpoch> map(32);
     for (int i = 0; i < 16; ++i)
@@ -137,18 +137,18 @@ TEST_CASE("ConcurrentHashMap snapshot foreach matches foreach", "[Containers][Co
     }
 
     std::vector<std::pair<int, int>> directItems;
-    std::vector<std::pair<int, int>> snapshotItems;
+    std::vector<std::pair<int, int>> weaklyConsistentItems;
 
     map.ForEach([&](const int& key, const int& value) {
         directItems.emplace_back(key, value);
     });
-    map.SnapshotForEach([&](const int& key, const int& value) {
-        snapshotItems.emplace_back(key, value);
+    map.WeaklyConsistentForEach([&](const int& key, const int& value) {
+        weaklyConsistentItems.emplace_back(key, value);
     });
 
     std::sort(directItems.begin(), directItems.end());
-    std::sort(snapshotItems.begin(), snapshotItems.end());
-    CHECK(snapshotItems == directItems);
+    std::sort(weaklyConsistentItems.begin(), weaklyConsistentItems.end());
+    CHECK(weaklyConsistentItems == directItems);
 }
 
 TEST_CASE("ConcurrentHashMap supports string keys and values", "[Containers][ConcurrentHashMap]")

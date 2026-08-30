@@ -88,13 +88,13 @@ namespace NGIN::Crypto::Backend::detail
                 memoryKiB == 0 ||
                 memoryKiB > std::numeric_limits<std::size_t>::max() / 1024U)
             {
-                return InvalidArgument();
+                return std::unexpected(InvalidArgument());
             }
 
             const auto memoryBytes = static_cast<std::size_t>(memoryKiB) * 1024U;
             if (memoryBytes < crypto_pwhash_MEMLIMIT_MIN || memoryBytes > crypto_pwhash_MEMLIMIT_MAX)
             {
-                return InvalidArgument();
+                return std::unexpected(InvalidArgument());
             }
 
             return memoryBytes;
@@ -111,7 +111,7 @@ namespace NGIN::Crypto::Backend::detail
                 !encodedHash.starts_with(ARGON2ID_PREFIX) ||
                 std::find(encodedHash.begin(), encodedHash.end(), '\0') != encodedHash.end())
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
             std::copy(encodedHash.begin(), encodedHash.end(), output.begin());
@@ -127,19 +127,19 @@ namespace NGIN::Crypto::Backend::detail
         {
             if (algorithm != AeadAlgorithm::XChaCha20Poly1305)
             {
-                return UnsupportedAlgorithm();
+                return std::unexpected(UnsupportedAlgorithm());
             }
             if (key.Size() != crypto_aead_xchacha20poly1305_ietf_KEYBYTES)
             {
-                return InvalidKey();
+                return std::unexpected(InvalidKey());
             }
             if (nonce.size() != crypto_aead_xchacha20poly1305_ietf_NPUBBYTES)
             {
-                return InvalidNonce();
+                return std::unexpected(InvalidNonce());
             }
             if (tag.size() != crypto_aead_xchacha20poly1305_ietf_ABYTES)
             {
-                return InvalidTag();
+                return std::unexpected(InvalidTag());
             }
 
             return {};
@@ -151,13 +151,13 @@ namespace NGIN::Crypto::Backend::detail
         {
             if (seed.Size() != crypto_sign_SEEDBYTES)
             {
-                return InvalidKey();
+                return std::unexpected(InvalidKey());
             }
 
             std::array<unsigned char, crypto_sign_PUBLICKEYBYTES> publicKey {};
             if (crypto_sign_seed_keypair(publicKey.data(), secretKey.data(), DataOrNull(seed.Bytes())) != 0)
             {
-                return InvalidKey();
+                return std::unexpected(InvalidKey());
             }
 
             return {};
@@ -169,9 +169,9 @@ namespace NGIN::Crypto::Backend::detail
         (void) options;
 
         auto initialized = EnsureSodiumInitialized();
-        if (!initialized.HasValue())
+        if (!initialized.has_value())
         {
-            return initialized.Error();
+            return std::unexpected(std::move(initialized).error());
         }
 
         BackendCapabilities capabilities;
@@ -197,9 +197,9 @@ namespace NGIN::Crypto::Backend::detail
     CryptoExpected<void> RandomLibsodium(ByteSpan output) noexcept
     {
         auto initialized = EnsureSodiumInitialized();
-        if (!initialized.HasValue())
+        if (!initialized.has_value())
         {
-            return initialized.Error();
+            return std::unexpected(std::move(initialized).error());
         }
 
         if (!output.empty())
@@ -219,9 +219,9 @@ namespace NGIN::Crypto::Backend::detail
             ByteSpan                         output) noexcept
     {
         auto initialized = EnsureSodiumInitialized();
-        if (!initialized.HasValue())
+        if (!initialized.has_value())
         {
-            return initialized.Error();
+            return std::unexpected(std::move(initialized).error());
         }
 
         if (parallelism != 1 ||
@@ -233,13 +233,13 @@ namespace NGIN::Crypto::Backend::detail
             memoryKiB == 0 ||
             memoryKiB > std::numeric_limits<std::size_t>::max() / 1024U)
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         const auto memoryBytes = static_cast<std::size_t>(memoryKiB) * 1024U;
         if (memoryBytes < crypto_pwhash_MEMLIMIT_MIN || memoryBytes > crypto_pwhash_MEMLIMIT_MAX)
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         const auto passwordBytes = password.Bytes();
@@ -263,15 +263,15 @@ namespace NGIN::Crypto::Backend::detail
             NGIN::UInt32                     parallelism)
     {
         auto initialized = EnsureSodiumInitialized();
-        if (!initialized.HasValue())
+        if (!initialized.has_value())
         {
-            return initialized.Error();
+            return std::unexpected(std::move(initialized).error());
         }
 
         auto memoryBytes = ValidatePasswordHashParameters(password, memoryKiB, iterations, parallelism);
-        if (!memoryBytes.HasValue())
+        if (!memoryBytes.has_value())
         {
-            return memoryBytes.Error();
+            return std::unexpected(std::move(memoryBytes).error());
         }
 
         std::array<char, crypto_pwhash_STRBYTES> encoded {};
@@ -281,12 +281,12 @@ namespace NGIN::Crypto::Backend::detail
                 reinterpret_cast<const char*>(DataOrNull(passwordBytes)),
                 static_cast<unsigned long long>(passwordBytes.size()),
                 static_cast<unsigned long long>(iterations),
-                memoryBytes.Value(),
+                memoryBytes.value(),
                 crypto_pwhash_ALG_ARGON2ID13);
 
         if (result != 0)
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         return std::string {encoded.data()};
@@ -297,20 +297,20 @@ namespace NGIN::Crypto::Backend::detail
             std::string_view                 encodedHash) noexcept
     {
         auto initialized = EnsureSodiumInitialized();
-        if (!initialized.HasValue())
+        if (!initialized.has_value())
         {
-            return initialized.Error();
+            return std::unexpected(std::move(initialized).error());
         }
         if (password.Size() > crypto_pwhash_PASSWD_MAX || !FitsUnsignedLongLong(password.Size()))
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         std::array<char, crypto_pwhash_STRBYTES> encoded {};
         auto                                     copied = CopySupportedPasswordHash(encodedHash, encoded);
-        if (!copied.HasValue())
+        if (!copied.has_value())
         {
-            return copied.Error();
+            return std::unexpected(std::move(copied).error());
         }
 
         const auto passwordBytes = password.Bytes();
@@ -329,9 +329,9 @@ namespace NGIN::Crypto::Backend::detail
             NGIN::UInt32     parallelism) noexcept
     {
         auto initialized = EnsureSodiumInitialized();
-        if (!initialized.HasValue())
+        if (!initialized.has_value())
         {
-            return initialized.Error();
+            return std::unexpected(std::move(initialized).error());
         }
 
         auto memoryBytes = ValidatePasswordHashParameters(
@@ -339,25 +339,25 @@ namespace NGIN::Crypto::Backend::detail
                 memoryKiB,
                 iterations,
                 parallelism);
-        if (!memoryBytes.HasValue())
+        if (!memoryBytes.has_value())
         {
-            return memoryBytes.Error();
+            return std::unexpected(std::move(memoryBytes).error());
         }
 
         std::array<char, crypto_pwhash_STRBYTES> encoded {};
         auto                                     copied = CopySupportedPasswordHash(encodedHash, encoded);
-        if (!copied.HasValue())
+        if (!copied.has_value())
         {
-            return copied.Error();
+            return std::unexpected(std::move(copied).error());
         }
 
         const int result = crypto_pwhash_str_needs_rehash(
                 encoded.data(),
                 static_cast<unsigned long long>(iterations),
-                memoryBytes.Value());
+                memoryBytes.value());
         if (result < 0)
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
         return result == 1;
@@ -373,19 +373,19 @@ namespace NGIN::Crypto::Backend::detail
             ByteSpan                         tag) noexcept
     {
         auto initialized = EnsureSodiumInitialized();
-        if (!initialized.HasValue())
+        if (!initialized.has_value())
         {
-            return initialized.Error();
+            return std::unexpected(std::move(initialized).error());
         }
 
         auto valid = ValidateXChaCha20Poly1305(algorithm, key, nonce, tag);
-        if (!valid.HasValue())
+        if (!valid.has_value())
         {
-            return valid.Error();
+            return std::unexpected(std::move(valid).error());
         }
         if (!FitsUnsignedLongLong(plaintext.size()) || !FitsUnsignedLongLong(associatedData.size()))
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         unsigned long long producedTagSize = 0;
@@ -414,19 +414,19 @@ namespace NGIN::Crypto::Backend::detail
             ByteSpan                         plaintext) noexcept
     {
         auto initialized = EnsureSodiumInitialized();
-        if (!initialized.HasValue())
+        if (!initialized.has_value())
         {
-            return initialized.Error();
+            return std::unexpected(std::move(initialized).error());
         }
 
         auto valid = ValidateXChaCha20Poly1305(algorithm, key, nonce, tag);
-        if (!valid.HasValue())
+        if (!valid.has_value())
         {
-            return valid.Error();
+            return std::unexpected(std::move(valid).error());
         }
         if (!FitsUnsignedLongLong(ciphertext.size()) || !FitsUnsignedLongLong(associatedData.size()))
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         const auto result = crypto_aead_xchacha20poly1305_ietf_decrypt_detached(
@@ -445,7 +445,7 @@ namespace NGIN::Crypto::Backend::detail
         }
 
         NGIN::Crypto::Memory::SecureZero(plaintext);
-        return AuthenticationFailed();
+        return std::unexpected(AuthenticationFailed());
     }
 
     CryptoExpected<void> Blake2bLibsodium(
@@ -454,9 +454,9 @@ namespace NGIN::Crypto::Backend::detail
             ByteSpan                         output) noexcept
     {
         auto initialized = EnsureSodiumInitialized();
-        if (!initialized.HasValue())
+        if (!initialized.has_value())
         {
-            return initialized.Error();
+            return std::unexpected(std::move(initialized).error());
         }
         if (output.size() < crypto_generichash_BYTES_MIN ||
             output.size() > crypto_generichash_BYTES_MAX ||
@@ -464,7 +464,7 @@ namespace NGIN::Crypto::Backend::detail
             key.Size() > crypto_generichash_KEYBYTES_MAX ||
             !FitsUnsignedLongLong(input.size()))
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         const auto result = crypto_generichash(
@@ -484,16 +484,16 @@ namespace NGIN::Crypto::Backend::detail
             ByteSpan                         output) noexcept
     {
         auto initialized = EnsureSodiumInitialized();
-        if (!initialized.HasValue())
+        if (!initialized.has_value())
         {
-            return initialized.Error();
+            return std::unexpected(std::move(initialized).error());
         }
         if (key.Size() != crypto_stream_xchacha20_KEYBYTES ||
             nonce.size() != crypto_stream_xchacha20_NONCEBYTES ||
             input.size() != output.size() ||
             !FitsUnsignedLongLong(input.size()))
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         const auto result = crypto_stream_xchacha20_xor(
@@ -510,13 +510,13 @@ namespace NGIN::Crypto::Backend::detail
             ByteSpan privateKey) noexcept
     {
         auto initialized = EnsureSodiumInitialized();
-        if (!initialized.HasValue())
+        if (!initialized.has_value())
         {
-            return initialized.Error();
+            return std::unexpected(std::move(initialized).error());
         }
         if (publicKey.size() != crypto_sign_PUBLICKEYBYTES || privateKey.size() != crypto_sign_SEEDBYTES)
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         randombytes_buf(DataOrNull(privateKey), privateKey.size());
@@ -535,25 +535,25 @@ namespace NGIN::Crypto::Backend::detail
             ByteSpan                         signature) noexcept
     {
         auto initialized = EnsureSodiumInitialized();
-        if (!initialized.HasValue())
+        if (!initialized.has_value())
         {
-            return initialized.Error();
+            return std::unexpected(std::move(initialized).error());
         }
         if (algorithm != SignatureAlgorithm::Ed25519)
         {
-            return UnsupportedAlgorithm();
+            return std::unexpected(UnsupportedAlgorithm());
         }
         if (signature.size() != crypto_sign_BYTES)
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         std::array<unsigned char, crypto_sign_SECRETKEYBYTES> secretKey {};
         auto                                                  seedResult = SeedToEd25519SecretKey(privateKey, secretKey);
-        if (!seedResult.HasValue())
+        if (!seedResult.has_value())
         {
             NGIN::Crypto::Memory::SecureZero(ByteSpan {reinterpret_cast<NGIN::Byte*>(secretKey.data()), secretKey.size()});
-            return seedResult.Error();
+            return std::unexpected(std::move(seedResult).error());
         }
 
         unsigned long long produced = 0;
@@ -575,21 +575,21 @@ namespace NGIN::Crypto::Backend::detail
             ConstByteSpan      signature) noexcept
     {
         auto initialized = EnsureSodiumInitialized();
-        if (!initialized.HasValue())
+        if (!initialized.has_value())
         {
-            return initialized.Error();
+            return std::unexpected(std::move(initialized).error());
         }
         if (algorithm != SignatureAlgorithm::Ed25519)
         {
-            return UnsupportedAlgorithm();
+            return std::unexpected(UnsupportedAlgorithm());
         }
         if (publicKey.size() != crypto_sign_PUBLICKEYBYTES)
         {
-            return InvalidKey();
+            return std::unexpected(InvalidKey());
         }
         if (signature.size() != crypto_sign_BYTES)
         {
-            return InvalidTag();
+            return std::unexpected(InvalidTag());
         }
 
         const int result = crypto_sign_verify_detached(
@@ -605,13 +605,13 @@ namespace NGIN::Crypto::Backend::detail
             ByteSpan privateKey) noexcept
     {
         auto initialized = EnsureSodiumInitialized();
-        if (!initialized.HasValue())
+        if (!initialized.has_value())
         {
-            return initialized.Error();
+            return std::unexpected(std::move(initialized).error());
         }
         if (publicKey.size() != crypto_scalarmult_BYTES || privateKey.size() != crypto_scalarmult_SCALARBYTES)
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         randombytes_buf(DataOrNull(privateKey), privateKey.size());
@@ -625,17 +625,17 @@ namespace NGIN::Crypto::Backend::detail
             ByteSpan                         output) noexcept
     {
         auto initialized = EnsureSodiumInitialized();
-        if (!initialized.HasValue())
+        if (!initialized.has_value())
         {
-            return initialized.Error();
+            return std::unexpected(std::move(initialized).error());
         }
         if (privateKey.Size() != crypto_scalarmult_SCALARBYTES || peerPublicKey.size() != crypto_scalarmult_BYTES)
         {
-            return InvalidKey();
+            return std::unexpected(InvalidKey());
         }
         if (output.size() != crypto_scalarmult_BYTES)
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         return crypto_scalarmult(DataOrNull(output), DataOrNull(privateKey.Bytes()), DataOrNull(peerPublicKey)) == 0

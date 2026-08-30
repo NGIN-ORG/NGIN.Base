@@ -29,10 +29,10 @@ namespace NGIN::Execution
             const std::string_view clipped = utf8.substr(0, output.size() - 1);
             const auto             wideResult =
                     NGIN::Text::Unicode::ToUtf16(clipped, NGIN::Text::Unicode::ErrorPolicy::Strict);
-            if (!wideResult.HasValue())
+            if (!wideResult.has_value())
                 return false;
 
-            const auto& wide = wideResult.Value();
+            const auto& wide = wideResult.value();
             if (wide.Size() > output.size() - 1)
                 return false;
 
@@ -56,17 +56,17 @@ namespace NGIN::Execution
                 std::array<wchar_t, 64> wide {};
                 if (Utf8ToWide(context->name.View(), wide))
                 {
-                    (void)::SetThreadDescription(::GetCurrentThread(), wide.data());
+                    (void) ::SetThreadDescription(::GetCurrentThread(), wide.data());
                 }
             }
 
             if (context->affinityMask != 0)
             {
-                (void)::SetThreadAffinityMask(::GetCurrentThread(), static_cast<std::uintptr_t>(context->affinityMask));
+                (void) ::SetThreadAffinityMask(::GetCurrentThread(), static_cast<std::uintptr_t>(context->affinityMask));
             }
             if (context->priority != 0)
             {
-                (void)::SetThreadPriority(::GetCurrentThread(), context->priority);
+                (void) ::SetThreadPriority(::GetCurrentThread(), context->priority);
             }
 
             try
@@ -120,8 +120,8 @@ namespace NGIN::Execution
             return;
         }
 
-        (void)::WaitForSingleObject(m_handle, INFINITE);
-        (void)::CloseHandle(static_cast<HANDLE>(m_handle));
+        (void) ::WaitForSingleObject(m_handle, INFINITE);
+        (void) ::CloseHandle(static_cast<HANDLE>(m_handle));
         m_handle = nullptr;
         m_threadId.store(0, std::memory_order_release);
         m_joinable = false;
@@ -134,7 +134,7 @@ namespace NGIN::Execution
             return;
         }
 
-        (void)::CloseHandle(static_cast<HANDLE>(m_handle));
+        (void) ::CloseHandle(static_cast<HANDLE>(m_handle));
         m_handle = nullptr;
         m_threadId.store(0, std::memory_order_release);
         m_joinable = false;

@@ -43,12 +43,12 @@ The Base core always owns platform secure randomness. Algorithm implementations 
 
 ```cpp
 auto context = NGIN::Crypto::Backend::CreateContext();
-if (!context.HasValue())
+if (!context.has_value())
 {
-    return context.Error();
+    return std::unexpected(std::move(context).error());
 }
 
-if (!context.Value().Supports(NGIN::Crypto::HashAlgorithm::Sha256))
+if (!context.value().Supports(NGIN::Crypto::HashAlgorithm::Sha256))
 {
     return NGIN::Crypto::CryptoError {NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm};
 }

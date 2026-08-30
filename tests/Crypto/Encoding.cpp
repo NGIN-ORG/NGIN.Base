@@ -71,23 +71,23 @@ TEST_CASE("Hex encodes and decodes strict text", "[Crypto][Encoding]")
     const auto input = Bytes("hello");
 
     auto encoded = NGIN::Crypto::Encoding::EncodeHex(input);
-    REQUIRE(encoded.HasValue());
-    REQUIRE(encoded.Value() == "68656c6c6f");
+    REQUIRE(encoded.has_value());
+    REQUIRE(encoded.value() == "68656c6c6f");
 
-    auto decoded = NGIN::Crypto::Encoding::DecodeHex(encoded.Value());
-    REQUIRE(decoded.HasValue());
-    RequireBytesEqual(decoded.Value(), "hello");
+    auto decoded = NGIN::Crypto::Encoding::DecodeHex(encoded.value());
+    REQUIRE(decoded.has_value());
+    RequireBytesEqual(decoded.value(), "hello");
 }
 
 TEST_CASE("Hex rejects odd length and invalid characters", "[Crypto][Encoding]")
 {
     auto odd = NGIN::Crypto::Encoding::DecodeHex("abc");
-    REQUIRE_FALSE(odd.HasValue());
-    REQUIRE(odd.Error().Code() == NGIN::Crypto::CryptoErrorCode::EncodingError);
+    REQUIRE_FALSE(odd.has_value());
+    REQUIRE(odd.error().Code() == NGIN::Crypto::CryptoErrorCode::EncodingError);
 
     auto invalid = NGIN::Crypto::Encoding::DecodeHex("00xz");
-    REQUIRE_FALSE(invalid.HasValue());
-    REQUIRE(invalid.Error().Code() == NGIN::Crypto::CryptoErrorCode::EncodingError);
+    REQUIRE_FALSE(invalid.has_value());
+    REQUIRE(invalid.error().Code() == NGIN::Crypto::CryptoErrorCode::EncodingError);
 }
 
 TEST_CASE("Hex preallocated APIs require exact output size", "[Crypto][Encoding]")
@@ -96,13 +96,13 @@ TEST_CASE("Hex preallocated APIs require exact output size", "[Crypto][Encoding]
 
     std::array<char, 1> tooSmall {};
     auto                encode = NGIN::Crypto::Encoding::EncodeHexInto(input, tooSmall);
-    REQUIRE_FALSE(encode.HasValue());
-    REQUIRE(encode.Error().Code() == NGIN::Crypto::CryptoErrorCode::OutputBufferTooSmall);
+    REQUIRE_FALSE(encode.has_value());
+    REQUIRE(encode.error().Code() == NGIN::Crypto::CryptoErrorCode::OutputBufferTooSmall);
 
     std::array<NGIN::Byte, 2> tooLarge {};
     auto                      decode = NGIN::Crypto::Encoding::DecodeHexInto("61", tooLarge);
-    REQUIRE_FALSE(decode.HasValue());
-    REQUIRE(decode.Error().Code() == NGIN::Crypto::CryptoErrorCode::OutputBufferTooSmall);
+    REQUIRE_FALSE(decode.has_value());
+    REQUIRE(decode.error().Code() == NGIN::Crypto::CryptoErrorCode::OutputBufferTooSmall);
 }
 
 TEST_CASE("Base64 matches RFC 4648 vectors", "[Crypto][Encoding]")
@@ -126,24 +126,24 @@ TEST_CASE("Base64 matches RFC 4648 vectors", "[Crypto][Encoding]")
     for (const auto& vector: vectors)
     {
         auto encoded = NGIN::Crypto::Encoding::EncodeBase64(Bytes(vector.plain));
-        REQUIRE(encoded.HasValue());
-        REQUIRE(encoded.Value() == vector.encoded);
+        REQUIRE(encoded.has_value());
+        REQUIRE(encoded.value() == vector.encoded);
 
         auto decoded = NGIN::Crypto::Encoding::DecodeBase64(vector.encoded);
-        REQUIRE(decoded.HasValue());
-        RequireBytesEqual(decoded.Value(), vector.plain);
+        REQUIRE(decoded.has_value());
+        RequireBytesEqual(decoded.value(), vector.plain);
     }
 }
 
 TEST_CASE("Base64 supports omitted padding", "[Crypto][Encoding]")
 {
     auto encoded = NGIN::Crypto::Encoding::EncodeBase64(Bytes("fo"), NGIN::Crypto::Encoding::Base64Padding::Omit);
-    REQUIRE(encoded.HasValue());
-    REQUIRE(encoded.Value() == "Zm8");
+    REQUIRE(encoded.has_value());
+    REQUIRE(encoded.value() == "Zm8");
 
-    auto decoded = NGIN::Crypto::Encoding::DecodeBase64(encoded.Value());
-    REQUIRE(decoded.HasValue());
-    RequireBytesEqual(decoded.Value(), "fo");
+    auto decoded = NGIN::Crypto::Encoding::DecodeBase64(encoded.value());
+    REQUIRE(decoded.has_value());
+    RequireBytesEqual(decoded.value(), "fo");
 }
 
 TEST_CASE("Base64 rejects malformed strict input", "[Crypto][Encoding]")
@@ -151,8 +151,8 @@ TEST_CASE("Base64 rejects malformed strict input", "[Crypto][Encoding]")
     for (std::string_view text: {"Z", "Z g==", "Zg===", "Z=g=", "Zh==", "Zm9="})
     {
         auto decoded = NGIN::Crypto::Encoding::DecodeBase64(text);
-        REQUIRE_FALSE(decoded.HasValue());
-        REQUIRE(decoded.Error().Code() == NGIN::Crypto::CryptoErrorCode::EncodingError);
+        REQUIRE_FALSE(decoded.has_value());
+        REQUIRE(decoded.error().Code() == NGIN::Crypto::CryptoErrorCode::EncodingError);
     }
 }
 
@@ -165,15 +165,15 @@ TEST_CASE("Base64Url encodes without padding by default", "[Crypto][Encoding]")
     };
 
     auto encoded = NGIN::Crypto::Encoding::EncodeBase64Url(input);
-    REQUIRE(encoded.HasValue());
-    REQUIRE(encoded.Value() == "-___");
+    REQUIRE(encoded.has_value());
+    REQUIRE(encoded.value() == "-___");
 
-    auto decoded = NGIN::Crypto::Encoding::DecodeBase64Url(encoded.Value());
-    REQUIRE(decoded.HasValue());
-    REQUIRE(decoded.Value().Size() == input.size());
+    auto decoded = NGIN::Crypto::Encoding::DecodeBase64Url(encoded.value());
+    REQUIRE(decoded.has_value());
+    REQUIRE(decoded.value().Size() == input.size());
     for (NGIN::UIntSize i = 0; i < input.size(); ++i)
     {
-        REQUIRE(decoded.Value()[i] == input[i]);
+        REQUIRE(decoded.value()[i] == input[i]);
     }
 }
 
@@ -181,8 +181,8 @@ TEST_CASE("Base64Url rejects standard Base64 alphabet characters", "[Crypto][Enc
 {
     auto decoded = NGIN::Crypto::Encoding::DecodeBase64Url("+///");
 
-    REQUIRE_FALSE(decoded.HasValue());
-    REQUIRE(decoded.Error().Code() == NGIN::Crypto::CryptoErrorCode::EncodingError);
+    REQUIRE_FALSE(decoded.has_value());
+    REQUIRE(decoded.error().Code() == NGIN::Crypto::CryptoErrorCode::EncodingError);
 }
 
 TEST_CASE("PEM parses strict blocks and normalizes line endings", "[Crypto][Encoding]")
@@ -197,10 +197,10 @@ TEST_CASE("PEM parses strict blocks and normalizes line endings", "[Crypto][Enco
                     .maxDecodedBytes = 16,
             });
 
-    REQUIRE(blocks.HasValue());
-    REQUIRE(blocks.Value().Size() == 1);
-    REQUIRE(blocks.Value()[0].label == "CERTIFICATE");
-    RequireBytesEqual(blocks.Value()[0].decoded, "hello");
+    REQUIRE(blocks.has_value());
+    REQUIRE(blocks.value().Size() == 1);
+    REQUIRE(blocks.value()[0].label == "CERTIFICATE");
+    RequireBytesEqual(blocks.value()[0].decoded, "hello");
 }
 
 TEST_CASE("PEM parses multiple allowlisted blocks", "[Crypto][Encoding]")
@@ -216,12 +216,12 @@ TEST_CASE("PEM parses multiple allowlisted blocks", "[Crypto][Encoding]")
                     .allowedLabels = {"PUBLIC KEY", "PRIVATE KEY"},
             });
 
-    REQUIRE(blocks.HasValue());
-    REQUIRE(blocks.Value().Size() == 2);
-    REQUIRE(blocks.Value()[0].label == "PUBLIC KEY");
-    RequireBytesEqual(blocks.Value()[0].decoded, "fo");
-    REQUIRE(blocks.Value()[1].label == "PRIVATE KEY");
-    RequireBytesEqual(blocks.Value()[1].decoded, "bar");
+    REQUIRE(blocks.has_value());
+    REQUIRE(blocks.value().Size() == 2);
+    REQUIRE(blocks.value()[0].label == "PUBLIC KEY");
+    RequireBytesEqual(blocks.value()[0].decoded, "fo");
+    REQUIRE(blocks.value()[1].label == "PRIVATE KEY");
+    RequireBytesEqual(blocks.value()[1].decoded, "bar");
 
     auto singleOnly = NGIN::Crypto::Encoding::ParsePem(
             "-----BEGIN PUBLIC KEY-----\n"
@@ -234,8 +234,8 @@ TEST_CASE("PEM parses multiple allowlisted blocks", "[Crypto][Encoding]")
                     .allowedLabels       = {"PUBLIC KEY", "PRIVATE KEY"},
                     .allowMultipleBlocks = false,
             });
-    REQUIRE_FALSE(singleOnly.HasValue());
-    REQUIRE(singleOnly.Error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
+    REQUIRE_FALSE(singleOnly.has_value());
+    REQUIRE(singleOnly.error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
 }
 
 TEST_CASE("PEM rejects malformed structure", "[Crypto][Encoding]")
@@ -256,8 +256,8 @@ TEST_CASE("PEM rejects malformed structure", "[Crypto][Encoding]")
          })
     {
         auto blocks = NGIN::Crypto::Encoding::ParsePem(text, {.allowedLabels = {"CERTIFICATE", "PUBLIC KEY"}});
-        REQUIRE_FALSE(blocks.HasValue());
-        REQUIRE(blocks.Error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
+        REQUIRE_FALSE(blocks.has_value());
+        REQUIRE(blocks.error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
     }
 }
 
@@ -268,8 +268,8 @@ TEST_CASE("PEM enforces allowlist and decoded size limits", "[Crypto][Encoding]"
             "Zm8=\n"
             "-----END PRIVATE KEY-----\n",
             {.allowedLabels = {"PUBLIC KEY"}});
-    REQUIRE_FALSE(disallowed.HasValue());
-    REQUIRE(disallowed.Error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
+    REQUIRE_FALSE(disallowed.has_value());
+    REQUIRE(disallowed.error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
 
     auto tooLarge = NGIN::Crypto::Encoding::ParsePem(
             "-----BEGIN CERTIFICATE-----\n"
@@ -279,8 +279,8 @@ TEST_CASE("PEM enforces allowlist and decoded size limits", "[Crypto][Encoding]"
                     .allowedLabels   = {"CERTIFICATE"},
                     .maxDecodedBytes = 1,
             });
-    REQUIRE_FALSE(tooLarge.HasValue());
-    REQUIRE(tooLarge.Error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
+    REQUIRE_FALSE(tooLarge.has_value());
+    REQUIRE(tooLarge.error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
 }
 
 TEST_CASE("PEM rejects malformed Base64 payloads", "[Crypto][Encoding]")
@@ -295,8 +295,8 @@ TEST_CASE("PEM rejects malformed Base64 payloads", "[Crypto][Encoding]")
          })
     {
         auto blocks = NGIN::Crypto::Encoding::ParsePem(text, {.allowedLabels = {"CERTIFICATE"}});
-        REQUIRE_FALSE(blocks.HasValue());
-        REQUIRE(blocks.Error().Code() == NGIN::Crypto::CryptoErrorCode::EncodingError);
+        REQUIRE_FALSE(blocks.has_value());
+        REQUIRE(blocks.error().Code() == NGIN::Crypto::CryptoErrorCode::EncodingError);
     }
 }
 
@@ -307,47 +307,47 @@ TEST_CASE("DER reads and writes primitive universal elements", "[Crypto][Encodin
     const auto     integerBytes = Bytes({0x02, 0x01, 0x05});
     Der::DerReader reader {integerBytes};
     auto           element = reader.ReadElement();
-    REQUIRE(element.HasValue());
+    REQUIRE(element.has_value());
     REQUIRE(reader.IsAtEnd());
-    REQUIRE(Der::IsDerUniversalElement(element.Value(), Der::DerUniversalTag::Integer));
+    REQUIRE(Der::IsDerUniversalElement(element.value(), Der::DerUniversalTag::Integer));
 
-    auto integer = Der::ReadDerInteger(element.Value());
-    REQUIRE(integer.HasValue());
-    RequireSpanEqual(integer.Value(), {0x05});
+    auto integer = Der::ReadDerInteger(element.value());
+    REQUIRE(integer.has_value());
+    RequireSpanEqual(integer.value(), {0x05});
 
-    auto encodedInteger = Der::EncodeDerInteger(integer.Value());
-    REQUIRE(encodedInteger.HasValue());
-    RequireBytesEqual(encodedInteger.Value(), {0x02, 0x01, 0x05});
+    auto encodedInteger = Der::EncodeDerInteger(integer.value());
+    REQUIRE(encodedInteger.has_value());
+    RequireBytesEqual(encodedInteger.value(), {0x02, 0x01, 0x05});
 
     const auto oidArcs = std::array<NGIN::UInt32, 7> {1, 2, 840, 113549, 1, 1, 1};
     auto       oid     = Der::EncodeDerObjectIdentifier(oidArcs);
-    REQUIRE(oid.HasValue());
-    RequireBytesEqual(oid.Value(), {0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01});
+    REQUIRE(oid.has_value());
+    RequireBytesEqual(oid.value(), {0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01});
 
-    Der::DerReader oidReader {NGIN::Crypto::ConstByteSpan {oid.Value().data(), oid.Value().Size()}};
+    Der::DerReader oidReader {NGIN::Crypto::ConstByteSpan {oid.value().data(), oid.value().Size()}};
     auto           oidElement = oidReader.ReadElement();
-    REQUIRE(oidElement.HasValue());
+    REQUIRE(oidElement.has_value());
 
-    auto decodedOid = Der::ReadDerObjectIdentifier(oidElement.Value());
-    REQUIRE(decodedOid.HasValue());
-    REQUIRE(decodedOid.Value().Size() == oidArcs.size());
+    auto decodedOid = Der::ReadDerObjectIdentifier(oidElement.value());
+    REQUIRE(decodedOid.has_value());
+    REQUIRE(decodedOid.value().Size() == oidArcs.size());
     for (NGIN::UIntSize i = 0; i < oidArcs.size(); ++i)
     {
-        REQUIRE(decodedOid.Value()[i] == oidArcs[i]);
+        REQUIRE(decodedOid.value()[i] == oidArcs[i]);
     }
 
     auto bitString = Der::EncodeDerBitString(3, Bytes({0xa0}));
-    REQUIRE(bitString.HasValue());
-    RequireBytesEqual(bitString.Value(), {0x03, 0x02, 0x03, 0xa0});
+    REQUIRE(bitString.has_value());
+    RequireBytesEqual(bitString.value(), {0x03, 0x02, 0x03, 0xa0});
 
-    Der::DerReader bitStringReader {NGIN::Crypto::ConstByteSpan {bitString.Value().data(), bitString.Value().Size()}};
+    Der::DerReader bitStringReader {NGIN::Crypto::ConstByteSpan {bitString.value().data(), bitString.value().Size()}};
     auto           bitStringElement = bitStringReader.ReadElement();
-    REQUIRE(bitStringElement.HasValue());
+    REQUIRE(bitStringElement.has_value());
 
-    auto decodedBitString = Der::ReadDerBitString(bitStringElement.Value());
-    REQUIRE(decodedBitString.HasValue());
-    REQUIRE(decodedBitString.Value().unusedBitCount == 3);
-    RequireSpanEqual(decodedBitString.Value().bytes, {0xa0});
+    auto decodedBitString = Der::ReadDerBitString(bitStringElement.value());
+    REQUIRE(decodedBitString.has_value());
+    REQUIRE(decodedBitString.value().unusedBitCount == 3);
+    RequireSpanEqual(decodedBitString.value().bytes, {0xa0});
 }
 
 TEST_CASE("DER reads nested SEQUENCE values with bounded readers", "[Crypto][Encoding]")
@@ -355,42 +355,42 @@ TEST_CASE("DER reads nested SEQUENCE values with bounded readers", "[Crypto][Enc
     namespace Der = NGIN::Crypto::Encoding;
 
     auto integer = Der::EncodeDerInteger(Bytes({0x05}));
-    REQUIRE(integer.HasValue());
+    REQUIRE(integer.has_value());
 
     auto octetString = Der::EncodeDerOctetString(Bytes("ngin"));
-    REQUIRE(octetString.HasValue());
+    REQUIRE(octetString.has_value());
 
     auto children = NGIN::Crypto::ByteBuffer {};
-    children.Reserve(integer.Value().Size() + octetString.Value().Size());
-    for (NGIN::Byte byte: integer.Value())
+    children.Reserve(integer.value().Size() + octetString.value().Size());
+    for (NGIN::Byte byte: integer.value())
     {
         children.PushBack(byte);
     }
-    for (NGIN::Byte byte: octetString.Value())
+    for (NGIN::Byte byte: octetString.value())
     {
         children.PushBack(byte);
     }
 
     auto sequence = Der::EncodeDerSequence(NGIN::Crypto::ConstByteSpan {children.data(), children.Size()});
-    REQUIRE(sequence.HasValue());
+    REQUIRE(sequence.has_value());
 
-    Der::DerReader reader {NGIN::Crypto::ConstByteSpan {sequence.Value().data(), sequence.Value().Size()}};
+    Der::DerReader reader {NGIN::Crypto::ConstByteSpan {sequence.value().data(), sequence.value().Size()}};
     auto           sequenceElement = reader.ReadElement();
-    REQUIRE(sequenceElement.HasValue());
+    REQUIRE(sequenceElement.has_value());
 
-    auto childReader = Der::ReadDerSequence(reader, sequenceElement.Value());
-    REQUIRE(childReader.HasValue());
+    auto childReader = Der::ReadDerSequence(reader, sequenceElement.value());
+    REQUIRE(childReader.has_value());
 
-    auto parsedInteger = childReader.Value().ReadElement();
-    REQUIRE(parsedInteger.HasValue());
-    REQUIRE(Der::ReadDerInteger(parsedInteger.Value()).HasValue());
+    auto parsedInteger = childReader.value().ReadElement();
+    REQUIRE(parsedInteger.has_value());
+    REQUIRE(Der::ReadDerInteger(parsedInteger.value()).has_value());
 
-    auto parsedOctetString = childReader.Value().ReadElement();
-    REQUIRE(parsedOctetString.HasValue());
-    auto decodedOctets = Der::ReadDerOctetString(parsedOctetString.Value());
-    REQUIRE(decodedOctets.HasValue());
-    RequireSpanEqual(decodedOctets.Value(), {0x6e, 0x67, 0x69, 0x6e});
-    REQUIRE(childReader.Value().IsAtEnd());
+    auto parsedOctetString = childReader.value().ReadElement();
+    REQUIRE(parsedOctetString.has_value());
+    auto decodedOctets = Der::ReadDerOctetString(parsedOctetString.value());
+    REQUIRE(decodedOctets.has_value());
+    RequireSpanEqual(decodedOctets.value(), {0x6e, 0x67, 0x69, 0x6e});
+    REQUIRE(childReader.value().IsAtEnd());
 }
 
 TEST_CASE("DER rejects BER and non-minimal encodings", "[Crypto][Encoding]")
@@ -406,8 +406,8 @@ TEST_CASE("DER rejects BER and non-minimal encodings", "[Crypto][Encoding]")
     {
         Der::DerReader reader {NGIN::Crypto::ConstByteSpan {bytes.data(), bytes.Size()}};
         auto           element = reader.ReadElement();
-        REQUIRE_FALSE(element.HasValue());
-        REQUIRE(element.Error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
+        REQUIRE_FALSE(element.has_value());
+        REQUIRE(element.error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
     }
 }
 
@@ -428,8 +428,8 @@ TEST_CASE("DER malformed corpus rejects truncated and oversized TLV forms", "[Cr
     {
         Der::DerReader reader {NGIN::Crypto::ConstByteSpan {bytes.data(), bytes.Size()}};
         auto           element = reader.ReadElement();
-        REQUIRE_FALSE(element.HasValue());
-        REQUIRE(element.Error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
+        REQUIRE_FALSE(element.has_value());
+        REQUIRE(element.error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
     }
 }
 
@@ -446,38 +446,38 @@ TEST_CASE("DER validates primitive helper invariants", "[Crypto][Encoding]")
     {
         Der::DerReader reader {NGIN::Crypto::ConstByteSpan {bytes.data(), bytes.Size()}};
         auto           element = reader.ReadElement();
-        REQUIRE(element.HasValue());
+        REQUIRE(element.has_value());
 
-        if (Der::IsDerUniversalElement(element.Value(), Der::DerUniversalTag::Integer))
+        if (Der::IsDerUniversalElement(element.value(), Der::DerUniversalTag::Integer))
         {
-            auto integer = Der::ReadDerInteger(element.Value());
-            REQUIRE_FALSE(integer.HasValue());
-            REQUIRE(integer.Error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
+            auto integer = Der::ReadDerInteger(element.value());
+            REQUIRE_FALSE(integer.has_value());
+            REQUIRE(integer.error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
         }
-        else if (Der::IsDerUniversalElement(element.Value(), Der::DerUniversalTag::BitString))
+        else if (Der::IsDerUniversalElement(element.value(), Der::DerUniversalTag::BitString))
         {
-            auto bitString = Der::ReadDerBitString(element.Value());
-            REQUIRE_FALSE(bitString.HasValue());
-            REQUIRE(bitString.Error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
+            auto bitString = Der::ReadDerBitString(element.value());
+            REQUIRE_FALSE(bitString.has_value());
+            REQUIRE(bitString.error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
         }
         else
         {
-            auto oid = Der::ReadDerObjectIdentifier(element.Value());
-            REQUIRE_FALSE(oid.HasValue());
-            REQUIRE(oid.Error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
+            auto oid = Der::ReadDerObjectIdentifier(element.value());
+            REQUIRE_FALSE(oid.has_value());
+            REQUIRE(oid.error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
         }
     }
 
     auto nonMinimalInteger = Der::EncodeDerInteger(Bytes({0x00, 0x7f}));
-    REQUIRE_FALSE(nonMinimalInteger.HasValue());
-    REQUIRE(nonMinimalInteger.Error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidArgument);
+    REQUIRE_FALSE(nonMinimalInteger.has_value());
+    REQUIRE(nonMinimalInteger.error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidArgument);
 
     auto invalidBitString = Der::EncodeDerBitString(3, Bytes({0xa1}));
-    REQUIRE_FALSE(invalidBitString.HasValue());
-    REQUIRE(invalidBitString.Error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidArgument);
+    REQUIRE_FALSE(invalidBitString.has_value());
+    REQUIRE(invalidBitString.error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidArgument);
 
     const auto invalidOidArcs = std::array<NGIN::UInt32, 2> {1, 40};
     auto       invalidOid     = Der::EncodeDerObjectIdentifier(invalidOidArcs);
-    REQUIRE_FALSE(invalidOid.HasValue());
-    REQUIRE(invalidOid.Error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidArgument);
+    REQUIRE_FALSE(invalidOid.has_value());
+    REQUIRE(invalidOid.error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidArgument);
 }

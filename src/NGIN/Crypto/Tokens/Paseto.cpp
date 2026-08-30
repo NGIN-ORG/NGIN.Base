@@ -81,12 +81,12 @@ namespace NGIN::Crypto::Tokens
         {
             auto document = NGIN::Serialization::JSON::Parser::Parse(
                     NGIN::Serialization::OwnedTextBuffer {json});
-            if (!document.HasValue() || !document.Value().Root().IsObject())
+            if (!document.has_value() || !document.value().Root().IsObject())
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
-            return std::move(document.Value());
+            return std::move(document.value());
         }
 
         [[nodiscard]] CryptoExpected<NGIN::Int64>
@@ -98,14 +98,14 @@ namespace NGIN::Crypto::Tokens
             const auto number = value.TryDouble();
             if (!number || !std::isfinite(*number))
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
             const auto whole = std::trunc(*number);
             if (*number != whole || whole < static_cast<NGIN::F64>(std::numeric_limits<NGIN::Int64>::min()) ||
                 whole > static_cast<NGIN::F64>(std::numeric_limits<NGIN::Int64>::max()))
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
             return static_cast<NGIN::Int64>(whole);
@@ -121,17 +121,17 @@ namespace NGIN::Crypto::Tokens
         [[nodiscard]] CryptoExpected<void> ValidateRequiredClaims(std::string_view payloadJson, PasetoValidationPolicy policy)
         {
             auto document = ParseJsonObject(payloadJson);
-            if (!document.HasValue())
+            if (!document.has_value())
             {
-                return document.Error();
+                return std::unexpected(std::move(document).error());
             }
 
-            const auto object = *document.Value().Root().TryObject();
+            const auto object = *document.value().Root().TryObject();
             for (std::string_view claim: policy.requiredClaims)
             {
                 if (!HasClaim(object, claim))
                 {
-                    return PolicyRejected();
+                    return std::unexpected(PolicyRejected());
                 }
             }
 
@@ -159,7 +159,7 @@ namespace NGIN::Crypto::Tokens
         {
             if (pieces.size() > std::numeric_limits<NGIN::UInt64>::max())
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
             NGIN::UIntSize payloadSize = 0;
@@ -168,7 +168,7 @@ namespace NGIN::Crypto::Tokens
                 if (piece.size() > std::numeric_limits<NGIN::UInt64>::max() ||
                     payloadSize > std::numeric_limits<NGIN::UIntSize>::max() - piece.size())
                 {
-                    return ParseError();
+                    return std::unexpected(ParseError());
                 }
                 payloadSize += piece.size();
             }
@@ -190,7 +190,7 @@ namespace NGIN::Crypto::Tokens
         {
             if (first.size() > std::numeric_limits<NGIN::UIntSize>::max() - second.size())
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
             ByteBuffer output;
@@ -209,33 +209,33 @@ namespace NGIN::Crypto::Tokens
             if (encryptionMaterial.size() != PASETO_V4_LOCAL_KEY_BYTES + PASETO_V4_LOCAL_COUNTER_NONCE_BYTES ||
                 authKey.size() != PASETO_V4_LOCAL_TAG_BYTES)
             {
-                return InvalidArgument();
+                return std::unexpected(InvalidArgument());
             }
 
             auto encryptionInput = Concat(StringBytes(PASETO_V4_LOCAL_ENCRYPTION_INFO), nonce);
-            if (!encryptionInput.HasValue())
+            if (!encryptionInput.has_value())
             {
-                return encryptionInput.Error();
+                return std::unexpected(std::move(encryptionInput).error());
             }
 
             auto split = NGIN::Crypto::Backend::detail::Blake2bLibsodium(
                     key,
-                    ConstByteSpan {encryptionInput.Value().data(), encryptionInput.Value().Size()},
+                    ConstByteSpan {encryptionInput.value().data(), encryptionInput.value().Size()},
                     encryptionMaterial);
-            if (!split.HasValue())
+            if (!split.has_value())
             {
-                return split.Error();
+                return std::unexpected(std::move(split).error());
             }
 
             auto authInput = Concat(StringBytes(PASETO_V4_LOCAL_AUTH_INFO), nonce);
-            if (!authInput.HasValue())
+            if (!authInput.has_value())
             {
-                return authInput.Error();
+                return std::unexpected(std::move(authInput).error());
             }
 
             return NGIN::Crypto::Backend::detail::Blake2bLibsodium(
                     key,
-                    ConstByteSpan {authInput.Value().data(), authInput.Value().Size()},
+                    ConstByteSpan {authInput.value().data(), authInput.value().Size()},
                     authKey);
         }
 
@@ -254,14 +254,14 @@ namespace NGIN::Crypto::Tokens
                     footer,
                     implicitAssertion,
             });
-            if (!preAuth.HasValue())
+            if (!preAuth.has_value())
             {
-                return preAuth.Error();
+                return std::unexpected(std::move(preAuth).error());
             }
 
             return NGIN::Crypto::Backend::detail::Blake2bLibsodium(
                     authKey,
-                    ConstByteSpan {preAuth.Value().data(), preAuth.Value().Size()},
+                    ConstByteSpan {preAuth.value().data(), preAuth.value().Size()},
                     tag);
         }
 #endif
@@ -278,12 +278,12 @@ namespace NGIN::Crypto::Tokens
                 std::string_view name)
         {
             auto document = ParseJsonObject(payloadJson);
-            if (!document.HasValue())
+            if (!document.has_value())
             {
-                return document.Error();
+                return std::unexpected(std::move(document).error());
             }
 
-            return document.Value().Root().TryObject()->Find(name).has_value();
+            return document.value().Root().TryObject()->Find(name).has_value();
         }
 
         [[nodiscard]] CryptoExpected<std::string> GetPasetoStringClaimInPayload(
@@ -291,15 +291,15 @@ namespace NGIN::Crypto::Tokens
                 std::string_view name)
         {
             auto document = ParseJsonObject(payloadJson);
-            if (!document.HasValue())
+            if (!document.has_value())
             {
-                return document.Error();
+                return std::unexpected(std::move(document).error());
             }
 
-            const auto value = document.Value().Root().TryObject()->Find(name);
+            const auto value = document.value().Root().TryObject()->Find(name);
             if (!value || !value->IsString())
             {
-                return InvalidArgument();
+                return std::unexpected(InvalidArgument());
             }
 
             return std::string {*value->TryString()};
@@ -310,15 +310,15 @@ namespace NGIN::Crypto::Tokens
                 std::string_view name)
         {
             auto document = ParseJsonObject(payloadJson);
-            if (!document.HasValue())
+            if (!document.has_value())
             {
-                return document.Error();
+                return std::unexpected(std::move(document).error());
             }
 
-            const auto value = document.Value().Root().TryObject()->Find(name);
+            const auto value = document.value().Root().TryObject()->Find(name);
             if (!value || !value->IsNumber())
             {
-                return InvalidArgument();
+                return std::unexpected(InvalidArgument());
             }
 
             return JsonNumberToInt64(*value);
@@ -329,15 +329,15 @@ namespace NGIN::Crypto::Tokens
                 std::string_view name)
         {
             auto document = ParseJsonObject(payloadJson);
-            if (!document.HasValue())
+            if (!document.has_value())
             {
-                return document.Error();
+                return std::unexpected(std::move(document).error());
             }
 
-            const auto value = document.Value().Root().TryObject()->Find(name);
+            const auto value = document.value().Root().TryObject()->Find(name);
             if (!value || !value->IsBool())
             {
-                return InvalidArgument();
+                return std::unexpected(InvalidArgument());
             }
 
             return *value->TryBool();
@@ -348,7 +348,7 @@ namespace NGIN::Crypto::Tokens
     {
         if (!StartsWith(token, PASETO_V4_PUBLIC_HEADER))
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
         const auto bodyStart = PASETO_V4_PUBLIC_HEADER.size();
@@ -360,51 +360,51 @@ namespace NGIN::Crypto::Tokens
 
         if (payloadAndSignatureText.empty())
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
         auto payloadAndSignature = NGIN::Crypto::Encoding::DecodeBase64Url(payloadAndSignatureText);
-        if (!payloadAndSignature.HasValue())
+        if (!payloadAndSignature.has_value())
         {
-            return payloadAndSignature.Error();
+            return std::unexpected(std::move(payloadAndSignature).error());
         }
-        if (payloadAndSignature.Value().Size() < ED25519_SIGNATURE_BYTES)
+        if (payloadAndSignature.value().Size() < ED25519_SIGNATURE_BYTES)
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
-        const auto payloadSize = payloadAndSignature.Value().Size() - ED25519_SIGNATURE_BYTES;
+        const auto payloadSize = payloadAndSignature.value().Size() - ED25519_SIGNATURE_BYTES;
         if (payloadSize > options.maxPayloadBytes)
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
         auto footer = NGIN::Crypto::Encoding::DecodeBase64Url(footerText);
-        if (!footer.HasValue())
+        if (!footer.has_value())
         {
-            return footer.Error();
+            return std::unexpected(std::move(footer).error());
         }
-        if (footer.Value().Size() > options.maxFooterBytes)
+        if (footer.value().Size() > options.maxFooterBytes)
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
-        auto payloadJson = CopyToString(ConstByteSpan {payloadAndSignature.Value().data(), payloadSize});
+        auto payloadJson = CopyToString(ConstByteSpan {payloadAndSignature.value().data(), payloadSize});
         auto parsedJson  = ParseJsonObject(payloadJson);
-        if (!parsedJson.HasValue())
+        if (!parsedJson.has_value())
         {
-            return parsedJson.Error();
+            return std::unexpected(std::move(parsedJson).error());
         }
 
         auto signature = MakeByteBuffer(ED25519_SIGNATURE_BYTES);
         for (NGIN::UIntSize i = 0; i < ED25519_SIGNATURE_BYTES; ++i)
         {
-            signature[i] = payloadAndSignature.Value()[payloadSize + i];
+            signature[i] = payloadAndSignature.value()[payloadSize + i];
         }
 
         return PasetoV4PublicToken {
                 .payloadJson = std::move(payloadJson),
-                .footer      = CopyToString(ConstByteSpan {footer.Value().data(), footer.Value().Size()}),
+                .footer      = CopyToString(ConstByteSpan {footer.value().data(), footer.value().Size()}),
                 .signature   = std::move(signature),
         };
     }
@@ -457,42 +457,42 @@ namespace NGIN::Crypto::Tokens
     {
         if (publicKey.size() != ED25519_PUBLIC_KEY_BYTES)
         {
-            return InvalidKey();
+            return std::unexpected(InvalidKey());
         }
         if (policy.implicitAssertion.size() > policy.parseOptions.maxImplicitBytes)
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
         auto parsed = ParsePasetoV4Public(token, policy.parseOptions);
-        if (!parsed.HasValue())
+        if (!parsed.has_value())
         {
-            return parsed.Error();
+            return std::unexpected(std::move(parsed).error());
         }
 
         if (!policy.expectedFooter.empty())
         {
-            if (!NGIN::Crypto::Memory::ConstantTimeEqual(StringBytes(parsed.Value().footer), policy.expectedFooter))
+            if (!NGIN::Crypto::Memory::ConstantTimeEqual(StringBytes(parsed.value().footer), policy.expectedFooter))
             {
-                return PolicyRejected();
+                return std::unexpected(PolicyRejected());
             }
         }
 
-        auto claims = ValidateRequiredClaims(parsed.Value().payloadJson, policy);
-        if (!claims.HasValue())
+        auto claims = ValidateRequiredClaims(parsed.value().payloadJson, policy);
+        if (!claims.has_value())
         {
-            return claims.Error();
+            return std::unexpected(std::move(claims).error());
         }
 
         auto message = Pae({
                 StringBytes(PASETO_V4_PUBLIC_HEADER),
-                StringBytes(parsed.Value().payloadJson),
-                StringBytes(parsed.Value().footer),
+                StringBytes(parsed.value().payloadJson),
+                StringBytes(parsed.value().footer),
                 policy.implicitAssertion,
         });
-        if (!message.HasValue())
+        if (!message.has_value())
         {
-            return message.Error();
+            return std::unexpected(std::move(message).error());
         }
 
         auto verified = NGIN::Crypto::Signatures::Verify(
@@ -500,12 +500,12 @@ namespace NGIN::Crypto::Tokens
                 SignatureAlgorithm::Ed25519,
                 NGIN::Crypto::Signatures::VerifyInput {
                         .publicKey = publicKey,
-                        .message   = ConstByteSpan {message.Value().data(), message.Value().Size()},
-                        .signature = ConstByteSpan {parsed.Value().signature.data(), parsed.Value().signature.Size()},
+                        .message   = ConstByteSpan {message.value().data(), message.value().Size()},
+                        .signature = ConstByteSpan {parsed.value().signature.data(), parsed.value().signature.Size()},
                 });
-        if (!verified.HasValue())
+        if (!verified.has_value())
         {
-            return verified.Error();
+            return std::unexpected(std::move(verified).error());
         }
 
         return parsed;
@@ -519,15 +519,15 @@ namespace NGIN::Crypto::Tokens
     {
         if (key.Size() != PASETO_V4_LOCAL_KEY_BYTES)
         {
-            return InvalidKey();
+            return std::unexpected(InvalidKey());
         }
         if (policy.implicitAssertion.size() > policy.parseOptions.maxImplicitBytes)
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
         if (!StartsWith(token, PASETO_V4_LOCAL_HEADER))
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
         const auto bodyStart = PASETO_V4_LOCAL_HEADER.size();
@@ -538,58 +538,58 @@ namespace NGIN::Crypto::Tokens
         auto footerText = footerDot == std::string_view::npos ? std::string_view {} : token.substr(footerDot + 1);
         if (payloadText.empty())
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
         auto payload = NGIN::Crypto::Encoding::DecodeBase64Url(payloadText);
-        if (!payload.HasValue())
+        if (!payload.has_value())
         {
-            return payload.Error();
+            return std::unexpected(std::move(payload).error());
         }
-        if (payload.Value().Size() < PASETO_V4_LOCAL_NONCE_BYTES + PASETO_V4_LOCAL_TAG_BYTES)
+        if (payload.value().Size() < PASETO_V4_LOCAL_NONCE_BYTES + PASETO_V4_LOCAL_TAG_BYTES)
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
         auto footer = NGIN::Crypto::Encoding::DecodeBase64Url(footerText);
-        if (!footer.HasValue())
+        if (!footer.has_value())
         {
-            return footer.Error();
+            return std::unexpected(std::move(footer).error());
         }
-        if (footer.Value().Size() > policy.parseOptions.maxFooterBytes)
+        if (footer.value().Size() > policy.parseOptions.maxFooterBytes)
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
-        const ConstByteSpan footerBytes {footer.Value().data(), footer.Value().Size()};
+        const ConstByteSpan footerBytes {footer.value().data(), footer.value().Size()};
         if (!policy.expectedFooter.empty() &&
             !NGIN::Crypto::Memory::ConstantTimeEqual(footerBytes, policy.expectedFooter))
         {
-            return PolicyRejected();
+            return std::unexpected(PolicyRejected());
         }
 
-        const auto ciphertextSize = payload.Value().Size() - PASETO_V4_LOCAL_NONCE_BYTES - PASETO_V4_LOCAL_TAG_BYTES;
+        const auto ciphertextSize = payload.value().Size() - PASETO_V4_LOCAL_NONCE_BYTES - PASETO_V4_LOCAL_TAG_BYTES;
         if (ciphertextSize > policy.parseOptions.maxPayloadBytes)
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
         if (!IsLibsodiumContext(context))
         {
-            return CryptoError {CryptoErrorCode::UnsupportedAlgorithm};
+            return std::unexpected(CryptoError {CryptoErrorCode::UnsupportedAlgorithm});
         }
 
 #if defined(NGIN_BASE_CRYPTO_HAS_LIBSODIUM)
         const ConstByteSpan nonce {
-                payload.Value().data(),
+                payload.value().data(),
                 PASETO_V4_LOCAL_NONCE_BYTES,
         };
         const ConstByteSpan ciphertext {
-                payload.Value().data() + PASETO_V4_LOCAL_NONCE_BYTES,
+                payload.value().data() + PASETO_V4_LOCAL_NONCE_BYTES,
                 ciphertextSize,
         };
         const ConstByteSpan tag {
-                payload.Value().data() + PASETO_V4_LOCAL_NONCE_BYTES + ciphertextSize,
+                payload.value().data() + PASETO_V4_LOCAL_NONCE_BYTES + ciphertextSize,
                 PASETO_V4_LOCAL_TAG_BYTES,
         };
 
@@ -600,9 +600,9 @@ namespace NGIN::Crypto::Tokens
                 nonce,
                 ByteSpan {encryptionMaterial.data(), encryptionMaterial.Size()},
                 ByteSpan {authKey.data(), authKey.Size()});
-        if (!derived.HasValue())
+        if (!derived.has_value())
         {
-            return derived.Error();
+            return std::unexpected(std::move(derived).error());
         }
 
         const auto encryptionKeyBytes = ConstByteSpan {encryptionMaterial.data(), PASETO_V4_LOCAL_KEY_BYTES};
@@ -620,17 +620,17 @@ namespace NGIN::Crypto::Tokens
                 policy.implicitAssertion,
                 ByteSpan {computedTag.data(), computedTag.Size()});
         NGIN::Crypto::Memory::SecureZero(ByteSpan {authKey.data(), authKey.Size()});
-        if (!tagResult.HasValue())
+        if (!tagResult.has_value())
         {
             NGIN::Crypto::Memory::SecureZero(ByteSpan {encryptionMaterial.data(), encryptionMaterial.Size()});
-            return tagResult.Error();
+            return std::unexpected(std::move(tagResult).error());
         }
 
         if (!NGIN::Crypto::Memory::ConstantTimeEqual(ConstByteSpan {computedTag.data(), computedTag.Size()}, tag))
         {
             NGIN::Crypto::Memory::SecureZero(ByteSpan {encryptionMaterial.data(), encryptionMaterial.Size()});
             NGIN::Crypto::Memory::SecureZero(ByteSpan {computedTag.data(), computedTag.Size()});
-            return CryptoError {CryptoErrorCode::AuthenticationFailed};
+            return std::unexpected(CryptoError {CryptoErrorCode::AuthenticationFailed});
         }
         NGIN::Crypto::Memory::SecureZero(ByteSpan {computedTag.data(), computedTag.Size()});
 
@@ -641,24 +641,24 @@ namespace NGIN::Crypto::Tokens
                 ciphertext,
                 ByteSpan {plaintext.data(), plaintext.Size()});
         NGIN::Crypto::Memory::SecureZero(ByteSpan {encryptionMaterial.data(), encryptionMaterial.Size()});
-        if (!opened.HasValue())
+        if (!opened.has_value())
         {
             NGIN::Crypto::Memory::SecureZero(ByteSpan {plaintext.data(), plaintext.Size()});
-            return opened.Error();
+            return std::unexpected(std::move(opened).error());
         }
 
         auto payloadJson = CopyToString(ConstByteSpan {plaintext.data(), plaintext.Size()});
         NGIN::Crypto::Memory::SecureZero(ByteSpan {plaintext.data(), plaintext.Size()});
         auto parsedJson = ParseJsonObject(payloadJson);
-        if (!parsedJson.HasValue())
+        if (!parsedJson.has_value())
         {
-            return parsedJson.Error();
+            return std::unexpected(std::move(parsedJson).error());
         }
 
         auto claims = ValidateRequiredClaims(payloadJson, policy);
-        if (!claims.HasValue())
+        if (!claims.has_value())
         {
-            return claims.Error();
+            return std::unexpected(std::move(claims).error());
         }
 
         auto nonceCopy = MakeByteBuffer(PASETO_V4_LOCAL_NONCE_BYTES);
@@ -674,7 +674,7 @@ namespace NGIN::Crypto::Tokens
         };
 #else
         (void) context;
-        return CryptoError {CryptoErrorCode::UnsupportedAlgorithm};
+        return std::unexpected(CryptoError {CryptoErrorCode::UnsupportedAlgorithm});
 #endif
     }
 
@@ -686,31 +686,31 @@ namespace NGIN::Crypto::Tokens
     {
         if (key.Size() != PASETO_V4_LOCAL_KEY_BYTES)
         {
-            return InvalidKey();
+            return std::unexpected(InvalidKey());
         }
         if (payloadJson.size() > options.limits.maxPayloadBytes ||
             options.footer.size() > options.limits.maxFooterBytes ||
             options.implicitAssertion.size() > options.limits.maxImplicitBytes)
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
         if (!IsLibsodiumContext(context))
         {
-            return CryptoError {CryptoErrorCode::UnsupportedAlgorithm};
+            return std::unexpected(CryptoError {CryptoErrorCode::UnsupportedAlgorithm});
         }
 
         auto parsedJson = ParseJsonObject(payloadJson);
-        if (!parsedJson.HasValue())
+        if (!parsedJson.has_value())
         {
-            return parsedJson.Error();
+            return std::unexpected(std::move(parsedJson).error());
         }
 
 #if defined(NGIN_BASE_CRYPTO_HAS_LIBSODIUM)
         auto nonce  = MakeByteBuffer(PASETO_V4_LOCAL_NONCE_BYTES);
         auto random = context.FillRandom(ByteSpan {nonce.data(), nonce.Size()});
-        if (!random.HasValue())
+        if (!random.has_value())
         {
-            return random.Error();
+            return std::unexpected(std::move(random).error());
         }
 
         auto encryptionMaterial = MakeByteBuffer(PASETO_V4_LOCAL_KEY_BYTES + PASETO_V4_LOCAL_COUNTER_NONCE_BYTES);
@@ -720,9 +720,9 @@ namespace NGIN::Crypto::Tokens
                 ConstByteSpan {nonce.data(), nonce.Size()},
                 ByteSpan {encryptionMaterial.data(), encryptionMaterial.Size()},
                 ByteSpan {authKey.data(), authKey.Size()});
-        if (!derived.HasValue())
+        if (!derived.has_value())
         {
-            return derived.Error();
+            return std::unexpected(std::move(derived).error());
         }
 
         const auto encryptionKeyBytes = ConstByteSpan {encryptionMaterial.data(), PASETO_V4_LOCAL_KEY_BYTES};
@@ -738,11 +738,11 @@ namespace NGIN::Crypto::Tokens
                 StringBytes(payloadJson),
                 ByteSpan {ciphertext.data(), ciphertext.Size()});
         NGIN::Crypto::Memory::SecureZero(ByteSpan {encryptionMaterial.data(), encryptionMaterial.Size()});
-        if (!encrypted.HasValue())
+        if (!encrypted.has_value())
         {
             NGIN::Crypto::Memory::SecureZero(ByteSpan {authKey.data(), authKey.Size()});
             NGIN::Crypto::Memory::SecureZero(ByteSpan {ciphertext.data(), ciphertext.Size()});
-            return encrypted.Error();
+            return std::unexpected(std::move(encrypted).error());
         }
 
         auto tag       = MakeByteBuffer(PASETO_V4_LOCAL_TAG_BYTES);
@@ -754,10 +754,10 @@ namespace NGIN::Crypto::Tokens
                 options.implicitAssertion,
                 ByteSpan {tag.data(), tag.Size()});
         NGIN::Crypto::Memory::SecureZero(ByteSpan {authKey.data(), authKey.Size()});
-        if (!tagResult.HasValue())
+        if (!tagResult.has_value())
         {
             NGIN::Crypto::Memory::SecureZero(ByteSpan {ciphertext.data(), ciphertext.Size()});
-            return tagResult.Error();
+            return std::unexpected(std::move(tagResult).error());
         }
 
         ByteBuffer body;
@@ -768,28 +768,28 @@ namespace NGIN::Crypto::Tokens
         NGIN::Crypto::Memory::SecureZero(ByteSpan {ciphertext.data(), ciphertext.Size()});
 
         auto encodedBody = NGIN::Crypto::Encoding::EncodeBase64Url(ConstByteSpan {body.data(), body.Size()});
-        if (!encodedBody.HasValue())
+        if (!encodedBody.has_value())
         {
-            return encodedBody.Error();
+            return std::unexpected(std::move(encodedBody).error());
         }
 
         std::string token {PASETO_V4_LOCAL_HEADER};
-        token += encodedBody.Value();
+        token += encodedBody.value();
         if (!options.footer.empty())
         {
             auto encodedFooter = NGIN::Crypto::Encoding::EncodeBase64Url(options.footer);
-            if (!encodedFooter.HasValue())
+            if (!encodedFooter.has_value())
             {
-                return encodedFooter.Error();
+                return std::unexpected(std::move(encodedFooter).error());
             }
             token.push_back('.');
-            token += encodedFooter.Value();
+            token += encodedFooter.value();
         }
 
         return token;
 #else
         (void) context;
-        return CryptoError {CryptoErrorCode::UnsupportedAlgorithm};
+        return std::unexpected(CryptoError {CryptoErrorCode::UnsupportedAlgorithm});
 #endif
     }
 }// namespace NGIN::Crypto::Tokens

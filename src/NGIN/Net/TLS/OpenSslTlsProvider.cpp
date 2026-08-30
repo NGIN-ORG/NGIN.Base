@@ -134,11 +134,11 @@ namespace NGIN::Net::TLS::detail
             for (const auto& certificate: trust.customCertificates)
             {
                 auto decoded = DecodeCertificate(certificate);
-                if (!decoded.HasValue())
+                if (!decoded.has_value())
                 {
-                    return NGIN::Utilities::Unexpected(decoded.Error());
+                    return NGIN::Utilities::Unexpected(decoded.error());
                 }
-                if (X509_STORE_add_cert(store, decoded.Value().get()) != 1)
+                if (X509_STORE_add_cert(store, decoded.value().get()) != 1)
                 {
                     const auto error = ERR_peek_last_error();
                     if (ERR_GET_REASON(error) == X509_R_CERT_ALREADY_IN_HASH_TABLE)
@@ -168,11 +168,11 @@ namespace NGIN::Net::TLS::detail
             }
 
             auto leaf = DecodeCertificate(credentials.certificateChain.certificates[0]);
-            if (!leaf.HasValue())
+            if (!leaf.has_value())
             {
-                return NGIN::Utilities::Unexpected(leaf.Error());
+                return NGIN::Utilities::Unexpected(leaf.error());
             }
-            if (SSL_CTX_use_certificate(context, leaf.Value().get()) != 1)
+            if (SSL_CTX_use_certificate(context, leaf.value().get()) != 1)
             {
                 return NGIN::Utilities::Unexpected(OpenSslError(
                         TlsErrorCategory::Certificate,
@@ -183,11 +183,11 @@ namespace NGIN::Net::TLS::detail
             for (NGIN::UIntSize index = 1; index < credentials.certificateChain.certificates.Size(); ++index)
             {
                 auto intermediate = DecodeCertificate(credentials.certificateChain.certificates[index]);
-                if (!intermediate.HasValue())
+                if (!intermediate.has_value())
                 {
-                    return NGIN::Utilities::Unexpected(intermediate.Error());
+                    return NGIN::Utilities::Unexpected(intermediate.error());
                 }
-                auto* transferred = intermediate.Value().release();
+                auto* transferred = intermediate.value().release();
                 if (SSL_CTX_add_extra_chain_cert(context, transferred) != 1)
                 {
                     X509_free(transferred);
@@ -204,16 +204,16 @@ namespace NGIN::Net::TLS::detail
                             credentials.privateKey.privateKey.data(),
                             credentials.privateKey.privateKey.Size(),
                     });
-            if (!privateKeyDer.HasValue())
+            if (!privateKeyDer.has_value())
             {
                 return NGIN::Utilities::Unexpected(MakeTlsError(
                         TlsErrorCategory::Certificate,
                         TlsErrorCode::InvalidConfiguration,
                         "failed to serialize TLS private key material"));
             }
-            const auto* keyCursor = reinterpret_cast<const unsigned char*>(privateKeyDer.Value().data());
+            const auto* keyCursor = reinterpret_cast<const unsigned char*>(privateKeyDer.value().data());
             EvpPkeyPtr  privateKey {
-                    d2i_AutoPrivateKey(nullptr, &keyCursor, static_cast<long>(privateKeyDer.Value().Size())),
+                    d2i_AutoPrivateKey(nullptr, &keyCursor, static_cast<long>(privateKeyDer.value().Size())),
                     EVP_PKEY_free,
             };
             if (!privateKey || SSL_CTX_use_PrivateKey(context, privateKey.get()) != 1)
@@ -518,11 +518,11 @@ namespace NGIN::Net::TLS::detail
                             "cannot create a TLS client session from a server context"));
                 }
                 auto created = CreateSession();
-                if (!created.HasValue())
+                if (!created.has_value())
                 {
-                    return NGIN::Utilities::Unexpected(created.Error());
+                    return NGIN::Utilities::Unexpected(created.error());
                 }
-                auto& session = created.Value();
+                auto& session = created.value();
                 SSL_set_connect_state(session.ssl.get());
 
                 const auto verificationName = options.verificationName.empty()
@@ -539,7 +539,7 @@ namespace NGIN::Net::TLS::detail
                 if (!options.serverName.empty())
                 {
                     const auto parsedAddress = NGIN::Net::IpAddress::Parse(options.serverName);
-                    if (!parsedAddress.HasValue() &&
+                    if (!parsedAddress.has_value() &&
                         SSL_set_tlsext_host_name(session.ssl.get(), options.serverName.c_str()) != 1)
                     {
                         return NGIN::Utilities::Unexpected(OpenSslError(
@@ -552,7 +552,7 @@ namespace NGIN::Net::TLS::detail
                 if (SSL_get_verify_mode(session.ssl.get()) != SSL_VERIFY_NONE)
                 {
                     const auto parsedAddress = NGIN::Net::IpAddress::Parse(verificationName);
-                    if (parsedAddress.HasValue())
+                    if (parsedAddress.has_value())
                     {
                         if (X509_VERIFY_PARAM_set1_ip_asc(
                                     SSL_get0_param(session.ssl.get()), verificationName.c_str()) != 1)
@@ -598,11 +598,11 @@ namespace NGIN::Net::TLS::detail
                             "cannot create a TLS server session from a client context"));
                 }
                 auto created = CreateSession();
-                if (!created.HasValue())
+                if (!created.has_value())
                 {
-                    return NGIN::Utilities::Unexpected(created.Error());
+                    return NGIN::Utilities::Unexpected(created.error());
                 }
-                auto& session = created.Value();
+                auto& session = created.value();
                 SSL_set_accept_state(session.ssl.get());
                 std::unique_ptr<TlsSession> out = std::make_unique<OpenSslSession>(
                         std::move(session.ssl), session.readBio, session.writeBio, m_requireAlpn);
@@ -712,17 +712,17 @@ namespace NGIN::Net::TLS::detail
             SSL_CTX_set_mode(context.get(), SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
 
             auto protocols = ConfigureProtocols(context.get(), options.protocols);
-            if (!protocols.HasValue())
+            if (!protocols.has_value())
             {
-                return NGIN::Utilities::Unexpected(protocols.Error());
+                return NGIN::Utilities::Unexpected(protocols.error());
             }
             auto alpn = EncodeAlpn(options.applicationProtocols);
-            if (!alpn.HasValue())
+            if (!alpn.has_value())
             {
-                return NGIN::Utilities::Unexpected(alpn.Error());
+                return NGIN::Utilities::Unexpected(alpn.error());
             }
             return std::make_shared<OpenSslContextState>(
-                    std::move(context), client, std::move(alpn.Value()), options.requireApplicationProtocol);
+                    std::move(context), client, std::move(alpn.value()), options.requireApplicationProtocol);
         }
     }// namespace
 
@@ -730,19 +730,19 @@ namespace NGIN::Net::TLS::detail
             TlsClientContextOptions options)
     {
         auto created = CreateContextBase(options, true);
-        if (!created.HasValue())
+        if (!created.has_value())
         {
-            return NGIN::Utilities::Unexpected(created.Error());
+            return NGIN::Utilities::Unexpected(created.error());
         }
-        auto& state   = created.Value();
+        auto& state   = created.value();
         auto* context = state->RawContext();
         if (options.verification == TlsPeerVerification::Required)
         {
             SSL_CTX_set_verify(context, SSL_VERIFY_PEER, nullptr);
             auto trust = ConfigureTrust(context, options.trust);
-            if (!trust.HasValue())
+            if (!trust.has_value())
             {
-                return NGIN::Utilities::Unexpected(trust.Error());
+                return NGIN::Utilities::Unexpected(trust.error());
             }
         }
         else
@@ -752,9 +752,9 @@ namespace NGIN::Net::TLS::detail
         if (options.credentials.has_value())
         {
             auto credentials = ConfigureCredentials(context, *options.credentials);
-            if (!credentials.HasValue())
+            if (!credentials.has_value())
             {
-                return NGIN::Utilities::Unexpected(credentials.Error());
+                return NGIN::Utilities::Unexpected(credentials.error());
             }
         }
         std::shared_ptr<const TlsContextState> out = std::move(state);
@@ -765,16 +765,16 @@ namespace NGIN::Net::TLS::detail
             TlsServerContextOptions options)
     {
         auto created = CreateContextBase(options, false);
-        if (!created.HasValue())
+        if (!created.has_value())
         {
-            return NGIN::Utilities::Unexpected(created.Error());
+            return NGIN::Utilities::Unexpected(created.error());
         }
-        auto& state       = created.Value();
+        auto& state       = created.value();
         auto* context     = state->RawContext();
         auto  credentials = ConfigureCredentials(context, options.credentials);
-        if (!credentials.HasValue())
+        if (!credentials.has_value())
         {
-            return NGIN::Utilities::Unexpected(credentials.Error());
+            return NGIN::Utilities::Unexpected(credentials.error());
         }
 
         if (options.clientAuthentication == TlsClientAuthentication::None)
@@ -790,9 +790,9 @@ namespace NGIN::Net::TLS::detail
             }
             SSL_CTX_set_verify(context, mode, nullptr);
             auto trust = ConfigureTrust(context, options.clientTrust);
-            if (!trust.HasValue())
+            if (!trust.has_value())
             {
-                return NGIN::Utilities::Unexpected(trust.Error());
+                return NGIN::Utilities::Unexpected(trust.error());
             }
         }
         state->ConfigureServerAlpnCallback();

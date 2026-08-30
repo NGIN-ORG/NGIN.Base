@@ -16,22 +16,22 @@ namespace NGIN::Crypto::Asymmetric
             const NGIN::Crypto::Backend::CryptoContext& context) noexcept
     {
         auto supported = context.EnsureSupports(SignatureAlgorithm::Ed25519);
-        if (!supported.HasValue())
+        if (!supported.has_value())
         {
-            return supported.Error();
+            return std::unexpected(std::move(supported).error());
         }
 
         FixedBytes<32> publicKey {};
         auto           privateKey = NGIN::Crypto::Memory::FixedSecret<32> {};
         auto           result     = context.GenerateEd25519KeyPairInto(publicKey, privateKey.UnsafeMutableBytes());
-        if (!result.HasValue())
+        if (!result.has_value())
         {
-            return result.Error();
+            return std::unexpected(std::move(result).error());
         }
 
         if (privateKey.Bytes().size() != Ed25519PrivateKey::SizeValue)
         {
-            return InternalError();
+            return std::unexpected(InternalError());
         }
 
         return Ed25519KeyPair {

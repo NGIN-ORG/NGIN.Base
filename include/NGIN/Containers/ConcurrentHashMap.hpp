@@ -327,7 +327,10 @@ namespace NGIN::Containers
         }
 
         template<class Callback>
-        void SnapshotForEach(Callback&& callback) const
+        /// @brief Visits entries through independently protected shard views.
+        /// @details Concurrent writes may be reflected differently from one shard to the next;
+        ///          this operation does not produce a point-in-time snapshot.
+        void WeaklyConsistentForEach(Callback&& callback) const
         {
             ForEach(std::forward<Callback>(callback));
         }

@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -52,6 +53,9 @@ namespace NGIN::Memory
         static constexpr std::uint64_t Canary = 0xD38B'5A71'C4E2'9F06ULL;
 
     public:
+        /// @brief Live-allocation records provide a definitive ownership answer.
+        static constexpr bool HasPreciseOwnership = true;
+
         /// @brief Constructs the adaptor around an inner allocator.
         explicit DebugAllocator(Inner inner = {})
             : m_inner(std::move(inner))
@@ -62,17 +66,21 @@ namespace NGIN::Memory
         DebugAllocator(const DebugAllocator&) = delete;
 
         /// @brief Debug allocators are non-copy-assignable because live allocation records are instance-owned.
-        auto operator=(const DebugAllocator&) -> DebugAllocator& = delete;
+        DebugAllocator& operator=(const DebugAllocator&) = delete;
 
         /// @brief Moves the inner allocator, live records, and diagnostic counters.
-        DebugAllocator(DebugAllocator&&) noexcept = default;
+        DebugAllocator(DebugAllocator&&) noexcept(
+                std::is_nothrow_move_constructible_v<Inner> &&
+                std::is_nothrow_move_constructible_v<std::vector<Record>>) = default;
 
         /// @brief Move-assigns the inner allocator, live records, and diagnostic counters.
-        auto operator=(DebugAllocator&&) noexcept -> DebugAllocator& = default;
+        DebugAllocator& operator=(DebugAllocator&&) noexcept(
+                std::is_nothrow_move_assignable_v<Inner> &&
+                std::is_nothrow_move_assignable_v<std::vector<Record>>) = default;
 
         /// @brief Allocates a guarded and initially poisoned byte block.
         /// @return User address, or `nullptr` for an invalid request or allocation failure.
-        [[nodiscard]] void* Allocate(const std::size_t bytes, const std::size_t alignment)
+        [[nodiscard]] void* Allocate(const std::size_t bytes, const std::size_t alignment) noexcept
         {
             if (bytes == 0 || alignment == 0 || (alignment & (alignment - 1)) != 0)
                 return nullptr;
@@ -89,11 +97,11 @@ namespace NGIN::Memory
             void*   pointer        = reinterpret_cast<void*>(address);
             Header* header         = reinterpret_cast<Header*>(address - sizeof(Header));
             *header                = Header {
-                    .raw           = raw,
-                    .rawSize       = rawSize,
-                    .rawAlignment  = effectiveAlignment,
-                    .requestedSize = bytes,
-                    .canary        = Canary,
+                                   .raw           = raw,
+                                   .rawSize       = rawSize,
+                                   .rawAlignment  = effectiveAlignment,
+                                   .requestedSize = bytes,
+                                   .canary        = Canary,
             };
             std::memset(pointer, 0xCD, bytes);
             std::memcpy(static_cast<std::byte*>(pointer) + bytes, &Canary, sizeof(Canary));
@@ -104,7 +112,7 @@ namespace NGIN::Memory
             } catch (...)
             {
                 m_inner.Deallocate(raw, rawSize, effectiveAlignment);
-                throw;
+                return nullptr;
             }
             return pointer;
         }
@@ -116,9 +124,10 @@ namespace NGIN::Memory
         {
             if (!pointer)
                 return;
-            const auto found = std::find_if(m_live.begin(), m_live.end(), [pointer](const Record& record) {
-                return record.pointer == pointer;
-            });
+            const typename std::vector<Record>::iterator found =
+                    std::find_if(m_live.begin(), m_live.end(), [pointer](const Record& record) {
+                        return record.pointer == pointer;
+                    });
             if (found == m_live.end())
             {
                 ++m_stats.invalidDeallocations;
@@ -141,18 +150,20 @@ namespace NGIN::Memory
         }
 
         /// @brief Allocates a guarded block and reports the requested size and alignment.
-        [[nodiscard]] MemoryBlock AllocateEx(const std::size_t bytes, const std::size_t alignment)
+        [[nodiscard]] MemoryBlock AllocateEx(const std::size_t bytes, const std::size_t alignment) noexcept
         {
             void* pointer = Allocate(bytes, alignment);
             return {pointer, pointer ? bytes : 0, pointer ? alignment : 0};
         }
 
-        /// @brief Returns whether a pointer exactly matches a currently live allocation.
-        [[nodiscard]] bool Owns(const void* pointer) const noexcept
+        /// @brief Classifies whether a pointer exactly matches a live allocation.
+        [[nodiscard]] Ownership OwnershipOf(const void* pointer) const noexcept
         {
-            return std::find_if(m_live.begin(), m_live.end(), [pointer](const Record& record) {
-                       return record.pointer == pointer;
-                   }) != m_live.end();
+            const typename std::vector<Record>::const_iterator found =
+                    std::find_if(m_live.begin(), m_live.end(), [pointer](const Record& record) {
+                        return record.pointer == pointer;
+                    });
+            return found != m_live.end() ? Ownership::Owns : Ownership::DoesNotOwn;
         }
 
         /// @brief Returns a snapshot of diagnostic counters and current live allocation count.

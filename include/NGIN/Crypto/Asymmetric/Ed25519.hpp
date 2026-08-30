@@ -41,9 +41,9 @@ namespace NGIN::Crypto::Asymmetric
     {
         NGIN::Crypto::Signatures::Ed25519Signature signature {};
         CryptoExpected<void>                       result = SignEd25519Into(context, privateKey, message, signature);
-        if (!result.HasValue())
+        if (!result.has_value())
         {
-            return result.Error();
+            return std::unexpected(std::move(result).error());
         }
 
         return signature;

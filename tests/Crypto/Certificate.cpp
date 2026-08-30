@@ -68,8 +68,8 @@ namespace
 
     [[nodiscard]] NGIN::Crypto::ByteBuffer RequireValue(NGIN::Crypto::CryptoExpected<NGIN::Crypto::ByteBuffer> value)
     {
-        REQUIRE(value.HasValue());
-        return std::move(value.Value());
+        REQUIRE(value.has_value());
+        return std::move(value.value());
     }
 
     [[nodiscard]] NGIN::Crypto::ConstByteSpan View(const NGIN::Crypto::ByteBuffer& bytes)
@@ -198,9 +198,9 @@ namespace
         const auto versionInteger = RequireValue(NGIN::Crypto::Encoding::EncodeDerInteger(View(Bytes({0x02}))));
         const auto version        = RequireValue(NGIN::Crypto::Encoding::EncodeDerElement(
                 NGIN::Crypto::Encoding::DerTag {
-                        .tagClass    = NGIN::Crypto::Encoding::DerTagClass::ContextSpecific,
-                        .constructed = true,
-                        .number      = 0,
+                               .tagClass    = NGIN::Crypto::Encoding::DerTagClass::ContextSpecific,
+                               .constructed = true,
+                               .number      = 0,
                 },
                 View(versionInteger)));
 
@@ -225,9 +225,9 @@ namespace
         const auto extensionsSequence = RequireValue(NGIN::Crypto::Encoding::EncodeDerSequence(View(extensionsChildren)));
         const auto encodedExtensions  = RequireValue(NGIN::Crypto::Encoding::EncodeDerElement(
                 NGIN::Crypto::Encoding::DerTag {
-                        .tagClass    = NGIN::Crypto::Encoding::DerTagClass::ContextSpecific,
-                        .constructed = true,
-                        .number      = 3,
+                         .tagClass    = NGIN::Crypto::Encoding::DerTagClass::ContextSpecific,
+                         .constructed = true,
+                         .number      = 3,
                 },
                 View(extensionsSequence)));
 
@@ -246,9 +246,9 @@ TEST_CASE("X509 parser extracts certificate structure and selected extensions", 
     const auto versionInteger = RequireValue(NGIN::Crypto::Encoding::EncodeDerInteger(View(Bytes({0x02}))));
     const auto version        = RequireValue(NGIN::Crypto::Encoding::EncodeDerElement(
             NGIN::Crypto::Encoding::DerTag {
-                    .tagClass    = NGIN::Crypto::Encoding::DerTagClass::ContextSpecific,
-                    .constructed = true,
-                    .number      = 0,
+                           .tagClass    = NGIN::Crypto::Encoding::DerTagClass::ContextSpecific,
+                           .constructed = true,
+                           .number      = 0,
             },
             View(versionInteger)));
 
@@ -311,9 +311,9 @@ TEST_CASE("X509 parser extracts certificate structure and selected extensions", 
     const auto extensionsSequence = RequireValue(NGIN::Crypto::Encoding::EncodeDerSequence(View(extensionsChildren)));
     const auto extensions         = RequireValue(NGIN::Crypto::Encoding::EncodeDerElement(
             NGIN::Crypto::Encoding::DerTag {
-                    .tagClass    = NGIN::Crypto::Encoding::DerTagClass::ContextSpecific,
-                    .constructed = true,
-                    .number      = 3,
+                            .tagClass    = NGIN::Crypto::Encoding::DerTagClass::ContextSpecific,
+                            .constructed = true,
+                            .number      = 3,
             },
             View(extensionsSequence)));
 
@@ -326,59 +326,59 @@ TEST_CASE("X509 parser extracts certificate structure and selected extensions", 
     const auto certificateDer      = RequireValue(NGIN::Crypto::Encoding::EncodeDerSequence(View(certificateChildren)));
 
     auto parsed = NGIN::Crypto::Certificates::ParseX509Certificate(View(certificateDer));
-    REQUIRE(parsed.HasValue());
-    REQUIRE(parsed.Value().version == 3);
-    REQUIRE(parsed.Value().serialNumber.Size() == 1);
-    REQUIRE(parsed.Value().serialNumber[0] == NGIN::Byte {1});
-    REQUIRE(parsed.Value().validity.notBefore == "260101000000Z");
-    REQUIRE(parsed.Value().validity.notAfter == "270101000000Z");
-    REQUIRE(parsed.Value().issuer.attributes.Size() == 1);
-    REQUIRE(parsed.Value().issuer.attributes[0].type ==
+    REQUIRE(parsed.has_value());
+    REQUIRE(parsed.value().version == 3);
+    REQUIRE(parsed.value().serialNumber.Size() == 1);
+    REQUIRE(parsed.value().serialNumber[0] == NGIN::Byte {1});
+    REQUIRE(parsed.value().validity.notBefore == "260101000000Z");
+    REQUIRE(parsed.value().validity.notAfter == "270101000000Z");
+    REQUIRE(parsed.value().issuer.attributes.Size() == 1);
+    REQUIRE(parsed.value().issuer.attributes[0].type ==
             NGIN::Crypto::Certificates::DistinguishedNameAttributeType::CommonName);
-    REQUIRE(parsed.Value().issuer.attributes[0].value == "Example Issuer");
-    REQUIRE(parsed.Value().subject.attributes.Size() == 2);
-    REQUIRE(parsed.Value().subject.attributes[0].type ==
+    REQUIRE(parsed.value().issuer.attributes[0].value == "Example Issuer");
+    REQUIRE(parsed.value().subject.attributes.Size() == 2);
+    REQUIRE(parsed.value().subject.attributes[0].type ==
             NGIN::Crypto::Certificates::DistinguishedNameAttributeType::CommonName);
-    REQUIRE(parsed.Value().subject.attributes[0].value == "example.com");
-    REQUIRE(parsed.Value().subject.attributes[1].type ==
+    REQUIRE(parsed.value().subject.attributes[0].value == "example.com");
+    REQUIRE(parsed.value().subject.attributes[1].type ==
             NGIN::Crypto::Certificates::DistinguishedNameAttributeType::OrganizationName);
-    REQUIRE(parsed.Value().subject.attributes[1].value == "NGIN");
-    REQUIRE(parsed.Value().hasKnownSignatureAlgorithm);
-    REQUIRE(parsed.Value().signatureAlgorithm == NGIN::Crypto::SignatureAlgorithm::Ed25519);
-    REQUIRE(parsed.Value().subjectPublicKeyInfo.algorithm.algorithm == NGIN::Crypto::Keys::KeyAlgorithm::Ed25519);
-    REQUIRE(parsed.Value().subjectPublicKeyInfo.publicKey.Size() == 32);
-    REQUIRE(parsed.Value().signatureValue.Size() == 64);
+    REQUIRE(parsed.value().subject.attributes[1].value == "NGIN");
+    REQUIRE(parsed.value().hasKnownSignatureAlgorithm);
+    REQUIRE(parsed.value().signatureAlgorithm == NGIN::Crypto::SignatureAlgorithm::Ed25519);
+    REQUIRE(parsed.value().subjectPublicKeyInfo.algorithm.algorithm == NGIN::Crypto::Keys::KeyAlgorithm::Ed25519);
+    REQUIRE(parsed.value().subjectPublicKeyInfo.publicKey.Size() == 32);
+    REQUIRE(parsed.value().signatureValue.Size() == 64);
 
-    REQUIRE(parsed.Value().hasSubjectAltNames);
-    REQUIRE(parsed.Value().subjectAltNames.dnsNames.Size() == 1);
-    REQUIRE(parsed.Value().subjectAltNames.dnsNames[0] == "example.com");
-    REQUIRE(parsed.Value().subjectAltNames.emailAddresses.Size() == 1);
-    REQUIRE(parsed.Value().subjectAltNames.emailAddresses[0] == "admin@example.com");
-    REQUIRE(parsed.Value().subjectAltNames.ipAddresses.Size() == 1);
-    REQUIRE(parsed.Value().subjectAltNames.ipAddresses[0].Size() == 4);
+    REQUIRE(parsed.value().hasSubjectAltNames);
+    REQUIRE(parsed.value().subjectAltNames.dnsNames.Size() == 1);
+    REQUIRE(parsed.value().subjectAltNames.dnsNames[0] == "example.com");
+    REQUIRE(parsed.value().subjectAltNames.emailAddresses.Size() == 1);
+    REQUIRE(parsed.value().subjectAltNames.emailAddresses[0] == "admin@example.com");
+    REQUIRE(parsed.value().subjectAltNames.ipAddresses.Size() == 1);
+    REQUIRE(parsed.value().subjectAltNames.ipAddresses[0].Size() == 4);
 
-    REQUIRE(parsed.Value().hasKeyUsage);
-    REQUIRE(parsed.Value().keyUsage.unusedBitCount == 5);
-    REQUIRE(parsed.Value().keyUsage.bits.Size() == 1);
-    REQUIRE(parsed.Value().keyUsage.bits[0] == NGIN::Byte {0xa0});
+    REQUIRE(parsed.value().hasKeyUsage);
+    REQUIRE(parsed.value().keyUsage.unusedBitCount == 5);
+    REQUIRE(parsed.value().keyUsage.bits.Size() == 1);
+    REQUIRE(parsed.value().keyUsage.bits[0] == NGIN::Byte {0xa0});
 
-    REQUIRE(parsed.Value().hasBasicConstraints);
-    REQUIRE(parsed.Value().basicConstraints.certificateAuthority);
-    REQUIRE(parsed.Value().basicConstraints.hasPathLengthConstraint);
-    REQUIRE(parsed.Value().basicConstraints.pathLengthConstraint == 3);
+    REQUIRE(parsed.value().hasBasicConstraints);
+    REQUIRE(parsed.value().basicConstraints.certificateAuthority);
+    REQUIRE(parsed.value().basicConstraints.hasPathLengthConstraint);
+    REQUIRE(parsed.value().basicConstraints.pathLengthConstraint == 3);
 
-    REQUIRE(parsed.Value().hasSubjectKeyIdentifier);
-    REQUIRE(parsed.Value().subjectKeyIdentifier.Size() == subjectKeyIdentifier.Size());
-    REQUIRE(parsed.Value().subjectKeyIdentifier[0] == NGIN::Byte {0x10});
-    REQUIRE(parsed.Value().subjectKeyIdentifier[3] == NGIN::Byte {0x40});
+    REQUIRE(parsed.value().hasSubjectKeyIdentifier);
+    REQUIRE(parsed.value().subjectKeyIdentifier.Size() == subjectKeyIdentifier.Size());
+    REQUIRE(parsed.value().subjectKeyIdentifier[0] == NGIN::Byte {0x10});
+    REQUIRE(parsed.value().subjectKeyIdentifier[3] == NGIN::Byte {0x40});
 
-    REQUIRE(parsed.Value().hasAuthorityKeyIdentifier);
-    REQUIRE(parsed.Value().authorityKeyIdentifier.Size() == 3);
-    REQUIRE(parsed.Value().authorityKeyIdentifier[0] == NGIN::Byte {0x99});
-    REQUIRE(parsed.Value().authorityKeyIdentifier[2] == NGIN::Byte {0x77});
+    REQUIRE(parsed.value().hasAuthorityKeyIdentifier);
+    REQUIRE(parsed.value().authorityKeyIdentifier.Size() == 3);
+    REQUIRE(parsed.value().authorityKeyIdentifier[0] == NGIN::Byte {0x99});
+    REQUIRE(parsed.value().authorityKeyIdentifier[2] == NGIN::Byte {0x77});
 
-    REQUIRE(parsed.Value().extendedKeyUsages.Size() == 1);
-    REQUIRE(parsed.Value().extendedKeyUsages[0].Size() == serverAuthOid.size());
+    REQUIRE(parsed.value().extendedKeyUsages.Size() == 1);
+    REQUIRE(parsed.value().extendedKeyUsages[0].Size() == serverAuthOid.size());
 }
 
 TEST_CASE("X509 parser rejects malformed known extension schemas", "[Crypto][Certificate]")
@@ -387,52 +387,52 @@ TEST_CASE("X509 parser rejects malformed known extension schemas", "[Crypto][Cer
     const auto badSanNames  = RequireValue(NGIN::Crypto::Encoding::EncodeDerSequence(View(badIpName)));
     const auto badSan       = Extension({2, 5, 29, 17}, badSanNames);
     auto       parsedBadSan = NGIN::Crypto::Certificates::ParseX509Certificate(View(CertificateWithExtensions({&badSan})));
-    REQUIRE_FALSE(parsedBadSan.HasValue());
-    REQUIRE(parsedBadSan.Error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
+    REQUIRE_FALSE(parsedBadSan.has_value());
+    REQUIRE(parsedBadSan.error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
 
     const auto dns          = GeneralName(2, Text("example.com"));
     const auto sanNames     = RequireValue(NGIN::Crypto::Encoding::EncodeDerSequence(View(dns)));
     const auto sanExtension = Extension({2, 5, 29, 17}, sanNames);
     auto       duplicateSan = NGIN::Crypto::Certificates::ParseX509Certificate(
             View(CertificateWithExtensions({&sanExtension, &sanExtension})));
-    REQUIRE_FALSE(duplicateSan.HasValue());
-    REQUIRE(duplicateSan.Error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
+    REQUIRE_FALSE(duplicateSan.has_value());
+    REQUIRE(duplicateSan.error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
 
     const auto emptyEkuSequence = RequireValue(NGIN::Crypto::Encoding::EncodeDerSequence(NGIN::Crypto::ConstByteSpan {}));
     const auto emptyEku         = Extension({2, 5, 29, 37}, emptyEkuSequence);
     auto       parsedEmptyEku   = NGIN::Crypto::Certificates::ParseX509Certificate(View(CertificateWithExtensions({&emptyEku})));
-    REQUIRE_FALSE(parsedEmptyEku.HasValue());
-    REQUIRE(parsedEmptyEku.Error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
+    REQUIRE_FALSE(parsedEmptyEku.has_value());
+    REQUIRE(parsedEmptyEku.error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
 
     const auto criticalFalseSan = ExtensionWithCritical({2, 5, 29, 17}, false, sanNames);
     auto       parsedCriticalFalse =
             NGIN::Crypto::Certificates::ParseX509Certificate(View(CertificateWithExtensions({&criticalFalseSan})));
-    REQUIRE_FALSE(parsedCriticalFalse.HasValue());
-    REQUIRE(parsedCriticalFalse.Error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
+    REQUIRE_FALSE(parsedCriticalFalse.has_value());
+    REQUIRE(parsedCriticalFalse.error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
 
     const auto explicitFalseCa       = DerBoolean(false);
     const auto falseBasicConstraints = RequireValue(NGIN::Crypto::Encoding::EncodeDerSequence(View(explicitFalseCa)));
     const auto falseBasicExtension   = Extension({2, 5, 29, 19}, falseBasicConstraints);
     auto       parsedFalseBasic      = NGIN::Crypto::Certificates::ParseX509Certificate(
             View(CertificateWithExtensions({&falseBasicExtension})));
-    REQUIRE_FALSE(parsedFalseBasic.HasValue());
-    REQUIRE(parsedFalseBasic.Error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
+    REQUIRE_FALSE(parsedFalseBasic.has_value());
+    REQUIRE(parsedFalseBasic.error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
 
     const auto pathLengthOnlyInteger   = Bytes({0x02, 0x01, 0x00});
     const auto pathLengthOnlyBasic     = RequireValue(NGIN::Crypto::Encoding::EncodeDerSequence(View(pathLengthOnlyInteger)));
     const auto pathLengthOnlyExtension = Extension({2, 5, 29, 19}, pathLengthOnlyBasic);
     auto       parsedPathLengthOnly    = NGIN::Crypto::Certificates::ParseX509Certificate(
             View(CertificateWithExtensions({&pathLengthOnlyExtension})));
-    REQUIRE_FALSE(parsedPathLengthOnly.HasValue());
-    REQUIRE(parsedPathLengthOnly.Error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
+    REQUIRE_FALSE(parsedPathLengthOnly.has_value());
+    REQUIRE(parsedPathLengthOnly.error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
 
     const auto caTrue                = DerBoolean(true);
     const auto basicConstraintsValue = RequireValue(NGIN::Crypto::Encoding::EncodeDerSequence(View(caTrue)));
     const auto basicConstraints      = Extension({2, 5, 29, 19}, basicConstraintsValue);
     auto       duplicateBasic        = NGIN::Crypto::Certificates::ParseX509Certificate(
             View(CertificateWithExtensions({&basicConstraints, &basicConstraints})));
-    REQUIRE_FALSE(duplicateBasic.HasValue());
-    REQUIRE(duplicateBasic.Error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
+    REQUIRE_FALSE(duplicateBasic.has_value());
+    REQUIRE(duplicateBasic.error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
 }
 
 TEST_CASE("X509 parser rejects malformed top-level certificate input", "[Crypto][Certificate]")
@@ -440,8 +440,8 @@ TEST_CASE("X509 parser rejects malformed top-level certificate input", "[Crypto]
     const auto notASequence = Bytes({0x04, 0x01, 0x00});
     auto       parsed       = NGIN::Crypto::Certificates::ParseX509Certificate(View(notASequence));
 
-    REQUIRE_FALSE(parsed.HasValue());
-    REQUIRE(parsed.Error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
+    REQUIRE_FALSE(parsed.has_value());
+    REQUIRE(parsed.error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
 }
 
 TEST_CASE("X509 parser malformed corpus rejects truncated certificate structures", "[Crypto][Certificate]")
@@ -455,8 +455,8 @@ TEST_CASE("X509 parser malformed corpus rejects truncated certificate structures
          })
     {
         auto parsed = NGIN::Crypto::Certificates::ParseX509Certificate(View(bytes));
-        REQUIRE_FALSE(parsed.HasValue());
-        REQUIRE(parsed.Error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
+        REQUIRE_FALSE(parsed.has_value());
+        REQUIRE(parsed.error().Code() == NGIN::Crypto::CryptoErrorCode::ParseError);
     }
 }
 
@@ -473,62 +473,62 @@ TEST_CASE("CertificateStore supports custom lookup and platform root loading", "
     certificates.PushBack(certificate);
 
     auto store = NGIN::Crypto::Certificates::CreateCustomCertificateStore(std::move(certificates));
-    REQUIRE(store.HasValue());
-    REQUIRE(store.Value().Size() == 1);
-    REQUIRE(store.Value().Info().kind == NGIN::Crypto::Certificates::CertificateStoreKind::Custom);
-    REQUIRE(store.Value().Info().source == "custom");
-    REQUIRE(store.Value().Info().certificatesLoaded == 1);
-    REQUIRE(store.Value().Info().certificatesSkipped == 0);
+    REQUIRE(store.has_value());
+    REQUIRE(store.value().Size() == 1);
+    REQUIRE(store.value().Info().kind == NGIN::Crypto::Certificates::CertificateStoreKind::Custom);
+    REQUIRE(store.value().Info().source == "custom");
+    REQUIRE(store.value().Info().certificatesLoaded == 1);
+    REQUIRE(store.value().Info().certificatesSkipped == 0);
 
-    auto matches = store.Value().FindBySubjectDer(View(certificate.subjectDer));
-    REQUIRE(matches.HasValue());
-    REQUIRE(matches.Value().certificates.Size() == 1);
+    auto matches = store.value().FindBySubjectDer(View(certificate.subjectDer));
+    REQUIRE(matches.has_value());
+    REQUIRE(matches.value().certificates.Size() == 1);
 
-    auto misses = store.Value().FindBySubjectDer(View(Bytes({0x30, 0x01, 0x00})));
-    REQUIRE(misses.HasValue());
-    REQUIRE(misses.Value().certificates.Size() == 0);
+    auto misses = store.value().FindBySubjectDer(View(Bytes({0x30, 0x01, 0x00})));
+    REQUIRE(misses.has_value());
+    REQUIRE(misses.value().certificates.Size() == 0);
 
-    auto skiMatches = store.Value().FindBySubjectKeyIdentifier(View(certificate.subjectKeyIdentifier));
-    REQUIRE(skiMatches.HasValue());
-    REQUIRE(skiMatches.Value().certificates.Size() == 1);
+    auto skiMatches = store.value().FindBySubjectKeyIdentifier(View(certificate.subjectKeyIdentifier));
+    REQUIRE(skiMatches.has_value());
+    REQUIRE(skiMatches.value().certificates.Size() == 1);
 
-    auto skiMisses = store.Value().FindBySubjectKeyIdentifier(View(Bytes({0x10, 0x20})));
-    REQUIRE(skiMisses.HasValue());
-    REQUIRE(skiMisses.Value().certificates.Size() == 0);
+    auto skiMisses = store.value().FindBySubjectKeyIdentifier(View(Bytes({0x10, 0x20})));
+    REQUIRE(skiMisses.has_value());
+    REQUIRE(skiMisses.value().certificates.Size() == 0);
 
-    auto akiMatches = store.Value().FindByAuthorityKeyIdentifier(View(certificate.authorityKeyIdentifier));
-    REQUIRE(akiMatches.HasValue());
-    REQUIRE(akiMatches.Value().certificates.Size() == 1);
+    auto akiMatches = store.value().FindByAuthorityKeyIdentifier(View(certificate.authorityKeyIdentifier));
+    REQUIRE(akiMatches.has_value());
+    REQUIRE(akiMatches.value().certificates.Size() == 1);
 
-    auto akiMisses = store.Value().FindByAuthorityKeyIdentifier(View(Bytes({0x90, 0x80})));
-    REQUIRE(akiMisses.HasValue());
-    REQUIRE(akiMisses.Value().certificates.Size() == 0);
+    auto akiMisses = store.value().FindByAuthorityKeyIdentifier(View(Bytes({0x90, 0x80})));
+    REQUIRE(akiMisses.has_value());
+    REQUIRE(akiMisses.value().certificates.Size() == 0);
 
     auto platformSelection = NGIN::Crypto::Certificates::OpenPlatformRootCertificateStoreWithDiagnostics();
     REQUIRE(platformSelection.diagnostics.Size() > 0);
 
     auto platform = NGIN::Crypto::Certificates::OpenPlatformRootCertificateStore();
-    if (platform.HasValue())
+    if (platform.has_value())
     {
-        REQUIRE(platformSelection.store.HasValue());
-        REQUIRE(platform.Value().Info().kind == NGIN::Crypto::Certificates::CertificateStoreKind::PlatformRoot);
-        REQUIRE(platform.Value().Info().platformBacked);
-        REQUIRE(platform.Value().Info().available);
-        REQUIRE(platform.Value().Size() > 0);
-        REQUIRE_FALSE(platform.Value().Info().sourcePath.empty());
-        REQUIRE(platform.Value().Info().certificatesLoaded == platform.Value().Size());
-        REQUIRE_FALSE(platform.Value().Info().diagnostic.empty());
+        REQUIRE(platformSelection.store.has_value());
+        REQUIRE(platform.value().Info().kind == NGIN::Crypto::Certificates::CertificateStoreKind::PlatformRoot);
+        REQUIRE(platform.value().Info().platformBacked);
+        REQUIRE(platform.value().Info().available);
+        REQUIRE(platform.value().Size() > 0);
+        REQUIRE_FALSE(platform.value().Info().sourcePath.empty());
+        REQUIRE(platform.value().Info().certificatesLoaded == platform.value().Size());
+        REQUIRE_FALSE(platform.value().Info().diagnostic.empty());
 
 #if defined(__linux__)
         REQUIRE(HasReadableLinuxCaBundle());
-        REQUIRE(platform.Value().Info().operatingSystem == "linux");
-        REQUIRE(platform.Value().Info().source == "system-ca-bundle");
+        REQUIRE(platform.value().Info().operatingSystem == "linux");
+        REQUIRE(platform.value().Info().source == "system-ca-bundle");
 #elif defined(_WIN32)
-        REQUIRE(platform.Value().Info().operatingSystem == "windows");
-        REQUIRE(platform.Value().Info().source == "native-windows-certificate-store");
+        REQUIRE(platform.value().Info().operatingSystem == "windows");
+        REQUIRE(platform.value().Info().source == "native-windows-certificate-store");
 #elif defined(__APPLE__)
-        REQUIRE(platform.Value().Info().operatingSystem == "macos");
-        REQUIRE(platform.Value().Info().source == "native-apple-security-trust-anchors");
+        REQUIRE(platform.value().Info().operatingSystem == "macos");
+        REQUIRE(platform.value().Info().source == "native-apple-security-trust-anchors");
 #endif
 
         bool sawSuccessfulDiagnostic = false;
@@ -537,15 +537,15 @@ TEST_CASE("CertificateStore supports custom lookup and platform root loading", "
             sawSuccessfulDiagnostic = sawSuccessfulDiagnostic ||
                                       (diagnostic.code == NGIN::Crypto::CryptoErrorCode::None &&
                                        diagnostic.info.available &&
-                                       diagnostic.info.source == platform.Value().Info().source);
+                                       diagnostic.info.source == platform.value().Info().source);
         }
         REQUIRE(sawSuccessfulDiagnostic);
     }
     else
     {
-        REQUIRE_FALSE(platformSelection.store.HasValue());
-        REQUIRE(platform.Error().Code() != NGIN::Crypto::CryptoErrorCode::None);
-        REQUIRE(platformSelection.store.Error().Code() != NGIN::Crypto::CryptoErrorCode::None);
+        REQUIRE_FALSE(platformSelection.store.has_value());
+        REQUIRE(platform.error().Code() != NGIN::Crypto::CryptoErrorCode::None);
+        REQUIRE(platformSelection.store.error().Code() != NGIN::Crypto::CryptoErrorCode::None);
         REQUIRE_FALSE(platformSelection.diagnostics[0].info.available);
     }
 }

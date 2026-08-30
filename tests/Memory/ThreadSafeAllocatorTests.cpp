@@ -33,7 +33,7 @@ TEST_CASE("ThreadSafeAllocator exposes ownership checks", "[Memory][ThreadSafeAl
     ThreadSafe allocator {Arena {128}};
     void*      pointer = allocator.Allocate(16, 8);
     REQUIRE(pointer != nullptr);
-    CHECK(allocator.Owns(pointer));
+    CHECK(allocator.OwnershipOf(pointer) == NGIN::Memory::Ownership::Owns);
     allocator.Deallocate(pointer, 16, 8);
 }
 
@@ -86,12 +86,15 @@ TEST_CASE("ThreadSafeAllocator composes with tracking decorator", "[Memory][Thre
     REQUIRE(first != nullptr);
     REQUIRE(second != nullptr);
 
-    auto& tracked = allocator.InnerAllocator();
-    auto  stats   = tracked.GetStats();
+    NGIN::Memory::AllocationStats stats = allocator.WithInner([](const Tracked& tracked) {
+        return tracked.GetStats();
+    });
     CHECK(stats.currentBytes == 96U);
 
     allocator.Deallocate(first, 64, 16);
     allocator.Deallocate(second, 32, 8);
-    stats = tracked.GetStats();
+    stats = allocator.WithInner([](const Tracked& tracked) {
+        return tracked.GetStats();
+    });
     CHECK(stats.currentBytes == 0U);
 }

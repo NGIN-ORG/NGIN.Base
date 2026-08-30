@@ -8,7 +8,7 @@ TEST_CASE("Secure random fills caller-provided buffers", "[Crypto][Random]")
 
     auto result = NGIN::Crypto::Random::Fill(NGIN::Crypto::ByteSpan {bytes.data(), bytes.Size()});
 
-    REQUIRE(result.HasValue());
+    REQUIRE(result.has_value());
     REQUIRE(bytes.Size() == 32);
 }
 
@@ -16,23 +16,23 @@ TEST_CASE("Secure random returns owned dynamic bytes", "[Crypto][Random]")
 {
     auto result = NGIN::Crypto::Random::RandomBytes(48);
 
-    REQUIRE(result.HasValue());
-    REQUIRE(result.Value().Size() == 48);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value().Size() == 48);
 }
 
 TEST_CASE("Secure random returns fixed-size bytes", "[Crypto][Random]")
 {
     auto result = NGIN::Crypto::Random::RandomBytes<16>();
 
-    REQUIRE(result.HasValue());
-    REQUIRE(result.Value().size() == 16);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value().size() == 16);
 }
 
 TEST_CASE("Secure random accepts empty output", "[Crypto][Random]")
 {
     auto result = NGIN::Crypto::Random::Fill(NGIN::Crypto::ByteSpan {});
 
-    REQUIRE(result.HasValue());
+    REQUIRE(result.has_value());
 }
 
 TEST_CASE("Platform entropy source forwards to secure random", "[Crypto][Random]")
@@ -44,7 +44,7 @@ TEST_CASE("Platform entropy source forwards to secure random", "[Crypto][Random]
 
     REQUIRE(source.IsAvailable());
     REQUIRE(source.IsCryptographicallySecure());
-    REQUIRE(result.HasValue());
+    REQUIRE(result.has_value());
 }
 
 TEST_CASE("Entropy source can be deterministic for tests", "[Crypto][Random]")
@@ -71,7 +71,7 @@ TEST_CASE("Entropy source can be deterministic for tests", "[Crypto][Random]")
 
     REQUIRE(source.IsAvailable());
     REQUIRE_FALSE(source.IsCryptographicallySecure());
-    REQUIRE(result.HasValue());
+    REQUIRE(result.has_value());
     REQUIRE(output[0] == static_cast<NGIN::Byte>(0));
     REQUIRE(output[1] == static_cast<NGIN::Byte>(1));
     REQUIRE(output[2] == static_cast<NGIN::Byte>(2));
@@ -87,6 +87,6 @@ TEST_CASE("Empty entropy source reports entropy unavailable", "[Crypto][Random]"
 
     REQUIRE_FALSE(source.IsAvailable());
     REQUIRE_FALSE(source.IsCryptographicallySecure());
-    REQUIRE_FALSE(result.HasValue());
-    REQUIRE(result.Error().Code() == NGIN::Crypto::CryptoErrorCode::EntropyUnavailable);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().Code() == NGIN::Crypto::CryptoErrorCode::EntropyUnavailable);
 }

@@ -30,13 +30,13 @@ namespace NGIN::IO
     ResultVoid LocalFileSystem::Move(const Path& from, const Path& to, const CopyOptions& options) noexcept
     {
         auto renamed = options.overwriteExisting ? Rename(from, to) : RenameNoReplace(from, to);
-        if (renamed.HasValue())
+        if (renamed.has_value())
             return renamed;
-        if (renamed.Error().code != IOErrorCode::CrossDevice)
+        if (renamed.error().code != IOErrorCode::CrossDevice)
             return renamed;
 
         auto copied = CopyFile(from, to, options);
-        if (!copied.HasValue())
+        if (!copied.has_value())
             return copied;
 
         RemoveOptions removeOptions;
@@ -46,10 +46,10 @@ namespace NGIN::IO
         MetadataOptions metadataOptions;
         metadataOptions.symlinkMode = SymlinkMode::DoNotFollow;
         auto infoResult             = GetInfo(from, metadataOptions);
-        if (!infoResult.HasValue())
-            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(infoResult.Error())));
+        if (!infoResult.has_value())
+            return ResultVoid(NGIN::Utilities::Unexpected<IOError>(std::move(infoResult.error())));
 
-        if (infoResult.Value().type == EntryType::Directory)
+        if (infoResult.value().type == EntryType::Directory)
             return RemoveDirectory(from, removeOptions);
         return RemoveFile(from, removeOptions);
     }
@@ -58,17 +58,18 @@ namespace NGIN::IO
     {
         FileView view;
         auto     result = view.Open(path);
-        if (!result.HasValue())
-            return Result<FileView>(NGIN::Utilities::Unexpected<IOError>(std::move(result.Error())));
+        if (!result.has_value())
+            return Result<FileView>(NGIN::Utilities::Unexpected<IOError>(std::move(result.error())));
         return Result<FileView>(std::move(view));
     }
 
     AsyncTask<FileInfo> LocalFileSystem::GetInfoAsync(
-            NGIN::Async::TaskContext& ctx, const Path& path, const MetadataOptions& options)
+            NGIN::Async::TaskContext& ctx, Path path, MetadataOptions options)
     {
-        auto completion = co_await detail::DispatchToDriver(*m_asyncDriver, ctx, [this, path, options]() mutable noexcept {
-            return GetInfo(path, options);
-        });
+        auto completion = co_await detail::DispatchToDriver(
+                *m_asyncDriver, ctx, [this, path = std::move(path), options]() mutable noexcept {
+                    return GetInfo(path, options);
+                });
 
         if (completion.IsCanceled())
         {
@@ -83,17 +84,20 @@ namespace NGIN::IO
         auto result = std::move(*completion.result);
         if (!result)
         {
-            co_return std::move(result).TakeError();
+            co_return std::move(result).error();
         }
-        co_return std::move(result).TakeValue();
+        co_return std::move(result).value();
     }
 
     AsyncTaskVoid LocalFileSystem::CopyFileAsync(
-            NGIN::Async::TaskContext& ctx, const Path& from, const Path& to, const CopyOptions& options)
+            NGIN::Async::TaskContext& ctx, Path from, Path to, CopyOptions options)
     {
-        auto completion = co_await detail::DispatchToDriver(*m_asyncDriver, ctx, [this, from, to, options]() mutable noexcept {
-            return CopyFile(from, to, options);
-        });
+        auto completion = co_await detail::DispatchToDriver(
+                *m_asyncDriver,
+                ctx,
+                [this, from = std::move(from), to = std::move(to), options]() mutable noexcept {
+                    return CopyFile(from, to, options);
+                });
 
         if (completion.IsCanceled())
         {
@@ -110,7 +114,7 @@ namespace NGIN::IO
         auto copied = std::move(*completion.result);
         if (!copied)
         {
-            co_await NGIN::Async::DomainFailure(std::move(copied).TakeError());
+            co_await NGIN::Async::DomainFailure(std::move(copied).error());
             co_return;
         }
 

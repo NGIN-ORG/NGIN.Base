@@ -5,6 +5,7 @@
 #include <concepts>
 #include <utility>
 
+#include <NGIN/Execution/ScheduleResult.hpp>
 #include <NGIN/Execution/WorkItem.hpp>
 #include <NGIN/Time/TimePoint.hpp>
 
@@ -17,8 +18,8 @@ namespace NGIN::Execution
     /// - `ExecuteAt(WorkItem, TimePoint)` for time-based scheduling
     template<typename T>
     concept ExecutorConcept = requires(T& executor, WorkItem item, NGIN::Time::TimePoint resumeAt) {
-        { executor.Execute(std::move(item)) } noexcept;
-        executor.ExecuteAt(std::move(item), resumeAt);
+        { executor.Execute(std::move(item)) } noexcept -> std::same_as<ScheduleResult>;
+        { executor.ExecuteAt(std::move(item), resumeAt) } noexcept -> std::same_as<ScheduleResult>;
     };
 
     /// @brief Optional capability: cooperative "pump" execution on the calling thread.

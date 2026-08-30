@@ -29,8 +29,8 @@ namespace
     [[nodiscard]] NGIN::Crypto::ByteBuffer DecodeHex(std::string_view text)
     {
         auto decoded = NGIN::Crypto::Encoding::DecodeHex(text);
-        REQUIRE(decoded.HasValue());
-        return decoded.Value();
+        REQUIRE(decoded.has_value());
+        return decoded.value();
     }
 
     template<NGIN::UIntSize Size>
@@ -126,20 +126,20 @@ TEST_CASE("AEAD algorithm headers generate typed keys and nonces", "[Crypto][Aea
     auto xchachaKey   = NGIN::Crypto::Symmetric::GenerateXChaCha20Poly1305Key();
     auto xchachaNonce = NGIN::Crypto::Symmetric::GenerateXChaCha20Poly1305Nonce();
 
-    REQUIRE(aes128Key.HasValue());
-    REQUIRE(aes128Key.Value().Bytes().size() == 16);
-    REQUIRE(aes256Key.HasValue());
-    REQUIRE(aes256Key.Value().Bytes().size() == 32);
-    REQUIRE(aesNonce.HasValue());
-    REQUIRE(aesNonce.Value().size() == 12);
-    REQUIRE(chachaKey.HasValue());
-    REQUIRE(chachaKey.Value().Bytes().size() == 32);
-    REQUIRE(chachaNonce.HasValue());
-    REQUIRE(chachaNonce.Value().size() == 12);
-    REQUIRE(xchachaKey.HasValue());
-    REQUIRE(xchachaKey.Value().Bytes().size() == 32);
-    REQUIRE(xchachaNonce.HasValue());
-    REQUIRE(xchachaNonce.Value().size() == 24);
+    REQUIRE(aes128Key.has_value());
+    REQUIRE(aes128Key.value().Bytes().size() == 16);
+    REQUIRE(aes256Key.has_value());
+    REQUIRE(aes256Key.value().Bytes().size() == 32);
+    REQUIRE(aesNonce.has_value());
+    REQUIRE(aesNonce.value().size() == 12);
+    REQUIRE(chachaKey.has_value());
+    REQUIRE(chachaKey.value().Bytes().size() == 32);
+    REQUIRE(chachaNonce.has_value());
+    REQUIRE(chachaNonce.value().size() == 12);
+    REQUIRE(xchachaKey.has_value());
+    REQUIRE(xchachaKey.value().Bytes().size() == 32);
+    REQUIRE(xchachaNonce.has_value());
+    REQUIRE(xchachaNonce.value().size() == 24);
 }
 
 TEST_CASE("SealInto checks output size before backend support", "[Crypto][Aead]")
@@ -170,8 +170,8 @@ TEST_CASE("SealInto checks output size before backend support", "[Crypto][Aead]"
             tooSmall,
             tag);
 
-    REQUIRE_FALSE(result.HasValue());
-    REQUIRE(result.Error().Code() == NGIN::Crypto::CryptoErrorCode::OutputBufferTooSmall);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().Code() == NGIN::Crypto::CryptoErrorCode::OutputBufferTooSmall);
 }
 
 TEST_CASE("SealInto rejects invalid key and nonce sizes", "[Crypto][Aead]")
@@ -203,8 +203,8 @@ TEST_CASE("SealInto rejects invalid key and nonce sizes", "[Crypto][Aead]")
             cipher,
             tag);
 
-    REQUIRE_FALSE(invalidKeyResult.HasValue());
-    REQUIRE(invalidKeyResult.Error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidKey);
+    REQUIRE_FALSE(invalidKeyResult.has_value());
+    REQUIRE(invalidKeyResult.error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidKey);
 
     NGIN::Crypto::Symmetric::AeadSealInput invalidNonceInput {
             .key            = NGIN::Crypto::Memory::SecretView {key.Bytes()},
@@ -219,8 +219,8 @@ TEST_CASE("SealInto rejects invalid key and nonce sizes", "[Crypto][Aead]")
             cipher,
             tag);
 
-    REQUIRE_FALSE(invalidNonceResult.HasValue());
-    REQUIRE(invalidNonceResult.Error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidNonce);
+    REQUIRE_FALSE(invalidNonceResult.has_value());
+    REQUIRE(invalidNonceResult.error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidNonce);
 }
 
 TEST_CASE("OpenInto rejects invalid tag size", "[Crypto][Aead]")
@@ -250,8 +250,8 @@ TEST_CASE("OpenInto rejects invalid tag size", "[Crypto][Aead]")
             input,
             plain);
 
-    REQUIRE_FALSE(result.HasValue());
-    REQUIRE(result.Error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidTag);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().Code() == NGIN::Crypto::CryptoErrorCode::InvalidTag);
 }
 
 TEST_CASE("AEAD returns unsupported algorithm when context lacks capability", "[Crypto][Aead]")
@@ -282,8 +282,8 @@ TEST_CASE("AEAD returns unsupported algorithm when context lacks capability", "[
             cipher,
             tag);
 
-    REQUIRE_FALSE(result.HasValue());
-    REQUIRE(result.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
 }
 
 TEST_CASE("AEAD owned helpers preserve validation and unsupported errors", "[Crypto][Aead]")
@@ -323,10 +323,10 @@ TEST_CASE("AEAD owned helpers preserve validation and unsupported errors", "[Cry
             NGIN::Crypto::AeadAlgorithm::Aes256Gcm,
             openInput);
 
-    REQUIRE_FALSE(sealResult.HasValue());
-    REQUIRE(sealResult.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
-    REQUIRE_FALSE(openResult.HasValue());
-    REQUIRE(openResult.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+    REQUIRE_FALSE(sealResult.has_value());
+    REQUIRE(sealResult.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+    REQUIRE_FALSE(openResult.has_value());
+    REQUIRE(openResult.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
 }
 
 TEST_CASE("Typed AEAD helpers preserve unsupported errors", "[Crypto][Aead]")
@@ -344,18 +344,18 @@ TEST_CASE("Typed AEAD helpers preserve unsupported errors", "[Crypto][Aead]")
     auto sealed = NGIN::Crypto::Symmetric::SealAes256Gcm(context, key, nonce, plain);
     auto opened = NGIN::Crypto::Symmetric::OpenAes256Gcm(context, key, nonce, plain, tag);
 
-    REQUIRE_FALSE(sealed.HasValue());
-    REQUIRE(sealed.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
-    REQUIRE_FALSE(opened.HasValue());
-    REQUIRE(opened.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+    REQUIRE_FALSE(sealed.has_value());
+    REQUIRE(sealed.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+    REQUIRE_FALSE(opened.has_value());
+    REQUIRE(opened.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
 }
 
 TEST_CASE("AES-GCM matches NIST vectors when backend supports it", "[Crypto][Aead]")
 {
     auto context = NGIN::Crypto::Backend::CreateContext();
-    REQUIRE(context.HasValue());
-    if (!context.Value().Supports(NGIN::Crypto::AeadAlgorithm::Aes128Gcm) ||
-        !context.Value().Supports(NGIN::Crypto::AeadAlgorithm::Aes256Gcm))
+    REQUIRE(context.has_value());
+    if (!context.value().Supports(NGIN::Crypto::AeadAlgorithm::Aes128Gcm) ||
+        !context.value().Supports(NGIN::Crypto::AeadAlgorithm::Aes256Gcm))
     {
         return;
     }
@@ -383,35 +383,35 @@ TEST_CASE("AES-GCM matches NIST vectors when backend supports it", "[Crypto][Aea
     };
 
     auto aes128 = NGIN::Crypto::Symmetric::Seal(
-            context.Value(),
+            context.value(),
             NGIN::Crypto::AeadAlgorithm::Aes128Gcm,
             aes128Input);
     auto aes256 = NGIN::Crypto::Symmetric::Seal(
-            context.Value(),
+            context.value(),
             NGIN::Crypto::AeadAlgorithm::Aes256Gcm,
             aes256Input);
 
-    REQUIRE(aes128.HasValue());
-    REQUIRE(aes256.HasValue());
+    REQUIRE(aes128.has_value());
+    REQUIRE(aes256.has_value());
     RequireBytesEqual(
-            NGIN::Crypto::ConstByteSpan {aes128.Value().ciphertext.data(), aes128.Value().ciphertext.Size()},
+            NGIN::Crypto::ConstByteSpan {aes128.value().ciphertext.data(), aes128.value().ciphertext.Size()},
             NGIN::Crypto::ConstByteSpan {expectedCipher128.data(), expectedCipher128.Size()});
     RequireBytesEqual(
-            NGIN::Crypto::ConstByteSpan {aes128.Value().tag.data(), aes128.Value().tag.size()},
+            NGIN::Crypto::ConstByteSpan {aes128.value().tag.data(), aes128.value().tag.size()},
             NGIN::Crypto::ConstByteSpan {expectedTag128.data(), expectedTag128.Size()});
     RequireBytesEqual(
-            NGIN::Crypto::ConstByteSpan {aes256.Value().ciphertext.data(), aes256.Value().ciphertext.Size()},
+            NGIN::Crypto::ConstByteSpan {aes256.value().ciphertext.data(), aes256.value().ciphertext.Size()},
             NGIN::Crypto::ConstByteSpan {expectedCipher256.data(), expectedCipher256.Size()});
     RequireBytesEqual(
-            NGIN::Crypto::ConstByteSpan {aes256.Value().tag.data(), aes256.Value().tag.size()},
+            NGIN::Crypto::ConstByteSpan {aes256.value().tag.data(), aes256.value().tag.size()},
             NGIN::Crypto::ConstByteSpan {expectedTag256.data(), expectedTag256.Size()});
 }
 
 TEST_CASE("Typed AES-GCM helpers match NIST vector when backend supports it", "[Crypto][Aead]")
 {
     auto context = NGIN::Crypto::Backend::CreateContext();
-    REQUIRE(context.HasValue());
-    if (!context.Value().Supports(NGIN::Crypto::AeadAlgorithm::Aes256Gcm))
+    REQUIRE(context.has_value());
+    if (!context.value().Supports(NGIN::Crypto::AeadAlgorithm::Aes256Gcm))
     {
         return;
     }
@@ -423,35 +423,35 @@ TEST_CASE("Typed AES-GCM helpers match NIST vector when backend supports it", "[
     const auto expectedTag    = DecodeHex("d0d1c8a799996bf0265b98b5d48ab919");
 
     auto sealed = NGIN::Crypto::Symmetric::SealAes256Gcm(
-            context.Value(),
+            context.value(),
             key,
             nonce,
             NGIN::Crypto::ConstByteSpan {plaintext.data(), plaintext.Size()});
-    REQUIRE(sealed.HasValue());
+    REQUIRE(sealed.has_value());
     RequireBytesEqual(
-            NGIN::Crypto::ConstByteSpan {sealed.Value().ciphertext.data(), sealed.Value().ciphertext.Size()},
+            NGIN::Crypto::ConstByteSpan {sealed.value().ciphertext.data(), sealed.value().ciphertext.Size()},
             NGIN::Crypto::ConstByteSpan {expectedCipher.data(), expectedCipher.Size()});
     RequireBytesEqual(
-            NGIN::Crypto::ConstByteSpan {sealed.Value().tag.data(), sealed.Value().tag.size()},
+            NGIN::Crypto::ConstByteSpan {sealed.value().tag.data(), sealed.value().tag.size()},
             NGIN::Crypto::ConstByteSpan {expectedTag.data(), expectedTag.Size()});
 
     auto opened = NGIN::Crypto::Symmetric::OpenAes256Gcm(
-            context.Value(),
+            context.value(),
             key,
             nonce,
-            NGIN::Crypto::ConstByteSpan {sealed.Value().ciphertext.data(), sealed.Value().ciphertext.Size()},
-            sealed.Value().tag);
-    REQUIRE(opened.HasValue());
+            NGIN::Crypto::ConstByteSpan {sealed.value().ciphertext.data(), sealed.value().ciphertext.Size()},
+            sealed.value().tag);
+    REQUIRE(opened.has_value());
     RequireBytesEqual(
-            NGIN::Crypto::ConstByteSpan {opened.Value().data(), opened.Value().Size()},
+            NGIN::Crypto::ConstByteSpan {opened.value().data(), opened.value().Size()},
             NGIN::Crypto::ConstByteSpan {plaintext.data(), plaintext.Size()});
 }
 
 TEST_CASE("AES-GCM opens valid ciphertext and rejects invalid tags when backend supports it", "[Crypto][Aead]")
 {
     auto context = NGIN::Crypto::Backend::CreateContext();
-    REQUIRE(context.HasValue());
-    if (!context.Value().Supports(NGIN::Crypto::AeadAlgorithm::Aes256Gcm))
+    REQUIRE(context.has_value());
+    if (!context.value().Supports(NGIN::Crypto::AeadAlgorithm::Aes256Gcm))
     {
         return;
     }
@@ -471,45 +471,45 @@ TEST_CASE("AES-GCM opens valid ciphertext and rejects invalid tags when backend 
     };
 
     auto sealed = NGIN::Crypto::Symmetric::Seal(
-            context.Value(),
+            context.value(),
             NGIN::Crypto::AeadAlgorithm::Aes256Gcm,
             sealInput);
-    REQUIRE(sealed.HasValue());
+    REQUIRE(sealed.has_value());
 
     NGIN::Crypto::Symmetric::AeadOpenInput openInput {
             .key            = NGIN::Crypto::Memory::SecretView {NGIN::Crypto::ConstByteSpan {key.data(), key.Size()}},
             .nonce          = NGIN::Crypto::ConstByteSpan {nonce.data(), nonce.Size()},
-            .ciphertext     = NGIN::Crypto::ConstByteSpan {sealed.Value().ciphertext.data(), sealed.Value().ciphertext.Size()},
+            .ciphertext     = NGIN::Crypto::ConstByteSpan {sealed.value().ciphertext.data(), sealed.value().ciphertext.Size()},
             .associatedData = NGIN::Crypto::ConstByteSpan {aad.data(), aad.Size()},
-            .tag            = NGIN::Crypto::ConstByteSpan {sealed.Value().tag.data(), sealed.Value().tag.size()},
+            .tag            = NGIN::Crypto::ConstByteSpan {sealed.value().tag.data(), sealed.value().tag.size()},
     };
 
     auto opened = NGIN::Crypto::Symmetric::Open(
-            context.Value(),
+            context.value(),
             NGIN::Crypto::AeadAlgorithm::Aes256Gcm,
             openInput);
-    REQUIRE(opened.HasValue());
+    REQUIRE(opened.has_value());
     RequireBytesEqual(
-            NGIN::Crypto::ConstByteSpan {opened.Value().data(), opened.Value().Size()},
+            NGIN::Crypto::ConstByteSpan {opened.value().data(), opened.value().Size()},
             NGIN::Crypto::ConstByteSpan {plaintext.data(), plaintext.Size()});
 
-    auto badTag = sealed.Value().tag;
+    auto badTag = sealed.value().tag;
     badTag[0] ^= NGIN::Byte {0x01};
     openInput.tag = NGIN::Crypto::ConstByteSpan {badTag.data(), badTag.size()};
 
     auto rejected = NGIN::Crypto::Symmetric::Open(
-            context.Value(),
+            context.value(),
             NGIN::Crypto::AeadAlgorithm::Aes256Gcm,
             openInput);
-    REQUIRE_FALSE(rejected.HasValue());
-    REQUIRE(rejected.Error().Code() == NGIN::Crypto::CryptoErrorCode::AuthenticationFailed);
+    REQUIRE_FALSE(rejected.has_value());
+    REQUIRE(rejected.error().Code() == NGIN::Crypto::CryptoErrorCode::AuthenticationFailed);
 }
 
 TEST_CASE("ChaCha20-Poly1305 matches RFC 8439 vector and rejects invalid tags when backend supports it", "[Crypto][Aead]")
 {
     auto context = NGIN::Crypto::Backend::CreateContext();
-    REQUIRE(context.HasValue());
-    if (!context.Value().Supports(NGIN::Crypto::AeadAlgorithm::ChaCha20Poly1305))
+    REQUIRE(context.has_value());
+    if (!context.value().Supports(NGIN::Crypto::AeadAlgorithm::ChaCha20Poly1305))
     {
         return;
     }
@@ -553,44 +553,44 @@ TEST_CASE("ChaCha20-Poly1305 matches RFC 8439 vector and rejects invalid tags wh
     };
 
     auto sealed = NGIN::Crypto::Symmetric::Seal(
-            context.Value(),
+            context.value(),
             NGIN::Crypto::AeadAlgorithm::ChaCha20Poly1305,
             sealInput);
-    REQUIRE(sealed.HasValue());
+    REQUIRE(sealed.has_value());
     RequireBytesEqual(
-            NGIN::Crypto::ConstByteSpan {sealed.Value().ciphertext.data(), sealed.Value().ciphertext.Size()},
+            NGIN::Crypto::ConstByteSpan {sealed.value().ciphertext.data(), sealed.value().ciphertext.Size()},
             NGIN::Crypto::ConstByteSpan {expectedCiphertext.data(), expectedCiphertext.Size()});
     RequireBytesEqual(
-            NGIN::Crypto::ConstByteSpan {sealed.Value().tag.data(), sealed.Value().tag.size()},
+            NGIN::Crypto::ConstByteSpan {sealed.value().tag.data(), sealed.value().tag.size()},
             NGIN::Crypto::ConstByteSpan {expectedTag.data(), expectedTag.Size()});
 
     NGIN::Crypto::Symmetric::AeadOpenInput openInput {
             .key            = NGIN::Crypto::Memory::SecretView {NGIN::Crypto::ConstByteSpan {key.data(), key.Size()}},
             .nonce          = NGIN::Crypto::ConstByteSpan {nonce.data(), nonce.Size()},
-            .ciphertext     = NGIN::Crypto::ConstByteSpan {sealed.Value().ciphertext.data(), sealed.Value().ciphertext.Size()},
+            .ciphertext     = NGIN::Crypto::ConstByteSpan {sealed.value().ciphertext.data(), sealed.value().ciphertext.Size()},
             .associatedData = NGIN::Crypto::ConstByteSpan {aad.data(), aad.Size()},
-            .tag            = NGIN::Crypto::ConstByteSpan {sealed.Value().tag.data(), sealed.Value().tag.size()},
+            .tag            = NGIN::Crypto::ConstByteSpan {sealed.value().tag.data(), sealed.value().tag.size()},
     };
 
     auto opened = NGIN::Crypto::Symmetric::Open(
-            context.Value(),
+            context.value(),
             NGIN::Crypto::AeadAlgorithm::ChaCha20Poly1305,
             openInput);
-    REQUIRE(opened.HasValue());
+    REQUIRE(opened.has_value());
     RequireBytesEqual(
-            NGIN::Crypto::ConstByteSpan {opened.Value().data(), opened.Value().Size()},
+            NGIN::Crypto::ConstByteSpan {opened.value().data(), opened.value().Size()},
             NGIN::Crypto::ConstByteSpan {plaintext.data(), plaintext.Size()});
 
-    auto badTag = sealed.Value().tag;
+    auto badTag = sealed.value().tag;
     badTag[0] ^= NGIN::Byte {0x01};
     openInput.tag = NGIN::Crypto::ConstByteSpan {badTag.data(), badTag.size()};
 
     auto rejected = NGIN::Crypto::Symmetric::Open(
-            context.Value(),
+            context.value(),
             NGIN::Crypto::AeadAlgorithm::ChaCha20Poly1305,
             openInput);
-    REQUIRE_FALSE(rejected.HasValue());
-    REQUIRE(rejected.Error().Code() == NGIN::Crypto::CryptoErrorCode::AuthenticationFailed);
+    REQUIRE_FALSE(rejected.has_value());
+    REQUIRE(rejected.error().Code() == NGIN::Crypto::CryptoErrorCode::AuthenticationFailed);
 }
 
 TEST_CASE("AEAD contract does not fake implementation even if capability is manually enabled", "[Crypto][Aead]")
@@ -623,6 +623,6 @@ TEST_CASE("AEAD contract does not fake implementation even if capability is manu
             cipher,
             tag);
 
-    REQUIRE_FALSE(result.HasValue());
-    REQUIRE(result.Error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().Code() == NGIN::Crypto::CryptoErrorCode::UnsupportedAlgorithm);
 }

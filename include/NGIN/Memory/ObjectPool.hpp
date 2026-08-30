@@ -52,14 +52,17 @@ namespace NGIN::Memory
         /// @param object Object returned by `Create`; null and foreign pointers are ignored.
         void Destroy(T* object) noexcept(std::is_nothrow_destructible_v<T>)
         {
-            if (!object || !m_storage.Owns(object))
+            if (!object || m_storage.OwnershipOf(object) != Ownership::Owns)
                 return;
             object->~T();
             m_storage.Deallocate(object, sizeof(T), alignof(T));
         }
 
         /// @brief Returns whether an address belongs to the pool's storage.
-        [[nodiscard]] bool Owns(const T* object) const noexcept { return m_storage.Owns(object); }
+        [[nodiscard]] bool Owns(const T* object) const noexcept
+        {
+            return m_storage.OwnershipOf(object) == Ownership::Owns;
+        }
 
         /// @brief Returns the number of currently available object slots.
         [[nodiscard]] std::size_t Available() const noexcept { return m_storage.AvailableBlocks(); }

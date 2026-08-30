@@ -228,7 +228,7 @@ namespace NGIN::Serialization::JSON
             WriteContext context {.output = {}, .options = options};
             auto         result = WriteValue(context, value, 0);
             if (!result)
-                return NGIN::Utilities::Unexpected<WriteDiagnostic>(std::move(result.Error()));
+                return NGIN::Utilities::Unexpected<WriteDiagnostic>(std::move(result.error()));
             return std::move(context.output);
         } catch (const std::bad_alloc&)
         {

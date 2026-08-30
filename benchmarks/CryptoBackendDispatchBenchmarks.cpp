@@ -18,16 +18,16 @@ int main()
     auto bestAvailable = CreateBestAvailableContext();
     auto platform      = CreatePlatformContext();
 
-    if (!bestAvailable.HasValue())
+    if (!bestAvailable.has_value())
     {
-        std::cerr << "CreateBestAvailableContext failed: " << bestAvailable.Error().Message() << '\n';
+        std::cerr << "CreateBestAvailableContext failed: " << bestAvailable.error().Message() << '\n';
         return 1;
     }
 
     Benchmark::Register([&](BenchmarkContext& ctx) {
         ctx.start();
         auto context = CreateBestAvailableContext();
-        ctx.doNotOptimize(context.HasValue());
+        ctx.doNotOptimize(context.has_value());
         ctx.stop();
     },
                         "Crypto create best available context");
@@ -35,13 +35,13 @@ int main()
     Benchmark::Register([&](BenchmarkContext& ctx) {
         ctx.start();
         auto context = CreatePlatformContext();
-        ctx.doNotOptimize(context.HasValue());
+        ctx.doNotOptimize(context.has_value());
         ctx.stop();
     },
                         "Crypto create platform context");
 
     Benchmark::Register([&](BenchmarkContext& ctx) {
-        const auto& context = bestAvailable.Value();
+        const auto& context = bestAvailable.value();
         ctx.start();
         auto hashSupport = context.DescribeSupport(HashAlgorithm::Sha256);
         auto macSupport  = context.DescribeSupport(MacAlgorithm::HmacSha256);
@@ -55,10 +55,10 @@ int main()
     },
                         "Crypto best available capability inspection");
 
-    if (platform.HasValue())
+    if (platform.has_value())
     {
         Benchmark::Register([&](BenchmarkContext& ctx) {
-            const auto& context = platform.Value();
+            const auto& context = platform.value();
             ctx.start();
             auto randomSupport = context.DescribeRandomSupport();
             auto hashSupport   = context.DescribeSupport(HashAlgorithm::Sha256);

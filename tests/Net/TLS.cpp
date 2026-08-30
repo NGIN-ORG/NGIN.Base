@@ -50,8 +50,8 @@ namespace
                 co_return NGIN::UInt32 {0};
             }
 
-            NGIN::Async::CancellationRegistration registration;
-            token.Register(
+            NGIN::Async::CancellationRegistration             registration;
+            const NGIN::Async::CancellationRegistrationResult registrationResult = token.Register(
                     registration,
                     {},
                     {},
@@ -60,6 +60,10 @@ namespace
                         return false;
                     },
                     m_state.get());
+            if (!registrationResult)
+            {
+                co_return NGIN::Net::NetError {NGIN::Net::NetErrorCode::Unknown};
+            }
 
             std::unique_lock lock(m_state->mutex);
             m_state->changed.wait(lock, [&] {
@@ -128,8 +132,8 @@ namespace
                 NGIN::Net::ByteSpan,
                 NGIN::Async::CancellationToken token) override
         {
-            NGIN::Async::CancellationRegistration registration;
-            token.Register(
+            NGIN::Async::CancellationRegistration             registration;
+            const NGIN::Async::CancellationRegistrationResult registrationResult = token.Register(
                     registration,
                     {},
                     {},
@@ -138,6 +142,10 @@ namespace
                         return false;
                     },
                     this);
+            if (!registrationResult)
+            {
+                co_return NGIN::Net::NetError {NGIN::Net::NetErrorCode::Unknown};
+            }
             std::unique_lock lock(m_mutex);
             m_changed.wait(lock, [&] { return token.IsCancellationRequested() || m_closed; });
             if (token.IsCancellationRequested())
@@ -200,24 +208,24 @@ namespace
     {
         const auto pem = NGIN::Crypto::Encoding::ParsePem(
                 ReadText(name), {.allowedLabels = {"CERTIFICATE"}, .allowMultipleBlocks = false});
-        REQUIRE(pem.HasValue());
-        REQUIRE(pem.Value().Size() == 1);
+        REQUIRE(pem.has_value());
+        REQUIRE(pem.value().Size() == 1);
         const auto parsed = NGIN::Crypto::Certificates::ParseX509Certificate(
-                NGIN::Crypto::ConstByteSpan {pem.Value()[0].decoded.data(), pem.Value()[0].decoded.Size()});
-        REQUIRE(parsed.HasValue());
-        return parsed.Value();
+                NGIN::Crypto::ConstByteSpan {pem.value()[0].decoded.data(), pem.value()[0].decoded.Size()});
+        REQUIRE(parsed.has_value());
+        return parsed.value();
     }
 
     [[nodiscard]] NGIN::Crypto::Keys::PrivateKeyInfo LoadPrivateKey(const std::string& name)
     {
         const auto pem = NGIN::Crypto::Encoding::ParsePem(
                 ReadText(name), {.allowedLabels = {"PRIVATE KEY"}, .allowMultipleBlocks = false});
-        REQUIRE(pem.HasValue());
-        REQUIRE(pem.Value().Size() == 1);
+        REQUIRE(pem.has_value());
+        REQUIRE(pem.value().Size() == 1);
         const auto parsed = NGIN::Crypto::Keys::ParsePrivateKeyInfo(
-                NGIN::Crypto::ConstByteSpan {pem.Value()[0].decoded.data(), pem.Value()[0].decoded.Size()});
-        REQUIRE(parsed.HasValue());
-        return parsed.Value();
+                NGIN::Crypto::ConstByteSpan {pem.value()[0].decoded.data(), pem.value()[0].decoded.Size()});
+        REQUIRE(parsed.has_value());
+        return parsed.value();
     }
 
     [[nodiscard]] NGIN::Crypto::Certificates::TlsCredentialMaterial Credentials(
@@ -284,9 +292,9 @@ namespace
                         .allowTruncatedEof = allowTruncated,
                 });
         auto server = NGIN::Net::TLS::TlsStream::CreateServer(std::move(pair.second), serverContext);
-        REQUIRE(client.HasValue());
-        REQUIRE(server.HasValue());
-        return {std::move(client.Value()), std::move(server.Value())};
+        REQUIRE(client.has_value());
+        REQUIRE(server.has_value());
+        return {std::move(client.value()), std::move(server.value())};
     }
 
     [[nodiscard]] NGIN::Net::TLS::TlsContext MakeClientContext(
@@ -305,8 +313,8 @@ namespace
         options.applicationProtocols       = std::move(alpn);
         options.requireApplicationProtocol = requireAlpn;
         auto context                       = NGIN::Net::TLS::TlsContext::CreateClient(std::move(options));
-        REQUIRE(context.HasValue());
-        return context.Value();
+        REQUIRE(context.has_value());
+        return context.value();
     }
 
     [[nodiscard]] NGIN::Net::TLS::TlsContext MakeServerContext(
@@ -326,8 +334,8 @@ namespace
         options.applicationProtocols       = std::move(alpn);
         options.requireApplicationProtocol = requireAlpn;
         auto context                       = NGIN::Net::TLS::TlsContext::CreateServer(std::move(options));
-        REQUIRE(context.HasValue());
-        return context.Value();
+        REQUIRE(context.has_value());
+        return context.value();
     }
 }// namespace
 
@@ -336,17 +344,17 @@ TEST_CASE("TLS provider availability is explicit", "[Net][TLS]")
     if (!NGIN::Net::TLS::TlsProviderAvailable())
     {
         auto context = NGIN::Net::TLS::TlsContext::CreateClient();
-        REQUIRE_FALSE(context.HasValue());
-        CHECK(context.Error().category == NGIN::Net::TLS::TlsErrorCategory::Provider);
-        CHECK(context.Error().code == NGIN::Net::TLS::TlsErrorCode::ProviderUnavailable);
+        REQUIRE_FALSE(context.has_value());
+        CHECK(context.error().category == NGIN::Net::TLS::TlsErrorCategory::Provider);
+        CHECK(context.error().code == NGIN::Net::TLS::TlsErrorCode::ProviderUnavailable);
         return;
     }
 
     NGIN::Net::TLS::TlsClientContextOptions options;
     options.verification = NGIN::Net::TLS::TlsPeerVerification::Disabled;
     auto context         = NGIN::Net::TLS::TlsContext::CreateClient(std::move(options));
-    REQUIRE(context.HasValue());
-    CHECK(context.Value().ProviderName() == "openssl");
+    REQUIRE(context.has_value());
+    CHECK(context.value().ProviderName() == "openssl");
 }
 
 TEST_CASE("TLS trusted handshake negotiates SNI ALPN and fragmented application data", "[Net][TLS]")
@@ -499,7 +507,7 @@ TEST_CASE("TLS handshake distinguishes caller cancellation and timeout", "[Net][
     NGIN::Net::TLS::TlsClientContextOptions options;
     options.verification = NGIN::Net::TLS::TlsPeerVerification::Disabled;
     auto context         = NGIN::Net::TLS::TlsContext::CreateClient(std::move(options));
-    REQUIRE(context.HasValue());
+    REQUIRE(context.has_value());
     NGIN::Execution::ThreadPoolScheduler scheduler(3);
     NGIN::Async::TaskContext             ctx(scheduler);
 
@@ -507,12 +515,12 @@ TEST_CASE("TLS handshake distinguishes caller cancellation and timeout", "[Net][
     {
         auto stream = NGIN::Net::TLS::TlsStream::CreateClient(
                 std::make_unique<BlockingByteStream>(),
-                context.Value(),
+                context.value(),
                 {.serverName = "localhost", .verificationName = {}, .allowTruncatedEof = false});
-        REQUIRE(stream.HasValue());
+        REQUIRE(stream.has_value());
         NGIN::Async::CancellationSource source;
         source.Cancel();
-        const auto result = NGIN::Async::SyncWait(ctx, stream.Value()->HandshakeAsync(ctx, source.GetToken()));
+        const auto result = NGIN::Async::SyncWait(ctx, stream.value()->HandshakeAsync(ctx, source.GetToken()));
         REQUIRE(result.IsDomainError());
         CHECK(result.DomainError().category == NGIN::Net::TLS::TlsErrorCategory::Cancellation);
     }
@@ -521,12 +529,12 @@ TEST_CASE("TLS handshake distinguishes caller cancellation and timeout", "[Net][
     {
         auto stream = NGIN::Net::TLS::TlsStream::CreateClient(
                 std::make_unique<BlockingByteStream>(),
-                context.Value(),
+                context.value(),
                 {.serverName = "localhost", .verificationName = {}, .allowTruncatedEof = false});
-        REQUIRE(stream.HasValue());
+        REQUIRE(stream.has_value());
         const auto result = NGIN::Async::SyncWait(
                 ctx,
-                stream.Value()->HandshakeAsync(
+                stream.value()->HandshakeAsync(
                         ctx,
                         {},
                         {.timeout = std::chrono::milliseconds(20)}));
@@ -550,7 +558,7 @@ TEST_CASE("TLS reports EOF without close_notify as truncation", "[Net][TLS]")
     REQUIRE(handshake.client.Succeeded());
     REQUIRE(handshake.server.Succeeded());
 
-    REQUIRE(streams.server->Close().HasValue());
+    REQUIRE(streams.server->Close().has_value());
     NGIN::Async::TaskContext  ctx(scheduler);
     std::array<NGIN::Byte, 8> buffer {};
     const auto                result = NGIN::Async::SyncWait(ctx, streams.client->ReadTlsAsync(ctx, buffer));

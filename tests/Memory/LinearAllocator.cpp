@@ -203,7 +203,7 @@ TEST_CASE("NGIN::Memory::LinearAllocator", "[Memory][LinearAllocator]")
         // Destination has prior state
         CHECK(dst.MaxSize() == kCapacity);
         CHECK(dst.Used() == 32UL);
-        CHECK(dst.Owns(p));
+        CHECK(dst.OwnershipOf(p) == NGIN::Memory::Ownership::Owns);
     }
 
     SECTION("MoveAssignment_TransfersSlabOwnership")
@@ -224,7 +224,7 @@ TEST_CASE("NGIN::Memory::LinearAllocator", "[Memory][LinearAllocator]")
 
         CHECK(dst.MaxSize() == kSrcCap);
         CHECK(dst.Used() == 48UL);
-        CHECK(dst.Owns(p));
+        CHECK(dst.OwnershipOf(p) == NGIN::Memory::Ownership::Owns);
     };
 
     // -------------------------------------------------------------------------
@@ -237,10 +237,10 @@ TEST_CASE("NGIN::Memory::LinearAllocator", "[Memory][LinearAllocator]")
 
         void* p = arena.Allocate(16, 8);
         CHECK(p != nullptr);
-        CHECK(arena.Owns(p));
+        CHECK(arena.OwnershipOf(p) == NGIN::Memory::Ownership::Owns);
 
         std::string external = "not in arena";
-        CHECK_FALSE(arena.Owns(external.data()));
+        CHECK(arena.OwnershipOf(external.data()) == NGIN::Memory::Ownership::DoesNotOwn);
     }
 
     SECTION("Deallocate_IsNoOp")

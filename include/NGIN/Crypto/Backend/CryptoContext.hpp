@@ -329,43 +329,57 @@ namespace NGIN::Crypto::Backend
         /// @brief Returns success when a hash algorithm is supported.
         [[nodiscard]] constexpr CryptoExpected<void> EnsureSupports(HashAlgorithm algorithm) const noexcept
         {
-            return Supports(algorithm) ? CryptoExpected<void> {} : CryptoError {CryptoErrorCode::UnsupportedAlgorithm};
+            return Supports(algorithm)
+                           ? CryptoExpected<void> {}
+                           : CryptoExpected<void> {std::unexpected(CryptoError {CryptoErrorCode::UnsupportedAlgorithm})};
         }
 
         /// @brief Returns success when a message-authentication algorithm is supported.
         [[nodiscard]] constexpr CryptoExpected<void> EnsureSupports(MacAlgorithm algorithm) const noexcept
         {
-            return Supports(algorithm) ? CryptoExpected<void> {} : CryptoError {CryptoErrorCode::UnsupportedAlgorithm};
+            return Supports(algorithm)
+                           ? CryptoExpected<void> {}
+                           : CryptoExpected<void> {std::unexpected(CryptoError {CryptoErrorCode::UnsupportedAlgorithm})};
         }
 
         /// @brief Returns success when a key-derivation algorithm is supported.
         [[nodiscard]] constexpr CryptoExpected<void> EnsureSupports(KdfAlgorithm algorithm) const noexcept
         {
-            return Supports(algorithm) ? CryptoExpected<void> {} : CryptoError {CryptoErrorCode::UnsupportedAlgorithm};
+            return Supports(algorithm)
+                           ? CryptoExpected<void> {}
+                           : CryptoExpected<void> {std::unexpected(CryptoError {CryptoErrorCode::UnsupportedAlgorithm})};
         }
 
         /// @brief Returns success when an authenticated-encryption algorithm is supported.
         [[nodiscard]] constexpr CryptoExpected<void> EnsureSupports(AeadAlgorithm algorithm) const noexcept
         {
-            return Supports(algorithm) ? CryptoExpected<void> {} : CryptoError {CryptoErrorCode::UnsupportedAlgorithm};
+            return Supports(algorithm)
+                           ? CryptoExpected<void> {}
+                           : CryptoExpected<void> {std::unexpected(CryptoError {CryptoErrorCode::UnsupportedAlgorithm})};
         }
 
         /// @brief Returns success when a key-agreement algorithm is supported.
         [[nodiscard]] constexpr CryptoExpected<void> EnsureSupports(KeyAgreementAlgorithm algorithm) const noexcept
         {
-            return Supports(algorithm) ? CryptoExpected<void> {} : CryptoError {CryptoErrorCode::UnsupportedAlgorithm};
+            return Supports(algorithm)
+                           ? CryptoExpected<void> {}
+                           : CryptoExpected<void> {std::unexpected(CryptoError {CryptoErrorCode::UnsupportedAlgorithm})};
         }
 
         /// @brief Returns success when an asymmetric-encryption algorithm is supported.
         [[nodiscard]] constexpr CryptoExpected<void> EnsureSupports(AsymmetricEncryptionAlgorithm algorithm) const noexcept
         {
-            return Supports(algorithm) ? CryptoExpected<void> {} : CryptoError {CryptoErrorCode::UnsupportedAlgorithm};
+            return Supports(algorithm)
+                           ? CryptoExpected<void> {}
+                           : CryptoExpected<void> {std::unexpected(CryptoError {CryptoErrorCode::UnsupportedAlgorithm})};
         }
 
         /// @brief Returns success when a signature algorithm is supported.
         [[nodiscard]] constexpr CryptoExpected<void> EnsureSupports(SignatureAlgorithm algorithm) const noexcept
         {
-            return Supports(algorithm) ? CryptoExpected<void> {} : CryptoError {CryptoErrorCode::UnsupportedAlgorithm};
+            return Supports(algorithm)
+                           ? CryptoExpected<void> {}
+                           : CryptoExpected<void> {std::unexpected(CryptoError {CryptoErrorCode::UnsupportedAlgorithm})};
         }
 
     private:

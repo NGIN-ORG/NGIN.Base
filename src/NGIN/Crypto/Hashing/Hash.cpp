@@ -20,7 +20,7 @@ namespace NGIN::Crypto::Hashing
     {
         if (output.size() != DigestSize(algorithm))
         {
-            return OutputBufferTooSmall();
+            return std::unexpected(OutputBufferTooSmall());
         }
 
         return context.HashInto(algorithm, input, output);
@@ -33,9 +33,9 @@ namespace NGIN::Crypto::Hashing
     {
         auto output = MakeByteBuffer(DigestSize(algorithm));
         auto result = HashInto(context, algorithm, input, ByteSpan {output.data(), output.Size()});
-        if (!result.HasValue())
+        if (!result.has_value())
         {
-            return result.Error();
+            return std::unexpected(std::move(result).error());
         }
 
         return output;
@@ -61,9 +61,9 @@ namespace NGIN::Crypto::Hashing
     {
         Sha256Digest output {};
         auto         result = Sha256Into(context, input, output);
-        if (!result.HasValue())
+        if (!result.has_value())
         {
-            return result.Error();
+            return std::unexpected(std::move(result).error());
         }
 
         return output;
@@ -73,9 +73,9 @@ namespace NGIN::Crypto::Hashing
     {
         Sha512Digest output {};
         auto         result = Sha512Into(context, input, output);
-        if (!result.HasValue())
+        if (!result.has_value())
         {
-            return result.Error();
+            return std::unexpected(std::move(result).error());
         }
 
         return output;

@@ -80,11 +80,11 @@ namespace NGIN::Net
             if (const auto percent = addressText.find('%'); percent != std::string_view::npos)
             {
                 auto scope = ParseScope(addressText.substr(percent + 1), percent + 2);
-                if (!scope.HasValue())
+                if (!scope.has_value())
                 {
-                    return NGIN::Utilities::Unexpected<AddressParseError>(std::move(scope).TakeError());
+                    return NGIN::Utilities::Unexpected<AddressParseError>(std::move(scope).error());
                 }
-                scopeId     = scope.Value();
+                scopeId     = scope.value();
                 addressText = addressText.substr(0, percent);
             }
         }
@@ -107,27 +107,27 @@ namespace NGIN::Net
         }
 
         auto address = IpAddress::Parse(addressText);
-        if (!address.HasValue())
+        if (!address.has_value())
         {
-            auto error = std::move(address).TakeError();
+            auto error = std::move(address).error();
             if (text.front() == '[')
             {
                 ++error.offset;
             }
             return NGIN::Utilities::Unexpected<AddressParseError>(error);
         }
-        if ((text.front() == '[' && !address.Value().IsV6()) ||
-            (scopeId != 0 && !address.Value().IsV6()))
+        if ((text.front() == '[' && !address.value().IsV6()) ||
+            (scopeId != 0 && !address.value().IsV6()))
         {
             return NGIN::Utilities::Unexpected<AddressParseError>(
                     {AddressParseErrorCode::InvalidScope, 1});
         }
         auto port = ParsePort(portText, portOffset);
-        if (!port.HasValue())
+        if (!port.has_value())
         {
-            return NGIN::Utilities::Unexpected<AddressParseError>(std::move(port).TakeError());
+            return NGIN::Utilities::Unexpected<AddressParseError>(std::move(port).error());
         }
-        return Endpoint {std::move(address).TakeValue(), port.Value(), scopeId};
+        return Endpoint {std::move(address).value(), port.value(), scopeId};
     }
 
     bool Endpoint::TryFormat(std::span<char> destination, NGIN::UIntSize& written) const noexcept

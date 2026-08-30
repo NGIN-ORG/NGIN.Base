@@ -41,7 +41,7 @@ namespace NGIN::Crypto::Random
         {
             if (m_fill == nullptr)
             {
-                return CryptoError {CryptoErrorCode::EntropyUnavailable};
+                return std::unexpected(CryptoError {CryptoErrorCode::EntropyUnavailable});
             }
 
             return m_fill(m_state, output);

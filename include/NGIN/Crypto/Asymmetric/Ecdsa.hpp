@@ -53,7 +53,7 @@ namespace NGIN::Crypto::Asymmetric
         {
             if (output.size() != 32 || integer.empty())
             {
-                return EcdsaDerParseError();
+                return std::unexpected(EcdsaDerParseError());
             }
 
             ConstByteSpan value = integer;
@@ -61,18 +61,18 @@ namespace NGIN::Crypto::Asymmetric
             {
                 if (value.size() == 1)
                 {
-                    return EcdsaDerParseError();
+                    return std::unexpected(EcdsaDerParseError());
                 }
                 value = value.subspan(1);
             }
             else if ((std::to_integer<NGIN::UInt8>(value[0]) & 0x80u) != 0)
             {
-                return EcdsaDerParseError();
+                return std::unexpected(EcdsaDerParseError());
             }
 
             if (value.size() > output.size())
             {
-                return EcdsaDerParseError();
+                return std::unexpected(EcdsaDerParseError());
             }
 
             for (NGIN::Byte& byte: output)
@@ -98,23 +98,23 @@ namespace NGIN::Crypto::Asymmetric
         const ByteBuffer s = detail::NormalizeEcdsaIntegerForDer(ConstByteSpan {signature.data() + 32, 32});
 
         CryptoExpected<ByteBuffer> derR = NGIN::Crypto::Encoding::EncodeDerInteger(ConstByteSpan {r.data(), r.Size()});
-        if (!derR.HasValue())
+        if (!derR.has_value())
         {
-            return derR.Error();
+            return std::unexpected(std::move(derR).error());
         }
         CryptoExpected<ByteBuffer> derS = NGIN::Crypto::Encoding::EncodeDerInteger(ConstByteSpan {s.data(), s.Size()});
-        if (!derS.HasValue())
+        if (!derS.has_value())
         {
-            return derS.Error();
+            return std::unexpected(std::move(derS).error());
         }
 
         ByteBuffer children;
-        children.Reserve(derR.Value().Size() + derS.Value().Size());
-        for (NGIN::Byte byte: derR.Value())
+        children.Reserve(derR.value().Size() + derS.value().Size());
+        for (NGIN::Byte byte: derR.value())
         {
             children.PushBack(byte);
         }
-        for (NGIN::Byte byte: derS.Value())
+        for (NGIN::Byte byte: derS.value())
         {
             children.PushBack(byte);
         }
@@ -135,39 +135,39 @@ namespace NGIN::Crypto::Asymmetric
         };
 
         CryptoExpected<NGIN::Crypto::Encoding::DerElement> sequenceElement = reader.ReadElement();
-        if (!sequenceElement.HasValue() || !reader.IsAtEnd())
+        if (!sequenceElement.has_value() || !reader.IsAtEnd())
         {
-            return detail::EcdsaDerParseError();
+            return std::unexpected(detail::EcdsaDerParseError());
         }
 
         CryptoExpected<NGIN::Crypto::Encoding::DerReader> sequence =
-                NGIN::Crypto::Encoding::ReadDerSequence(reader, sequenceElement.Value());
-        if (!sequence.HasValue())
+                NGIN::Crypto::Encoding::ReadDerSequence(reader, sequenceElement.value());
+        if (!sequence.has_value())
         {
-            return detail::EcdsaDerParseError();
+            return std::unexpected(detail::EcdsaDerParseError());
         }
 
-        CryptoExpected<NGIN::Crypto::Encoding::DerElement> rElement = sequence.Value().ReadElement();
-        CryptoExpected<NGIN::Crypto::Encoding::DerElement> sElement = sequence.Value().ReadElement();
-        if (!rElement.HasValue() || !sElement.HasValue() || !sequence.Value().IsAtEnd())
+        CryptoExpected<NGIN::Crypto::Encoding::DerElement> rElement = sequence.value().ReadElement();
+        CryptoExpected<NGIN::Crypto::Encoding::DerElement> sElement = sequence.value().ReadElement();
+        if (!rElement.has_value() || !sElement.has_value() || !sequence.value().IsAtEnd())
         {
-            return detail::EcdsaDerParseError();
+            return std::unexpected(detail::EcdsaDerParseError());
         }
 
-        CryptoExpected<ConstByteSpan> r = NGIN::Crypto::Encoding::ReadDerInteger(rElement.Value());
-        CryptoExpected<ConstByteSpan> s = NGIN::Crypto::Encoding::ReadDerInteger(sElement.Value());
-        if (!r.HasValue() || !s.HasValue())
+        CryptoExpected<ConstByteSpan> r = NGIN::Crypto::Encoding::ReadDerInteger(rElement.value());
+        CryptoExpected<ConstByteSpan> s = NGIN::Crypto::Encoding::ReadDerInteger(sElement.value());
+        if (!r.has_value() || !s.has_value())
         {
-            return detail::EcdsaDerParseError();
+            return std::unexpected(detail::EcdsaDerParseError());
         }
 
         EcdsaP256Sha256Signature signature {};
-        CryptoExpected<void>     copyR = detail::CopyDerIntegerToEcdsaComponent(r.Value(), ByteSpan {signature.data(), 32});
+        CryptoExpected<void>     copyR = detail::CopyDerIntegerToEcdsaComponent(r.value(), ByteSpan {signature.data(), 32});
         CryptoExpected<void>     copyS =
-                detail::CopyDerIntegerToEcdsaComponent(s.Value(), ByteSpan {signature.data() + 32, 32});
-        if (!copyR.HasValue() || !copyS.HasValue())
+                detail::CopyDerIntegerToEcdsaComponent(s.value(), ByteSpan {signature.data() + 32, 32});
+        if (!copyR.has_value() || !copyS.has_value())
         {
-            return detail::EcdsaDerParseError();
+            return std::unexpected(detail::EcdsaDerParseError());
         }
 
         return signature;
@@ -198,9 +198,9 @@ namespace NGIN::Crypto::Asymmetric
     {
         EcdsaP256Sha256Signature signature {};
         CryptoExpected<void>     result = SignEcdsaP256Sha256Into(context, privateKey, message, signature);
-        if (!result.HasValue())
+        if (!result.has_value())
         {
-            return result.Error();
+            return std::unexpected(std::move(result).error());
         }
 
         return signature;

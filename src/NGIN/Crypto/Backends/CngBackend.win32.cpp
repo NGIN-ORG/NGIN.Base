@@ -3,8 +3,8 @@
 #include <NGIN/Crypto/Memory/ZeroMemory.hpp>
 #include <NGIN/Crypto/Random/SecureRandom.hpp>
 
-#include <windows.h>
 #include <bcrypt.h>
+#include <windows.h>
 
 #include <limits>
 
@@ -272,7 +272,7 @@ namespace NGIN::Crypto::Backend::detail
             auto              status = BCryptOpenAlgorithmProvider(&handle, algorithmId, nullptr, flags);
             if (!StatusOk(status))
             {
-                return BackendUnavailable(status);
+                return std::unexpected(BackendUnavailable(status));
             }
 
             return AlgorithmHandle {handle};
@@ -284,7 +284,7 @@ namespace NGIN::Crypto::Backend::detail
         {
             if (!FitsUlong(secret.size()))
             {
-                return InvalidKey();
+                return std::unexpected(InvalidKey());
             }
 
             BCRYPT_HASH_HANDLE hash   = nullptr;
@@ -298,7 +298,7 @@ namespace NGIN::Crypto::Backend::detail
                     0);
             if (!StatusOk(status))
             {
-                return InternalError(status);
+                return std::unexpected(InternalError(status));
             }
 
             return HashHandle {hash};
@@ -310,7 +310,7 @@ namespace NGIN::Crypto::Backend::detail
         {
             if (!FitsUlong(key.Size()))
             {
-                return InvalidKey();
+                return std::unexpected(InvalidKey());
             }
 
             auto              keyBytes = key.Bytes();
@@ -325,7 +325,7 @@ namespace NGIN::Crypto::Backend::detail
                     0);
             if (!StatusOk(status))
             {
-                return InvalidKey();
+                return std::unexpected(InvalidKey());
             }
 
             return KeyHandle {handle};
@@ -341,7 +341,7 @@ namespace NGIN::Crypto::Backend::detail
                     0);
             if (!StatusOk(status))
             {
-                return BackendUnavailable(status);
+                return std::unexpected(BackendUnavailable(status));
             }
 
             return {};
@@ -352,13 +352,13 @@ namespace NGIN::Crypto::Backend::detail
             auto algorithmId = SelectHashId(algorithm);
             if (algorithmId == nullptr)
             {
-                return UnsupportedAlgorithm();
+                return std::unexpected(UnsupportedAlgorithm());
             }
 
             auto provider = OpenAlgorithm(algorithmId);
-            if (!provider.HasValue())
+            if (!provider.has_value())
             {
-                return provider.Error();
+                return std::unexpected(std::move(provider).error());
             }
 
             return {};
@@ -369,13 +369,13 @@ namespace NGIN::Crypto::Backend::detail
             auto algorithmId = SelectHashId(algorithm);
             if (algorithmId == nullptr)
             {
-                return UnsupportedAlgorithm();
+                return std::unexpected(UnsupportedAlgorithm());
             }
 
             auto provider = OpenAlgorithm(algorithmId, BCRYPT_ALG_HANDLE_HMAC_FLAG);
-            if (!provider.HasValue())
+            if (!provider.has_value())
             {
-                return provider.Error();
+                return std::unexpected(std::move(provider).error());
             }
 
             return {};
@@ -384,12 +384,12 @@ namespace NGIN::Crypto::Backend::detail
         [[nodiscard]] CryptoExpected<void> ProbeAesGcm() noexcept
         {
             auto provider = OpenAlgorithm(BCRYPT_AES_ALGORITHM);
-            if (!provider.HasValue())
+            if (!provider.has_value())
             {
-                return provider.Error();
+                return std::unexpected(std::move(provider).error());
             }
 
-            return SetGcmMode(provider.Value().Get());
+            return SetGcmMode(provider.value().Get());
         }
     }// namespace
 
@@ -402,23 +402,23 @@ namespace NGIN::Crypto::Backend::detail
         {
             capabilities.EnableRandom();
         }
-        if (ProbeHash(HashAlgorithm::Sha256).HasValue())
+        if (ProbeHash(HashAlgorithm::Sha256).has_value())
         {
             capabilities.Enable(HashAlgorithm::Sha256);
         }
-        if (ProbeHash(HashAlgorithm::Sha512).HasValue())
+        if (ProbeHash(HashAlgorithm::Sha512).has_value())
         {
             capabilities.Enable(HashAlgorithm::Sha512);
         }
-        if (ProbeMac(MacAlgorithm::HmacSha256).HasValue())
+        if (ProbeMac(MacAlgorithm::HmacSha256).has_value())
         {
             capabilities.Enable(MacAlgorithm::HmacSha256).Enable(KdfAlgorithm::Pbkdf2Sha256);
         }
-        if (ProbeMac(MacAlgorithm::HmacSha512).HasValue())
+        if (ProbeMac(MacAlgorithm::HmacSha512).has_value())
         {
             capabilities.Enable(MacAlgorithm::HmacSha512).Enable(KdfAlgorithm::Pbkdf2Sha512);
         }
-        if (ProbeAesGcm().HasValue())
+        if (ProbeAesGcm().has_value())
         {
             capabilities.Enable(AeadAlgorithm::Aes128Gcm).Enable(AeadAlgorithm::Aes256Gcm);
         }
@@ -443,43 +443,43 @@ namespace NGIN::Crypto::Backend::detail
         auto algorithmId = SelectHashId(algorithm);
         if (algorithmId == nullptr)
         {
-            return UnsupportedAlgorithm();
+            return std::unexpected(UnsupportedAlgorithm());
         }
         if (!FitsUlong(input.size()) || !FitsUlong(output.size()))
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         auto provider = OpenAlgorithm(algorithmId);
-        if (!provider.HasValue())
+        if (!provider.has_value())
         {
-            return provider.Error();
+            return std::unexpected(std::move(provider).error());
         }
 
-        auto hash = CreateHash(provider.Value().Get());
-        if (!hash.HasValue())
+        auto hash = CreateHash(provider.value().Get());
+        if (!hash.has_value())
         {
-            return hash.Error();
+            return std::unexpected(std::move(hash).error());
         }
 
         auto status = BCryptHashData(
-                hash.Value().Get(),
+                hash.value().Get(),
                 DataOrNull(input),
                 static_cast<ULONG>(input.size()),
                 0);
         if (!StatusOk(status))
         {
-            return InternalError(status);
+            return std::unexpected(InternalError(status));
         }
 
         status = BCryptFinishHash(
-                hash.Value().Get(),
+                hash.value().Get(),
                 DataOrNull(output),
                 static_cast<ULONG>(output.size()),
                 0);
         if (!StatusOk(status))
         {
-            return InternalError(status);
+            return std::unexpected(InternalError(status));
         }
 
         return {};
@@ -494,43 +494,43 @@ namespace NGIN::Crypto::Backend::detail
         auto algorithmId = SelectHashId(algorithm);
         if (algorithmId == nullptr)
         {
-            return UnsupportedAlgorithm();
+            return std::unexpected(UnsupportedAlgorithm());
         }
         if (!FitsUlong(input.size()) || !FitsUlong(output.size()))
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         auto provider = OpenAlgorithm(algorithmId, BCRYPT_ALG_HANDLE_HMAC_FLAG);
-        if (!provider.HasValue())
+        if (!provider.has_value())
         {
-            return provider.Error();
+            return std::unexpected(std::move(provider).error());
         }
 
-        auto hash = CreateHash(provider.Value().Get(), key.Bytes());
-        if (!hash.HasValue())
+        auto hash = CreateHash(provider.value().Get(), key.Bytes());
+        if (!hash.has_value())
         {
-            return hash.Error();
+            return std::unexpected(std::move(hash).error());
         }
 
         auto status = BCryptHashData(
-                hash.Value().Get(),
+                hash.value().Get(),
                 DataOrNull(input),
                 static_cast<ULONG>(input.size()),
                 0);
         if (!StatusOk(status))
         {
-            return InternalError(status);
+            return std::unexpected(InternalError(status));
         }
 
         status = BCryptFinishHash(
-                hash.Value().Get(),
+                hash.value().Get(),
                 DataOrNull(output),
                 static_cast<ULONG>(output.size()),
                 0);
         if (!StatusOk(status))
         {
-            return InternalError(status);
+            return std::unexpected(InternalError(status));
         }
 
         return {};
@@ -546,22 +546,22 @@ namespace NGIN::Crypto::Backend::detail
         auto algorithmId = SelectHashId(algorithm);
         if (algorithmId == nullptr)
         {
-            return UnsupportedAlgorithm();
+            return std::unexpected(UnsupportedAlgorithm());
         }
         if (!FitsUlong(password.Size()) || !FitsUlong(salt.size()) || !FitsUlong(output.size()))
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         auto provider = OpenAlgorithm(algorithmId, BCRYPT_ALG_HANDLE_HMAC_FLAG);
-        if (!provider.HasValue())
+        if (!provider.has_value())
         {
-            return provider.Error();
+            return std::unexpected(std::move(provider).error());
         }
 
         auto passwordBytes = password.Bytes();
         auto status        = BCryptDeriveKeyPBKDF2(
-                provider.Value().Get(),
+                provider.value().Get(),
                 DataOrNull(passwordBytes),
                 static_cast<ULONG>(passwordBytes.size()),
                 DataOrNull(salt),
@@ -572,7 +572,7 @@ namespace NGIN::Crypto::Backend::detail
                 0);
         if (!StatusOk(status))
         {
-            return InternalError(status);
+            return std::unexpected(InternalError(status));
         }
 
         return {};
@@ -589,30 +589,30 @@ namespace NGIN::Crypto::Backend::detail
     {
         if (!IsCngAesGcm(algorithm))
         {
-            return UnsupportedAlgorithm();
+            return std::unexpected(UnsupportedAlgorithm());
         }
         if (!FitsUlong(nonce.size()) || !FitsUlong(plaintext.size()) || !FitsUlong(associatedData.size()) ||
             !FitsUlong(ciphertext.size()) || !FitsUlong(tag.size()))
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         auto provider = OpenAlgorithm(BCRYPT_AES_ALGORITHM);
-        if (!provider.HasValue())
+        if (!provider.has_value())
         {
-            return provider.Error();
+            return std::unexpected(std::move(provider).error());
         }
 
-        auto gcm = SetGcmMode(provider.Value().Get());
-        if (!gcm.HasValue())
+        auto gcm = SetGcmMode(provider.value().Get());
+        if (!gcm.has_value())
         {
-            return gcm.Error();
+            return std::unexpected(std::move(gcm).error());
         }
 
-        auto keyHandle = GenerateSymmetricKey(provider.Value().Get(), key);
-        if (!keyHandle.HasValue())
+        auto keyHandle = GenerateSymmetricKey(provider.value().Get(), key);
+        if (!keyHandle.has_value())
         {
-            return keyHandle.Error();
+            return std::unexpected(std::move(keyHandle).error());
         }
 
         BCRYPT_AUTHENTICATED_CIPHER_MODE_INFO authInfo;
@@ -626,7 +626,7 @@ namespace NGIN::Crypto::Backend::detail
 
         ULONG produced = 0;
         auto  status   = BCryptEncrypt(
-                keyHandle.Value().Get(),
+                keyHandle.value().Get(),
                 DataOrNull(plaintext),
                 static_cast<ULONG>(plaintext.size()),
                 &authInfo,
@@ -638,10 +638,12 @@ namespace NGIN::Crypto::Backend::detail
                 0);
         if (!StatusOk(status))
         {
-            return InternalError(status);
+            return std::unexpected(InternalError(status));
         }
 
-        return produced == ciphertext.size() ? CryptoExpected<void> {} : InternalError(status);
+        return produced == ciphertext.size()
+                       ? CryptoExpected<void> {}
+                       : CryptoExpected<void> {std::unexpected(InternalError(status))};
     }
 
     CryptoExpected<void> AeadOpenCng(
@@ -655,30 +657,30 @@ namespace NGIN::Crypto::Backend::detail
     {
         if (!IsCngAesGcm(algorithm))
         {
-            return UnsupportedAlgorithm();
+            return std::unexpected(UnsupportedAlgorithm());
         }
         if (!FitsUlong(nonce.size()) || !FitsUlong(ciphertext.size()) || !FitsUlong(associatedData.size()) ||
             !FitsUlong(tag.size()) || !FitsUlong(plaintext.size()))
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         auto provider = OpenAlgorithm(BCRYPT_AES_ALGORITHM);
-        if (!provider.HasValue())
+        if (!provider.has_value())
         {
-            return provider.Error();
+            return std::unexpected(std::move(provider).error());
         }
 
-        auto gcm = SetGcmMode(provider.Value().Get());
-        if (!gcm.HasValue())
+        auto gcm = SetGcmMode(provider.value().Get());
+        if (!gcm.has_value())
         {
-            return gcm.Error();
+            return std::unexpected(std::move(gcm).error());
         }
 
-        auto keyHandle = GenerateSymmetricKey(provider.Value().Get(), key);
-        if (!keyHandle.HasValue())
+        auto keyHandle = GenerateSymmetricKey(provider.value().Get(), key);
+        if (!keyHandle.has_value())
         {
-            return keyHandle.Error();
+            return std::unexpected(std::move(keyHandle).error());
         }
 
         BCRYPT_AUTHENTICATED_CIPHER_MODE_INFO authInfo;
@@ -692,7 +694,7 @@ namespace NGIN::Crypto::Backend::detail
 
         ULONG produced = 0;
         auto  status   = BCryptDecrypt(
-                keyHandle.Value().Get(),
+                keyHandle.value().Get(),
                 DataOrNull(ciphertext),
                 static_cast<ULONG>(ciphertext.size()),
                 &authInfo,
@@ -705,7 +707,7 @@ namespace NGIN::Crypto::Backend::detail
         if (!StatusOk(status))
         {
             NGIN::Crypto::Memory::SecureZero(plaintext);
-            return AuthenticationFailed();
+            return std::unexpected(AuthenticationFailed());
         }
 
         return produced == plaintext.size() ? CryptoExpected<void> {} : InternalError(status);

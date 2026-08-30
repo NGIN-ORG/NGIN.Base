@@ -82,7 +82,7 @@ namespace NGIN::Crypto::Asymmetric
         {
             if (bytes.size() != Size)
             {
-                return detail::InvalidKey();
+                return std::unexpected(detail::InvalidKey());
             }
 
             return PublicKey {detail::CopyFixedBytes<Size>(bytes)};
@@ -151,7 +151,7 @@ namespace NGIN::Crypto::Asymmetric
         {
             if (bytes.size() != Size)
             {
-                return detail::InvalidKey();
+                return std::unexpected(detail::InvalidKey());
             }
 
             return PrivateKey {SecretType::FromValue(detail::CopyFixedBytes<Size>(bytes))};

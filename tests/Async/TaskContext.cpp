@@ -20,14 +20,16 @@ namespace
             m_delayed.reserve(256);
         }
 
-        void Execute(NGIN::Execution::WorkItem item) noexcept
+        NGIN::Execution::ScheduleResult Execute(NGIN::Execution::WorkItem item) noexcept
         {
             m_ready.push_back(std::move(item));
+            return {};
         }
 
-        void ExecuteAt(NGIN::Execution::WorkItem item, NGIN::Time::TimePoint)
+        NGIN::Execution::ScheduleResult ExecuteAt(NGIN::Execution::WorkItem item, NGIN::Time::TimePoint) noexcept
         {
             m_delayed.push_back(std::move(item));
+            return {};
         }
 
         [[nodiscard]] bool RunOne() noexcept

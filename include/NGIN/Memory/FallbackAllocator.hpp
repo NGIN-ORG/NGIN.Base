@@ -4,7 +4,9 @@
 
 #include <NGIN/Defines.hpp>
 #include <NGIN/Memory/AllocatorConcept.hpp>
+#include <NGIN/Memory/detail/CheckedArithmetic.hpp>
 
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -20,8 +22,12 @@ namespace NGIN::Memory
     class FallbackAllocator
     {
     public:
-        static_assert(AllocatorOwnsPointer<Primary> && AllocatorOwnsPointer<Secondary>,
-                      "FallbackAllocator requires Owns() on both allocators. Use TaggedFallbackAllocator instead.");
+        static_assert(AllocatorReportsPreciseOwnership<Primary> && AllocatorReportsPreciseOwnership<Secondary>,
+                      "FallbackAllocator requires definitive OwnershipOf() results from both allocators. "
+                      "Use TaggedFallbackAllocator when either allocator can return Ownership::Unknown.");
+
+        /// @brief Both underlying allocators provide definitive ownership queries.
+        static constexpr bool HasPreciseOwnership = true;
 
         /// @brief Constructs both underlying allocators with their defaults.
         FallbackAllocator() = default;
@@ -40,10 +46,22 @@ namespace NGIN::Memory
         /// @brief Releases a block through the underlying allocator that owns it.
         void Deallocate(void* ptr, std::size_t n, std::size_t a) noexcept
         {
-            if (m_primary.Owns(ptr))
+            if (!ptr)
+                return;
+
+            if (m_primary.OwnershipOf(ptr) == Ownership::Owns)
+            {
                 m_primary.Deallocate(ptr, n, a);
-            else
+                return;
+            }
+
+            if (m_secondary.OwnershipOf(ptr) == Ownership::Owns)
+            {
                 m_secondary.Deallocate(ptr, n, a);
+                return;
+            }
+
+            assert(false && "FallbackAllocator received a pointer owned by neither allocator");
         }
         /// @brief Returns the saturating sum of both allocators' maximum allocation sizes.
         [[nodiscard]] std::size_t MaxSize() const noexcept
@@ -63,10 +81,12 @@ namespace NGIN::Memory
                 return std::numeric_limits<std::size_t>::max();
             return a + b;
         }
-        /// @brief Returns whether either underlying allocator owns a pointer.
-        [[nodiscard]] bool Owns(const void* p) const noexcept
+        /// @brief Returns a definitive ownership result from the underlying allocators.
+        [[nodiscard]] Ownership OwnershipOf(const void* p) const noexcept
         {
-            return m_primary.Owns(p) || m_secondary.Owns(p);
+            if (m_primary.OwnershipOf(p) == Ownership::Owns || m_secondary.OwnershipOf(p) == Ownership::Owns)
+                return Ownership::Owns;
+            return Ownership::DoesNotOwn;
         }
 
     private:
@@ -76,31 +96,6 @@ namespace NGIN::Memory
 
     namespace detail
     {
-        constexpr bool IsPowerOfTwo(std::size_t value) noexcept
-        {
-            return value && ((value & (value - 1)) == 0);
-        }
-
-        constexpr std::size_t NormalizeAlignment(std::size_t alignmentInBytes) noexcept
-        {
-            if (alignmentInBytes == 0)
-                alignmentInBytes = 1;
-            if (!IsPowerOfTwo(alignmentInBytes))
-            {
-                std::size_t a = alignmentInBytes - 1;
-                a |= a >> 1;
-                a |= a >> 2;
-                a |= a >> 4;
-                a |= a >> 8;
-                a |= a >> 16;
-#if INTPTR_MAX == INT64_MAX
-                a |= a >> 32;
-#endif
-                alignmentInBytes = a + 1;
-            }
-            return alignmentInBytes;
-        }
-
         struct TaggedHeader
         {
             void*         rawBase {nullptr};
@@ -145,24 +140,32 @@ namespace NGIN::Memory
             void* p = Allocate(n, alignmentInBytes);
             if (!p)
                 return {};
-            const std::uint8_t tag = HeaderFromUserPointer_(p)->tag;
-            return MemoryBlock {p, n, detail::NormalizeAlignment(alignmentInBytes), tag};
+            const std::uint8_t tag                 = HeaderFromUserPointer_(p)->tag;
+            std::size_t        normalizedAlignment = 0;
+            if (!detail::TryNormalizeAlignment(alignmentInBytes, alignof(detail::TaggedHeader), normalizedAlignment))
+                return {};
+            return MemoryBlock {p, n, normalizedAlignment, tag};
         }
 
         /// @brief Releases a tagged block through the allocator recorded in its header.
-        /// @warning Passing a pointer not produced by this allocator is ignored.
+        /// @pre `ptr` is null or was returned by this allocator and has not already been released.
+        /// @warning The route header cannot be inspected safely for an arbitrary foreign pointer.
         void Deallocate(void* ptr, std::size_t, std::size_t) noexcept
         {
             if (!ptr)
                 return;
             detail::TaggedHeader* header = HeaderFromUserPointer_(ptr);
+            assert(header->magic == detail::TaggedHeader::MAGIC &&
+                   "TaggedFallbackAllocator requires a pointer returned by this allocator");
             if (header->magic != detail::TaggedHeader::MAGIC)
                 return;
 
             if (header->tag == 1)
                 m_primary.Deallocate(header->rawBase, header->rawSizeInBytes, header->rawAlignmentInBytes);
-            else
+            else if (header->tag == 2)
                 m_secondary.Deallocate(header->rawBase, header->rawSizeInBytes, header->rawAlignmentInBytes);
+            else
+                assert(false && "TaggedFallbackAllocator allocation header has an invalid route tag");
         }
 
         /// @brief Returns the saturating sum of both allocators' maximum allocation sizes.
@@ -183,15 +186,6 @@ namespace NGIN::Memory
             if (a > (std::numeric_limits<std::size_t>::max() - b))
                 return std::numeric_limits<std::size_t>::max();
             return a + b;
-        }
-
-        /// @brief Queries whether either underlying allocator positively owns a pointer.
-        /// @return `Ownership::Owns` on a positive result; otherwise `Ownership::Unknown`.
-        [[nodiscard]] Ownership OwnershipOf(const void* p) const noexcept
-        {
-            return AllocatorTraits<Primary>::OwnershipOf(m_primary, p) == Ownership::Owns       ? Ownership::Owns
-                   : AllocatorTraits<Secondary>::OwnershipOf(m_secondary, p) == Ownership::Owns ? Ownership::Owns
-                                                                                                : Ownership::Unknown;
         }
 
         /// @brief Returns the primary allocator.
@@ -215,12 +209,14 @@ namespace NGIN::Memory
         template<class Alloc>
         [[nodiscard]] void* AllocateTagged_(Alloc& alloc, std::size_t n, std::size_t alignmentInBytes, std::uint8_t tag) noexcept
         {
-            const std::size_t normalizedAlignment =
-                    (std::max) (detail::NormalizeAlignment(alignmentInBytes), alignof(detail::TaggedHeader));
-
-            if (n > std::numeric_limits<std::size_t>::max() - sizeof(detail::TaggedHeader) - (normalizedAlignment - 1))
+            std::size_t normalizedAlignment = 0;
+            if (!detail::TryNormalizeAlignment(alignmentInBytes, alignof(detail::TaggedHeader), normalizedAlignment))
                 return nullptr;
-            const std::size_t rawSizeInBytes = n + sizeof(detail::TaggedHeader) + (normalizedAlignment - 1);
+
+            std::size_t rawSizeInBytes = 0;
+            if (!detail::CheckedAdd(n, sizeof(detail::TaggedHeader), rawSizeInBytes) ||
+                !detail::CheckedAdd(rawSizeInBytes, normalizedAlignment - 1, rawSizeInBytes))
+                return nullptr;
 
             void* raw = alloc.Allocate(rawSizeInBytes, normalizedAlignment);
             if (!raw)

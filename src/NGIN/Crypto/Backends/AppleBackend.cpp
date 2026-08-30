@@ -48,7 +48,7 @@ namespace NGIN::Crypto::Backend::detail
                     return kCCHmacAlgSHA512;
             }
 
-            return UnsupportedAlgorithm();
+            return std::unexpected(UnsupportedAlgorithm());
         }
 
         [[nodiscard]] constexpr CryptoExpected<CCPseudoRandomAlgorithm> SelectPbkdf2Prf(KdfAlgorithm algorithm) noexcept
@@ -62,10 +62,10 @@ namespace NGIN::Crypto::Backend::detail
                 case KdfAlgorithm::HkdfSha256:
                 case KdfAlgorithm::HkdfSha512:
                 case KdfAlgorithm::Argon2id:
-                    return UnsupportedAlgorithm();
+                    return std::unexpected(UnsupportedAlgorithm());
             }
 
-            return UnsupportedAlgorithm();
+            return std::unexpected(UnsupportedAlgorithm());
         }
     }// namespace
 
@@ -98,7 +98,7 @@ namespace NGIN::Crypto::Backend::detail
     {
         if (!FitsCcLong(input.size()))
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         const auto* inputData = input.empty() ? nullptr : reinterpret_cast<const void*>(input.data());
@@ -107,7 +107,7 @@ namespace NGIN::Crypto::Backend::detail
             case HashAlgorithm::Sha256:
                 if (output.size() != CC_SHA256_DIGEST_LENGTH)
                 {
-                    return InvalidArgument();
+                    return std::unexpected(InvalidArgument());
                 }
                 return CC_SHA256(inputData, static_cast<CC_LONG>(input.size()), reinterpret_cast<unsigned char*>(output.data())) !=
                                        nullptr
@@ -116,7 +116,7 @@ namespace NGIN::Crypto::Backend::detail
             case HashAlgorithm::Sha512:
                 if (output.size() != CC_SHA512_DIGEST_LENGTH)
                 {
-                    return InvalidArgument();
+                    return std::unexpected(InvalidArgument());
                 }
                 return CC_SHA512(inputData, static_cast<CC_LONG>(input.size()), reinterpret_cast<unsigned char*>(output.data())) !=
                                        nullptr
@@ -125,10 +125,10 @@ namespace NGIN::Crypto::Backend::detail
             case HashAlgorithm::Sha3_256:
             case HashAlgorithm::Sha3_512:
             case HashAlgorithm::Blake3:
-                return UnsupportedAlgorithm();
+                return std::unexpected(UnsupportedAlgorithm());
         }
 
-        return UnsupportedAlgorithm();
+        return std::unexpected(UnsupportedAlgorithm());
     }
 
     CryptoExpected<void> MacApple(
@@ -138,26 +138,26 @@ namespace NGIN::Crypto::Backend::detail
             ByteSpan                         output) noexcept
     {
         auto hmac = SelectHmac(algorithm);
-        if (!hmac.HasValue())
+        if (!hmac.has_value())
         {
-            return hmac.Error();
+            return std::unexpected(std::move(hmac).error());
         }
 
         const auto keyBytes = key.Bytes();
         if (keyBytes.empty())
         {
-            return InvalidKey();
+            return std::unexpected(InvalidKey());
         }
 
         const auto expectedSize = algorithm == MacAlgorithm::HmacSha256 ? CC_SHA256_DIGEST_LENGTH : CC_SHA512_DIGEST_LENGTH;
         if (output.size() != expectedSize)
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         const auto* keyData   = reinterpret_cast<const void*>(keyBytes.data());
         const auto* inputData = input.empty() ? nullptr : reinterpret_cast<const void*>(input.data());
-        CCHmac(hmac.Value(), keyData, keyBytes.size(), inputData, input.size(), output.data());
+        CCHmac(hmac.value(), keyData, keyBytes.size(), inputData, input.size(), output.data());
         return {};
     }
 
@@ -169,19 +169,19 @@ namespace NGIN::Crypto::Backend::detail
             ByteSpan                         output) noexcept
     {
         auto prf = SelectPbkdf2Prf(algorithm);
-        if (!prf.HasValue())
+        if (!prf.has_value())
         {
-            return prf.Error();
+            return std::unexpected(std::move(prf).error());
         }
         if (iterations == 0 || output.empty())
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         const auto passwordBytes = password.Bytes();
         if (passwordBytes.empty())
         {
-            return InvalidKey();
+            return std::unexpected(InvalidKey());
         }
 
         const auto* saltData = salt.empty() ? nullptr : reinterpret_cast<const std::uint8_t*>(salt.data());
@@ -191,7 +191,7 @@ namespace NGIN::Crypto::Backend::detail
                 passwordBytes.size(),
                 saltData,
                 salt.size(),
-                prf.Value(),
+                prf.value(),
                 iterations,
                 reinterpret_cast<std::uint8_t*>(output.data()),
                 output.size());

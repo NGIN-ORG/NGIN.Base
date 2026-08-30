@@ -31,7 +31,7 @@ TEST_CASE("JSON parser exposes checked immutable views", "[serialization][json]"
     auto result = Parse(R"({"name":"NGIN","count":3,"active":true,"tags":["a","b"],"child":{"x":1},"nothing":null})");
     REQUIRE(result);
 
-    const auto root = result.Value().Root();
+    const auto root = result.value().Root();
     REQUIRE(root.IsObject());
     const auto object = *root.TryObject();
     REQUIRE(*object.Find("name")->TryString() == "NGIN");
@@ -51,8 +51,8 @@ TEST_CASE("JSON owning documents survive temporary input and document moves", "[
 {
     auto parsed = JSON::Parse(OwnedTextBuffer {std::string {"{\"value\":\"owned\"}"}});
     REQUIRE(parsed);
-    const auto     beforeMove = parsed.Value().Root();
-    JSON::Document moved      = std::move(parsed.Value());
+    const auto     beforeMove = parsed.value().Root();
+    JSON::Document moved      = std::move(parsed.value());
     REQUIRE(*beforeMove.TryObject()->Find("value")->TryString() == "owned");
     REQUIRE(*moved.Root().TryObject()->Find("value")->TryString() == "owned");
 }
@@ -63,15 +63,15 @@ TEST_CASE("JSON borrowed parsing is explicit", "[serialization][json][ownership]
     ParseScratch scratch;
     auto         parsed = JSON::ParseBorrowed(BorrowedTextView {source}, scratch);
     REQUIRE(parsed);
-    CHECK(parsed.Value().SourceText().data() == source.data());
-    CHECK(*parsed.Value().Root().TryObject()->Find("value")->TryString() == "borrowed");
+    CHECK(parsed.value().SourceText().data() == source.data());
+    CHECK(*parsed.value().Root().TryObject()->Find("value")->TryString() == "borrowed");
 
     source                  = R"({"value":"a\nb"})";
     UIntSize warmedCapacity = 0;
     {
         auto decoded = JSON::ParseBorrowed(BorrowedTextView {source}, scratch);
         REQUIRE(decoded);
-        CHECK(*decoded.Value().Root().TryObject()->Find("value")->TryString() == "a\nb");
+        CHECK(*decoded.value().Root().TryObject()->Find("value")->TryString() == "a\nb");
         warmedCapacity = scratch.Capacity();
     }
     auto reused = JSON::ParseBorrowed(BorrowedTextView {source}, scratch);
@@ -84,14 +84,14 @@ TEST_CASE("JSON in-situ parsing is explicit and decodes within owned mutable inp
 {
     auto parsed = JSON::ParseInSitu(MutableTextBuffer {R"({"text":"a\nb"})"});
     REQUIRE(parsed);
-    CHECK(*parsed.Value().Root().TryObject()->Find("text")->TryString() == "a\nb");
+    CHECK(*parsed.value().Root().TryObject()->Find("text")->TryString() == "a\nb");
 }
 
 TEST_CASE("JSON preserves the full integer domain", "[serialization][json][number]")
 {
     auto parsed = Parse(R"([-9223372036854775808,9223372036854775807,9223372036854775808,18446744073709551615,1.25])");
     REQUIRE(parsed);
-    const auto values = *parsed.Value().Root().TryArray();
+    const auto values = *parsed.value().Root().TryArray();
     CHECK(*values[0].TryInt64() == (std::numeric_limits<Int64>::min)());
     CHECK(*values[1].TryInt64() == (std::numeric_limits<Int64>::max)());
     CHECK(values[2].IsUInt64());
@@ -130,24 +130,24 @@ TEST_CASE("JSON duplicate-key policies are deterministic", "[serialization][json
     options.duplicateKeys = JSON::DuplicateKeyPolicy::KeepFirst;
     auto first            = Parse(R"({"a":1,"a":2})", options);
     REQUIRE(first);
-    CHECK(*first.Value().Root().TryObject()->Find("a")->TryInt64() == 1);
+    CHECK(*first.value().Root().TryObject()->Find("a")->TryInt64() == 1);
 
     options.duplicateKeys = JSON::DuplicateKeyPolicy::KeepLast;
     auto last             = Parse(R"({"a":1,"a":2})", options);
     REQUIRE(last);
-    CHECK(*last.Value().Root().TryObject()->Find("a")->TryInt64() == 2);
+    CHECK(*last.value().Root().TryObject()->Find("a")->TryInt64() == 2);
 
     options.duplicateKeys = JSON::DuplicateKeyPolicy::Preserve;
     auto preserved        = Parse(R"({"a":1,"a":2})", options);
     REQUIRE(preserved);
-    CHECK(preserved.Value().Root().TryObject()->Size() == 2);
+    CHECK(preserved.value().Root().TryObject()->Size() == 2);
 }
 
 TEST_CASE("JSON strings validate escapes, surrogates, controls, and UTF-8", "[serialization][json][unicode]")
 {
     auto pair = Parse(R"({"a":"\uD83D\uDE00"})");
     REQUIRE(pair);
-    CHECK(*pair.Value().Root().TryObject()->Find("a")->TryString() ==
+    CHECK(*pair.value().Root().TryObject()->Find("a")->TryString() ==
           std::string_view("\xF0\x9F\x98\x80", 4));
 
     CHECK_FALSE(Parse("\"\\uD83D\""));
@@ -163,14 +163,14 @@ TEST_CASE("JSON parse limits fail with structured diagnostics", "[serialization]
     limits.maxDepth = 2;
     auto depth      = Parse("[[[]]]", {}, limits);
     REQUIRE_FALSE(depth);
-    CHECK(depth.Error().code == ParseErrorCode::DepthExceeded);
-    CHECK(depth.Error().location.line == 1);
+    CHECK(depth.error().code == ParseErrorCode::DepthExceeded);
+    CHECK(depth.error().location.line == 1);
 
     limits          = {};
     limits.maxNodes = 2;
     auto nodes      = Parse("[1,2]", {}, limits);
     REQUIRE_FALSE(nodes);
-    CHECK(nodes.Error().code == ParseErrorCode::LimitExceeded);
+    CHECK(nodes.error().code == ParseErrorCode::LimitExceeded);
 }
 
 TEST_CASE("JSON builder and writer round-trip exact numeric kinds", "[serialization][json][writer]")
@@ -181,20 +181,20 @@ TEST_CASE("JSON builder and writer round-trip exact numeric kinds", "[serializat
     REQUIRE(name);
     REQUIRE(maximum);
     const std::array members {
-            JSON::ObjectMember {"name", name.Value()},
-            JSON::ObjectMember {"maximum", maximum.Value()},
+            JSON::ObjectMember {"name", name.value()},
+            JSON::ObjectMember {"maximum", maximum.value()},
     };
     auto root = builder.Object(members);
     REQUIRE(root);
-    auto document = builder.Finish(root.Value());
+    auto document = builder.Finish(root.value());
     REQUIRE(document);
 
-    auto text = JSON::Writer::WriteCanonical(document.Value().Root());
+    auto text = JSON::Writer::WriteCanonical(document.value().Root());
     REQUIRE(text);
-    CHECK(text.Value() == R"({"maximum":18446744073709551615,"name":"NGIN"})");
-    auto reparsed = Parse(text.Value());
+    CHECK(text.value() == R"({"maximum":18446744073709551615,"name":"NGIN"})");
+    auto reparsed = Parse(text.value());
     REQUIRE(reparsed);
-    CHECK(reparsed.Value().Root().TryObject()->Find("maximum")->IsUInt64());
+    CHECK(reparsed.value().Root().TryObject()->Find("maximum")->IsUInt64());
 }
 
 TEST_CASE("JSON builder rejects invalid UTF-8 and duplicate keys",
@@ -205,8 +205,8 @@ TEST_CASE("JSON builder rejects invalid UTF-8 and duplicate keys",
     auto value = builder.Null();
     REQUIRE(value);
     const std::array members {
-            JSON::ObjectMember {"same", value.Value()},
-            JSON::ObjectMember {"same", value.Value()},
+            JSON::ObjectMember {"same", value.value()},
+            JSON::ObjectMember {"same", value.value()},
     };
     CHECK_FALSE(builder.Object(members));
 }
@@ -217,14 +217,14 @@ TEST_CASE("JSON writer escapes every control-character class", "[serialization][
     const std::string value {"\"\x01\b\f\n\r\t\\", 8};
     auto              node = builder.String(value);
     REQUIRE(node);
-    auto document = builder.Finish(node.Value());
+    auto document = builder.Finish(node.value());
     REQUIRE(document);
-    auto text = JSON::Writer::Write(document.Value());
+    auto text = JSON::Writer::Write(document.value());
     REQUIRE(text);
-    CHECK(text.Value() == "\"\\\"\\u0001\\b\\f\\n\\r\\t\\\\\"");
-    auto reparsed = Parse(text.Value());
+    CHECK(text.value() == "\"\\\"\\u0001\\b\\f\\n\\r\\t\\\\\"");
+    auto reparsed = Parse(text.value());
     REQUIRE(reparsed);
-    CHECK(*reparsed.Value().Root().TryString() == value);
+    CHECK(*reparsed.value().Root().TryString() == value);
 }
 
 TEST_CASE("JSON stream writer enforces structure and reuses retained state",
@@ -276,8 +276,8 @@ TEST_CASE("JSON contiguous event parser preserves exact numeric categories and h
             handler,
             scratch);
     REQUIRE_FALSE(stopped);
-    CHECK(stopped.Error().code == ParseErrorCode::HandlerRejected);
-    CHECK(stopped.Error().consumerContext == 77);
+    CHECK(stopped.error().code == ParseErrorCode::HandlerRejected);
+    CHECK(stopped.error().consumerContext == 77);
     CHECK(unsignedValue == (std::numeric_limits<UInt64>::max)());
     CHECK(kinds.front() == JSON::EventKind::StartObject);
 }
@@ -345,10 +345,10 @@ TEST_CASE("JSON direct event parser applies duplicate and resource-limit policie
     auto         duplicate = JSON::EventParser::ParseContiguous(
             BorrowedTextView {R"({"x":1,"x":2})"}, handler, scratch);
     REQUIRE_FALSE(duplicate);
-    CHECK(duplicate.Error().code == ParseErrorCode::DuplicateName);
-    REQUIRE(duplicate.Error().related);
-    CHECK(duplicate.Error().related->begin == 1);
-    CHECK(duplicate.Error().related->end == 4);
+    CHECK(duplicate.error().code == ParseErrorCode::DuplicateName);
+    REQUIRE(duplicate.error().related);
+    CHECK(duplicate.error().related->begin == 1);
+    CHECK(duplicate.error().related->end == 4);
 
     JSON::ParseOptions keepFirst;
     keepFirst.duplicateKeys = JSON::DuplicateKeyPolicy::KeepFirst;
@@ -368,12 +368,12 @@ TEST_CASE("JSON direct event parser applies duplicate and resource-limit policie
     auto limited    = JSON::EventParser::ParseContiguous(
             BorrowedTextView {R"([1,2])"}, handler, scratch, {}, limits);
     REQUIRE_FALSE(limited);
-    CHECK(limited.Error().code == ParseErrorCode::LimitExceeded);
+    CHECK(limited.error().code == ParseErrorCode::LimitExceeded);
 
     auto invalid = JSON::EventParser::ParseContiguous(
             BorrowedTextView {R"({"x":[1,2})"}, handler, scratch);
     REQUIRE_FALSE(invalid);
-    CHECK(invalid.Error().code != ParseErrorCode::HandlerRejected);
+    CHECK(invalid.error().code != ParseErrorCode::HandlerRejected);
 
     auto throwingHandler = [](const JSON::Event& event) -> JSON::EventAction {
         if (event.kind == JSON::EventKind::Null)
@@ -391,14 +391,14 @@ TEST_CASE("JSON memory accounting includes finalized value views",
 {
     auto baseline = Parse(R"({"items":[1,2,3,4],"nested":{"enabled":true}})");
     REQUIRE(baseline);
-    REQUIRE(baseline.Value().MemoryCommitted() > 0);
+    REQUIRE(baseline.value().MemoryCommitted() > 0);
 
     ParseLimits limits;
-    limits.maxTotalMemoryBytes = baseline.Value().MemoryCommitted() - 1;
+    limits.maxTotalMemoryBytes = baseline.value().MemoryCommitted() - 1;
     auto limited               = JSON::Parse(
             OwnedTextBuffer {R"({"items":[1,2,3,4],"nested":{"enabled":true}})"},
             {},
             limits);
     REQUIRE_FALSE(limited);
-    CHECK(limited.Error().code == ParseErrorCode::LimitExceeded);
+    CHECK(limited.error().code == ParseErrorCode::LimitExceeded);
 }

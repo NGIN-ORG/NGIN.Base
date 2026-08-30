@@ -96,7 +96,7 @@ namespace NGIN::Crypto::Encoding
         {
             if (offset >= input.size())
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
             NGIN::UInt64 value        = 0;
@@ -109,13 +109,13 @@ namespace NGIN::Crypto::Encoding
 
                 if (firstOctet && hasMoreBytes && (octet & 0x7fu) == 0)
                 {
-                    return ParseError();
+                    return std::unexpected(ParseError());
                 }
                 firstOctet = false;
 
                 if (value > ((std::numeric_limits<NGIN::UInt64>::max() >> 7u)))
                 {
-                    return ParseError();
+                    return std::unexpected(ParseError());
                 }
 
                 value = (value << 7u) | static_cast<NGIN::UInt64>(octet & 0x7fu);
@@ -123,7 +123,7 @@ namespace NGIN::Crypto::Encoding
 
             if (hasMoreBytes)
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
             return value;
@@ -182,7 +182,7 @@ namespace NGIN::Crypto::Encoding
 
             if (count > 126)
             {
-                return InvalidArgument();
+                return std::unexpected(InvalidArgument());
             }
 
             AppendByte(output, 0x80u | static_cast<NGIN::UInt8>(count));
@@ -217,7 +217,7 @@ namespace NGIN::Crypto::Encoding
         const auto elementStart = m_offset;
         if (m_offset >= m_input.size())
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
         const auto identifier = ByteValue(m_input[m_offset++]);
@@ -231,17 +231,17 @@ namespace NGIN::Crypto::Encoding
         if (tag.number == 0x1fu)
         {
             auto highTagNumber = ReadBase128Integer(m_input, m_offset);
-            if (!highTagNumber.HasValue() || highTagNumber.Value() < 31 ||
-                highTagNumber.Value() > std::numeric_limits<NGIN::UInt32>::max())
+            if (!highTagNumber.has_value() || highTagNumber.value() < 31 ||
+                highTagNumber.value() > std::numeric_limits<NGIN::UInt32>::max())
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
-            tag.number = static_cast<NGIN::UInt32>(highTagNumber.Value());
+            tag.number = static_cast<NGIN::UInt32>(highTagNumber.value());
         }
 
         if (m_offset >= m_input.size())
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
         const auto     firstLengthOctet = ByteValue(m_input[m_offset++]);
@@ -255,31 +255,31 @@ namespace NGIN::Crypto::Encoding
             const auto lengthOctets = static_cast<NGIN::UIntSize>(firstLengthOctet & 0x7fu);
             if (lengthOctets == 0 || lengthOctets > sizeof(NGIN::UIntSize) || lengthOctets > Remaining())
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
             if (ByteValue(m_input[m_offset]) == 0)
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
 
             for (NGIN::UIntSize i = 0; i < lengthOctets; ++i)
             {
                 if (length > ((std::numeric_limits<NGIN::UIntSize>::max() >> 8u)))
                 {
-                    return ParseError();
+                    return std::unexpected(ParseError());
                 }
                 length = (length << 8u) | ByteValue(m_input[m_offset++]);
             }
 
             if (length <= 127)
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
         }
 
         if (length > m_options.maxElementBytes || length > Remaining())
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
         const auto valueStart = m_offset;
@@ -296,7 +296,7 @@ namespace NGIN::Crypto::Encoding
     {
         if (!element.tag.constructed || m_depth >= m_options.maxDepth)
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
         return DerReader {element.value, m_options, m_depth + 1};
@@ -311,7 +311,7 @@ namespace NGIN::Crypto::Encoding
     {
         if (!IsDerUniversalElement(element, DerUniversalTag::Integer) || !IsMinimalInteger(element.value))
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
         return element.value;
@@ -321,14 +321,14 @@ namespace NGIN::Crypto::Encoding
     {
         if (!IsDerUniversalElement(element, DerUniversalTag::BitString) || element.value.empty())
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
         const auto unusedBitCount = ByteValue(element.value[0]);
         const auto bytes          = element.value.subspan(1);
         if (!IsValidBitStringValue(unusedBitCount, bytes))
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
         return DerBitString {
@@ -341,7 +341,7 @@ namespace NGIN::Crypto::Encoding
     {
         if (!IsDerUniversalElement(element, DerUniversalTag::OctetString))
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
         return element.value;
@@ -351,18 +351,18 @@ namespace NGIN::Crypto::Encoding
     {
         if (!IsDerUniversalElement(element, DerUniversalTag::ObjectIdentifier) || element.value.empty())
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
         NGIN::UIntSize offset = 0;
         auto           first  = ReadBase128Integer(element.value, offset);
-        if (!first.HasValue())
+        if (!first.has_value())
         {
-            return first.Error();
+            return std::unexpected(std::move(first).error());
         }
 
         NGIN::Containers::Vector<NGIN::UInt32> arcs;
-        const auto                             firstValue = first.Value();
+        const auto                             firstValue = first.value();
         if (firstValue < 40)
         {
             arcs.PushBack(0);
@@ -377,7 +377,7 @@ namespace NGIN::Crypto::Encoding
         {
             if (firstValue - 80 > std::numeric_limits<NGIN::UInt32>::max())
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
             arcs.PushBack(2);
             arcs.PushBack(static_cast<NGIN::UInt32>(firstValue - 80));
@@ -386,11 +386,11 @@ namespace NGIN::Crypto::Encoding
         while (offset < element.value.size())
         {
             auto arc = ReadBase128Integer(element.value, offset);
-            if (!arc.HasValue() || arc.Value() > std::numeric_limits<NGIN::UInt32>::max())
+            if (!arc.has_value() || arc.value() > std::numeric_limits<NGIN::UInt32>::max())
             {
-                return ParseError();
+                return std::unexpected(ParseError());
             }
-            arcs.PushBack(static_cast<NGIN::UInt32>(arc.Value()));
+            arcs.PushBack(static_cast<NGIN::UInt32>(arc.value()));
         }
 
         return arcs;
@@ -400,7 +400,7 @@ namespace NGIN::Crypto::Encoding
     {
         if (!IsDerUniversalElement(element, DerUniversalTag::Sequence, true))
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
         return parent.EnterConstructed(element);
@@ -410,7 +410,7 @@ namespace NGIN::Crypto::Encoding
     {
         if (!IsDerUniversalElement(element, DerUniversalTag::Set, true))
         {
-            return ParseError();
+            return std::unexpected(ParseError());
         }
 
         return parent.EnterConstructed(element);
@@ -422,15 +422,15 @@ namespace NGIN::Crypto::Encoding
         output.Reserve(value.size() + 8);
 
         auto identifier = AppendIdentifier(output, tag);
-        if (!identifier.HasValue())
+        if (!identifier.has_value())
         {
-            return identifier.Error();
+            return std::unexpected(std::move(identifier).error());
         }
 
         auto length = AppendLength(output, value.size());
-        if (!length.HasValue())
+        if (!length.has_value())
         {
-            return length.Error();
+            return std::unexpected(std::move(length).error());
         }
 
         AppendBytes(output, value);
@@ -441,7 +441,7 @@ namespace NGIN::Crypto::Encoding
     {
         if (!IsMinimalInteger(value))
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         return EncodeDerElement(MakeDerUniversalTag(DerUniversalTag::Integer), value);
@@ -451,7 +451,7 @@ namespace NGIN::Crypto::Encoding
     {
         if (!IsValidBitStringValue(unusedBitCount, bytes))
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         ByteBuffer value;
@@ -470,23 +470,23 @@ namespace NGIN::Crypto::Encoding
     {
         if (arcs.size() < 2 || arcs[0] > 2 || (arcs[0] < 2 && arcs[1] > 39))
         {
-            return InvalidArgument();
+            return std::unexpected(InvalidArgument());
         }
 
         ByteBuffer value;
         const auto firstValue = static_cast<NGIN::UInt64>(arcs[0]) * 40u + arcs[1];
         auto       first      = AppendBase128Integer(value, firstValue);
-        if (!first.HasValue())
+        if (!first.has_value())
         {
-            return first.Error();
+            return std::unexpected(std::move(first).error());
         }
 
         for (NGIN::UIntSize i = 2; i < arcs.size(); ++i)
         {
             auto arc = AppendBase128Integer(value, arcs[i]);
-            if (!arc.HasValue())
+            if (!arc.has_value())
             {
-                return arc.Error();
+                return std::unexpected(std::move(arc).error());
             }
         }
 

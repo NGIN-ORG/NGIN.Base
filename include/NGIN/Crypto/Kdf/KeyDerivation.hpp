@@ -115,9 +115,9 @@ namespace NGIN::Crypto::Kdf
     {
         NGIN::Crypto::Memory::FixedSecret<Size> output {};
         CryptoExpected<void>                    result = DeriveKeyInto(context, parameters, output.UnsafeMutableBytes());
-        if (!result.HasValue())
+        if (!result.has_value())
         {
-            return result.Error();
+            return std::unexpected(std::move(result).error());
         }
 
         return output;

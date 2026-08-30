@@ -151,12 +151,12 @@ namespace NGIN::Net::TLS
         }
 
         auto session = context.m_state->CreateClientSession(options);
-        if (!session.HasValue())
+        if (!session.has_value())
         {
-            return NGIN::Utilities::Unexpected(session.Error());
+            return NGIN::Utilities::Unexpected(session.error());
         }
         return std::unique_ptr<TlsStream>(
-                new TlsStream(std::move(inner), std::move(session.Value()), options.allowTruncatedEof));
+                new TlsStream(std::move(inner), std::move(session.value()), options.allowTruncatedEof));
     }
 
     TlsExpected<std::unique_ptr<TlsStream>> TlsStream::CreateServer(
@@ -170,12 +170,12 @@ namespace NGIN::Net::TLS
         }
 
         auto session = context.m_state->CreateServerSession(options);
-        if (!session.HasValue())
+        if (!session.has_value())
         {
-            return NGIN::Utilities::Unexpected(session.Error());
+            return NGIN::Utilities::Unexpected(session.error());
         }
         return std::unique_ptr<TlsStream>(
-                new TlsStream(std::move(inner), std::move(session.Value()), options.allowTruncatedEof));
+                new TlsStream(std::move(inner), std::move(session.value()), options.allowTruncatedEof));
     }
 
     NGIN::Async::Task<void, TlsError> TlsStream::FlushEncrypted(
@@ -201,24 +201,24 @@ namespace NGIN::Net::TLS
                 std::lock_guard lock(m_providerMutex);
                 return m_session->DrainEncrypted();
             }();
-            if (!encrypted.HasValue())
+            if (!encrypted.has_value())
             {
-                co_await NGIN::Async::DomainFailure(encrypted.Error());
+                co_await NGIN::Async::DomainFailure(encrypted.error());
                 co_return;
             }
-            if (encrypted.Value().empty())
+            if (encrypted.value().empty())
             {
                 co_return;
             }
 
             std::size_t offset = 0;
-            while (offset < encrypted.Value().size())
+            while (offset < encrypted.value().size())
             {
                 auto operation = NGIN::Async::Spawn(
                         ctx,
                         m_inner->WriteAsync(
                                 ctx,
-                                NGIN::Net::ConstByteSpan {encrypted.Value().data() + offset, encrypted.Value().size() - offset},
+                                NGIN::Net::ConstByteSpan {encrypted.value().data() + offset, encrypted.value().size() - offset},
                                 token));
                 auto completion = co_await operation;
                 if (!completion)
@@ -264,9 +264,9 @@ namespace NGIN::Net::TLS
             }
             return m_session->FeedEncrypted(NGIN::Net::ConstByteSpan {buffer.data(), completion.Value()});
         }();
-        if (!fed.HasValue())
+        if (!fed.has_value())
         {
-            co_await NGIN::Async::DomainFailure(fed.Error());
+            co_await NGIN::Async::DomainFailure(fed.error());
         }
         co_return;
     }
@@ -311,7 +311,7 @@ namespace NGIN::Net::TLS
                 co_await NGIN::Async::DomainFailure(InvalidState("TLS handshake requires a valid executor"));
                 co_return;
             }
-            executor.ExecuteAfter(
+            const NGIN::Execution::ScheduleResult timeoutSchedule = executor.ExecuteAfter(
                     [timeoutState]() noexcept {
                         if (timeoutState->armed->exchange(false, std::memory_order_acq_rel))
                         {
@@ -320,6 +320,14 @@ namespace NGIN::Net::TLS
                         }
                     },
                     NGIN::Units::Milliseconds(static_cast<double>(options.timeout.count())));
+            if (!timeoutSchedule)
+            {
+                timeoutState->armed->store(false, std::memory_order_release);
+                m_activeTimeoutFired.reset();
+                m_state.store(TlsStreamState::Failed, std::memory_order_release);
+                co_await NGIN::Async::DomainFailure(InvalidState("TLS executor rejected the handshake timeout"));
+                co_return;
+            }
         }
 
         const auto finishTimeout = [&]() noexcept {
@@ -336,11 +344,11 @@ namespace NGIN::Net::TLS
                 std::lock_guard lock(m_providerMutex);
                 return m_session->Handshake();
             }();
-            if (!step.HasValue())
+            if (!step.has_value())
             {
                 finishTimeout();
                 m_state.store(TlsStreamState::Failed, std::memory_order_release);
-                co_await NGIN::Async::DomainFailure(step.Error());
+                co_await NGIN::Async::DomainFailure(step.error());
                 co_return;
             }
 
@@ -356,14 +364,14 @@ namespace NGIN::Net::TLS
                 co_return;
             }
 
-            if (step.Value().status == detail::TlsProviderStatus::Complete)
+            if (step.value().status == detail::TlsProviderStatus::Complete)
             {
                 finishTimeout();
                 CaptureSessionMetadata();
                 m_state.store(TlsStreamState::Open, std::memory_order_release);
                 co_return;
             }
-            if (step.Value().status == detail::TlsProviderStatus::WantRead)
+            if (step.value().status == detail::TlsProviderStatus::WantRead)
             {
                 auto readOperation = NGIN::Async::Spawn(
                         operationContext,
@@ -378,7 +386,7 @@ namespace NGIN::Net::TLS
                 }
                 continue;
             }
-            if (step.Value().status == detail::TlsProviderStatus::Closed)
+            if (step.value().status == detail::TlsProviderStatus::Closed)
             {
                 finishTimeout();
                 m_state.store(TlsStreamState::Failed, std::memory_order_release);
@@ -417,15 +425,15 @@ namespace NGIN::Net::TLS
                 std::lock_guard lock(m_providerMutex);
                 return m_session->Read(destination);
             }();
-            if (!step.HasValue())
+            if (!step.has_value())
             {
-                if (m_allowTruncatedEof && step.Error().code == TlsErrorCode::TruncatedStream)
+                if (m_allowTruncatedEof && step.error().code == TlsErrorCode::TruncatedStream)
                 {
                     m_state.store(TlsStreamState::Closed, std::memory_order_release);
                     co_return NGIN::UInt32 {0};
                 }
                 m_state.store(TlsStreamState::Failed, std::memory_order_release);
-                co_return step.Error();
+                co_return step.error();
             }
 
             auto flushOperation = NGIN::Async::Spawn(
@@ -447,16 +455,16 @@ namespace NGIN::Net::TLS
                 co_return CancellationError(false);
             }
 
-            if (step.Value().status == detail::TlsProviderStatus::Complete)
+            if (step.value().status == detail::TlsProviderStatus::Complete)
             {
-                co_return step.Value().bytes;
+                co_return step.value().bytes;
             }
-            if (step.Value().status == detail::TlsProviderStatus::Closed)
+            if (step.value().status == detail::TlsProviderStatus::Closed)
             {
                 m_state.store(TlsStreamState::Closed, std::memory_order_release);
                 co_return NGIN::UInt32 {0};
             }
-            if (step.Value().status == detail::TlsProviderStatus::WantRead)
+            if (step.value().status == detail::TlsProviderStatus::WantRead)
             {
                 auto readOperation = NGIN::Async::Spawn(
                         operationContext,
@@ -506,10 +514,10 @@ namespace NGIN::Net::TLS
                 std::lock_guard lock(m_providerMutex);
                 return m_session->Write(source);
             }();
-            if (!step.HasValue())
+            if (!step.has_value())
             {
                 m_state.store(TlsStreamState::Failed, std::memory_order_release);
-                co_return step.Error();
+                co_return step.error();
             }
 
             auto flushOperation = NGIN::Async::Spawn(
@@ -531,17 +539,17 @@ namespace NGIN::Net::TLS
                 co_return CancellationError(false);
             }
 
-            if (step.Value().status == detail::TlsProviderStatus::Complete)
+            if (step.value().status == detail::TlsProviderStatus::Complete)
             {
-                co_return step.Value().bytes;
+                co_return step.value().bytes;
             }
-            if (step.Value().status == detail::TlsProviderStatus::Closed)
+            if (step.value().status == detail::TlsProviderStatus::Closed)
             {
                 m_state.store(TlsStreamState::Closed, std::memory_order_release);
                 co_return detail::MakeTlsError(
                         TlsErrorCategory::State, TlsErrorCode::Closed, "TLS stream is closed");
             }
-            if (step.Value().status == detail::TlsProviderStatus::WantRead)
+            if (step.value().status == detail::TlsProviderStatus::WantRead)
             {
                 auto readOperation = NGIN::Async::Spawn(
                         operationContext,
@@ -595,16 +603,16 @@ namespace NGIN::Net::TLS
                 std::lock_guard lock(m_providerMutex);
                 return m_session->Shutdown();
             }();
-            if (!step.HasValue())
+            if (!step.has_value())
             {
-                if (m_allowTruncatedEof && step.Error().code == TlsErrorCode::TruncatedStream)
+                if (m_allowTruncatedEof && step.error().code == TlsErrorCode::TruncatedStream)
                 {
                     m_state.store(TlsStreamState::Closed, std::memory_order_release);
                     static_cast<void>(m_inner->Close());
                     co_return;
                 }
                 m_state.store(TlsStreamState::Failed, std::memory_order_release);
-                co_await NGIN::Async::DomainFailure(step.Error());
+                co_await NGIN::Async::DomainFailure(step.error());
                 co_return;
             }
 
@@ -619,14 +627,14 @@ namespace NGIN::Net::TLS
                 co_return;
             }
 
-            if (step.Value().status == detail::TlsProviderStatus::Complete ||
-                step.Value().status == detail::TlsProviderStatus::Closed)
+            if (step.value().status == detail::TlsProviderStatus::Complete ||
+                step.value().status == detail::TlsProviderStatus::Closed)
             {
                 m_state.store(TlsStreamState::Closed, std::memory_order_release);
                 static_cast<void>(m_inner->Close());
                 co_return;
             }
-            if (step.Value().status == detail::TlsProviderStatus::WantRead)
+            if (step.value().status == detail::TlsProviderStatus::WantRead)
             {
                 auto readOperation = NGIN::Async::Spawn(
                         operationContext,
@@ -732,9 +740,9 @@ namespace NGIN::Net::TLS
         if (!peerDer.empty())
         {
             auto parsed = NGIN::Crypto::Certificates::ParseX509Certificate(peerDer);
-            if (parsed.HasValue())
+            if (parsed.has_value())
             {
-                m_peerCertificate = std::move(parsed.Value());
+                m_peerCertificate = std::move(parsed.value());
             }
         }
     }

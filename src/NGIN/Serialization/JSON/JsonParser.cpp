@@ -496,7 +496,7 @@ namespace NGIN::Serialization::JSON
             ctx.cursor.Advance();
             auto trivia = SkipTrivia(ctx);
             if (!trivia)
-                return Failure<NodeId>(std::move(trivia.Error()));
+                return Failure<NodeId>(std::move(trivia.error()));
 
             std::vector<NodeId> values;
             if (ctx.cursor.Peek() == ']')
@@ -512,7 +512,7 @@ namespace NGIN::Serialization::JSON
                         return value;
                     try
                     {
-                        values.push_back(value.Value());
+                        values.push_back(value.value());
                     } catch (const std::bad_alloc&)
                     {
                         return Failure<NodeId>(MakeError(ctx, ParseErrorCode::OutOfMemory, "JSON array allocation failed"));
@@ -520,7 +520,7 @@ namespace NGIN::Serialization::JSON
 
                     auto postValue = SkipTrivia(ctx);
                     if (!postValue)
-                        return Failure<NodeId>(std::move(postValue.Error()));
+                        return Failure<NodeId>(std::move(postValue.error()));
 
                     if (ctx.cursor.Peek() == ']')
                     {
@@ -538,7 +538,7 @@ namespace NGIN::Serialization::JSON
                     ctx.cursor.Advance();
                     auto postComma = SkipTrivia(ctx);
                     if (!postComma)
-                        return Failure<NodeId>(std::move(postComma.Error()));
+                        return Failure<NodeId>(std::move(postComma.error()));
 
                     if (ctx.cursor.Peek() == ']')
                     {
@@ -596,7 +596,7 @@ namespace NGIN::Serialization::JSON
             ctx.cursor.Advance();
             auto trivia = SkipTrivia(ctx);
             if (!trivia)
-                return Failure<NodeId>(std::move(trivia.Error()));
+                return Failure<NodeId>(std::move(trivia.error()));
 
             std::vector<detail::MemberRecord> members;
             if (ctx.cursor.Peek() == '}')
@@ -609,30 +609,30 @@ namespace NGIN::Serialization::JSON
                 {
                     auto key = ParseString(ctx);
                     if (!key)
-                        return Failure<NodeId>(std::move(key.Error()));
+                        return Failure<NodeId>(std::move(key.error()));
 
                     auto postKey = SkipTrivia(ctx);
                     if (!postKey)
-                        return Failure<NodeId>(std::move(postKey.Error()));
+                        return Failure<NodeId>(std::move(postKey.error()));
                     if (ctx.cursor.Peek() != ':')
                         return Failure<NodeId>(MakeError(ctx, ParseErrorCode::UnexpectedCharacter, "Expected ':' after JSON key"));
                     ctx.cursor.Advance();
 
                     auto postColon = SkipTrivia(ctx);
                     if (!postColon)
-                        return Failure<NodeId>(std::move(postColon.Error()));
+                        return Failure<NodeId>(std::move(postColon.error()));
 
                     auto value = ParseValue(ctx);
                     if (!value)
                         return value;
 
                     detail::MemberRecord member {
-                            .key   = key.Value().value,
-                            .value = value.Value(),
+                            .key   = key.value().value,
+                            .value = value.value(),
                             .span  = SourceSpan {
-                                    .source = ctx.state->sourceId,
-                                    .begin  = key.Value().span.begin,
-                                    .end    = ctx.state->Node(value.Value())->span.end,
+                                     .source = ctx.state->sourceId,
+                                     .begin  = key.value().span.begin,
+                                     .end    = ctx.state->Node(value.value())->span.end,
                             },
                     };
 
@@ -654,8 +654,8 @@ namespace NGIN::Serialization::JSON
                                 auto error    = MakeErrorAt(ctx,
                                                             ParseErrorCode::DuplicateName,
                                                             "Duplicate JSON object key",
-                                                            key.Value().span.begin,
-                                                            key.Value().span.end);
+                                                            key.value().span.begin,
+                                                            key.value().span.end);
                                 error.related = duplicate->span;
                                 return Failure<NodeId>(std::move(error));
                             }
@@ -692,7 +692,7 @@ namespace NGIN::Serialization::JSON
 
                     auto postValue = SkipTrivia(ctx);
                     if (!postValue)
-                        return Failure<NodeId>(std::move(postValue.Error()));
+                        return Failure<NodeId>(std::move(postValue.error()));
 
                     if (ctx.cursor.Peek() == '}')
                     {
@@ -710,7 +710,7 @@ namespace NGIN::Serialization::JSON
                     ctx.cursor.Advance();
                     auto postComma = SkipTrivia(ctx);
                     if (!postComma)
-                        return Failure<NodeId>(std::move(postComma.Error()));
+                        return Failure<NodeId>(std::move(postComma.error()));
 
                     if (ctx.cursor.Peek() == '}')
                     {
@@ -892,7 +892,7 @@ namespace NGIN::Serialization::JSON
         {
             auto trivia = SkipTrivia(ctx);
             if (!trivia)
-                return Failure<NodeId>(std::move(trivia.Error()));
+                return Failure<NodeId>(std::move(trivia.error()));
 
             const UIntSize start = ctx.cursor.Offset();
             const char     token = ctx.cursor.Peek();
@@ -905,11 +905,11 @@ namespace NGIN::Serialization::JSON
             {
                 auto string = ParseString(ctx);
                 if (!string)
-                    return Failure<NodeId>(std::move(string.Error()));
+                    return Failure<NodeId>(std::move(string.error()));
                 detail::NodeRecord node;
                 node.kind                = ValueKind::String;
-                node.span                = string.Value().span;
-                node.payload.stringValue = string.Value().value;
+                node.span                = string.value().span;
+                node.payload.stringValue = string.value().value;
                 return AddNode(ctx, node);
             }
             if (token == '-' || IsDigit(token))
@@ -996,12 +996,12 @@ namespace NGIN::Serialization::JSON
 
             auto root = ParseValue(context);
             if (!root)
-                return Failure<DocumentType>(std::move(root.Error()));
-            state->root = root.Value();
+                return Failure<DocumentType>(std::move(root.error()));
+            state->root = root.value();
 
             auto trivia = SkipTrivia(context);
             if (!trivia)
-                return Failure<DocumentType>(std::move(trivia.Error()));
+                return Failure<DocumentType>(std::move(trivia.error()));
             if (!context.cursor.IsEof())
             {
                 return Failure<DocumentType>(MakeError(context,

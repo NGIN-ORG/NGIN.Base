@@ -107,7 +107,7 @@ namespace NGIN::Net
         std::array<NGIN::Byte, 256> storage {};
         auto                        recvResult = socket.TryReceiveFrom(ByteSpan {storage.data(), storage.size()});
         REQUIRE_FALSE(recvResult);
-        REQUIRE(recvResult.Error().code == NetErrorCode::WouldBlock);
+        REQUIRE(recvResult.error().code == NetErrorCode::WouldBlock);
 
         socket.Close();
     }
@@ -127,7 +127,7 @@ namespace NGIN::Net
 
         auto acceptResult = listener.TryAccept();
         REQUIRE_FALSE(acceptResult);
-        REQUIRE(acceptResult.Error().code == NetErrorCode::WouldBlock);
+        REQUIRE(acceptResult.error().code == NetErrorCode::WouldBlock);
 
         listener.Close();
     }
@@ -172,7 +172,7 @@ namespace NGIN::Net
                 received = true;
                 break;
             }
-            REQUIRE(recvResult.Error().code == NetErrorCode::WouldBlock);
+            REQUIRE(recvResult.error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
 
@@ -207,7 +207,7 @@ namespace NGIN::Net
                 accepted = true;
                 break;
             }
-            REQUIRE(acceptResult.Error().code == NetErrorCode::WouldBlock);
+            REQUIRE(acceptResult.error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(accepted);
@@ -229,7 +229,7 @@ namespace NGIN::Net
                 received = true;
                 break;
             }
-            REQUIRE(recvResult.Error().code == NetErrorCode::WouldBlock);
+            REQUIRE(recvResult.error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(received);
@@ -373,7 +373,7 @@ namespace NGIN::Net
                 accepted = true;
                 break;
             }
-            REQUIRE(acceptResult.Error().code == NetErrorCode::WouldBlock);
+            REQUIRE(acceptResult.error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(accepted);
@@ -405,7 +405,7 @@ namespace NGIN::Net
             auto sendResult = client.TrySendSegments(BufferSegmentSpan {iovecs.data(), count});
             if (!sendResult)
             {
-                REQUIRE(sendResult.Error().code == NetErrorCode::WouldBlock);
+                REQUIRE(sendResult.error().code == NetErrorCode::WouldBlock);
                 SleepBrief();
                 continue;
             }
@@ -438,7 +438,7 @@ namespace NGIN::Net
             auto recvResult = server.TryReceiveSegments(MutableBufferSegmentSpan {iovecs.data(), count});
             if (!recvResult)
             {
-                REQUIRE(recvResult.Error().code == NetErrorCode::WouldBlock);
+                REQUIRE(recvResult.error().code == NetErrorCode::WouldBlock);
                 SleepBrief();
                 continue;
             }
@@ -482,7 +482,7 @@ namespace NGIN::Net
                 accepted = true;
                 break;
             }
-            REQUIRE(acceptResult.Error().code == NetErrorCode::WouldBlock);
+            REQUIRE(acceptResult.error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(accepted);
@@ -556,7 +556,7 @@ namespace NGIN::Net
                 accepted = true;
                 break;
             }
-            REQUIRE(acceptResult.Error().code == NetErrorCode::WouldBlock);
+            REQUIRE(acceptResult.error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(accepted);
@@ -635,7 +635,7 @@ namespace NGIN::Net
                 sent = true;
                 break;
             }
-            REQUIRE(sendResult.Error().code == NetErrorCode::WouldBlock);
+            REQUIRE(sendResult.error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(sent);
@@ -658,7 +658,7 @@ namespace NGIN::Net
                 received = true;
                 break;
             }
-            REQUIRE(recvResult.Error().code == NetErrorCode::WouldBlock);
+            REQUIRE(recvResult.error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(received);
@@ -815,7 +815,7 @@ namespace NGIN::Net
                 accepted = true;
                 break;
             }
-            REQUIRE(acceptResult.Error().code == NetErrorCode::WouldBlock);
+            REQUIRE(acceptResult.error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(accepted);
@@ -873,7 +873,7 @@ namespace NGIN::Net
                 accepted = true;
                 break;
             }
-            REQUIRE(acceptResult.Error().code == NetErrorCode::WouldBlock);
+            REQUIRE(acceptResult.error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(accepted);
@@ -928,7 +928,7 @@ namespace NGIN::Net
                 accepted = true;
                 break;
             }
-            REQUIRE(acceptResult.Error().code == NetErrorCode::WouldBlock);
+            REQUIRE(acceptResult.error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(accepted);
@@ -989,8 +989,8 @@ namespace NGIN::Net
         REQUIRE(client.Open(AddressFamily::V4));
         auto result = client.Connect({IpAddress::LoopbackV4(), port});
         REQUIRE_FALSE(result);
-        const bool refused = result.Error().code == NetErrorCode::Disconnected ||
-                             result.Error().code == NetErrorCode::ConnectionReset;
+        const bool refused = result.error().code == NetErrorCode::Disconnected ||
+                             result.error().code == NetErrorCode::ConnectionReset;
         REQUIRE(refused);
 
         client.Close();
@@ -1051,7 +1051,7 @@ namespace NGIN::Net
                 accepted = true;
                 break;
             }
-            REQUIRE(acceptResult.Error().code == NetErrorCode::WouldBlock);
+            REQUIRE(acceptResult.error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(accepted);
@@ -1115,7 +1115,7 @@ namespace NGIN::Net
                 accepted = true;
                 break;
             }
-            REQUIRE(acceptResult.Error().code == NetErrorCode::WouldBlock);
+            REQUIRE(acceptResult.error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(accepted);
@@ -1135,7 +1135,7 @@ namespace NGIN::Net
                 received = true;
                 break;
             }
-            REQUIRE(recvResult.Error().code == NetErrorCode::WouldBlock);
+            REQUIRE(recvResult.error().code == NetErrorCode::WouldBlock);
             SleepBrief();
         }
         REQUIRE(received);

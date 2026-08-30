@@ -22,19 +22,19 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
     while (!reader.IsAtEnd())
     {
         auto element = reader.ReadElement();
-        if (!element.HasValue())
+        if (!element.has_value())
         {
             break;
         }
 
-        (void) NGIN::Crypto::Encoding::ReadDerInteger(element.Value());
-        (void) NGIN::Crypto::Encoding::ReadDerBitString(element.Value());
-        (void) NGIN::Crypto::Encoding::ReadDerOctetString(element.Value());
-        (void) NGIN::Crypto::Encoding::ReadDerObjectIdentifier(element.Value());
+        (void) NGIN::Crypto::Encoding::ReadDerInteger(element.value());
+        (void) NGIN::Crypto::Encoding::ReadDerBitString(element.value());
+        (void) NGIN::Crypto::Encoding::ReadDerOctetString(element.value());
+        (void) NGIN::Crypto::Encoding::ReadDerObjectIdentifier(element.value());
 
-        if (element.Value().tag.constructed)
+        if (element.value().tag.constructed)
         {
-            (void) reader.EnterConstructed(element.Value());
+            (void) reader.EnterConstructed(element.value());
         }
     }
 

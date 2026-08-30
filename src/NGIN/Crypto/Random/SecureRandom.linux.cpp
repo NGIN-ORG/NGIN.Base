@@ -22,12 +22,12 @@ namespace NGIN::Crypto::Random
                     continue;
                 }
 
-                return EntropyUnavailableError(errno);
+                return std::unexpected(EntropyUnavailableError(errno));
             }
 
             if (received == 0)
             {
-                return EntropyUnavailableError();
+                return std::unexpected(EntropyUnavailableError());
             }
 
             const auto receivedSize = static_cast<NGIN::UIntSize>(received);

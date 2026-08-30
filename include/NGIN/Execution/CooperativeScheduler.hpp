@@ -4,9 +4,11 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <new>
 #include <utility>
 #include <vector>
 
+#include <NGIN/Execution/ScheduleResult.hpp>
 #include <NGIN/Execution/WorkItem.hpp>
 #include <NGIN/Time/MonotonicClock.hpp>
 #include <NGIN/Time/TimePoint.hpp>
@@ -28,24 +30,35 @@ namespace NGIN::Execution
         }
 
         /// @brief Queues a non-empty work item for execution by a future pump call.
-        void Execute(WorkItem item) noexcept
+        [[nodiscard]] ScheduleResult Execute(WorkItem item) noexcept
         {
-            if (!item.IsEmpty())
+            if (item.IsEmpty())
+                return std::unexpected(ScheduleError::Rejected);
+            try
             {
                 m_ready.push_back(std::move(item));
+            } catch (const std::bad_alloc&)
+            {
+                return std::unexpected(ScheduleError::ResourceExhausted);
             }
+            return {};
         }
 
         /// @brief Queues a non-empty work item for execution no earlier than a time point.
-        void ExecuteAt(WorkItem item, NGIN::Time::TimePoint resumeAt)
+        [[nodiscard]] ScheduleResult ExecuteAt(WorkItem item, NGIN::Time::TimePoint resumeAt) noexcept
         {
             if (item.IsEmpty())
-            {
-                return;
-            }
+                return std::unexpected(ScheduleError::Rejected);
 
-            m_timers.push_back(Timer {resumeAt, std::move(item)});
-            std::push_heap(m_timers.begin(), m_timers.end(), &Timer::IsEarlier);
+            try
+            {
+                m_timers.push_back(Timer {resumeAt, std::move(item)});
+                std::push_heap(m_timers.begin(), m_timers.end(), &Timer::IsEarlier);
+            } catch (const std::bad_alloc&)
+            {
+                return std::unexpected(ScheduleError::ResourceExhausted);
+            }
+            return {};
         }
 
         /// @brief Executes at most one due timer or ready item using the current monotonic time.

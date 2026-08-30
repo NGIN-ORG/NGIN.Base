@@ -8,13 +8,38 @@
 #include <atomic>
 #include <coroutine>
 #include <cstdlib>
+#include <exception>
 #include <iostream>
 #include <thread>
 #include <vector>
 
+namespace
+{
+    void RequireAccepted(NGIN::Execution::ScheduleResult result) noexcept
+    {
+        if (!result)
+        {
+            std::terminate();
+        }
+    }
+}// namespace
+
 int main()
 {
     using namespace NGIN;
+    // Registration snapshots the default configuration, so choose the run
+    // length before constructing benchmark entries.
+    if (std::getenv("NGIN_BENCH_SMOKE") != nullptr)
+    {
+        Benchmark::defaultConfig.iterations       = 1;
+        Benchmark::defaultConfig.warmupIterations = 0;
+    }
+    else
+    {
+        Benchmark::defaultConfig.iterations       = 100;
+        Benchmark::defaultConfig.warmupIterations = 5;
+    }
+
     constexpr int  numCoroutines           = 10000;
     constexpr int  numThreads              = 4;
     constexpr int  numFibers               = 128;
@@ -66,7 +91,7 @@ int main()
                 }
                 void await_suspend(std::coroutine_handle<> h) const
                 {
-                    sched.Execute(NGIN::Execution::WorkItem(h));
+                    RequireAccepted(sched.Execute(NGIN::Execution::WorkItem(h)));
                 }
                 void await_resume() const noexcept
                 {
@@ -140,7 +165,7 @@ int main()
             benchCtx.start();
             for (int i = 0; i < numCoroutines; ++i)
             {
-                scheduler.Execute(NGIN::Execution::WorkItem(job));
+                RequireAccepted(scheduler.Execute(NGIN::Execution::WorkItem(job)));
             }
 
             auto value = completed.load(std::memory_order_acquire);
@@ -181,7 +206,7 @@ int main()
                     const int endIndex   = (numCoroutines * (p + 1)) / numProducers;
                     for (int i = startIndex; i < endIndex; ++i)
                     {
-                        scheduler.Execute(NGIN::Execution::WorkItem(job));
+                        RequireAccepted(scheduler.Execute(NGIN::Execution::WorkItem(job)));
                     }
                 });
             }
@@ -221,7 +246,7 @@ int main()
             for (int i = 0; i < numCoroutines; ++i)
             {
                 const auto resumeAt = NGIN::Time::TimePoint::FromNanoseconds(farFuture.ToNanoseconds() + static_cast<UInt64>(i));
-                scheduler.ExecuteAt(NGIN::Execution::WorkItem([]() noexcept {}), resumeAt);
+                RequireAccepted(scheduler.ExecuteAt(NGIN::Execution::WorkItem([]() noexcept {}), resumeAt));
             }
             benchCtx.stop();
         },
@@ -244,7 +269,7 @@ int main()
                 }
                 void await_suspend(std::coroutine_handle<> h) const
                 {
-                    sched.Execute(NGIN::Execution::WorkItem(h));
+                    RequireAccepted(sched.Execute(NGIN::Execution::WorkItem(h)));
                 }
                 void await_resume() const noexcept
                 {
@@ -283,7 +308,7 @@ int main()
             benchCtx.start();
             for (int i = 0; i < numCoroutines; ++i)
             {
-                scheduler.Execute(NGIN::Execution::WorkItem(job));
+                RequireAccepted(scheduler.Execute(NGIN::Execution::WorkItem(job)));
             }
 
             auto value = completed.load(std::memory_order_acquire);
@@ -324,7 +349,7 @@ int main()
                     const int endIndex   = (numCoroutines * (p + 1)) / numProducers;
                     for (int i = startIndex; i < endIndex; ++i)
                     {
-                        scheduler.Execute(NGIN::Execution::WorkItem(job));
+                        RequireAccepted(scheduler.Execute(NGIN::Execution::WorkItem(job)));
                     }
                 });
             }
@@ -364,7 +389,7 @@ int main()
             for (int i = 0; i < numCoroutines; ++i)
             {
                 const auto resumeAt = NGIN::Time::TimePoint::FromNanoseconds(farFuture.ToNanoseconds() + static_cast<UInt64>(i));
-                scheduler.ExecuteAt(NGIN::Execution::WorkItem([]() noexcept {}), resumeAt);
+                RequireAccepted(scheduler.ExecuteAt(NGIN::Execution::WorkItem([]() noexcept {}), resumeAt));
             }
             benchCtx.stop();
         },
@@ -528,7 +553,7 @@ int main()
             benchCtx.start();
             for (int i = 0; i < numCoroutines; ++i)
             {
-                scheduler.Execute(NGIN::Execution::WorkItem(job));
+                RequireAccepted(scheduler.Execute(NGIN::Execution::WorkItem(job)));
             }
             while (completed.load(std::memory_order_relaxed) < numCoroutines)
             {
@@ -674,25 +699,16 @@ int main()
             for (int i = 0; i < numCoroutines; ++i)
             {
                 const auto resumeAt = NGIN::Time::TimePoint::FromNanoseconds(farFuture.ToNanoseconds() + static_cast<UInt64>(i));
-                scheduler.ExecuteAt(NGIN::Execution::WorkItem([]() noexcept {}), resumeAt);
+                RequireAccepted(scheduler.ExecuteAt(NGIN::Execution::WorkItem([]() noexcept {}), resumeAt));
             }
             benchCtx.stop();
         },
                             "CooperativeScheduler ExecuteAt enqueue 10k timers");
     }
 
-    // Run all benchmarks and print results
-    if (std::getenv("NGIN_BENCH_SMOKE") != nullptr)
-    {
-        Benchmark::defaultConfig.iterations       = 1;
-        Benchmark::defaultConfig.warmupIterations = 0;
-    }
-    else
-    {
-        Benchmark::defaultConfig.iterations       = 100;
-        Benchmark::defaultConfig.warmupIterations = 5;
-    }
-    auto results = Benchmark::RunAll<Milliseconds>();
+    // Run all benchmarks and print results.
+    const std::vector<NGIN::BenchmarkResult<NGIN::Units::Milliseconds>> results =
+            Benchmark::RunAll<NGIN::Units::Milliseconds>();
     Benchmark::PrintSummaryTable(std::cout, results);
     return 0;
 }

@@ -2,7 +2,6 @@
 /// @brief A schedulable work item: coroutine continuation or job.
 #pragma once
 
-#include <atomic>
 #include <concepts>
 #include <coroutine>
 #include <cstddef>
@@ -19,162 +18,36 @@ namespace NGIN::Execution
 {
     namespace detail
     {
-        class JobPool final
+        /// @brief Direct heap storage used for jobs that do not satisfy the inline-storage contract.
+        /// @details Keeping this path unpooled avoids shared freelist races. The inline path remains allocation-free.
+        class JobAllocation final
         {
         public:
-            JobPool()                          = delete;
-            JobPool(const JobPool&)            = delete;
-            JobPool& operator=(const JobPool&) = delete;
-            JobPool(JobPool&&)                 = delete;
-            JobPool& operator=(JobPool&&)      = delete;
-            ~JobPool()                         = delete;
+            JobAllocation()                                = delete;
+            JobAllocation(const JobAllocation&)            = delete;
+            JobAllocation& operator=(const JobAllocation&) = delete;
+            JobAllocation(JobAllocation&&)                 = delete;
+            JobAllocation& operator=(JobAllocation&&)      = delete;
+            ~JobAllocation()                               = delete;
 
-            static constexpr std::size_t PoolAlignment = alignof(std::max_align_t);
-            static constexpr std::size_t Class64       = 64;
-            static constexpr std::size_t Class128      = 128;
-            static constexpr std::size_t Class256      = 256;
-            static constexpr std::size_t Class512      = 512;
-
-            static void* Allocate(std::size_t size, std::size_t alignment)
+            /// @brief Allocates one aligned callable block.
+            [[nodiscard]] static void* Allocate(const std::size_t size, const std::size_t alignment)
             {
-                if (alignment > PoolAlignment)
-                {
+                if (alignment > __STDCPP_DEFAULT_NEW_ALIGNMENT__)
                     return ::operator new(size, std::align_val_t(alignment));
-                }
-
-                const auto classSize = SizeClass(size);
-                if (classSize == 0)
-                {
-                    return ::operator new(size, std::align_val_t(PoolAlignment));
-                }
-
-                auto& head = HeadFor(classSize);
-                if (auto* node = Pop(head))
-                {
-                    return node;
-                }
-
-                Refill(classSize);
-
-                if (auto* node = Pop(head))
-                {
-                    return node;
-                }
-
-                return ::operator new(size, std::align_val_t(PoolAlignment));
+                return ::operator new(size);
             }
 
-            static void Deallocate(void* ptr, std::size_t size, std::size_t alignment) noexcept
+            /// @brief Releases one callable block with the alignment used for allocation.
+            static void Deallocate(void* pointer, const std::size_t alignment) noexcept
             {
-                if (!ptr)
+                if (alignment > __STDCPP_DEFAULT_NEW_ALIGNMENT__)
                 {
+                    ::operator delete(pointer, std::align_val_t(alignment));
                     return;
                 }
-
-                if (alignment > PoolAlignment)
-                {
-                    ::operator delete(ptr, std::align_val_t(alignment));
-                    return;
-                }
-
-                const auto classSize = SizeClass(size);
-                if (classSize == 0)
-                {
-                    ::operator delete(ptr, std::align_val_t(PoolAlignment));
-                    return;
-                }
-
-                Push(HeadFor(classSize), static_cast<Node*>(ptr));
+                ::operator delete(pointer);
             }
-
-        private:
-            struct Node final
-            {
-                Node* next {nullptr};
-            };
-
-            static constexpr std::size_t SizeClass(std::size_t size) noexcept
-            {
-                if (size == 0)
-                {
-                    return 0;
-                }
-                if (size <= Class64)
-                {
-                    return Class64;
-                }
-                if (size <= Class128)
-                {
-                    return Class128;
-                }
-                if (size <= Class256)
-                {
-                    return Class256;
-                }
-                if (size <= Class512)
-                {
-                    return Class512;
-                }
-                return 0;
-            }
-
-            static std::atomic<Node*>& HeadFor(std::size_t classSize) noexcept
-            {
-                switch (classSize)
-                {
-                    case Class64:
-                        return s_head64;
-                    case Class128:
-                        return s_head128;
-                    case Class256:
-                        return s_head256;
-                    default:
-                        return s_head512;
-                }
-            }
-
-            static Node* Pop(std::atomic<Node*>& head) noexcept
-            {
-                Node* node = head.load(std::memory_order_acquire);
-                while (node)
-                {
-                    Node* next = node->next;
-                    if (head.compare_exchange_weak(node, next, std::memory_order_acq_rel, std::memory_order_acquire))
-                    {
-                        node->next = nullptr;
-                        return node;
-                    }
-                }
-                return nullptr;
-            }
-
-            static void Push(std::atomic<Node*>& head, Node* node) noexcept
-            {
-                Node* cur = head.load(std::memory_order_relaxed);
-                do
-                {
-                    node->next = cur;
-                } while (!head.compare_exchange_weak(cur, node, std::memory_order_release, std::memory_order_relaxed));
-            }
-
-            static void Refill(std::size_t classSize)
-            {
-                static constexpr std::size_t blocksPerSlab = 64;
-                const auto                   slabBytes     = classSize * blocksPerSlab;
-                auto*                        slab          = static_cast<std::byte*>(::operator new(slabBytes, std::align_val_t(PoolAlignment)));
-
-                auto& head = HeadFor(classSize);
-                for (std::size_t i = 0; i < blocksPerSlab; ++i)
-                {
-                    auto* node = std::launder(reinterpret_cast<Node*>(slab + i * classSize));
-                    Push(head, node);
-                }
-            }
-
-            inline static std::atomic<Node*> s_head64 {nullptr};
-            inline static std::atomic<Node*> s_head128 {nullptr};
-            inline static std::atomic<Node*> s_head256 {nullptr};
-            inline static std::atomic<Node*> s_head512 {nullptr};
         };
     }// namespace detail
 
@@ -209,14 +82,12 @@ namespace NGIN::Execution
         /// @brief Constructs an owning type-erased job work item.
         /// @throws std::invalid_argument If `job` is empty.
         explicit WorkItem(NGIN::Utilities::Callable<void()> job)
-            : m_kind(Kind::Job)
         {
             if (!job)
             {
                 throw std::invalid_argument("NGIN::Execution::WorkItem: job must be non-empty");
             }
-            new (&m_storage.job) JobStorage();
-            m_storage.job.Init(std::move(job));
+            InitializeJob(std::move(job));
         }
 
         /// @brief Constructs an owning job from an invocable object.
@@ -226,10 +97,8 @@ namespace NGIN::Execution
                     std::invocable<std::remove_reference_t<F>&> &&
                     std::same_as<std::invoke_result_t<std::remove_reference_t<F>&>, void>
         explicit WorkItem(F&& job)
-            : m_kind(Kind::Job)
         {
-            new (&m_storage.job) JobStorage();
-            m_storage.job.Init(std::forward<F>(job));
+            InitializeJob(std::forward<F>(job));
         }
 
         /// @brief Transfers the payload and leaves the source empty.
@@ -360,9 +229,17 @@ namespace NGIN::Execution
                 }
                 else
                 {
-                    void* mem                       = detail::JobPool::Allocate(sizeof(T), alignof(T));
-                    auto* ptr                       = new (mem) T(std::forward<F>(job));
-                    *static_cast<T**>(StoragePtr()) = ptr;
+                    void* const memory  = detail::JobAllocation::Allocate(sizeof(T), alignof(T));
+                    T*          pointer = nullptr;
+                    try
+                    {
+                        pointer = ::new (memory) T(std::forward<F>(job));
+                    } catch (...)
+                    {
+                        detail::JobAllocation::Deallocate(memory, alignof(T));
+                        throw;
+                    }
+                    *static_cast<T**>(StoragePtr()) = pointer;
                     m_vtable                        = &GetVTable<T, true>();
                 }
             }
@@ -416,21 +293,21 @@ namespace NGIN::Execution
                         +[](void* storage) noexcept {
                             if constexpr (Heap)
                             {
-                                auto* ptr = *static_cast<T**>(storage);
-                                (*ptr)();
+                                T* const pointer = *static_cast<T**>(storage);
+                                (*pointer)();
                             }
                             else
                             {
-                                auto* obj = static_cast<T*>(storage);
-                                (*obj)();
+                                T* const object = static_cast<T*>(storage);
+                                (*object)();
                             }
                         },
                         +[](void* storage) noexcept {
                             if constexpr (Heap)
                             {
-                                auto* ptr = *static_cast<T**>(storage);
-                                std::destroy_at(ptr);
-                                detail::JobPool::Deallocate(ptr, sizeof(T), alignof(T));
+                                T* const pointer = *static_cast<T**>(storage);
+                                std::destroy_at(pointer);
+                                detail::JobAllocation::Deallocate(pointer, alignof(T));
                             }
                             else
                             {
@@ -440,16 +317,16 @@ namespace NGIN::Execution
                         +[](void* dest, void* src) noexcept {
                             if constexpr (Heap)
                             {
-                                auto*& destPtr = *static_cast<T**>(dest);
-                                auto*& srcPtr  = *static_cast<T**>(src);
-                                destPtr        = srcPtr;
-                                srcPtr         = nullptr;
+                                T*& destinationPointer = *static_cast<T**>(dest);
+                                T*& sourcePointer      = *static_cast<T**>(src);
+                                destinationPointer     = sourcePointer;
+                                sourcePointer          = nullptr;
                             }
                             else
                             {
-                                auto* srcObj = static_cast<T*>(src);
-                                new (dest) T(std::move(*srcObj));
-                                std::destroy_at(srcObj);
+                                T* const sourceObject = static_cast<T*>(src);
+                                new (dest) T(std::move(*sourceObject));
+                                std::destroy_at(sourceObject);
                             }
                         },
                 };
@@ -483,6 +360,22 @@ namespace NGIN::Execution
 
             ~Storage() {}
         };
+
+        template<class F>
+        void InitializeJob(F&& job)
+        {
+            std::construct_at(std::addressof(m_storage.job));
+            try
+            {
+                m_storage.job.Init(std::forward<F>(job));
+                m_kind = Kind::Job;
+            } catch (...)
+            {
+                std::destroy_at(std::addressof(m_storage.job));
+                m_storage.coroutine = nullptr;
+                throw;
+            }
+        }
 
         void Reset() noexcept
         {

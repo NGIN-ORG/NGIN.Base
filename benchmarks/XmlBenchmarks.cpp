@@ -174,7 +174,7 @@ namespace
         for (const auto& input: cases)
         {
             auto result = XML::Parse(OwnedTextBuffer {input.source});
-            if (result.HasValue() != input.valid)
+            if (result.has_value() != input.valid)
             {
                 std::cerr << "NGIN preflight disagreed with expected validity for '" << input.name << "'.\n";
                 return false;
@@ -224,12 +224,12 @@ namespace
 
             std::cout << std::left << std::setw(20) << input.name
                       << std::right << std::setw(12) << input.source.size()
-                      << std::setw(12) << owned.Value().NodeCount()
-                      << std::setw(14) << owned.Value().MemoryUsed()
-                      << std::setw(14) << owned.Value().MemoryCommitted()
-                      << std::setw(14) << owned.Value().PeakMemoryCommitted()
-                      << std::setw(14) << borrowed.Value().MemoryCommitted()
-                      << std::setw(14) << owned.Value().AllocationCount()
+                      << std::setw(12) << owned.value().NodeCount()
+                      << std::setw(14) << owned.value().MemoryUsed()
+                      << std::setw(14) << owned.value().MemoryCommitted()
+                      << std::setw(14) << owned.value().PeakMemoryCommitted()
+                      << std::setw(14) << borrowed.value().MemoryCommitted()
+                      << std::setw(14) << owned.value().AllocationCount()
                       << '\n';
         }
     }
@@ -279,9 +279,9 @@ int main()
                 operations,
                 [inputPtr](BenchmarkContext& context) {
                     auto result = XML::Parse(OwnedTextBuffer {inputPtr->source});
-                    context.doNotOptimize(result.HasValue());
+                    context.doNotOptimize(result.has_value());
                     if (result)
-                        context.doNotOptimize(result.Value().NodeCount());
+                        context.doNotOptimize(result.value().NodeCount());
                 });
 
         RegisterBatched(
@@ -291,9 +291,9 @@ int main()
                 [inputPtr, &borrowedScratch](BenchmarkContext& context) {
                     auto result = XML::ParseBorrowed(
                             BorrowedTextView {inputPtr->source}, borrowedScratch);
-                    context.doNotOptimize(result.HasValue());
+                    context.doNotOptimize(result.has_value());
                     if (result)
-                        context.doNotOptimize(result.Value().NodeCount());
+                        context.doNotOptimize(result.value().NodeCount());
                 });
 
         RegisterBatched(
@@ -302,9 +302,9 @@ int main()
                 operations,
                 [inputPtr](BenchmarkContext& context) {
                     auto result = XML::ParseInSitu(MutableTextBuffer {inputPtr->source});
-                    context.doNotOptimize(result.HasValue());
+                    context.doNotOptimize(result.has_value());
                     if (result)
-                        context.doNotOptimize(result.Value().NodeCount());
+                        context.doNotOptimize(result.value().NodeCount());
                 });
     }
 
@@ -322,7 +322,7 @@ int main()
                 [input, &eventScratch, &eventHandler](BenchmarkContext& context) {
                     auto result = XML::EventParser::ParseContiguous(
                             BorrowedTextView {input->source}, eventHandler, eventScratch);
-                    context.doNotOptimize(result.HasValue());
+                    context.doNotOptimize(result.has_value());
                 });
     }
 
@@ -335,7 +335,7 @@ int main()
                 BatchSize(input->source.size()),
                 [input](BenchmarkContext& context) {
                     auto result = XML::ParseSyntax(OwnedTextBuffer {input->source});
-                    context.doNotOptimize(result.HasValue());
+                    context.doNotOptimize(result.has_value());
                 });
     }
 
@@ -345,9 +345,9 @@ int main()
             "XML/NGIN writer/elements-100KiB",
             1,
             [&parsedForWrite](BenchmarkContext& context) {
-                auto result = XML::Writer::Write(parsedForWrite.Value());
+                auto result = XML::Writer::Write(parsedForWrite.value());
                 if (result)
-                    context.doNotOptimize(result.Value().size());
+                    context.doNotOptimize(result.value().size());
             });
 
 #if defined(NGIN_HAVE_PUGIXML)

@@ -18,7 +18,7 @@ namespace NGIN::Crypto::Random
         const auto status = SecRandomCopyBytes(kSecRandomDefault, output.size(), reinterpret_cast<std::uint8_t*>(output.data()));
         if (status != errSecSuccess)
         {
-            return EntropyUnavailableError(static_cast<NGIN::Int32>(status));
+            return std::unexpected(EntropyUnavailableError(static_cast<NGIN::Int32>(status)));
         }
 
         return {};

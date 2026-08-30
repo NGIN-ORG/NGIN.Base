@@ -41,6 +41,7 @@
 
 #include <NGIN/Memory/AllocatorConcept.hpp>
 #include <NGIN/Memory/SystemAllocator.hpp>
+#include <NGIN/Memory/detail/CheckedArithmetic.hpp>
 
 namespace NGIN::Memory
 {
@@ -55,10 +56,13 @@ namespace NGIN::Memory
     /// `Rollback(marker)` rolls the bump pointer back to a saved marker returned by `Mark()`.
     ///
     /// This allocator is **not thread-safe** and should be used by a single thread at a time.
-    template<class Upstream = SystemAllocator>
+    template<AllocatorConcept Upstream = SystemAllocator>
     class LinearAllocator
     {
     public:
+        /// @brief Linear slabs provide an exact address-range ownership answer.
+        static constexpr bool HasPreciseOwnership = true;
+
         /// @brief Convenient alias for the upstream allocator type.
         using UpstreamAllocator = Upstream;
 
@@ -78,8 +82,14 @@ namespace NGIN::Memory
         explicit LinearAllocator(std::size_t capacityInBytes,
                                  Upstream    upstream             = {},
                                  std::size_t baseAlignmentInBytes = (std::max) (std::size_t(alignof(std::max_align_t)), std::size_t(64)))
-            : m_upstreamInstance(std::move(upstream)), m_baseAlignmentInBytes(baseAlignmentInBytes)
+            : m_upstreamInstance(std::move(upstream))
         {
+            if (!detail::TryNormalizeAlignment(baseAlignmentInBytes, alignof(std::max_align_t), m_baseAlignmentInBytes))
+            {
+                m_baseAlignmentInBytes = alignof(std::max_align_t);
+                return;
+            }
+
             void* base        = m_upstreamInstance.Allocate(capacityInBytes, m_baseAlignmentInBytes);
             m_basePointer     = static_cast<std::byte*>(base);
             m_currentPointer  = m_basePointer;
@@ -92,7 +102,7 @@ namespace NGIN::Memory
         LinearAllocator& operator=(const LinearAllocator&) = delete;
 
         /// @brief Move constructor. Transfers slab ownership and internal state.
-        LinearAllocator(LinearAllocator&& other) noexcept
+        LinearAllocator(LinearAllocator&& other) noexcept(std::is_nothrow_move_constructible_v<Upstream>)
             : m_upstreamInstance(std::move(other.m_upstreamInstance)), m_baseAlignmentInBytes(other.m_baseAlignmentInBytes), m_basePointer(other.m_basePointer), m_currentPointer(other.m_currentPointer), m_capacityInBytes(other.m_capacityInBytes)
         {
             other.m_basePointer = other.m_currentPointer = nullptr;
@@ -101,7 +111,7 @@ namespace NGIN::Memory
         }
 
         /// @brief Move assignment. Releases current slab (if any) and takes ownership of @p other 's slab.
-        LinearAllocator& operator=(LinearAllocator&& other) noexcept
+        LinearAllocator& operator=(LinearAllocator&& other) noexcept(std::is_nothrow_move_assignable_v<Upstream>)
         {
             if (this != &other)
             {
@@ -135,25 +145,10 @@ namespace NGIN::Memory
         /// @return A valid power-of-two alignment, clamped to at least `alignof(std::max_align_t)`.
         [[nodiscard]] static constexpr std::size_t NormalizeAlignment(std::size_t alignmentInBytes) noexcept
         {
-            if (alignmentInBytes == 0)
-                alignmentInBytes = 1;
-            if (!IsPowerOfTwo(alignmentInBytes))
-            {
-                // Round up to next power-of-two
-                std::size_t a = alignmentInBytes - 1;
-                a |= a >> 1;
-                a |= a >> 2;
-                a |= a >> 4;
-                a |= a >> 8;
-                a |= a >> 16;
-#if INTPTR_MAX == INT64_MAX
-                a |= a >> 32;
-#endif
-                alignmentInBytes = a + 1;
-            }
-            if (alignmentInBytes < alignof(std::max_align_t))
-                alignmentInBytes = alignof(std::max_align_t);
-            return alignmentInBytes;
+            std::size_t normalizedAlignment = 0;
+            if (!detail::TryNormalizeAlignment(alignmentInBytes, alignof(std::max_align_t), normalizedAlignment))
+                return 0;
+            return normalizedAlignment;
         }
 
         /// @brief Allocate a block of memory from the linear arena.
@@ -170,6 +165,8 @@ namespace NGIN::Memory
                 return nullptr;
 
             const std::size_t normalizedAlignment = NormalizeAlignment(alignmentInBytes);
+            if (normalizedAlignment == 0)
+                return nullptr;
 
             // Align within remaining space using std::align to avoid overflow-prone arithmetic
             std::size_t space = m_capacityInBytes - Used();
@@ -193,7 +190,9 @@ namespace NGIN::Memory
         [[nodiscard]] MemoryBlock AllocateEx(std::size_t sizeInBytes, std::size_t alignmentInBytes) noexcept
         {
             const std::size_t normalizedAlignment = NormalizeAlignment(alignmentInBytes);
-            void*             p                   = Allocate(sizeInBytes, normalizedAlignment);
+            if (normalizedAlignment == 0)
+                return {};
+            void* p = Allocate(sizeInBytes, normalizedAlignment);
             if (!p)
                 return MemoryBlock {};
             return MemoryBlock {p, sizeInBytes, normalizedAlignment, 0};
@@ -217,16 +216,23 @@ namespace NGIN::Memory
         /// @brief Return the number of bytes used so far in the slab.
         [[nodiscard]] std::size_t Used() const noexcept
         {
+            if (!m_basePointer)
+                return 0;
             return static_cast<std::size_t>(m_currentPointer - m_basePointer);
         }
 
-        /// @brief Conservative ownership test: returns true if @p pointer lies within the slab range.
+        /// @brief Classifies whether an address lies within the owned slab range.
         /// @param pointer Pointer to test.
-        /// @return True if @p pointer is within [base, base + capacity); false otherwise.
-        [[nodiscard]] bool Owns(const void* pointer) const noexcept
+        /// @return A definitive ownership result for the allocator's slab.
+        [[nodiscard]] Ownership OwnershipOf(const void* pointer) const noexcept
         {
-            const auto addr = reinterpret_cast<const std::byte*>(pointer);
-            return addr >= m_basePointer && addr < m_basePointer + m_capacityInBytes;
+            if (!m_basePointer || !pointer)
+                return Ownership::DoesNotOwn;
+
+            const std::uintptr_t address = reinterpret_cast<std::uintptr_t>(pointer);
+            const std::uintptr_t begin   = reinterpret_cast<std::uintptr_t>(m_basePointer);
+            const std::uintptr_t end     = begin + m_capacityInBytes;
+            return address >= begin && address < end ? Ownership::Owns : Ownership::DoesNotOwn;
         }
 
         /// @brief Reset the bump pointer to the beginning of the slab (reclaim all allocations).
@@ -240,7 +246,13 @@ namespace NGIN::Memory
         /// @param marker Marker returned by `Mark()`. If it does not refer into the slab, the call is ignored.
         void Rollback(ArenaMarker marker) noexcept
         {
-            if (marker.ptr >= m_basePointer && marker.ptr <= m_basePointer + m_capacityInBytes)
+            if (!m_basePointer || !marker.ptr)
+                return;
+
+            const std::uintptr_t markerAddress = reinterpret_cast<std::uintptr_t>(marker.ptr);
+            const std::uintptr_t begin         = reinterpret_cast<std::uintptr_t>(m_basePointer);
+            const std::uintptr_t end           = begin + m_capacityInBytes;
+            if (markerAddress >= begin && markerAddress <= end)
                 m_currentPointer = static_cast<std::byte*>(marker.ptr);
         }
 

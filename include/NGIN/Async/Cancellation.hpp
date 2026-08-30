@@ -3,9 +3,16 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
 #include <coroutine>
+#include <expected>
 #include <initializer_list>
+#include <limits>
 #include <memory>
+#include <memory_resource>
+#include <mutex>
+#include <new>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -24,11 +31,24 @@ namespace NGIN::Async
     namespace detail
     {
         struct CancellationState;
+        struct CancellationNode;
     }// namespace detail
 
     /// @brief Callback invoked once when a cancellation registration fires.
     /// @return Whether the associated coroutine handle should also be resumed.
     using CancellationCallback = bool (*)(void*) noexcept;
+
+    /// @brief Reason a cancellation callback could not be registered.
+    enum class CancellationRegistrationError : std::uint8_t
+    {
+        /// @brief Neither a callback nor a resumable coroutine was supplied.
+        InvalidTarget,
+        /// @brief Stable registration-node allocation failed.
+        ResourceExhausted,
+    };
+
+    /// @brief Success or a recoverable cancellation-registration failure.
+    using CancellationRegistrationResult = std::expected<void, CancellationRegistrationError>;
 
     /// @brief Move-only ownership handle for one callback registered with a cancellation token.
     class CancellationRegistration final
@@ -71,24 +91,17 @@ namespace NGIN::Async
         /// @brief Returns whether this object owns a callback registration.
         [[nodiscard]] bool IsValid() const noexcept
         {
-            return m_state.Get() != nullptr;
+            return static_cast<bool>(m_node);
         }
 
     private:
         friend struct detail::CancellationState;
         friend class CancellationToken;
 
-        void Fire() noexcept;
-
         void MoveFrom(CancellationRegistration&& other) noexcept;
 
         Memory::Shared<detail::CancellationState> m_state {};
-        NGIN::Execution::ExecutorRef              m_exec {};
-        std::coroutine_handle<>                   m_handle {};
-        CancellationCallback                      m_callback {nullptr};
-        void*                                     m_callbackCtx {nullptr};
-        UIntSize                                  m_index {static_cast<UIntSize>(-1)};
-        std::atomic<bool>                         m_armed {false};
+        std::shared_ptr<detail::CancellationNode> m_node {};
     };
 
     /// @brief Copyable observation handle for shared cancellation state.
@@ -119,11 +132,12 @@ namespace NGIN::Async
         }
 
         /// @brief Registers a callback and optional coroutine continuation for cancellation.
-        void Register(CancellationRegistration&    outRegistration,
-                      NGIN::Execution::ExecutorRef exec,
-                      std::coroutine_handle<>      handle,
-                      CancellationCallback         callback    = nullptr,
-                      void*                        callbackCtx = nullptr) const noexcept;
+        [[nodiscard]] CancellationRegistrationResult Register(
+                CancellationRegistration&    outRegistration,
+                NGIN::Execution::ExecutorRef exec,
+                std::coroutine_handle<>      handle,
+                CancellationCallback         callback    = nullptr,
+                void*                        callbackCtx = nullptr) const noexcept;
 
     private:
         Memory::Shared<detail::CancellationState> m_state {};
@@ -132,64 +146,107 @@ namespace NGIN::Async
 
     namespace detail
     {
+        enum class CancellationNodeStatus : std::uint8_t
+        {
+            Registered,
+            Invoking,
+            Unregistered,
+            Completed,
+        };
+
+        /// @brief Stable state-owned callback node shared by cancellation and registration handles.
+        struct CancellationNode final
+        {
+            NGIN::Execution::ExecutorRef exec {};
+            std::coroutine_handle<>      handle {};
+            CancellationCallback         callback {nullptr};
+            void*                        callbackContext {nullptr};
+
+            std::mutex              mutex {};
+            std::condition_variable completedCondition {};
+            CancellationNodeStatus  status {CancellationNodeStatus::Registered};
+            std::thread::id         invokingThread {};
+
+            void Invoke() noexcept
+            {
+                {
+                    std::lock_guard<std::mutex> guard(mutex);
+                    if (status != CancellationNodeStatus::Registered)
+                        return;
+                    status         = CancellationNodeStatus::Invoking;
+                    invokingThread = std::this_thread::get_id();
+                }
+
+                bool shouldResume = true;
+                if (callback)
+                    shouldResume = callback(callbackContext);
+
+                {
+                    std::lock_guard<std::mutex> guard(mutex);
+                    status         = CancellationNodeStatus::Completed;
+                    invokingThread = {};
+                }
+                completedCondition.notify_all();
+
+                if (shouldResume && exec.IsValid() && handle)
+                {
+                    const NGIN::Execution::ScheduleResult result = exec.Execute(handle);
+                    if (!result)
+                        handle.resume();
+                }
+            }
+
+            /// @brief Prevents future invocation and waits for a callback already running on another thread.
+            /// @details Self-unregistration returns immediately; the cancellation pass retains node lifetime.
+            void Unregister() noexcept
+            {
+                std::unique_lock<std::mutex> guard(mutex);
+                if (status == CancellationNodeStatus::Registered)
+                {
+                    status = CancellationNodeStatus::Unregistered;
+                    return;
+                }
+                if (status == CancellationNodeStatus::Invoking && invokingThread != std::this_thread::get_id())
+                {
+                    completedCondition.wait(guard, [this] {
+                        return status != CancellationNodeStatus::Invoking;
+                    });
+                }
+            }
+        };
+
         struct CancellationState final
         {
-            std::atomic<bool>                      canceled {false};
-            NGIN::Sync::SpinLock                   lock {};
-            std::vector<CancellationRegistration*> registrations {};
-
-            CancellationState()
+            explicit CancellationState(std::pmr::memory_resource* memoryResource)
+                : resource(memoryResource ? memoryResource : std::pmr::get_default_resource()), registrations(resource)
             {
                 registrations.reserve(8);
             }
 
-            [[nodiscard]] bool TryRegister(CancellationRegistration* registration) noexcept
+            std::atomic<bool>                                   canceled {false};
+            NGIN::Sync::SpinLock                                lock {};
+            std::pmr::memory_resource*                          resource;
+            std::pmr::vector<std::shared_ptr<CancellationNode>> registrations;
+
+            [[nodiscard]] bool TryRegister(const std::shared_ptr<CancellationNode>& node)
             {
-                if (!registration)
-                {
-                    return false;
-                }
                 NGIN::Sync::LockGuard guard(lock);
                 if (canceled.load(std::memory_order_acquire))
-                {
                     return false;
-                }
-                registration->m_index = registrations.size();
-                registrations.push_back(registration);
+                registrations.push_back(node);
                 return true;
             }
 
-            void Unregister(CancellationRegistration* registration) noexcept
+            void Unregister(const std::shared_ptr<CancellationNode>& node) noexcept
             {
-                if (!registration)
-                {
+                if (!node)
                     return;
-                }
                 NGIN::Sync::LockGuard guard(lock);
-                if (registration->m_index < registrations.size() && registrations[registration->m_index] == registration)
+                for (std::size_t index = 0; index < registrations.size(); ++index)
                 {
-                    const auto lastIndex = registrations.size() - 1;
-                    if (registration->m_index != lastIndex)
+                    if (registrations[index] == node)
                     {
-                        auto* moved                          = registrations[lastIndex];
-                        registrations[registration->m_index] = moved;
-                        moved->m_index                       = registration->m_index;
-                    }
-                    registrations.pop_back();
-                    return;
-                }
-
-                for (UIntSize i = 0; i < registrations.size(); ++i)
-                {
-                    if (registrations[i] == registration)
-                    {
-                        const auto lastIndex = registrations.size() - 1;
-                        if (i != lastIndex)
-                        {
-                            auto* moved      = registrations[lastIndex];
-                            registrations[i] = moved;
-                            moved->m_index   = i;
-                        }
+                        registrations[index] = std::move(registrations.back());
                         registrations.pop_back();
                         return;
                     }
@@ -204,18 +261,16 @@ namespace NGIN::Async
                     return;
                 }
 
-                std::vector<CancellationRegistration*> local;
+                std::pmr::vector<std::shared_ptr<CancellationNode>> local(resource);
                 {
                     NGIN::Sync::LockGuard guard(lock);
                     local.swap(registrations);
                 }
 
-                for (auto* reg: local)
+                for (const std::shared_ptr<CancellationNode>& node: local)
                 {
-                    if (reg)
-                    {
-                        reg->Fire();
-                    }
+                    if (node)
+                        node->Invoke();
                 }
             }
         };
@@ -226,8 +281,10 @@ namespace NGIN::Async
     {
     public:
         /// @brief Constructs a new, independently cancelable source.
-        CancellationSource()
-            : m_state(Memory::MakeShared<detail::CancellationState>())
+        /// @param memoryResource Resource used by registration nodes and the state registration table. It must
+        /// outlive the source and every token or registration created from it.
+        explicit CancellationSource(std::pmr::memory_resource* memoryResource = std::pmr::get_default_resource())
+            : m_state(Memory::MakeShared<detail::CancellationState>(memoryResource))
         {
         }
 
@@ -250,41 +307,48 @@ namespace NGIN::Async
         }
 
         /// @brief Schedules cancellation at an absolute monotonic time.
-        void CancelAt(NGIN::Execution::ExecutorRef exec, NGIN::Time::TimePoint at) noexcept
+        /// @return Submission status; an already-canceled source is a successful no-op.
+        [[nodiscard]] NGIN::Execution::ScheduleResult CancelAt(
+                NGIN::Execution::ExecutorRef exec,
+                NGIN::Time::TimePoint        at) noexcept
         {
-            if (IsCancellationRequested() || !exec.IsValid())
-            {
-                return;
-            }
+            if (IsCancellationRequested())
+                return {};
+            if (!exec.IsValid())
+                return std::unexpected(NGIN::Execution::ScheduleError::InvalidExecutor);
 
-            auto state = m_state;
-            exec.ExecuteAt(NGIN::Utilities::Callable<void()>([state]() noexcept { state->Cancel(); }), at);
+            Memory::Shared<detail::CancellationState> state = m_state;
+            return exec.ExecuteAt(NGIN::Utilities::Callable<void()>([state]() noexcept { state->Cancel(); }), at);
         }
 
         /// @brief Schedules cancellation after a duration.
         template<typename TUnit>
             requires NGIN::Units::QuantityOf<NGIN::Units::TIME, TUnit>
-        void CancelAfter(NGIN::Execution::ExecutorRef exec, const TUnit& delay) noexcept
+        [[nodiscard]] NGIN::Execution::ScheduleResult CancelAfter(
+                NGIN::Execution::ExecutorRef exec,
+                const TUnit&                 delay) noexcept
         {
-            if (IsCancellationRequested() || !exec.IsValid())
-            {
-                return;
-            }
+            if (IsCancellationRequested())
+                return {};
+            if (!exec.IsValid())
+                return std::unexpected(NGIN::Execution::ScheduleError::InvalidExecutor);
 
-            const auto nsDouble = NGIN::Units::UnitCast<NGIN::Units::Nanoseconds>(delay).GetValue();
+            const double nsDouble = NGIN::Units::UnitCast<NGIN::Units::Nanoseconds>(delay).GetValue();
             if (nsDouble <= 0.0)
             {
                 Cancel();
-                return;
+                return {};
             }
 
-            const auto now = NGIN::Time::MonotonicClock::Now().ToNanoseconds();
-            auto       add = static_cast<NGIN::UInt64>(nsDouble);
+            const NGIN::UInt64 now = NGIN::Time::MonotonicClock::Now().ToNanoseconds();
+            NGIN::UInt64       add = static_cast<NGIN::UInt64>(nsDouble);
             if (static_cast<double>(add) < nsDouble)
             {
                 ++add;
             }
-            CancelAt(exec, NGIN::Time::TimePoint::FromNanoseconds(now + add));
+            const NGIN::UInt64 maximum = (std::numeric_limits<NGIN::UInt64>::max)();
+            const NGIN::UInt64 target  = add > maximum - now ? maximum : now + add;
+            return CancelAt(exec, NGIN::Time::TimePoint::FromNanoseconds(target));
         }
 
     private:
@@ -296,53 +360,45 @@ namespace NGIN::Async
         return m_state && m_state->canceled.load(std::memory_order_acquire);
     }
 
-    inline void CancellationToken::Register(CancellationRegistration&    outRegistration,
-                                            NGIN::Execution::ExecutorRef exec,
-                                            std::coroutine_handle<>      handle,
-                                            CancellationCallback         callback,
-                                            void*                        callbackCtx) const noexcept
+    inline CancellationRegistrationResult CancellationToken::Register(
+            CancellationRegistration&    outRegistration,
+            NGIN::Execution::ExecutorRef exec,
+            std::coroutine_handle<>      handle,
+            CancellationCallback         callback,
+            void*                        callbackCtx) const noexcept
     {
         outRegistration.Reset();
         if (!m_state)
-        {
-            return;
-        }
+            return {};
 
         const bool wantsResume = exec.IsValid() && handle;
         if (!wantsResume && callback == nullptr)
+            return std::unexpected(CancellationRegistrationError::InvalidTarget);
+
+        std::shared_ptr<detail::CancellationNode> node;
+        try
         {
-            return;
+            node = std::allocate_shared<detail::CancellationNode>(
+                    std::pmr::polymorphic_allocator<detail::CancellationNode> {m_state->resource});
+            node->exec            = exec;
+            node->handle          = handle;
+            node->callback        = callback;
+            node->callbackContext = callbackCtx;
+
+            if (m_state->TryRegister(node))
+            {
+                outRegistration.m_state = m_state;
+                outRegistration.m_node  = std::move(node);
+                return {};
+            }
+        } catch (const std::bad_alloc&)
+        {
+            return std::unexpected(CancellationRegistrationError::ResourceExhausted);
         }
 
-        outRegistration.m_state       = m_state;
-        outRegistration.m_exec        = exec;
-        outRegistration.m_handle      = handle;
-        outRegistration.m_callback    = callback;
-        outRegistration.m_callbackCtx = callbackCtx;
-        outRegistration.m_armed.store(true, std::memory_order_relaxed);
-
-        if (m_state->TryRegister(&outRegistration))
-        {
-            return;
-        }
-
-        outRegistration.m_state.Reset();
-        outRegistration.m_exec        = {};
-        outRegistration.m_handle      = {};
-        outRegistration.m_callback    = nullptr;
-        outRegistration.m_callbackCtx = nullptr;
-        outRegistration.m_index       = static_cast<UIntSize>(-1);
-        outRegistration.m_armed.store(false, std::memory_order_relaxed);
-
-        bool shouldResume = true;
-        if (callback)
-        {
-            shouldResume = callback(callbackCtx);
-        }
-        if (shouldResume && wantsResume)
-        {
-            exec.Execute(handle);
-        }
+        // Cancellation won registration under the state lock. Invoke the stable node immediately.
+        node->Invoke();
+        return {};
     }
 
     namespace detail
@@ -362,19 +418,22 @@ namespace NGIN::Async
             CancellationSource                    source {};
             std::vector<CancellationRegistration> registrations {};
 
-            void Link(std::initializer_list<CancellationToken> tokens) noexcept
+            void Link(std::initializer_list<CancellationToken> tokens)
             {
                 registrations.resize(tokens.size());
 
                 UIntSize index = 0;
-                for (const auto& token: tokens)
+                for (const CancellationToken& token: tokens)
                 {
                     if (token.IsCancellationRequested())
                     {
                         source.Cancel();
                         return;
                     }
-                    token.Register(registrations[index++], {}, {}, &CancelLinkedSource, &source);
+                    const CancellationRegistrationResult result =
+                            token.Register(registrations[index++], {}, {}, &CancelLinkedSource, &source);
+                    if (!result && result.error() == CancellationRegistrationError::ResourceExhausted)
+                        throw std::bad_alloc {};
                 }
             }
         };
@@ -441,73 +500,19 @@ namespace NGIN::Async
 
     inline void CancellationRegistration::MoveFrom(CancellationRegistration&& other) noexcept
     {
-        m_state       = std::move(other.m_state);
-        m_exec        = other.m_exec;
-        m_handle      = other.m_handle;
-        m_callback    = other.m_callback;
-        m_callbackCtx = other.m_callbackCtx;
-        m_index       = other.m_index;
-        m_armed.store(other.m_armed.exchange(false, std::memory_order_acq_rel), std::memory_order_relaxed);
-
-        if (m_state)
-        {
-            NGIN::Sync::LockGuard guard(m_state->lock);
-            if (m_index < m_state->registrations.size() && m_state->registrations[m_index] == &other)
-            {
-                m_state->registrations[m_index] = this;
-            }
-            else
-            {
-                for (UIntSize i = 0; i < m_state->registrations.size(); ++i)
-                {
-                    if (m_state->registrations[i] == &other)
-                    {
-                        m_state->registrations[i] = this;
-                        m_index                   = i;
-                        break;
-                    }
-                }
-            }
-        }
-
-        other.m_exec        = {};
-        other.m_handle      = {};
-        other.m_callback    = nullptr;
-        other.m_callbackCtx = nullptr;
-        other.m_index       = static_cast<UIntSize>(-1);
+        m_state = std::move(other.m_state);
+        m_node  = std::move(other.m_node);
     }
 
     inline void CancellationRegistration::Reset() noexcept
     {
-        if (!m_state)
-        {
+        if (!m_node)
             return;
-        }
-        m_armed.store(false, std::memory_order_relaxed);
-        m_state->Unregister(this);
-        m_state.Reset();
-        m_exec        = {};
-        m_handle      = {};
-        m_callback    = nullptr;
-        m_callbackCtx = nullptr;
-        m_index       = static_cast<UIntSize>(-1);
-    }
 
-    inline void CancellationRegistration::Fire() noexcept
-    {
-        bool shouldResume = true;
-        if (m_callback)
-        {
-            shouldResume = m_callback(m_callbackCtx);
-        }
-
-        bool expected = true;
-        if (m_armed.compare_exchange_strong(expected, false, std::memory_order_acq_rel))
-        {
-            if (shouldResume && m_exec.IsValid() && m_handle)
-            {
-                m_exec.Execute(m_handle);
-            }
-        }
+        Memory::Shared<detail::CancellationState> state = std::move(m_state);
+        std::shared_ptr<detail::CancellationNode> node  = std::move(m_node);
+        if (state)
+            state->Unregister(node);
+        node->Unregister();
     }
 }// namespace NGIN::Async

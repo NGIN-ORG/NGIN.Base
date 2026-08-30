@@ -16,6 +16,9 @@ namespace NGIN::Memory
     class PolyAllocatorRef
     {
     public:
+        /// @brief Type erasure cannot promise definitive ownership for every bound allocator.
+        static constexpr bool HasPreciseOwnership = false;
+
         /// @brief Constructs an empty allocator reference that rejects allocations.
         PolyAllocatorRef() noexcept
             : m_object(nullptr),
