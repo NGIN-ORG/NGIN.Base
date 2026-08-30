@@ -20,6 +20,7 @@ namespace
     static_assert((RIGHT - LEFT) == Vector3<int> {3, 3, 3});
     static_assert(Dot(LEFT, RIGHT) == 32);
     static_assert(LengthSquared(LEFT) == 14);
+    static_assert(DistanceSquared(LEFT, RIGHT) == 27);
     static_assert(Cross(LEFT, RIGHT) == Vector3<int> {-3, 6, -3});
     static_assert(HadamardProduct(LEFT, RIGHT) == Vector3<int> {4, 10, 18});
     static_assert(Vector4F::Size() == 4);

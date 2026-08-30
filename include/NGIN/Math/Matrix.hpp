@@ -281,11 +281,12 @@ namespace NGIN::Math
             const Vector<T, Columns>&       vector)
     {
         Vector<T, Rows> result;
-        for (std::size_t column = 0; column < Columns; ++column)
+        for (std::size_t row = 0; row < Rows; ++row)
         {
-            const T component = vector[column];
-            for (std::size_t row = 0; row < Rows; ++row)
-                result[row] += matrix(row, column) * component;
+            T value {0};
+            for (std::size_t column = 0; column < Columns; ++column)
+                value += matrix(row, column) * vector[column];
+            result[row] = std::move(value);
         }
         return result;
     }
@@ -601,13 +602,19 @@ namespace NGIN::Math
     template<LinearAlgebraScalarConcept T>
     using Matrix4 = Matrix<T, 4, 4>;
 
+    /// @brief Three-by-four matrix alias commonly used for compact affine data.
+    template<LinearAlgebraScalarConcept T>
+    using Matrix3x4 = Matrix<T, 3, 4>;
+
     /// @brief Common single-precision matrix aliases.
-    using Matrix2F = Matrix2<F32>;
-    using Matrix3F = Matrix3<F32>;
-    using Matrix4F = Matrix4<F32>;
+    using Matrix2F   = Matrix2<F32>;
+    using Matrix3F   = Matrix3<F32>;
+    using Matrix4F   = Matrix4<F32>;
+    using Matrix3x4F = Matrix3x4<F32>;
 
     /// @brief Common double-precision matrix aliases.
-    using Matrix2D = Matrix2<F64>;
-    using Matrix3D = Matrix3<F64>;
-    using Matrix4D = Matrix4<F64>;
+    using Matrix2D   = Matrix2<F64>;
+    using Matrix3D   = Matrix3<F64>;
+    using Matrix4D   = Matrix4<F64>;
+    using Matrix3x4D = Matrix3x4<F64>;
 }// namespace NGIN::Math

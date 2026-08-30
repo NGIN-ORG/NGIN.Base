@@ -297,6 +297,15 @@ namespace NGIN::Math
         return Length(right - left);
     }
 
+    /// @brief Computes squared Euclidean distance without taking a square root.
+    template<LinearAlgebraScalarConcept T, std::size_t Dimension>
+    [[nodiscard]] constexpr T DistanceSquared(
+            const Vector<T, Dimension>& left,
+            const Vector<T, Dimension>& right)
+    {
+        return LengthSquared(right - left);
+    }
+
     /// @brief Returns a normalized vector.
     /// @pre The vector must have non-zero length.
     /// @details Use TryNormalize() when degenerate inputs are possible.
