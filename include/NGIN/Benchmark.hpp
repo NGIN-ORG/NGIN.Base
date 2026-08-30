@@ -117,6 +117,8 @@ namespace NGIN
         DesiredUnit medianTime        = DesiredUnit(0.0);
         DesiredUnit percentile25      = DesiredUnit(0.0);
         DesiredUnit percentile75      = DesiredUnit(0.0);
+        DesiredUnit percentile95      = DesiredUnit(0.0);
+        DesiredUnit percentile99      = DesiredUnit(0.0);
     };
 
     /// \brief  A simple benchmarking engine that runs a user‐provided
@@ -266,16 +268,16 @@ namespace NGIN
             if (config.keepRawTimings && !rawTimings.empty())
             {
                 std::sort(rawTimings.begin(), rawTimings.end());
-                auto at = [&](std::size_t idx) -> F64 {
-                    return rawTimings[std::min(idx, rawTimings.size() - 1)];
+                const auto atPercentile = [&](const std::size_t numerator) -> F64 {
+                    const std::size_t index = ((rawTimings.size() - 1) * numerator) / 100;
+                    return rawTimings[index];
                 };
-                F64 med = at(rawTimings.size() / 2);
-                F64 p25 = at(rawTimings.size() / 4);
-                F64 p75 = at((3 * rawTimings.size()) / 4);
 
-                result.medianTime   = Units::UnitCast<DesiredUnit>(Units::Nanoseconds(med));
-                result.percentile25 = Units::UnitCast<DesiredUnit>(Units::Nanoseconds(p25));
-                result.percentile75 = Units::UnitCast<DesiredUnit>(Units::Nanoseconds(p75));
+                result.percentile25 = Units::UnitCast<DesiredUnit>(Units::Nanoseconds(atPercentile(25)));
+                result.medianTime   = Units::UnitCast<DesiredUnit>(Units::Nanoseconds(atPercentile(50)));
+                result.percentile75 = Units::UnitCast<DesiredUnit>(Units::Nanoseconds(atPercentile(75)));
+                result.percentile95 = Units::UnitCast<DesiredUnit>(Units::Nanoseconds(atPercentile(95)));
+                result.percentile99 = Units::UnitCast<DesiredUnit>(Units::Nanoseconds(atPercentile(99)));
             }
 
             return result;
@@ -499,7 +501,9 @@ namespace NGIN
         {
             os << "\n  p25 = " << r.percentile25
                << ",  median = " << r.medianTime
-               << ",  p75 = " << r.percentile75;
+               << ",  p75 = " << r.percentile75
+               << ",  p95 = " << r.percentile95
+               << ",  p99 = " << r.percentile99;
         }
         return os;
     }

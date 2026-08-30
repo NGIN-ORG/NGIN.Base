@@ -12,6 +12,7 @@ TEST_CASE("benchmark registry preserves per-benchmark configuration", "[benchmar
     const BenchmarkConfig config {
             .iterations       = 3,
             .warmupIterations = 2,
+            .keepRawTimings   = true,
     };
     Benchmark::Register(
             config,
@@ -27,5 +28,8 @@ TEST_CASE("benchmark registry preserves per-benchmark configuration", "[benchmar
     });
     REQUIRE(result != results.end());
     CHECK(result->numIterations == 3);
+    CHECK(result->medianTime.GetValue() >= 0.0);
+    CHECK(result->percentile95.GetValue() >= result->medianTime.GetValue());
+    CHECK(result->percentile99.GetValue() >= result->percentile95.GetValue());
     CHECK(invocations == 5);
 }
