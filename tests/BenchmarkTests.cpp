@@ -3,6 +3,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
+#include <string_view>
 
 TEST_CASE("benchmark registry preserves per-benchmark configuration", "[benchmark]")
 {
@@ -32,4 +34,25 @@ TEST_CASE("benchmark registry preserves per-benchmark configuration", "[benchmar
     CHECK(result->percentile95.GetValue() >= result->medianTime.GetValue());
     CHECK(result->percentile99.GetValue() >= result->percentile95.GetValue());
     CHECK(invocations == 5);
+}
+
+TEST_CASE("benchmark registry supports explicit run ordering", "[benchmark]")
+{
+    using namespace NGIN;
+
+    const BenchmarkConfig config {
+            .iterations       = 1,
+            .warmupIterations = 0,
+    };
+    Benchmark::Register(config, [](BenchmarkContext&) {}, "ordering first registration");
+    Benchmark::Register(config, [](BenchmarkContext&) {}, "ordering second registration");
+
+    constexpr std::array order {
+            std::string_view {"ordering second registration"},
+            std::string_view {"ordering first registration"},
+    };
+    const auto results = Benchmark::RunAllInOrder<Units::Nanoseconds>(order);
+    REQUIRE(results.size() >= 2);
+    CHECK(results[0].name == "ordering second registration");
+    CHECK(results[1].name == "ordering first registration");
 }

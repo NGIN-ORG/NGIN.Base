@@ -9,8 +9,10 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <vector>
 
@@ -366,6 +368,39 @@ namespace NGIN
             {
                 results.push_back(uptr->Run<DesiredUnit>());
             }
+            return results;
+        }
+
+        /// \brief Runs named benchmarks first in the supplied order, followed by remaining registrations.
+        /// \details Each registered benchmark runs at most once. Unknown and duplicate names are ignored.
+        template<typename DesiredUnit>
+            requires Units::QuantityOf<Units::TIME, DesiredUnit>
+        static std::vector<BenchmarkResult<DesiredUnit>> RunAllInOrder(
+                std::span<const std::string_view> benchmarkNames)
+        {
+            std::vector<BenchmarkResult<DesiredUnit>> results;
+            std::lock_guard<std::mutex>               lock(GetRegistryMutex());
+            std::vector<bool>                         visited(GetRegistry().size(), false);
+
+            const auto runAt = [&](std::size_t index) {
+                results.push_back(GetRegistry()[index]->Run<DesiredUnit>());
+                visited[index] = true;
+            };
+
+            for (const std::string_view benchmarkName: benchmarkNames)
+            {
+                for (std::size_t index = 0; index < GetRegistry().size(); ++index)
+                {
+                    if (!visited[index] && GetRegistry()[index]->name == benchmarkName)
+                    {
+                        runAt(index);
+                        break;
+                    }
+                }
+            }
+            for (std::size_t index = 0; index < GetRegistry().size(); ++index)
+                if (!visited[index])
+                    runAt(index);
             return results;
         }
         template<typename DesiredUnit>

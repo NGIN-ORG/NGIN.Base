@@ -1,4 +1,5 @@
 #include <NGIN/Benchmark.hpp>
+#include <NGIN/Math/AffineMatrix.hpp>
 #include <NGIN/Math/Matrix.hpp>
 
 #ifndef NGIN_BENCH_HAS_GLM
@@ -22,11 +23,13 @@ using NGIN::Benchmark;
 using NGIN::BenchmarkConfig;
 using NGIN::BenchmarkContext;
 using NGIN::BenchmarkResult;
+using NGIN::Math::AffineMatrix3F;
 using NGIN::Math::Cross;
 using NGIN::Math::Dot;
 using NGIN::Math::Inverse;
 using NGIN::Math::Matrix4F;
 using NGIN::Math::Normalize;
+using NGIN::Math::TransformPoint;
 using NGIN::Math::TryInverse;
 using NGIN::Math::TryNormalize;
 using NGIN::Math::Vector3F;
@@ -35,14 +38,14 @@ using NGIN::Units::Nanoseconds;
 
 namespace
 {
-    constexpr std::size_t VECTOR_COUNT  = 16'384;
-    constexpr std::size_t MATRIX_COUNT  = 4'096;
-    constexpr std::size_t INVERSE_COUNT = MATRIX_COUNT;
+    constexpr std::size_t VECTOR_COUNT  = 262'144;
+    constexpr std::size_t MATRIX_COUNT  = 65'536;
+    constexpr std::size_t INVERSE_COUNT = 16'384;
 
     constexpr BenchmarkConfig BENCHMARK_CONFIG = [] {
         BenchmarkConfig config;
-        config.iterations       = 80;
-        config.warmupIterations = 20;
+        config.iterations       = 100;
+        config.warmupIterations = 50;
         config.keepRawTimings   = true;
         return config;
     }();
@@ -59,6 +62,7 @@ namespace
         std::vector<Matrix4F> matrixLeft    = std::vector<Matrix4F>(MATRIX_COUNT);
         std::vector<Matrix4F> matrixRight   = std::vector<Matrix4F>(MATRIX_COUNT);
         std::vector<Matrix4F> matrixOutput  = std::vector<Matrix4F>(MATRIX_COUNT);
+        AffineMatrix3F        sharedAffine;
     };
 
 #if NGIN_BENCH_HAS_GLM
@@ -74,6 +78,7 @@ namespace
         std::vector<glm::mat4> matrixLeft    = std::vector<glm::mat4>(MATRIX_COUNT);
         std::vector<glm::mat4> matrixRight   = std::vector<glm::mat4>(MATRIX_COUNT);
         std::vector<glm::mat4> matrixOutput  = std::vector<glm::mat4>(MATRIX_COUNT);
+        glm::mat4              sharedAffine {1.0F};
     };
 
     [[nodiscard]] glm::mat4 ToGlm(const Matrix4F& source)
@@ -162,6 +167,24 @@ namespace
             glmData.matrixRight[index] = ToGlm(nginData.matrixRight[index]);
 #endif
         }
+
+        nginData.sharedAffine = AffineMatrix3F {
+                nginData.matrixLeft[0](0, 0),
+                nginData.matrixLeft[0](0, 1),
+                nginData.matrixLeft[0](0, 2),
+                nginData.matrixLeft[0](0, 3),
+                nginData.matrixLeft[0](1, 0),
+                nginData.matrixLeft[0](1, 1),
+                nginData.matrixLeft[0](1, 2),
+                nginData.matrixLeft[0](1, 3),
+                nginData.matrixLeft[0](2, 0),
+                nginData.matrixLeft[0](2, 1),
+                nginData.matrixLeft[0](2, 2),
+                nginData.matrixLeft[0](2, 3),
+        };
+#if NGIN_BENCH_HAS_GLM
+        glmData.sharedAffine = glmData.matrixLeft[0];
+#endif
     }
 
     template<class T>
@@ -261,6 +284,29 @@ namespace
                     context.stop();
                 },
                 "NGIN/Matrix4/MultiplyVector4");
+
+        Benchmark::Register(
+                BENCHMARK_CONFIG,
+                [&data](BenchmarkContext& context) {
+                    const Matrix4F& matrix = data.matrixLeft.front();
+                    context.start();
+                    for (std::size_t index = 0; index < VECTOR_COUNT; ++index)
+                        data.vector4Output[index] = matrix * data.vector4Left[index];
+                    ObserveOutput(context, data.vector4Output);
+                    context.stop();
+                },
+                "NGIN/Matrix4/TransformVectorBatch");
+
+        Benchmark::Register(
+                BENCHMARK_CONFIG,
+                [&data](BenchmarkContext& context) {
+                    context.start();
+                    for (std::size_t index = 0; index < VECTOR_COUNT; ++index)
+                        data.vector3Output[index] = TransformPoint(data.sharedAffine, data.vector3Left[index]);
+                    ObserveOutput(context, data.vector3Output);
+                    context.stop();
+                },
+                "NGIN/Affine3x4/TransformPointBatch");
 
         Benchmark::Register(
                 BENCHMARK_CONFIG,
@@ -390,6 +436,29 @@ namespace
         Benchmark::Register(
                 BENCHMARK_CONFIG,
                 [&data](BenchmarkContext& context) {
+                    const glm::mat4& matrix = data.matrixLeft.front();
+                    context.start();
+                    for (std::size_t index = 0; index < VECTOR_COUNT; ++index)
+                        data.vector4Output[index] = matrix * data.vector4Left[index];
+                    ObserveOutput(context, data.vector4Output);
+                    context.stop();
+                },
+                "GLM/Matrix4/TransformVectorBatch");
+
+        Benchmark::Register(
+                BENCHMARK_CONFIG,
+                [&data](BenchmarkContext& context) {
+                    context.start();
+                    for (std::size_t index = 0; index < VECTOR_COUNT; ++index)
+                        data.vector3Output[index] = glm::vec3(data.sharedAffine * glm::vec4(data.vector3Left[index], 1.0F));
+                    ObserveOutput(context, data.vector3Output);
+                    context.stop();
+                },
+                "GLM/Matrix4/TransformPointBatch");
+
+        Benchmark::Register(
+                BENCHMARK_CONFIG,
+                [&data](BenchmarkContext& context) {
                     context.start();
                     for (std::size_t index = 0; index < MATRIX_COUNT; ++index)
                         data.vector4Output[index] = data.vector4Left[index] * data.matrixLeft[index];
@@ -472,7 +541,36 @@ int main()
     RegisterGlmBenchmarks(glmData);
 #endif
 
-    const std::vector<BenchmarkResult<Nanoseconds>> results = Benchmark::RunAll<Nanoseconds>();
+    const std::vector<std::string_view> benchmarkOrder {
+            "NGIN/Vector3/Add",
+            "GLM/Vector3/Add",
+            "NGIN/Vector3/Dot",
+            "GLM/Vector3/Dot",
+            "NGIN/Vector3/Cross",
+            "GLM/Vector3/Cross",
+            "NGIN/Vector3/Normalize",
+            "GLM/Vector3/Normalize",
+            "NGIN/Vector3/NormalizeChecked",
+            "NGIN/Vector4/Add",
+            "GLM/Vector4/Add",
+            "NGIN/Vector4/Dot",
+            "GLM/Vector4/Dot",
+            "NGIN/Matrix4/MultiplyVector4",
+            "GLM/Matrix4/MultiplyVector4",
+            "NGIN/Matrix4/TransformVectorBatch",
+            "GLM/Matrix4/TransformVectorBatch",
+            "NGIN/Affine3x4/TransformPointBatch",
+            "GLM/Matrix4/TransformPointBatch",
+            "NGIN/Vector4/MultiplyMatrix4",
+            "GLM/Vector4/MultiplyMatrix4",
+            "NGIN/Matrix4/MultiplyMatrix4",
+            "GLM/Matrix4/MultiplyMatrix4",
+            "NGIN/Matrix4/Inverse",
+            "GLM/Matrix4/Inverse",
+            "NGIN/Matrix4/InverseChecked",
+    };
+    const std::vector<BenchmarkResult<Nanoseconds>> results =
+            Benchmark::RunAllInOrder<Nanoseconds>(benchmarkOrder);
     Benchmark::PrintSummaryTable(std::cout, results);
 
 #if NGIN_BENCH_HAS_GLM
@@ -481,34 +579,54 @@ int main()
               << std::right << std::setw(12) << "NGIN"
               << std::setw(12) << "GLM"
               << std::setw(12) << "Ratio" << '\n';
-    double      ratioProduct    = 1.0;
-    std::size_t comparisonCount = 0;
-    const auto  compare         = [&](std::string_view operation,
+    double      apiRatioProduct         = 1.0;
+    std::size_t apiComparisonCount      = 0;
+    double      workloadRatioProduct    = 1.0;
+    std::size_t workloadComparisonCount = 0;
+    const auto  compare                 = [&](std::string_view operation,
                              std::string_view nginName,
                              std::string_view glmName,
                              std::size_t      operationsPerIteration) {
-        if (const std::optional<double> ratio =
-                    PrintComparison(results, operation, nginName, glmName, operationsPerIteration))
+        return PrintComparison(results, operation, nginName, glmName, operationsPerIteration);
+    };
+    const auto addRatio = [](const std::optional<double>& ratio, double& product, std::size_t& count) {
+        if (ratio)
         {
-            ratioProduct *= *ratio;
-            ++comparisonCount;
+            product *= *ratio;
+            ++count;
         }
     };
 
-    compare("Vector3 add", "NGIN/Vector3/Add", "GLM/Vector3/Add", VECTOR_COUNT);
-    compare("Vector3 dot", "NGIN/Vector3/Dot", "GLM/Vector3/Dot", VECTOR_COUNT);
-    compare("Vector3 cross", "NGIN/Vector3/Cross", "GLM/Vector3/Cross", VECTOR_COUNT);
-    compare("Vector3 normalize", "NGIN/Vector3/Normalize", "GLM/Vector3/Normalize", VECTOR_COUNT);
-    compare("Vector4 add", "NGIN/Vector4/Add", "GLM/Vector4/Add", VECTOR_COUNT);
-    compare("Vector4 dot", "NGIN/Vector4/Dot", "GLM/Vector4/Dot", VECTOR_COUNT);
-    compare("Matrix4 * Vector4", "NGIN/Matrix4/MultiplyVector4", "GLM/Matrix4/MultiplyVector4", MATRIX_COUNT);
-    compare("Vector4 * Matrix4", "NGIN/Vector4/MultiplyMatrix4", "GLM/Vector4/MultiplyMatrix4", MATRIX_COUNT);
-    compare("Matrix4 * Matrix4", "NGIN/Matrix4/MultiplyMatrix4", "GLM/Matrix4/MultiplyMatrix4", MATRIX_COUNT);
-    compare("Matrix4 inverse", "NGIN/Matrix4/Inverse", "GLM/Matrix4/Inverse", INVERSE_COUNT);
+    addRatio(compare("Vector3 add", "NGIN/Vector3/Add", "GLM/Vector3/Add", VECTOR_COUNT), apiRatioProduct, apiComparisonCount);
+    addRatio(compare("Vector3 dot", "NGIN/Vector3/Dot", "GLM/Vector3/Dot", VECTOR_COUNT), apiRatioProduct, apiComparisonCount);
+    addRatio(compare("Vector3 cross", "NGIN/Vector3/Cross", "GLM/Vector3/Cross", VECTOR_COUNT), apiRatioProduct, apiComparisonCount);
+    addRatio(compare("Vector3 normalize", "NGIN/Vector3/Normalize", "GLM/Vector3/Normalize", VECTOR_COUNT), apiRatioProduct, apiComparisonCount);
+    addRatio(compare("Vector4 add", "NGIN/Vector4/Add", "GLM/Vector4/Add", VECTOR_COUNT), apiRatioProduct, apiComparisonCount);
+    addRatio(compare("Vector4 dot", "NGIN/Vector4/Dot", "GLM/Vector4/Dot", VECTOR_COUNT), apiRatioProduct, apiComparisonCount);
+    const std::optional<double> matrixVectorRatio =
+            compare("Matrix4 * Vector4", "NGIN/Matrix4/MultiplyVector4", "GLM/Matrix4/MultiplyVector4", MATRIX_COUNT);
+    addRatio(matrixVectorRatio, apiRatioProduct, apiComparisonCount);
+    addRatio(matrixVectorRatio, workloadRatioProduct, workloadComparisonCount);
+    addRatio(compare("Vector4 * Matrix4", "NGIN/Vector4/MultiplyMatrix4", "GLM/Vector4/MultiplyMatrix4", MATRIX_COUNT), apiRatioProduct, apiComparisonCount);
+    addRatio(compare("Matrix4 * Matrix4", "NGIN/Matrix4/MultiplyMatrix4", "GLM/Matrix4/MultiplyMatrix4", MATRIX_COUNT), apiRatioProduct, apiComparisonCount);
+    addRatio(compare("Matrix4 inverse", "NGIN/Matrix4/Inverse", "GLM/Matrix4/Inverse", INVERSE_COUNT), apiRatioProduct, apiComparisonCount);
 
-    if (comparisonCount > 0)
-        std::cout << "Geometric mean NGIN / GLM: "
-                  << std::pow(ratioProduct, 1.0 / static_cast<double>(comparisonCount)) << '\n';
+    std::cout << "\nGame-engine transform throughput\n";
+    addRatio(
+            compare("Shared Matrix4 * vectors", "NGIN/Matrix4/TransformVectorBatch", "GLM/Matrix4/TransformVectorBatch", VECTOR_COUNT),
+            workloadRatioProduct,
+            workloadComparisonCount);
+    addRatio(
+            compare("Affine3x4 transform points", "NGIN/Affine3x4/TransformPointBatch", "GLM/Matrix4/TransformPointBatch", VECTOR_COUNT),
+            workloadRatioProduct,
+            workloadComparisonCount);
+
+    if (apiComparisonCount > 0)
+        std::cout << "Unweighted API geometric mean NGIN / GLM: "
+                  << std::pow(apiRatioProduct, 1.0 / static_cast<double>(apiComparisonCount)) << '\n';
+    if (workloadComparisonCount > 0)
+        std::cout << "Transform-workload geometric mean NGIN / GLM: "
+                  << std::pow(workloadRatioProduct, 1.0 / static_cast<double>(workloadComparisonCount)) << '\n';
 #endif
     return 0;
 }
