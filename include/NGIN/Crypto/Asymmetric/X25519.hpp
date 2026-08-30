@@ -1,10 +1,19 @@
+/// @file X25519.hpp
+/// @brief Strong X25519 keys, generation, and shared-secret derivation.
 #pragma once
 
-#include <NGIN/Crypto/Asymmetric/KeyTypes.hpp>
+#include <NGIN/Crypto/Asymmetric/KeyPair.hpp>
+#include <NGIN/Crypto/Asymmetric/PrivateKey.hpp>
+#include <NGIN/Crypto/Asymmetric/PublicKey.hpp>
 #include <NGIN/Crypto/Backend/CryptoContext.hpp>
 
 namespace NGIN::Crypto::Asymmetric
 {
+    /// @brief Algorithm tag preventing X25519 keys from mixing with other key types.
+    struct X25519KeyTag
+    {
+    };
+
     using X25519PublicKey    = PublicKey<X25519KeyTag, 32>;
     using X25519PrivateKey   = PrivateKey<X25519KeyTag, 32>;
     using X25519KeyPair      = KeyPair<X25519PublicKey, X25519PrivateKey>;

@@ -1,9 +1,14 @@
+/// @file HmacSha512.hpp
+/// @brief Fixed-size HMAC-SHA-512 operations.
 #pragma once
 
-#include <NGIN/Crypto/Mac/Hmac.hpp>
+#include <NGIN/Crypto/Mac/Mac.hpp>
 
 namespace NGIN::Crypto::Mac
 {
+    /// @brief Fixed-size HMAC-SHA-512 authentication tag.
+    using HmacSha512Tag = Tag<64>;
+
     /// @brief Computes HMAC-SHA512 into caller-provided tag storage.
     [[nodiscard]] inline CryptoExpected<void> HmacSha512Into(
             const NGIN::Crypto::Backend::CryptoContext& context,

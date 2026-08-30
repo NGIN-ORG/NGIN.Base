@@ -1,6 +1,8 @@
+/// @file Signature.hpp
+/// @brief Fixed-size signature values and size queries.
 #pragma once
 
-#include <NGIN/Crypto/Asymmetric/KeyTypes.hpp>
+#include <NGIN/Crypto/Asymmetric/KeySizes.hpp>
 #include <NGIN/Crypto/Types.hpp>
 
 namespace NGIN::Crypto::Signatures

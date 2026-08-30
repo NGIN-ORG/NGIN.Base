@@ -1,6 +1,8 @@
 #include <NGIN/Crypto/Hashing/Hash.hpp>
 
 #include <NGIN/Crypto/Errors/CryptoError.hpp>
+#include <NGIN/Crypto/Hashing/Sha256.hpp>
+#include <NGIN/Crypto/Hashing/Sha512.hpp>
 
 namespace NGIN::Crypto::Hashing
 {

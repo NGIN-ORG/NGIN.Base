@@ -1,3 +1,5 @@
+/// @file Mac.hpp
+/// @brief Algorithm-selected message-authentication operations.
 #pragma once
 
 #include <NGIN/Crypto/Backend/CryptoContext.hpp>
@@ -11,9 +13,6 @@ namespace NGIN::Crypto::Mac
     /// @brief Fixed-size public message authentication tag bytes.
     template<NGIN::UIntSize Size>
     using Tag = FixedBytes<Size>;
-
-    using HmacSha256Tag = Tag<32>;
-    using HmacSha512Tag = Tag<64>;
 
     /// @brief Returns the tag size for a MAC algorithm in bytes.
     [[nodiscard]] constexpr NGIN::UIntSize MacTagSize(MacAlgorithm algorithm) noexcept

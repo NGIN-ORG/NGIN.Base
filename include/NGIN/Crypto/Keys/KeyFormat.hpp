@@ -3,9 +3,10 @@
 #pragma once
 
 #include <NGIN/Containers/Vector.hpp>
-#include <NGIN/Crypto/Algorithm.hpp>
+#include <NGIN/Crypto/Asymmetric/KeyAgreementAlgorithm.hpp>
 #include <NGIN/Crypto/ByteBuffer.hpp>
 #include <NGIN/Crypto/Result.hpp>
+#include <NGIN/Crypto/Signatures/SignatureAlgorithm.hpp>
 
 namespace NGIN::Crypto::Keys
 {

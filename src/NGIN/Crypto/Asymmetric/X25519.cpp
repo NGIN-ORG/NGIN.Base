@@ -1,5 +1,7 @@
 #include <NGIN/Crypto/Asymmetric/X25519.hpp>
 
+#include <NGIN/Crypto/Asymmetric/KeySizes.hpp>
+
 #include <NGIN/Crypto/Errors/CryptoError.hpp>
 
 namespace NGIN::Crypto::Asymmetric

@@ -1,4 +1,4 @@
-#include <NGIN/Crypto/Mac/Hmac.hpp>
+#include <NGIN/Crypto/Mac/Mac.hpp>
 
 #include <NGIN/Crypto/Errors/CryptoError.hpp>
 #include <NGIN/Crypto/Mac/HmacSha256.hpp>

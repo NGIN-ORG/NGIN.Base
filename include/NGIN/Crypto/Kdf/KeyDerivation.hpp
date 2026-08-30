@@ -4,6 +4,7 @@
 
 #include <NGIN/Crypto/Backend/CryptoContext.hpp>
 #include <NGIN/Crypto/ByteBuffer.hpp>
+#include <NGIN/Crypto/Kdf/KdfAlgorithm.hpp>
 #include <NGIN/Crypto/Memory/Secret.hpp>
 #include <NGIN/Crypto/Memory/SecretView.hpp>
 #include <NGIN/Crypto/Types.hpp>

@@ -2,7 +2,8 @@
 /// @brief P-256 ECDSA key, signature, DER conversion, signing, and verification helpers.
 #pragma once
 
-#include <NGIN/Crypto/Asymmetric/KeyTypes.hpp>
+#include <NGIN/Crypto/Asymmetric/PrivateKey.hpp>
+#include <NGIN/Crypto/Asymmetric/PublicKey.hpp>
 #include <NGIN/Crypto/Encoding/Der.hpp>
 #include <NGIN/Crypto/Errors/CryptoError.hpp>
 #include <NGIN/Crypto/Signatures/Sign.hpp>
@@ -12,6 +13,11 @@
 
 namespace NGIN::Crypto::Asymmetric
 {
+    /// @brief Algorithm tag preventing P-256 keys from mixing with other key types.
+    struct EcdsaP256KeyTag
+    {
+    };
+
     using EcdsaP256PublicKey          = PublicKey<EcdsaP256KeyTag, 65>;
     using EcdsaP256PrivateKey         = PrivateKey<EcdsaP256KeyTag, 32>;
     using EcdsaP256Sha256Signature    = NGIN::Crypto::Signatures::Signature<64>;

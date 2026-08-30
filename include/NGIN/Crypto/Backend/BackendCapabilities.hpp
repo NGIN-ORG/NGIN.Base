@@ -2,7 +2,13 @@
 /// @brief Compact set of algorithms supported by a crypto backend.
 #pragma once
 
-#include <NGIN/Crypto/Algorithm.hpp>
+#include <NGIN/Crypto/Asymmetric/AsymmetricEncryptionAlgorithm.hpp>
+#include <NGIN/Crypto/Asymmetric/KeyAgreementAlgorithm.hpp>
+#include <NGIN/Crypto/Hashing/HashAlgorithm.hpp>
+#include <NGIN/Crypto/Kdf/KdfAlgorithm.hpp>
+#include <NGIN/Crypto/Mac/MacAlgorithm.hpp>
+#include <NGIN/Crypto/Signatures/SignatureAlgorithm.hpp>
+#include <NGIN/Crypto/Symmetric/AeadAlgorithm.hpp>
 #include <NGIN/Primitives.hpp>
 
 namespace NGIN::Crypto::Backend

@@ -25,7 +25,8 @@ Backend-backed crypto contracts, secure memory helpers, encodings, and platform 
 
 ## Design Principles
 
-1. API contracts live in public headers; non-trivial implementation lives in `src/NGIN/Crypto`.
+1. Named leaf headers own the declarations they advertise; explicit family umbrellas aggregate them, and non-trivial
+   implementation lives in `src/NGIN/Crypto`.
 2. Public APIs use byte spans and fixed byte wrappers, not strings.
 3. Recoverable failures return `CryptoExpected<T>`.
 4. Backend-backed algorithms require an explicit neutral `CryptoContext`.

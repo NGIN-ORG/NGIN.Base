@@ -2,12 +2,19 @@
 /// @brief Strong Ed25519 keys, generation, signing, and verification.
 #pragma once
 
-#include <NGIN/Crypto/Asymmetric/KeyTypes.hpp>
+#include <NGIN/Crypto/Asymmetric/KeyPair.hpp>
+#include <NGIN/Crypto/Asymmetric/PrivateKey.hpp>
+#include <NGIN/Crypto/Asymmetric/PublicKey.hpp>
 #include <NGIN/Crypto/Signatures/Sign.hpp>
 #include <NGIN/Crypto/Signatures/Verify.hpp>
 
 namespace NGIN::Crypto::Asymmetric
 {
+    /// @brief Algorithm tag preventing Ed25519 keys from mixing with other key types.
+    struct Ed25519KeyTag
+    {
+    };
+
     using Ed25519PublicKey  = PublicKey<Ed25519KeyTag, 32>;
     using Ed25519PrivateKey = PrivateKey<Ed25519KeyTag, 32>;
     using Ed25519KeyPair    = KeyPair<Ed25519PublicKey, Ed25519PrivateKey>;

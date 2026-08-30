@@ -1,6 +1,8 @@
 #include <NGIN/Benchmark.hpp>
 #include <NGIN/Crypto/Backend/CryptoContext.hpp>
 #include <NGIN/Crypto/Hashing/Hash.hpp>
+#include <NGIN/Crypto/Hashing/Sha256.hpp>
+#include <NGIN/Crypto/Hashing/Sha512.hpp>
 
 #include <array>
 #include <iostream>

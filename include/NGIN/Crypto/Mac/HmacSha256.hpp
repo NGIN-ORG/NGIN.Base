@@ -1,9 +1,14 @@
+/// @file HmacSha256.hpp
+/// @brief Fixed-size HMAC-SHA-256 operations.
 #pragma once
 
-#include <NGIN/Crypto/Mac/Hmac.hpp>
+#include <NGIN/Crypto/Mac/Mac.hpp>
 
 namespace NGIN::Crypto::Mac
 {
+    /// @brief Fixed-size HMAC-SHA-256 authentication tag.
+    using HmacSha256Tag = Tag<32>;
+
     /// @brief Computes HMAC-SHA256 into caller-provided tag storage.
     [[nodiscard]] inline CryptoExpected<void> HmacSha256Into(
             const NGIN::Crypto::Backend::CryptoContext& context,

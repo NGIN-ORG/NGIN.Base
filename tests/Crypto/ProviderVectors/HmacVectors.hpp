@@ -1,6 +1,6 @@
 #pragma once
 
-#include <NGIN/Crypto/Algorithm.hpp>
+#include <NGIN/Crypto/Mac/MacAlgorithm.hpp>
 
 #include <array>
 #include <string_view>

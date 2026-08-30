@@ -1,4 +1,6 @@
 #include <NGIN/Crypto/Hashing/Hash.hpp>
+#include <NGIN/Crypto/Hashing/Sha256.hpp>
+#include <NGIN/Crypto/Hashing/Sha512.hpp>
 
 #include <NGIN/Crypto/Encoding/Hex.hpp>
 

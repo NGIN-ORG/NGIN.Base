@@ -1,10 +1,12 @@
 #pragma once
 
-#include <NGIN/Crypto/Algorithm.hpp>
+#include <NGIN/Crypto/AlgorithmFamily.hpp>
+#include <NGIN/Crypto/Asymmetric/AsymmetricEncryptionAlgorithm.hpp>
 #include <NGIN/Crypto/Asymmetric/Ecdsa.hpp>
 #include <NGIN/Crypto/Asymmetric/Ed25519.hpp>
+#include <NGIN/Crypto/Asymmetric/KeyAgreementAlgorithm.hpp>
 #include <NGIN/Crypto/Asymmetric/KeyPair.hpp>
-#include <NGIN/Crypto/Asymmetric/KeyTypes.hpp>
+#include <NGIN/Crypto/Asymmetric/KeySizes.hpp>
 #include <NGIN/Crypto/Asymmetric/PrivateKey.hpp>
 #include <NGIN/Crypto/Asymmetric/PublicKey.hpp>
 #include <NGIN/Crypto/Asymmetric/Rsa.hpp>
@@ -30,8 +32,11 @@
 #include <NGIN/Crypto/Hashing/Digest.hpp>
 #include <NGIN/Crypto/Hashing/Hash.hpp>
 #include <NGIN/Crypto/Hashing/HashAlgorithm.hpp>
+#include <NGIN/Crypto/Hashing/Sha256.hpp>
+#include <NGIN/Crypto/Hashing/Sha512.hpp>
 #include <NGIN/Crypto/Kdf/Argon2id.hpp>
 #include <NGIN/Crypto/Kdf/Hkdf.hpp>
+#include <NGIN/Crypto/Kdf/KdfAlgorithm.hpp>
 #include <NGIN/Crypto/Kdf/KeyDerivation.hpp>
 #include <NGIN/Crypto/Kdf/PasswordHash.hpp>
 #include <NGIN/Crypto/Kdf/Pbkdf2.hpp>
@@ -39,7 +44,6 @@
 #include <NGIN/Crypto/Keys/KeyOperations.hpp>
 #include <NGIN/Crypto/Keys/PrivateKeyInfo.hpp>
 #include <NGIN/Crypto/Keys/SubjectPublicKeyInfo.hpp>
-#include <NGIN/Crypto/Mac/Hmac.hpp>
 #include <NGIN/Crypto/Mac/HmacSha256.hpp>
 #include <NGIN/Crypto/Mac/HmacSha512.hpp>
 #include <NGIN/Crypto/Mac/Mac.hpp>
@@ -54,6 +58,7 @@
 #include <NGIN/Crypto/Result.hpp>
 #include <NGIN/Crypto/Signatures/Sign.hpp>
 #include <NGIN/Crypto/Signatures/Signature.hpp>
+#include <NGIN/Crypto/Signatures/SignatureAlgorithm.hpp>
 #include <NGIN/Crypto/Signatures/Verify.hpp>
 #include <NGIN/Crypto/Symmetric/Aead.hpp>
 #include <NGIN/Crypto/Symmetric/AeadAlgorithm.hpp>
