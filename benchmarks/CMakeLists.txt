@@ -23,6 +23,7 @@ option(NGIN_BENCH_USE_SIMDJSON "Enable simdjson comparisons" ON)
 option(NGIN_BENCH_USE_RAPIDJSON "Enable RapidJSON comparisons" ON)
 option(NGIN_BENCH_USE_PUGIXML "Enable pugixml comparisons" ON)
 option(NGIN_BENCH_USE_TINYXML2 "Enable tinyxml2 comparisons" ON)
+option(NGIN_BENCH_USE_GLM "Enable GLM linear-algebra comparisons" ON)
 
 function(ngin_add_benchmark target)
   add_executable(${target} ${ARGN})
@@ -49,6 +50,7 @@ ngin_add_benchmark(VectorBenchmarks VectorBenchmarks.cpp)
 ngin_add_benchmark(AllocatorBenchmarks AllocatorBenchmarks.cpp)
 ngin_add_benchmark(BigIntBenchmarks BigIntBenchmarks.cpp)
 ngin_add_benchmark(BigFloatBenchmarks BigFloatBenchmarks.cpp)
+ngin_add_benchmark(LinearAlgebraBenchmarks LinearAlgebraBenchmarks.cpp)
 ngin_add_benchmark(CallableBenchmarks CallableBenchmarks.cpp)
 ngin_add_benchmark(FiberBenchmarks FiberBenchmarks.cpp)
 ngin_add_benchmark(HardeningBenchmarks HardeningBenchmarks.cpp)
@@ -61,6 +63,26 @@ ngin_add_benchmark(CryptoAeadBenchmarks CryptoAeadBenchmarks.cpp)
 ngin_add_benchmark(CryptoParserBenchmarks CryptoParserBenchmarks.cpp)
 ngin_add_benchmark(CryptoKeyFormatBenchmarks CryptoKeyFormatBenchmarks.cpp)
 ngin_add_benchmark(CryptoBackendDispatchBenchmarks CryptoBackendDispatchBenchmarks.cpp)
+
+if(NGIN_BENCH_USE_GLM)
+  find_package(glm 1.0.3 CONFIG QUIET)
+  if(NOT TARGET glm::glm)
+    CPMAddPackage(
+      NAME glm
+      GITHUB_REPOSITORY g-truc/glm
+      GIT_TAG 1.0.3
+      OPTIONS
+        "GLM_BUILD_TESTS OFF"
+        "GLM_BUILD_INSTALL OFF"
+    )
+  endif()
+  if(TARGET glm::glm)
+    target_link_libraries(LinearAlgebraBenchmarks PRIVATE glm::glm)
+    target_compile_definitions(LinearAlgebraBenchmarks PRIVATE NGIN_BENCH_HAS_GLM=1)
+  else()
+    message(WARNING "GLM comparison requested but glm::glm is unavailable")
+  endif()
+endif()
 
 if(MSVC)
   target_compile_options(SIMDFastMathBench PRIVATE /arch:AVX2)

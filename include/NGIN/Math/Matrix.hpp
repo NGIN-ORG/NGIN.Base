@@ -3,6 +3,7 @@
 /// @file Matrix.hpp
 /// @brief Fixed-size row-major matrices and fundamental linear algebra operations.
 
+#include <NGIN/Defines.hpp>
 #include <NGIN/Math/Vector.hpp>
 
 #include <array>
@@ -280,8 +281,28 @@ namespace NGIN::Math
             const Vector<T, Columns>&       vector)
     {
         Vector<T, Rows> result;
+        for (std::size_t column = 0; column < Columns; ++column)
+        {
+            const T component = vector[column];
+            for (std::size_t row = 0; row < Rows; ++row)
+                result[row] += matrix(row, column) * component;
+        }
+        return result;
+    }
+
+    /// @brief Transforms a row vector by a compatible matrix.
+    template<LinearAlgebraScalarConcept T, std::size_t Rows, std::size_t Columns>
+    [[nodiscard]] constexpr Vector<T, Columns> operator*(
+            const Vector<T, Rows>&          vector,
+            const Matrix<T, Rows, Columns>& matrix)
+    {
+        Vector<T, Columns> result;
         for (std::size_t row = 0; row < Rows; ++row)
-            result[row] = Dot(matrix.Row(row), vector);
+        {
+            const T component = vector[row];
+            for (std::size_t column = 0; column < Columns; ++column)
+                result[column] += component * matrix(row, column);
+        }
         return result;
     }
 
@@ -355,6 +376,153 @@ namespace NGIN::Math
         }
     }
 
+    /// @brief Returns the inverse of a floating-point matrix.
+    /// @pre The matrix must be non-singular.
+    /// @details The common 1x1 through 4x4 cases use direct adjugate formulas. Use TryInverse()
+    /// when singular or tolerance-degenerate inputs are possible.
+    template<std::floating_point T, std::size_t Size>
+    [[nodiscard]] NGIN_ALWAYS_INLINE constexpr Matrix<T, Size, Size> Inverse(const Matrix<T, Size, Size>& value)
+    {
+        if constexpr (Size == 1)
+        {
+            return Matrix<T, 1, 1> {T {1} / value(0, 0)};
+        }
+        else if constexpr (Size == 2)
+        {
+            const T reciprocalDeterminant = T {1} / (value(0, 0) * value(1, 1) - value(0, 1) * value(1, 0));
+            return Matrix<T, 2, 2> {
+                    value(1, 1) * reciprocalDeterminant,
+                    -value(0, 1) * reciprocalDeterminant,
+                    -value(1, 0) * reciprocalDeterminant,
+                    value(0, 0) * reciprocalDeterminant,
+            };
+        }
+        else if constexpr (Size == 3)
+        {
+            const T cofactor00 = value(1, 1) * value(2, 2) - value(1, 2) * value(2, 1);
+            const T cofactor01 = value(1, 2) * value(2, 0) - value(1, 0) * value(2, 2);
+            const T cofactor02 = value(1, 0) * value(2, 1) - value(1, 1) * value(2, 0);
+            const T reciprocalDeterminant =
+                    T {1} / (value(0, 0) * cofactor00 + value(0, 1) * cofactor01 + value(0, 2) * cofactor02);
+
+            return Matrix<T, 3, 3> {
+                    cofactor00 * reciprocalDeterminant,
+                    (value(0, 2) * value(2, 1) - value(0, 1) * value(2, 2)) * reciprocalDeterminant,
+                    (value(0, 1) * value(1, 2) - value(0, 2) * value(1, 1)) * reciprocalDeterminant,
+                    cofactor01 * reciprocalDeterminant,
+                    (value(0, 0) * value(2, 2) - value(0, 2) * value(2, 0)) * reciprocalDeterminant,
+                    (value(0, 2) * value(1, 0) - value(0, 0) * value(1, 2)) * reciprocalDeterminant,
+                    cofactor02 * reciprocalDeterminant,
+                    (value(0, 1) * value(2, 0) - value(0, 0) * value(2, 1)) * reciprocalDeterminant,
+                    (value(0, 0) * value(1, 1) - value(0, 1) * value(1, 0)) * reciprocalDeterminant,
+            };
+        }
+        else if constexpr (Size == 4)
+        {
+            const T coefficient00 = value(2, 2) * value(3, 3) - value(2, 3) * value(3, 2);
+            const T coefficient02 = value(2, 1) * value(3, 3) - value(2, 3) * value(3, 1);
+            const T coefficient03 = value(2, 1) * value(3, 2) - value(2, 2) * value(3, 1);
+            const T coefficient04 = value(1, 2) * value(3, 3) - value(1, 3) * value(3, 2);
+            const T coefficient06 = value(1, 1) * value(3, 3) - value(1, 3) * value(3, 1);
+            const T coefficient07 = value(1, 1) * value(3, 2) - value(1, 2) * value(3, 1);
+            const T coefficient08 = value(1, 2) * value(2, 3) - value(1, 3) * value(2, 2);
+            const T coefficient10 = value(1, 1) * value(2, 3) - value(1, 3) * value(2, 1);
+            const T coefficient11 = value(1, 1) * value(2, 2) - value(1, 2) * value(2, 1);
+            const T coefficient12 = value(0, 2) * value(3, 3) - value(0, 3) * value(3, 2);
+            const T coefficient14 = value(0, 1) * value(3, 3) - value(0, 3) * value(3, 1);
+            const T coefficient15 = value(0, 1) * value(3, 2) - value(0, 2) * value(3, 1);
+            const T coefficient16 = value(0, 2) * value(2, 3) - value(0, 3) * value(2, 2);
+            const T coefficient18 = value(0, 1) * value(2, 3) - value(0, 3) * value(2, 1);
+            const T coefficient19 = value(0, 1) * value(2, 2) - value(0, 2) * value(2, 1);
+            const T coefficient20 = value(0, 2) * value(1, 3) - value(0, 3) * value(1, 2);
+            const T coefficient22 = value(0, 1) * value(1, 3) - value(0, 3) * value(1, 1);
+            const T coefficient23 = value(0, 1) * value(1, 2) - value(0, 2) * value(1, 1);
+
+            const Vector<T, 4> factor0 {coefficient00, coefficient00, coefficient02, coefficient03};
+            const Vector<T, 4> factor1 {coefficient04, coefficient04, coefficient06, coefficient07};
+            const Vector<T, 4> factor2 {coefficient08, coefficient08, coefficient10, coefficient11};
+            const Vector<T, 4> factor3 {coefficient12, coefficient12, coefficient14, coefficient15};
+            const Vector<T, 4> factor4 {coefficient16, coefficient16, coefficient18, coefficient19};
+            const Vector<T, 4> factor5 {coefficient20, coefficient20, coefficient22, coefficient23};
+
+            const Vector<T, 4> vector0 {value(0, 1), value(0, 0), value(0, 0), value(0, 0)};
+            const Vector<T, 4> vector1 {value(1, 1), value(1, 0), value(1, 0), value(1, 0)};
+            const Vector<T, 4> vector2 {value(2, 1), value(2, 0), value(2, 0), value(2, 0)};
+            const Vector<T, 4> vector3 {value(3, 1), value(3, 0), value(3, 0), value(3, 0)};
+
+            const Vector<T, 4> column0 = HadamardProduct(
+                    HadamardProduct(vector1, factor0) - HadamardProduct(vector2, factor1) +
+                            HadamardProduct(vector3, factor2),
+                    Vector<T, 4> {T {1}, T {-1}, T {1}, T {-1}});
+            const Vector<T, 4> column1 = HadamardProduct(
+                    HadamardProduct(vector0, factor0) - HadamardProduct(vector2, factor3) +
+                            HadamardProduct(vector3, factor4),
+                    Vector<T, 4> {T {-1}, T {1}, T {-1}, T {1}});
+            const Vector<T, 4> column2 = HadamardProduct(
+                    HadamardProduct(vector0, factor1) - HadamardProduct(vector1, factor3) +
+                            HadamardProduct(vector3, factor5),
+                    Vector<T, 4> {T {1}, T {-1}, T {1}, T {-1}});
+            const Vector<T, 4> column3 = HadamardProduct(
+                    HadamardProduct(vector0, factor2) - HadamardProduct(vector1, factor4) +
+                            HadamardProduct(vector2, factor5),
+                    Vector<T, 4> {T {-1}, T {1}, T {-1}, T {1}});
+
+            const T reciprocalDeterminant =
+                    T {1} /
+                    (value(0, 0) * column0[0] + value(1, 0) * column1[0] + value(2, 0) * column2[0] +
+                     value(3, 0) * column3[0]);
+
+            Matrix<T, 4, 4> result;
+            result.SetColumn(0, column0 * reciprocalDeterminant);
+            result.SetColumn(1, column1 * reciprocalDeterminant);
+            result.SetColumn(2, column2 * reciprocalDeterminant);
+            result.SetColumn(3, column3 * reciprocalDeterminant);
+            return result;
+        }
+        else
+        {
+            Matrix<T, Size, Size> work    = value;
+            Matrix<T, Size, Size> inverse = Matrix<T, Size, Size>::Identity();
+
+            for (std::size_t pivotIndex = 0; pivotIndex < Size; ++pivotIndex)
+            {
+                std::size_t pivotRow = pivotIndex;
+                for (std::size_t row = pivotIndex + 1; row < Size; ++row)
+                    if (std::abs(work(row, pivotIndex)) > std::abs(work(pivotRow, pivotIndex)))
+                        pivotRow = row;
+
+                if (pivotRow != pivotIndex)
+                {
+                    for (std::size_t column = 0; column < Size; ++column)
+                    {
+                        std::swap(work(pivotIndex, column), work(pivotRow, column));
+                        std::swap(inverse(pivotIndex, column), inverse(pivotRow, column));
+                    }
+                }
+
+                const T reciprocalPivot = T {1} / work(pivotIndex, pivotIndex);
+                for (std::size_t column = 0; column < Size; ++column)
+                {
+                    work(pivotIndex, column) *= reciprocalPivot;
+                    inverse(pivotIndex, column) *= reciprocalPivot;
+                }
+
+                for (std::size_t row = 0; row < Size; ++row)
+                {
+                    if (row == pivotIndex)
+                        continue;
+                    const T factor = work(row, pivotIndex);
+                    for (std::size_t column = 0; column < Size; ++column)
+                    {
+                        work(row, column) -= factor * work(pivotIndex, column);
+                        inverse(row, column) -= factor * inverse(pivotIndex, column);
+                    }
+                }
+            }
+            return inverse;
+        }
+    }
+
     /// @brief Returns an inverse, or no value when no pivot exceeds the supplied absolute tolerance.
     /// @details The element type must model a field; integer division generally does not satisfy that contract.
     template<LinearAlgebraScalarConcept T, std::size_t Size>
@@ -388,18 +556,19 @@ namespace NGIN::Math
 
             if (pivotRow != pivotIndex)
             {
-                const Vector<T, Size> workRow = work.Row(pivotIndex);
-                work.SetRow(pivotIndex, work.Row(pivotRow));
-                work.SetRow(pivotRow, workRow);
-
-                const Vector<T, Size> inverseRow = inverse.Row(pivotIndex);
-                inverse.SetRow(pivotIndex, inverse.Row(pivotRow));
-                inverse.SetRow(pivotRow, inverseRow);
+                for (std::size_t column = 0; column < Size; ++column)
+                {
+                    std::swap(work(pivotIndex, column), work(pivotRow, column));
+                    std::swap(inverse(pivotIndex, column), inverse(pivotRow, column));
+                }
             }
 
-            const T pivot = work(pivotIndex, pivotIndex);
-            work.SetRow(pivotIndex, work.Row(pivotIndex) / pivot);
-            inverse.SetRow(pivotIndex, inverse.Row(pivotIndex) / pivot);
+            const T reciprocalPivot = T {1} / work(pivotIndex, pivotIndex);
+            for (std::size_t column = 0; column < Size; ++column)
+            {
+                work(pivotIndex, column) *= reciprocalPivot;
+                inverse(pivotIndex, column) *= reciprocalPivot;
+            }
 
             for (std::size_t row = 0; row < Size; ++row)
             {
@@ -409,8 +578,11 @@ namespace NGIN::Math
                 const T factor = work(row, pivotIndex);
                 if (factor == T {0})
                     continue;
-                work.SetRow(row, work.Row(row) - factor * work.Row(pivotIndex));
-                inverse.SetRow(row, inverse.Row(row) - factor * inverse.Row(pivotIndex));
+                for (std::size_t column = 0; column < Size; ++column)
+                {
+                    work(row, column) -= factor * work(pivotIndex, column);
+                    inverse(row, column) -= factor * inverse(pivotIndex, column);
+                }
             }
         }
 

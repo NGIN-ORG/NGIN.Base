@@ -6,6 +6,8 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <cmath>
+
 using namespace NGIN::Math;
 
 namespace
@@ -19,6 +21,20 @@ namespace
     static_assert(Trace(LEFT) == 5);
     static_assert(Determinant(LEFT) == -2);
     static_assert(Matrix3<int>::Identity() * Vector3<int> {2, 3, 4} == Vector3<int> {2, 3, 4});
+    static_assert(Vector3<int> {2, 3, 4} * Matrix3<int>::Identity() == Vector3<int> {2, 3, 4});
+
+    template<std::size_t Size>
+    void CheckApproximatelyIdentity(const Matrix<double, Size, Size>& value, double margin = 1e-12)
+    {
+        for (std::size_t row = 0; row < Size; ++row)
+        {
+            for (std::size_t column = 0; column < Size; ++column)
+            {
+                const double expected = row == column ? 1.0 : 0.0;
+                CHECK(value(row, column) == Catch::Approx(expected).margin(margin));
+            }
+        }
+    }
 }// namespace
 
 TEST_CASE("Math matrices use explicit row-major storage", "[Math][Matrix]")
@@ -43,6 +59,7 @@ TEST_CASE("Math matrices compose compatible shapes", "[Math][Matrix]")
     const Matrix<double, 3, 2> right {7.0, 8.0, 9.0, 10.0, 11.0, 12.0};
     CHECK(left * right == Matrix2D {58.0, 64.0, 139.0, 154.0});
     CHECK(left * Vector3D {1.0, 0.0, -1.0} == Vector2D {-2.0, -2.0});
+    CHECK(Vector2D {1.0, -1.0} * left == Vector3D {-3.0, -3.0, -3.0});
     CHECK((Transpose(left) == Matrix<double, 3, 2> {1.0, 4.0, 2.0, 5.0, 3.0, 6.0}));
 
     CHECK(left + left == left * 2.0);
@@ -64,19 +81,83 @@ TEST_CASE("Math matrices provide checked inversion", "[Math][Matrix]")
     const auto     inverse = TryInverse(value);
     REQUIRE(inverse.has_value());
 
-    const Matrix3D identity = value * *inverse;
-    for (std::size_t row = 0; row < identity.Rows(); ++row)
-    {
-        for (std::size_t column = 0; column < identity.Columns(); ++column)
-        {
-            const double expected = row == column ? 1.0 : 0.0;
-            CHECK(identity(row, column) == Catch::Approx(expected).margin(1e-12));
-        }
-    }
+    CheckApproximatelyIdentity(value * *inverse);
 
     const Matrix2D needsPivot {0.0, 2.0, 1.0, 0.0};
     REQUIRE(TryInverse(needsPivot).has_value());
     CHECK(needsPivot * *TryInverse(needsPivot) == Matrix2D::Identity());
+}
+
+TEST_CASE("Math matrices provide unchecked fast inversion for non-singular inputs", "[Math][Matrix]")
+{
+    const Matrix2D value2 {4.0, 7.0, 2.0, 6.0};
+    CheckApproximatelyIdentity(value2 * Inverse(value2));
+
+    const Matrix3D value3 {3.0, 0.0, 2.0, 2.0, 0.0, -2.0, 0.0, 1.0, 1.0};
+    CheckApproximatelyIdentity(value3 * Inverse(value3));
+
+    const Matrix4D value4 {
+            5.0,
+            7.0,
+            9.0,
+            10.0,
+            2.0,
+            3.0,
+            3.0,
+            8.0,
+            8.0,
+            10.0,
+            2.0,
+            3.0,
+            3.0,
+            3.0,
+            4.0,
+            8.0,
+    };
+    CheckApproximatelyIdentity(value4 * Inverse(value4), 1e-10);
+
+    for (std::size_t sample = 0; sample < 32; ++sample)
+    {
+        Matrix4D generated;
+        for (std::size_t row = 0; row < 4; ++row)
+        {
+            for (std::size_t column = 0; column < 4; ++column)
+            {
+                const double phase     = static_cast<double>(sample * 16 + row * 4 + column + 1) * 0.17;
+                generated(row, column) = row == column ? 5.0 + std::sin(phase) : 0.25 * std::sin(phase);
+            }
+        }
+        CheckApproximatelyIdentity(generated * Inverse(generated), 1e-10);
+    }
+
+    const Matrix<double, 5, 5> value5 {
+            3.0,
+            1.0,
+            0.0,
+            0.0,
+            1.0,
+            1.0,
+            4.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            5.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            6.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            1.0,
+            7.0,
+    };
+    CheckApproximatelyIdentity(value5 * Inverse(value5), 1e-10);
 }
 
 TEST_CASE("Math matrix inversion rejects singular and tolerance-degenerate inputs", "[Math][Matrix]")

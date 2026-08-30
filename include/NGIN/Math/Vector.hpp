@@ -297,6 +297,16 @@ namespace NGIN::Math
         return Length(right - left);
     }
 
+    /// @brief Returns a normalized vector.
+    /// @pre The vector must have non-zero length.
+    /// @details Use TryNormalize() when degenerate inputs are possible.
+    template<std::floating_point T, std::size_t Dimension>
+    [[nodiscard]] Vector<T, Dimension> Normalize(const Vector<T, Dimension>& value)
+    {
+        const T reciprocalMagnitude = T {1} / std::sqrt(LengthSquared(value));
+        return value * reciprocalMagnitude;
+    }
+
     /// @brief Returns a normalized vector, or no value when its length is within the supplied tolerance of zero.
     template<std::floating_point T, std::size_t Dimension>
     [[nodiscard]] std::optional<Vector<T, Dimension>> TryNormalize(
@@ -307,7 +317,8 @@ namespace NGIN::Math
         const T absoluteTolerance = std::abs(tolerance);
         if (magnitudeSquared <= absoluteTolerance * absoluteTolerance)
             return std::nullopt;
-        return value / std::sqrt(magnitudeSquared);
+        const T reciprocalMagnitude = T {1} / std::sqrt(magnitudeSquared);
+        return value * reciprocalMagnitude;
     }
 
     /// @brief Computes the three-dimensional cross product.

@@ -62,6 +62,10 @@ TEST_CASE("Math vectors compute Euclidean geometry", "[Math][Vector]")
     CHECK(Length(value) == Catch::Approx(5.0));
     CHECK(Distance(value, Vector2D {0.0, 0.0}) == Catch::Approx(5.0));
 
+    const Vector2D fastNormalized = Normalize(value);
+    CHECK(fastNormalized.X() == Catch::Approx(0.6));
+    CHECK(fastNormalized.Y() == Catch::Approx(0.8));
+
     const auto normalized = TryNormalize(value);
     REQUIRE(normalized.has_value());
     CHECK(normalized->X() == Catch::Approx(0.6));
