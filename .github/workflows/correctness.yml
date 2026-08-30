@@ -1,0 +1,78 @@
+name: NGIN.Base correctness
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  native:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux GCC
+            os: ubuntu-latest
+            cc: gcc
+            cxx: g++
+          - name: Linux Clang
+            os: ubuntu-latest
+            cc: clang
+            cxx: clang++
+          - name: Windows MSVC
+            os: windows-latest
+            cc: ""
+            cxx: ""
+          - name: macOS AppleClang
+            os: macos-latest
+            cc: clang
+            cxx: clang++
+    runs-on: ${{ matrix.os }}
+    env:
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Initialize MSVC environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Configure
+        run: cmake --preset tests
+      - name: Build
+        run: cmake --build --preset tests-debug
+      - name: Test
+        run: ctest --test-dir build/tests -C Debug --output-on-failure -LE Base.Package
+
+  sanitizers:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ASan and UBSan
+            preset: tests-asan
+            build_preset: tests-asan-build
+          - name: TSan
+            preset: tests-tsan
+            build_preset: tests-tsan-build
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }}
+      - name: Build
+        run: cmake --build --preset ${{ matrix.build_preset }}
+      - name: Test
+        run: ctest --test-dir build/${{ matrix.preset }} -C RelWithDebInfo --output-on-failure -LE Base.Package
+
+  installed-consumers:
+    name: Installed component consumers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake --preset tests
+      - name: Build test metadata
+        run: cmake --build build/tests --config Debug --target NGINBasePublicHeaderChecks
+      - name: Test component packages
+        run: ctest --test-dir build/tests -C Debug --output-on-failure -L Base.Package

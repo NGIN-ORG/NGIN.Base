@@ -51,14 +51,19 @@ their public target links.
 
 Each component provides `NGIN::Base::<Component>::Static`,
 `NGIN::Base::<Component>::Shared`, and a preferred-form
-`NGIN::Base::<Component>` alias. `NGIN::Base::Static`, `NGIN::Base::Shared`,
-and `NGIN::Base` are interface aggregates over the corresponding components;
-they do not compile a second copy of component sources.
+`NGIN::Base::<Component>` alias. When all seven components are present,
+`NGIN::Base::Static`, `NGIN::Base::Shared`, and `NGIN::Base` are interface
+aggregates over the corresponding components; they do not compile a second
+copy of component sources. Subset builds intentionally omit these aggregates
+so `NGIN::Base` never changes meaning based on package contents.
 
 `NGIN_BASE_BUILD_COMPONENTS` accepts `all` or a semicolon-separated component
 list and computes its dependency closure. Installed package metadata exposes
 only the component targets that were built, and supports normal CMake component
 requests such as `find_package(NGINBase CONFIG REQUIRED COMPONENTS Foundation)`.
+Only headers in the enabled closure are installed. Optional OpenSSL discovery
+is deferred until a consumer requests `Crypto`, `NetTLS`, or the complete
+aggregate that needs it.
 
 ## Public-surface conventions
 
@@ -87,5 +92,6 @@ When tests are enabled, `NGINBasePublicHeaderChecks` compiles every public
 contract header in an independent translation unit. This catches accidental
 reliance on transitive includes. Detail headers are compiled through their
 owning public header. Component-focused tests link the narrow owning component.
-The external-consumer matrix links and runs the aggregate plus all seven
-components against both build-tree and installed package exports.
+The installed-consumer matrix configures isolated Foundation, Execution, Net,
+NetTLS, and complete packages, then links and runs a consumer against each
+installed export.

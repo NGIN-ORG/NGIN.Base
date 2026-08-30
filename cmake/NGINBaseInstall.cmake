@@ -3,10 +3,22 @@
 #-------------------------------------------------------------------------------
 include(GNUInstallDirs)
 
-install(
-  DIRECTORY include/
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-)
+# Install exactly the public-header closure owned by enabled components. A
+# subset package must not appear to provide APIs whose compiled component is
+# absent.
+foreach(component IN LISTS NGIN_BASE_ENABLED_COMPONENTS)
+  string(TOUPPER "${component}" component_upper)
+  foreach(public_header IN LISTS NGIN_BASE_${component_upper}_PUBLIC_HEADERS)
+    file(RELATIVE_PATH relative_header "${NGIN_BASE_ROOT_DIR}/include/NGIN" "${public_header}")
+    get_filename_component(relative_directory "${relative_header}" DIRECTORY)
+    if(relative_directory STREQUAL "")
+      set(header_destination "${CMAKE_INSTALL_INCLUDEDIR}/NGIN")
+    else()
+      set(header_destination "${CMAKE_INSTALL_INCLUDEDIR}/NGIN/${relative_directory}")
+    endif()
+    install(FILES "${public_header}" DESTINATION "${header_destination}")
+  endforeach()
+endforeach()
 
 install(
   TARGETS ${NGIN_BASE_EXPORT_TARGETS}

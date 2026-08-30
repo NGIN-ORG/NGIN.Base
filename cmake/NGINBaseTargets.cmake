@@ -6,6 +6,12 @@ include(GNUInstallDirs)
 set(NGIN_BASE_EXPORT_TARGETS)
 set(NGIN_BASE_STATIC_COMPONENT_TARGETS)
 set(NGIN_BASE_SHARED_COMPONENT_TARGETS)
+set(NGIN_BASE_HAS_COMPLETE_AGGREGATE TRUE)
+foreach(component IN LISTS NGIN_BASE_COMPONENTS)
+  if(NOT component IN_LIST NGIN_BASE_ENABLED_COMPONENTS)
+    set(NGIN_BASE_HAS_COMPLETE_AGGREGATE FALSE)
+  endif()
+endforeach()
 
 function(ngin_base_configure_component_target target_name component linkage)
   string(TOUPPER "${component}" component_upper)
@@ -26,6 +32,7 @@ function(ngin_base_configure_component_target target_name component linkage)
   target_compile_definitions(${target_name}
     PUBLIC
       ${NGIN_BASE_PLATFORM_DEFINITIONS}
+      NGIN_BASE_CAPTURE_EXCEPTION_STACKTRACE=$<BOOL:${NGIN_BASE_CAPTURE_EXCEPTION_STACKTRACE}>
     PRIVATE
       ${NGIN_BASE_${component_upper}_PRIVATE_DEFINITIONS}
   )
@@ -83,7 +90,7 @@ foreach(component IN LISTS NGIN_BASE_ENABLED_COMPONENTS)
   endif()
 endforeach()
 
-if(NGIN_BASE_BUILD_STATIC)
+if(NGIN_BASE_BUILD_STATIC AND NGIN_BASE_HAS_COMPLETE_AGGREGATE)
   add_library(NGIN.Base.Static INTERFACE)
   target_link_libraries(NGIN.Base.Static INTERFACE ${NGIN_BASE_STATIC_COMPONENT_TARGETS})
   set_target_properties(NGIN.Base.Static PROPERTIES EXPORT_NAME BaseStatic)
@@ -91,7 +98,7 @@ if(NGIN_BASE_BUILD_STATIC)
   list(APPEND NGIN_BASE_EXPORT_TARGETS NGIN.Base.Static)
 endif()
 
-if(NGIN_BASE_BUILD_SHARED)
+if(NGIN_BASE_BUILD_SHARED AND NGIN_BASE_HAS_COMPLETE_AGGREGATE)
   add_library(NGIN.Base.Shared INTERFACE)
   target_link_libraries(NGIN.Base.Shared INTERFACE ${NGIN_BASE_SHARED_COMPONENT_TARGETS})
   set_target_properties(NGIN.Base.Shared PROPERTIES EXPORT_NAME BaseShared)
@@ -107,10 +114,12 @@ foreach(component IN LISTS NGIN_BASE_ENABLED_COMPONENTS)
   endif()
 endforeach()
 
-if(NGIN_BASE_BUILD_SHARED)
-  add_library(NGIN::Base ALIAS NGIN.Base.Shared)
-else()
-  add_library(NGIN::Base ALIAS NGIN.Base.Static)
+if(NGIN_BASE_HAS_COMPLETE_AGGREGATE)
+  if(NGIN_BASE_BUILD_SHARED)
+    add_library(NGIN::Base ALIAS NGIN.Base.Shared)
+  else()
+    add_library(NGIN::Base ALIAS NGIN.Base.Static)
+  endif()
 endif()
 
 if(NGIN_BASE_BUILD_STATIC AND NGIN_BASE_BUILD_SHARED)

@@ -162,6 +162,41 @@ endif()
 
 ngin_base_configure_test_targets("${NGIN_BASE_TEST_TARGETS}")
 
+set(_ngin_base_package_matrix_root "${_base_binary_dir}/package-consumer-matrix")
+set(_ngin_base_package_matrix
+  "Foundation|Foundation|FALSE|NGIN/Primitives.hpp|NGIN/Async/Task.hpp"
+  "Execution|Execution|FALSE|NGIN/Async/Task.hpp|NGIN/IO/Path.hpp"
+  "Net|Net|FALSE|NGIN/Net.hpp|NGIN/Crypto/Crypto.hpp"
+  "NetTLS|NetTLS|TRUE|NGIN/NetTLS.hpp|NONE"
+  "all|Complete|TRUE|NGIN/NGIN.hpp|NONE"
+)
+foreach(matrix_entry IN LISTS _ngin_base_package_matrix)
+  string(REPLACE "|" ";" matrix_fields "${matrix_entry}")
+  list(GET matrix_fields 0 package_components)
+  list(GET matrix_fields 1 consumer_component)
+  list(GET matrix_fields 2 expect_aggregate)
+  list(GET matrix_fields 3 expected_header)
+  list(GET matrix_fields 4 absent_header)
+  add_test(
+    NAME "Base.Package.${consumer_component}.InstalledConsumer"
+    COMMAND "${CMAKE_COMMAND}"
+      "-DNGIN_BASE_SOURCE_DIR=${_base_root_dir}"
+      "-DNGIN_BASE_MATRIX_ROOT=${_ngin_base_package_matrix_root}"
+      "-DNGIN_BASE_TEST_GENERATOR=${CMAKE_GENERATOR}"
+      "-DNGIN_BASE_TEST_CONFIG=$<CONFIG>"
+      "-DNGIN_BASE_PACKAGE_COMPONENTS=${package_components}"
+      "-DNGIN_BASE_CONSUMER_COMPONENT=${consumer_component}"
+      "-DNGIN_BASE_EXPECT_AGGREGATE=${expect_aggregate}"
+      "-DNGIN_BASE_EXPECTED_HEADER=${expected_header}"
+      "-DNGIN_BASE_ABSENT_HEADER=${absent_header}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunInstalledConsumer.cmake"
+  )
+  set_tests_properties(
+    "Base.Package.${consumer_component}.InstalledConsumer"
+    PROPERTIES LABELS "Base.Package" TIMEOUT 900 RUN_SERIAL TRUE
+  )
+endforeach()
+
 if(TARGET IO_DynamicLibraryTests)
   add_dependencies(IO_DynamicLibraryTests NGINBaseDynamicLibraryFixture)
   set_target_properties(IO_DynamicLibraryTests PROPERTIES
