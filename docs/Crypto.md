@@ -20,7 +20,7 @@ the optional OpenSSL build path.
 Use the umbrella header when compile time is not a concern:
 
 ```cpp
-#include <NGIN/Crypto/Crypto.hpp>
+#include <NGIN/Crypto.hpp>
 ```
 
 Use leaf headers in public headers or hot build paths:

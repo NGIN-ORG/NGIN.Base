@@ -14,7 +14,7 @@
 #include <NGIN/Crypto/Kdf/Argon2id.hpp>
 #include <NGIN/Crypto/Kdf/Hkdf.hpp>
 #include <NGIN/Crypto/Kdf/Pbkdf2.hpp>
-#include <NGIN/Crypto/Mac/Mac.hpp>
+#include <NGIN/Crypto/Mac/MacOperations.hpp>
 #include <NGIN/Crypto/Random/RandomBytes.hpp>
 #include <NGIN/Crypto/Signatures/Sign.hpp>
 #include <NGIN/Crypto/Signatures/Verify.hpp>

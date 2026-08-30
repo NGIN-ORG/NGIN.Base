@@ -236,4 +236,3 @@ namespace NGIN::Execution::detail
 #else
 static_assert(false, "Fiber.win32.winfiber.inc included on non-Windows platform");
 #endif
-

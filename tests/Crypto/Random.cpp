@@ -1,4 +1,4 @@
-#include <NGIN/Crypto/Random/Random.hpp>
+#include <NGIN/Crypto/Random.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

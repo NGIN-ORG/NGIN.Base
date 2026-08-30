@@ -1,43 +1,25 @@
 #pragma once
 
 /// @file NGIN.hpp
-/// @brief Convenience surface for frequently used Foundation APIs.
+/// @brief Umbrella include for the complete Foundation component.
 ///
-/// Optional subsystems use focused umbrellas: Execution.hpp, IO.hpp, Net.hpp,
-/// Serialization.hpp, Crypto/Crypto.hpp, and NetTLS.hpp.
+/// Optional subsystems use focused umbrellas such as Async.hpp, Execution.hpp,
+/// IO.hpp, Net.hpp, Serialization.hpp, Crypto.hpp, and NetTLS.hpp.
 
 #include <NGIN/BaseVersion.hpp>
-#include <NGIN/Containers/FlatHashMap.hpp>
-#include <NGIN/Containers/Vector.hpp>
+#include <NGIN/Benchmark.hpp>
+#include <NGIN/Containers.hpp>
 #include <NGIN/Defines.hpp>
-#include <NGIN/Exceptions/Exception.hpp>
-#include <NGIN/Memory/AllocationHelpers.hpp>
-#include <NGIN/Memory/AllocatorConcept.hpp>
-#include <NGIN/Memory/DebugAllocator.hpp>
-#include <NGIN/Memory/FallbackAllocator.hpp>
-#include <NGIN/Memory/FixedBlockAllocator.hpp>
-#include <NGIN/Memory/HalfPointer.hpp>
-#include <NGIN/Memory/LinearAllocator.hpp>
-#include <NGIN/Memory/ObjectPool.hpp>
-#include <NGIN/Memory/SegregatedPoolAllocator.hpp>
-#include <NGIN/Memory/SystemAllocator.hpp>
-#include <NGIN/Memory/TrackingAllocator.hpp>
-#include <NGIN/Meta/EnumTraits.hpp>
-#include <NGIN/Meta/FunctionTraits.hpp>
-#include <NGIN/Meta/ReflectionIdentity.hpp>
-#include <NGIN/Meta/SymbolId.hpp>
-#include <NGIN/Meta/TypeId.hpp>
-#include <NGIN/Meta/TypeTraits.hpp>
+#include <NGIN/Exceptions.hpp>
+#include <NGIN/Hashing.hpp>
+#include <NGIN/Math.hpp>
+#include <NGIN/Memory.hpp>
+#include <NGIN/Meta.hpp>
 #include <NGIN/Primitives.hpp>
-#include <NGIN/Text/String.hpp>
-#include <NGIN/Text/Unicode.hpp>
+#include <NGIN/SIMD.hpp>
+#include <NGIN/Sync.hpp>
+#include <NGIN/Text.hpp>
+#include <NGIN/Time.hpp>
 #include <NGIN/Timer.hpp>
 #include <NGIN/Units.hpp>
-#include <NGIN/Utilities/Any.hpp>
-#include <NGIN/Utilities/Callable.hpp>
-#include <NGIN/Utilities/Expected.hpp>
-#include <NGIN/Utilities/LSBFlag.hpp>
-#include <NGIN/Utilities/MSBFlag.hpp>
-#include <NGIN/Utilities/Optional.hpp>
-#include <NGIN/Utilities/StringInterner.hpp>
-#include <NGIN/Utilities/SymbolTable.hpp>
+#include <NGIN/Utilities.hpp>

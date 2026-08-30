@@ -346,4 +346,3 @@ namespace NGIN::Execution::detail
 #else
 static_assert(false, "Fiber.posix.ucontext.inc included on unsupported platform");
 #endif
-

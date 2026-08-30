@@ -1,4 +1,4 @@
-/// @file Mac.hpp
+/// @file MacOperations.hpp
 /// @brief Algorithm-selected message-authentication operations.
 #pragma once
 

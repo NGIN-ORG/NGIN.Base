@@ -1,6 +1,6 @@
 #include <NGIN/Crypto/Mac/HmacSha256.hpp>
 #include <NGIN/Crypto/Mac/HmacSha512.hpp>
-#include <NGIN/Crypto/Mac/Mac.hpp>
+#include <NGIN/Crypto/Mac/MacOperations.hpp>
 
 #include <NGIN/Crypto/Encoding/Hex.hpp>
 

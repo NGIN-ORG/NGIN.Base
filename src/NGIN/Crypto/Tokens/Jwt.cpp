@@ -3,7 +3,7 @@
 #include <NGIN/Crypto/Asymmetric/Rsa.hpp>
 #include <NGIN/Crypto/Encoding/Base64Url.hpp>
 #include <NGIN/Crypto/Errors/CryptoError.hpp>
-#include <NGIN/Crypto/Mac/Mac.hpp>
+#include <NGIN/Crypto/Mac/MacOperations.hpp>
 #include <NGIN/Crypto/Signatures/Verify.hpp>
 #include <NGIN/Serialization/JSON/JsonParser.hpp>
 

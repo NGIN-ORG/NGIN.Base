@@ -1,4 +1,4 @@
-#include <NGIN/Crypto/Crypto.hpp>
+#include <NGIN/Crypto.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

@@ -1,15 +1,10 @@
 #pragma once
 
 /// @file Execution.hpp
-/// @brief Convenience surface for asynchronous work, schedulers, threads, and fibers.
+/// @brief Umbrella include for executors, schedulers, threads, and fibers.
 
-#include <NGIN/Async/AsyncGenerator.hpp>
-#include <NGIN/Async/Cancellation.hpp>
-#include <NGIN/Async/Generator.hpp>
-#include <NGIN/Async/Task.hpp>
-#include <NGIN/Async/TaskContext.hpp>
-#include <NGIN/Async/WhenAll.hpp>
-#include <NGIN/Async/WhenAny.hpp>
+#include <NGIN/Execution/Concepts.hpp>
+#include <NGIN/Execution/Config.hpp>
 #include <NGIN/Execution/CooperativeScheduler.hpp>
 #include <NGIN/Execution/ExecutorRef.hpp>
 #include <NGIN/Execution/Fiber.hpp>

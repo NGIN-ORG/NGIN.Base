@@ -14,7 +14,7 @@ set(NGIN_BASE_FOUNDATION_SOURCES
 )
 
 set(NGIN_BASE_EXECUTION_SOURCES
-  ${NGIN_BASE_ROOT_DIR}/src/Async/Fiber/FiberCommon.cpp
+  ${NGIN_BASE_ROOT_DIR}/src/NGIN/Execution/Fiber/FiberCommon.cpp
 )
 
 set(NGIN_BASE_IO_SOURCES
@@ -423,7 +423,7 @@ foreach(_ngin_component IN LISTS NGIN_BASE_COMPONENTS)
 endforeach()
 if(WIN32)
   list(APPEND NGIN_BASE_EXECUTION_SOURCES
-    ${NGIN_BASE_ROOT_DIR}/src/Async/Fiber/Fiber.win32.cpp
+    ${NGIN_BASE_ROOT_DIR}/src/NGIN/Execution/Fiber/Fiber.win32.cpp
     ${NGIN_BASE_ROOT_DIR}/src/NGIN/Execution/ThisThread.win32.cpp
     ${NGIN_BASE_ROOT_DIR}/src/NGIN/Execution/Thread.win32.cpp
   )
@@ -446,7 +446,7 @@ if(WIN32)
   )
 elseif(APPLE)
   list(APPEND NGIN_BASE_EXECUTION_SOURCES
-    ${NGIN_BASE_ROOT_DIR}/src/Async/Fiber/Fiber.posix.cpp
+    ${NGIN_BASE_ROOT_DIR}/src/NGIN/Execution/Fiber/Fiber.posix.cpp
     ${NGIN_BASE_ROOT_DIR}/src/NGIN/Execution/ThisThread.posix.cpp
     ${NGIN_BASE_ROOT_DIR}/src/NGIN/Execution/Thread.posix.cpp
   )
@@ -468,7 +468,7 @@ elseif(APPLE)
   )
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   list(APPEND NGIN_BASE_EXECUTION_SOURCES
-    ${NGIN_BASE_ROOT_DIR}/src/Async/Fiber/Fiber.posix.cpp
+    ${NGIN_BASE_ROOT_DIR}/src/NGIN/Execution/Fiber/Fiber.posix.cpp
     ${NGIN_BASE_ROOT_DIR}/src/NGIN/Execution/ThisThread.linux.cpp
     ${NGIN_BASE_ROOT_DIR}/src/NGIN/Execution/Thread.posix.cpp
   )
@@ -492,7 +492,7 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   )
 elseif(UNIX)
   list(APPEND NGIN_BASE_EXECUTION_SOURCES
-    ${NGIN_BASE_ROOT_DIR}/src/Async/Fiber/Fiber.posix.cpp
+    ${NGIN_BASE_ROOT_DIR}/src/NGIN/Execution/Fiber/Fiber.posix.cpp
     ${NGIN_BASE_ROOT_DIR}/src/NGIN/Execution/ThisThread.posix.cpp
     ${NGIN_BASE_ROOT_DIR}/src/NGIN/Execution/Thread.posix.cpp
   )
@@ -517,19 +517,19 @@ endif()
 if(UNIX AND NGIN_BASE_FIBER_BACKEND STREQUAL "custom_asm")
   if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$")
     list(APPEND NGIN_BASE_EXECUTION_SOURCES
-      ${NGIN_BASE_ROOT_DIR}/src/Async/Fiber/FiberContext.x86_64.cpp
+      ${NGIN_BASE_ROOT_DIR}/src/NGIN/Execution/Fiber/FiberContext.x86_64.cpp
     )
   elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
     list(APPEND NGIN_BASE_EXECUTION_SOURCES
-      ${NGIN_BASE_ROOT_DIR}/src/Async/Fiber/FiberContext.aarch64.cpp
+      ${NGIN_BASE_ROOT_DIR}/src/NGIN/Execution/Fiber/FiberContext.aarch64.cpp
     )
   endif()
 elseif(UNIX AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$")
   list(APPEND NGIN_BASE_EXECUTION_SOURCES
-    ${NGIN_BASE_ROOT_DIR}/src/Async/Fiber/FiberContext.x86_64.cpp
+    ${NGIN_BASE_ROOT_DIR}/src/NGIN/Execution/Fiber/FiberContext.x86_64.cpp
   )
 elseif(UNIX AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
   list(APPEND NGIN_BASE_EXECUTION_SOURCES
-    ${NGIN_BASE_ROOT_DIR}/src/Async/Fiber/FiberContext.aarch64.cpp
+    ${NGIN_BASE_ROOT_DIR}/src/NGIN/Execution/Fiber/FiberContext.aarch64.cpp
   )
 endif()

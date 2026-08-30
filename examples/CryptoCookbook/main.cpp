@@ -1,4 +1,4 @@
-#include <NGIN/Crypto/Crypto.hpp>
+#include <NGIN/Crypto.hpp>
 
 #include <array>
 #include <iostream>

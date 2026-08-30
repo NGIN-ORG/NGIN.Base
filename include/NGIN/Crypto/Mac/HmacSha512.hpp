@@ -2,7 +2,7 @@
 /// @brief Fixed-size HMAC-SHA-512 operations.
 #pragma once
 
-#include <NGIN/Crypto/Mac/Mac.hpp>
+#include <NGIN/Crypto/Mac/MacOperations.hpp>
 
 namespace NGIN::Crypto::Mac
 {

@@ -166,7 +166,7 @@ set(_ngin_base_package_matrix_root "${_base_binary_dir}/package-consumer-matrix"
 set(_ngin_base_package_matrix
   "Foundation|Foundation|FALSE|NGIN/Primitives.hpp|NGIN/Async/Task.hpp"
   "Execution|Execution|FALSE|NGIN/Async/Task.hpp|NGIN/IO/Path.hpp"
-  "Net|Net|FALSE|NGIN/Net.hpp|NGIN/Crypto/Crypto.hpp"
+  "Net|Net|FALSE|NGIN/Net.hpp|NGIN/Crypto.hpp"
   "NetTLS|NetTLS|TRUE|NGIN/NetTLS.hpp|NONE"
   "all|Complete|TRUE|NGIN/NGIN.hpp|NONE"
 )

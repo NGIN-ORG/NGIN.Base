@@ -28,21 +28,32 @@ set(NGIN_BASE_FOUNDATION_PUBLIC_HEADER_ROOTS
 set(NGIN_BASE_FOUNDATION_PUBLIC_HEADER_FILES
   Benchmark.hpp
   BaseVersion.hpp
+  Containers.hpp
   Defines.hpp
+  Exceptions.hpp
+  Hashing.hpp
+  Math.hpp
+  Memory.hpp
+  Meta.hpp
   NGIN.hpp
   Primitives.hpp
   SIMD.hpp
+  Sync.hpp
+  Text.hpp
+  Time.hpp
   Timer.hpp
   Units.hpp
+  Utilities.hpp
 )
 
 set(NGIN_BASE_EXECUTION_PUBLIC_HEADER_ROOTS Async Execution)
-set(NGIN_BASE_EXECUTION_PUBLIC_HEADER_FILES Execution.hpp)
+set(NGIN_BASE_EXECUTION_PUBLIC_HEADER_FILES Async.hpp Execution.hpp)
 set(NGIN_BASE_IO_PUBLIC_HEADER_ROOTS IO)
 set(NGIN_BASE_IO_PUBLIC_HEADER_FILES IO.hpp)
 set(NGIN_BASE_SERIALIZATION_PUBLIC_HEADER_ROOTS Serialization)
 set(NGIN_BASE_SERIALIZATION_PUBLIC_HEADER_FILES Serialization.hpp)
 set(NGIN_BASE_CRYPTO_PUBLIC_HEADER_ROOTS Crypto)
+set(NGIN_BASE_CRYPTO_PUBLIC_HEADER_FILES Crypto.hpp)
 set(NGIN_BASE_NET_PUBLIC_HEADER_ROOTS
   Net/Runtime
   Net/Sockets
@@ -57,9 +68,13 @@ set(NGIN_BASE_NET_PUBLIC_HEADER_FILES
   Net/ResolveSocketType.hpp
   Net/Resolve.hpp
   Net/ResolverDriver.hpp
+  Net/Runtime.hpp
+  Net/Sockets.hpp
+  Net/Transport.hpp
+  Net/Types.hpp
 )
 set(NGIN_BASE_NETTLS_PUBLIC_HEADER_ROOTS Net/TLS)
-set(NGIN_BASE_NETTLS_PUBLIC_HEADER_FILES NetTLS.hpp)
+set(NGIN_BASE_NETTLS_PUBLIC_HEADER_FILES Net/TLS.hpp NetTLS.hpp)
 
 file(GLOB_RECURSE NGIN_BASE_PUBLIC_HEADERS CONFIGURE_DEPENDS
   "${NGIN_BASE_ROOT_DIR}/include/NGIN/*.hpp"
@@ -67,10 +82,44 @@ file(GLOB_RECURSE NGIN_BASE_PUBLIC_HEADERS CONFIGURE_DEPENDS
 list(SORT NGIN_BASE_PUBLIC_HEADERS)
 set(NGIN_BASE_PUBLIC_CONTRACT_HEADERS)
 
+# Public module directories and their umbrellas are parallel: NGIN/Foo/ is
+# aggregated by NGIN/Foo.hpp, including nested modules. Implementation-only
+# detail directories do not expose umbrellas.
+file(GLOB_RECURSE NGIN_BASE_PUBLIC_HEADER_ENTRIES CONFIGURE_DEPENDS LIST_DIRECTORIES true
+  "${NGIN_BASE_ROOT_DIR}/include/NGIN/*"
+)
+foreach(public_entry IN LISTS NGIN_BASE_PUBLIC_HEADER_ENTRIES)
+  if(IS_DIRECTORY "${public_entry}")
+    file(RELATIVE_PATH relative_directory "${NGIN_BASE_ROOT_DIR}/include/NGIN" "${public_entry}")
+    string(REPLACE "\\" "/" relative_directory "${relative_directory}")
+    if(NOT relative_directory MATCHES "(^|/)detail($|/)")
+      set(umbrella_header "${public_entry}.hpp")
+      if(NOT EXISTS "${umbrella_header}")
+        message(FATAL_ERROR
+          "Public module directory 'NGIN/${relative_directory}/' requires parallel umbrella "
+          "'NGIN/${relative_directory}.hpp'"
+        )
+      endif()
+    endif()
+  endif()
+endforeach()
+
 foreach(public_header IN LISTS NGIN_BASE_PUBLIC_HEADERS)
   file(RELATIVE_PATH relative_header "${NGIN_BASE_ROOT_DIR}/include/NGIN" "${public_header}")
   string(REPLACE "\\" "/" relative_header "${relative_header}")
   set(header_components)
+
+  if(relative_header MATCHES "/" AND NOT relative_header MATCHES "(^|/)detail/")
+    get_filename_component(header_stem "${relative_header}" NAME_WE)
+    get_filename_component(header_directory "${relative_header}" DIRECTORY)
+    get_filename_component(directory_name "${header_directory}" NAME)
+    if(header_stem STREQUAL directory_name)
+      message(FATAL_ERROR
+        "Nested self-named header 'NGIN/${relative_header}' is not a valid umbrella location; "
+        "use the parallel 'NGIN/${header_directory}.hpp' surface"
+      )
+    endif()
+  endif()
 
   if(NOT relative_header MATCHES "(^|/)detail/")
     list(APPEND NGIN_BASE_PUBLIC_CONTRACT_HEADERS "${public_header}")

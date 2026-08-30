@@ -67,6 +67,13 @@ aggregate that needs it.
 
 ## Public-surface conventions
 
+- Every public module directory has a same-named sibling umbrella header. For
+  example, `NGIN/Crypto/` is aggregated by `NGIN/Crypto.hpp`, while
+  `NGIN/Crypto/Encoding/` is aggregated by `NGIN/Crypto/Encoding.hpp`.
+  Lowercase `detail/` directories and explicitly internal headers are excluded.
+- Parent umbrellas compose nested umbrellas where component boundaries allow.
+  `NGIN/Net.hpp` intentionally excludes TLS because NetTLS is a separately linked
+  component; use `NGIN/Net/TLS.hpp` or `NGIN/NetTLS.hpp` for that surface.
 - Central entry points are the documented subsystem umbrellas and the focused
   headers used by their examples.
 - A header or type explicitly marked experimental, currently including

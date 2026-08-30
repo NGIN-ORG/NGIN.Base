@@ -1,7 +1,8 @@
 # Execution, threads, and fibers
 
 `NGIN/Execution.hpp` is the focused umbrella for schedulers, native threads,
-fibers, and the Async task model.
+and fibers. The coroutine task model has its parallel `NGIN/Async.hpp`
+umbrella; include both when an implementation directly uses both areas.
 
 Use:
 
