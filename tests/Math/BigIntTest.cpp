@@ -5,6 +5,7 @@
 
 #include <NGIN/Math/BigInt.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <random>
 #include <sstream>
 #include <string>
 
@@ -12,13 +13,15 @@ using namespace NGIN::Math;
 
 TEST_CASE("NGIN::Math::BigInt", "[Math][BigInt]")
 {
-    SECTION("DefaultConstruction") {
+    SECTION("DefaultConstruction")
+    {
         BigInt a;
         CHECK(a == BigInt("0"));
         CHECK(a.IsZero());
     }
 
-    SECTION("StringConstruction") {
+    SECTION("StringConstruction")
+    {
         BigInt a("12345");
         BigInt b("-67890");
         CHECK(a == BigInt("12345"));
@@ -26,7 +29,8 @@ TEST_CASE("NGIN::Math::BigInt", "[Math][BigInt]")
         CHECK(a != b);
     }
 
-    SECTION("Addition") {
+    SECTION("Addition")
+    {
         BigInt a("123");
         BigInt b("456");
         CHECK((a + b) == BigInt("579"));
@@ -35,7 +39,8 @@ TEST_CASE("NGIN::Math::BigInt", "[Math][BigInt]")
         CHECK((BigInt("-123") + BigInt("23")) == BigInt("-100"));
     }
 
-    SECTION("Subtraction") {
+    SECTION("Subtraction")
+    {
         BigInt a("1000");
         BigInt b("1");
         CHECK((a - b) == BigInt("999"));
@@ -43,7 +48,7 @@ TEST_CASE("NGIN::Math::BigInt", "[Math][BigInt]")
         CHECK((BigInt("-1000") - BigInt("-1")) == BigInt("-999"));
         CHECK((BigInt("1000") - BigInt("-1")) == BigInt("1001"));
     };
-    
+
     SECTION("Multiplication")
     {
         BigInt a("123");
@@ -104,6 +109,68 @@ TEST_CASE("NGIN::Math::BigInt", "[Math][BigInt]")
         CHECK((BigInt("-1") / BigInt("1")) == BigInt("-1"));
         CHECK((BigInt("1") / BigInt("-1")) == BigInt("-1"));
         CHECK((BigInt("-1") / BigInt("-1")) == BigInt("1"));
+
+        // Regression: the former tiny-number path subtracted the divisor once
+        // per quotient unit, making this otherwise small division impractical.
+        const BigInt adverseDividend("999999999999999999999999999999999999");
+        const BigInt adverseDivisor("1000000000");
+        CHECK((adverseDividend / adverseDivisor) == BigInt("999999999999999999999999999"));
+        CHECK((adverseDividend % adverseDivisor) == BigInt("999999999"));
+    }
+
+    SECTION("DivRem")
+    {
+        const BigInt dividend("1234567890123456789012345678901234567890");
+        const BigInt divisor("9876543210987654321");
+        const auto [quotient, remainder] = dividend.DivRem(divisor);
+        CHECK(dividend == divisor * quotient + remainder);
+        CHECK(remainder >= BigInt(0));
+        CHECK(remainder < divisor);
+        CHECK(quotient == dividend / divisor);
+        CHECK(remainder == dividend % divisor);
+
+        const auto [negativeQuotient, negativeRemainder] = (-dividend).DivRem(divisor);
+        CHECK(-dividend == divisor * negativeQuotient + negativeRemainder);
+        CHECK(negativeRemainder < BigInt(0));
+        CHECK((-dividend).DivRem(-divisor) == std::pair {-negativeQuotient, negativeRemainder});
+
+        CHECK_THROWS_AS(dividend.DivRem(BigInt(0)), std::runtime_error);
+        CHECK_THROWS_AS(BigInt::DivByUInt32(dividend, 0), std::runtime_error);
+    }
+
+    SECTION("RandomizedDivisionIdentities")
+    {
+        std::mt19937_64 random(0x4e47494eULL);
+        for (int iteration = 0; iteration < 2048; ++iteration)
+        {
+            const NGIN::UInt64 dividend      = random();
+            const NGIN::UInt64 divisor       = random() | 1ULL;
+            const auto [quotient, remainder] = BigInt(dividend).DivRem(BigInt(divisor));
+            CAPTURE(iteration, dividend, divisor);
+            CHECK(quotient == BigInt(dividend / divisor));
+            CHECK(remainder == BigInt(dividend % divisor));
+        }
+
+        const auto randomDecimal = [](std::mt19937_64& generator, NGIN::UIntSize digits) {
+            std::string value;
+            value.reserve(digits);
+            value.push_back(static_cast<char>('1' + generator() % 9));
+            for (NGIN::UIntSize i = 1; i < digits; ++i)
+                value.push_back(static_cast<char>('0' + generator() % 10));
+            return value;
+        };
+        for (int iteration = 0; iteration < 128; ++iteration)
+        {
+            const NGIN::UIntSize dividendDigits = 50 + random() % 550;
+            const NGIN::UIntSize divisorDigits  = 10 + random() % (dividendDigits - 9);
+            const BigInt         dividend(randomDecimal(random, dividendDigits));
+            const BigInt         divisor(randomDecimal(random, divisorDigits));
+            const auto [quotient, remainder] = dividend.DivRem(divisor);
+            CAPTURE(iteration, dividendDigits, divisorDigits);
+            CHECK(dividend == divisor * quotient + remainder);
+            CHECK(remainder >= BigInt(0));
+            CHECK(remainder < divisor);
+        }
     }
 
     SECTION("Modulo")
@@ -186,6 +253,8 @@ TEST_CASE("NGIN::Math::BigInt", "[Math][BigInt]")
         CHECK(BigInt("0") + BigInt("0") == BigInt("0"));
         CHECK(BigInt("0") - BigInt("0") == BigInt("0"));
         CHECK(BigInt("0") * BigInt("0") == BigInt("0"));
+        CHECK(BigInt("-123") + BigInt("123") == BigInt("0"));
+        CHECK(BigInt("-123") - BigInt("-123") == BigInt("0"));
     }
 
     SECTION("OutputOperator")

@@ -7,7 +7,8 @@ time, distance, rate, or storage units would be costly.
 
 `NGIN/Math/Ratio.hpp` supplies ratio arithmetic used by conversion code.
 `NGIN/Math/BigInt.hpp` provides large integer operations for workloads that
-cannot fit the primitive integer domain.
+cannot fit the primitive integer domain. Use `BigInt::DivRem()` when both the
+quotient and remainder are needed so division is performed once.
 
 Choose representation types according to range and precision requirements;
 unit typing prevents dimensional mistakes but cannot prevent numeric overflow.

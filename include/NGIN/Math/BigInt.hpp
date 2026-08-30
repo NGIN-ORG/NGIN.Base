@@ -1,10 +1,13 @@
 #pragma once
 #include <NGIN/Primitives.hpp>
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
 #include <iomanip>
 #include <iostream>
+#include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 namespace NGIN::Math
 {
@@ -13,23 +16,20 @@ namespace NGIN::Math
     {
 
     public:
-        // Helper: divide BigInt by UInt32 (for unnormalizing remainder)
+        /// @brief Divides a value by one base limb and optionally returns the remainder.
         static BigInt
         DivByUInt32(const BigInt& value, UInt32 divisor, UInt32* outRemainder = nullptr)
         {
-            BigInt result;
-            result.m_digits.resize(value.m_digits.size());
-            UInt64 rem = 0;
-            for (Int64 i = value.m_digits.size() - 1; i >= 0; --i)
-            {
-                UInt64 cur         = value.m_digits[i] + rem * BASE;
-                result.m_digits[i] = static_cast<UInt32>(cur / divisor);
-                rem                = cur % divisor;
-            }
+            if (divisor == 0)
+                throw std::runtime_error("Division by zero");
+
+            BigInt result(UninitializedTag {});
+            result.m_digits = value.m_digits;
+            UInt32 rem      = DivideDigitsByUInt32(result.m_digits, divisor);
             result.Trim();
             result.m_negative = value.m_negative;
             if (outRemainder)
-                *outRemainder = static_cast<UInt32>(rem);
+                *outRemainder = rem;
             return result;
         }
         // Construct from std::string
@@ -42,7 +42,7 @@ namespace NGIN::Math
             m_negative = false;
             if (value == 0)
             {
-                m_digits = std::vector<UInt32>{0};
+                m_digits = std::vector<UInt32> {0};
             }
             else
             {
@@ -142,75 +142,78 @@ namespace NGIN::Math
             m_negative     = (str[0] == '-');
             UIntSize start = m_negative ? 1 : 0;
             m_digits.clear();
-            UIntSize            len = std::strlen(str);
-            std::vector<UInt32> temp_digits;
-            for (Int64 i = len; i > static_cast<Int64>(start); i -= BASE_DIGITS)
+            UIntSize len = std::strlen(str);
+            m_digits.reserve((len - start + BASE_DIGITS - 1) / BASE_DIGITS);
+            for (UIntSize end = len; end > start;)
             {
-                UInt32 block = 0;
-                for (Int64 j = std::max(static_cast<Int64>(start), i - BASE_DIGITS); j < i; ++j)
+                const UIntSize begin = end - start > BASE_DIGITS ? end - BASE_DIGITS : start;
+                UInt32         block = 0;
+                for (UIntSize j = begin; j < end; ++j)
                 {
-                    block = block * 10 + (str[j] - '0');
+                    block = block * 10 + static_cast<UInt32>(str[j] - '0');
                 }
-                temp_digits.push_back(block);
+                m_digits.push_back(block);
+                end = begin;
             }
-            m_digits = temp_digits;
             Trim();
-            // Normalize zero: always non-negative
-            if (IsZero())
-                m_negative = false;
         }
 
         // Addition operator
         BigInt operator+(const BigInt& other) const
         {
+            BigInt result(UninitializedTag {});
             if (m_negative == other.m_negative)
             {
-                BigInt result;
                 result.m_negative = m_negative;
                 result.m_digits   = AddDigits(m_digits, other.m_digits);
                 result.Trim();
                 return result;
             }
-            // Mixed sign: a + (-b) == a - b, (-a) + b == b - a
-            if (m_negative)
-                return other - (-*this);
+
+            if (AbsLess(*this, other))
+            {
+                result.m_negative = other.m_negative;
+                result.m_digits   = SubtractDigits(other.m_digits, m_digits);
+            }
             else
-                return *this - (-other);
+            {
+                result.m_negative = m_negative;
+                result.m_digits   = SubtractDigits(m_digits, other.m_digits);
+            }
+            result.Trim();
+            return result;
         }
 
         // Subtraction operator
         BigInt operator-(const BigInt& other) const
         {
-            if (m_negative == other.m_negative)
+            BigInt result(UninitializedTag {});
+            if (m_negative != other.m_negative)
             {
-                if (AbsLess(*this, other))
-                {
-                    BigInt result;
-                    result.m_negative = !m_negative;
-                    result.m_digits   = SubtractDigits(other.m_digits, m_digits);
-                    result.Trim();
-                    return result;
-                }
-                else
-                {
-                    BigInt result;
-                    result.m_negative = m_negative;
-                    result.m_digits   = SubtractDigits(m_digits, other.m_digits);
-                    result.Trim();
-                    return result;
-                }
+                result.m_negative = m_negative;
+                result.m_digits   = AddDigits(m_digits, other.m_digits);
+                result.Trim();
+                return result;
             }
-            // Mixed sign: a - (-b) == a + b, (-a) - b == -(a + b)
-            if (m_negative)
-                return -((-*this) + other);
+
+            if (AbsLess(*this, other))
+            {
+                result.m_negative = !m_negative;
+                result.m_digits   = SubtractDigits(other.m_digits, m_digits);
+            }
             else
-                return *this + (-other);
+            {
+                result.m_negative = m_negative;
+                result.m_digits   = SubtractDigits(m_digits, other.m_digits);
+            }
+            result.Trim();
+            return result;
         }
 
         // Multiplication operator
         BigInt operator*(const BigInt& other) const
         {
-            BigInt result;
+            BigInt result(UninitializedTag {});
             result.m_negative = m_negative != other.m_negative;
             result.m_digits   = MultiplyDigits(m_digits, other.m_digits);
             result.Trim();
@@ -220,12 +223,8 @@ namespace NGIN::Math
         // Division operator
         BigInt operator/(const BigInt& other) const
         {
-            if (other.IsZero())
-                throw std::runtime_error("Division by zero");
-            BigInt quotient, remainder;
-            DivMod(*this, other, quotient, remainder);
-            // Truncate towards zero (C++/Python semantics)
-            return quotient;
+            std::pair<BigInt, BigInt> result = DivRem(other);
+            return std::move(result.first);
         }
 
         // Modulo operator
@@ -233,12 +232,22 @@ namespace NGIN::Math
         {
             if (other.IsZero())
                 throw std::runtime_error("Modulo by zero");
-            BigInt quotient, remainder;
-            DivMod(*this, other, quotient, remainder);
-            // Set remainder sign to match dividend (C++/Python semantics)
-            if (m_negative && !remainder.IsZero())
-                remainder = -remainder;
-            return remainder;
+            std::pair<BigInt, BigInt> result = DivRem(other);
+            return std::move(result.second);
+        }
+
+        /// @brief Divides this value and returns the quotient and remainder from one traversal.
+        /// @param divisor Value to divide by; must be non-zero.
+        /// @return Quotient truncated toward zero and remainder with the dividend's sign.
+        [[nodiscard]] std::pair<BigInt, BigInt> DivRem(const BigInt& divisor) const
+        {
+            if (divisor.IsZero())
+                throw std::runtime_error("Division by zero");
+
+            BigInt quotient(UninitializedTag {});
+            BigInt remainder(UninitializedTag {});
+            DivMod(*this, divisor, quotient, remainder);
+            return {std::move(quotient), std::move(remainder)};
         }
 
         // Unary minus
@@ -309,6 +318,12 @@ namespace NGIN::Math
         }
 
     private:
+        struct UninitializedTag
+        {
+        };
+
+        explicit BigInt(UninitializedTag) noexcept {}
+
         static constexpr UInt32 BASE        = 1000000000;// 10^9
         static constexpr UInt32 BASE_DIGITS = 9;         // Number of decimal digits per element
         std::vector<UInt32>     m_digits {};             // Least significant digit first
@@ -316,26 +331,28 @@ namespace NGIN::Math
 
         static std::vector<UInt32> AddDigits(const std::vector<UInt32>& a, const std::vector<UInt32>& b)
         {
-            std::vector<UInt32> result;
-            result.reserve(std::max(a.size(), b.size()) + 1);
-            UIntSize n     = std::max(a.size(), b.size());
-            UInt64   carry = 0;
-            for (UIntSize i = 0; i < n || carry; ++i)
+            const UIntSize      n = std::max(a.size(), b.size());
+            std::vector<UInt32> result(n + 1, 0);
+            UInt64              carry = 0;
+            for (UIntSize i = 0; i < n; ++i)
             {
                 UInt64 d1  = i < a.size() ? a[i] : 0;
                 UInt64 d2  = i < b.size() ? b[i] : 0;
                 UInt64 sum = d1 + d2 + carry;
-                result.push_back(static_cast<UInt32>(sum % BASE));
-                carry = sum / BASE;
+                result[i]  = static_cast<UInt32>(sum % BASE);
+                carry      = sum / BASE;
             }
+            if (carry)
+                result[n] = static_cast<UInt32>(carry);
+            else
+                result.pop_back();
             return result;
         }
 
         static std::vector<UInt32> SubtractDigits(const std::vector<UInt32>& a, const std::vector<UInt32>& b)
         {
-            std::vector<UInt32> result;
-            result.reserve(a.size());
-            Int64 borrow = 0;
+            std::vector<UInt32> result(a.size(), 0);
+            Int64               borrow = 0;
             for (UIntSize i = 0; i < a.size(); ++i)
             {
                 Int64 d1  = a[i];
@@ -350,12 +367,44 @@ namespace NGIN::Math
                 {
                     borrow = 0;
                 }
-                result.push_back(static_cast<UInt32>(sub));
+                result[i] = static_cast<UInt32>(sub);
             }
             // Remove leading zeros
             while (result.size() > 1 && result.back() == 0)
                 result.pop_back();
             return result;
+        }
+
+        static std::vector<UInt32> MultiplyDigitsByUInt32(const std::vector<UInt32>& digits, UInt32 factor)
+        {
+            if (factor == 0 || (digits.size() == 1 && digits[0] == 0))
+                return {0};
+
+            std::vector<UInt32> result(digits.size(), 0);
+            UInt64              carry = 0;
+            for (UIntSize i = 0; i < digits.size(); ++i)
+            {
+                const UInt64 product = static_cast<UInt64>(digits[i]) * factor + carry;
+                result[i]            = static_cast<UInt32>(product % BASE);
+                carry                = product / BASE;
+            }
+            if (carry)
+                result.push_back(static_cast<UInt32>(carry));
+            return result;
+        }
+
+        static UInt32 DivideDigitsByUInt32(std::vector<UInt32>& digits, UInt32 divisor)
+        {
+            UInt64 remainder = 0;
+            for (UIntSize i = digits.size(); i-- > 0;)
+            {
+                const UInt64 current = digits[i] + remainder * BASE;
+                digits[i]            = static_cast<UInt32>(current / divisor);
+                remainder            = current % divisor;
+            }
+            while (digits.size() > 1 && digits.back() == 0)
+                digits.pop_back();
+            return static_cast<UInt32>(remainder);
         }
 
         static std::vector<UInt32> MultiplyDigits(
@@ -393,12 +442,13 @@ namespace NGIN::Math
 
             // split each operand at `half`
             auto split = [&](const std::vector<UInt32>& v) {
-                size_t cut = std::min(half, v.size());
+                size_t     cut    = std::min(half, v.size());
+                const auto offset = static_cast<std::ptrdiff_t>(cut);
                 return std::pair<
                         std::vector<UInt32>,
                         std::vector<UInt32>> {
-                        std::vector<UInt32>(v.begin(), v.begin() + cut),
-                        std::vector<UInt32>(v.begin() + cut, v.end())};
+                        std::vector<UInt32>(v.begin(), v.begin() + offset),
+                        std::vector<UInt32>(v.begin() + offset, v.end())};
             };
             auto [a_low, a_high] = split(a);
             auto [b_low, b_high] = split(b);
@@ -448,8 +498,6 @@ namespace NGIN::Math
 
         static void DivMod(const BigInt& a, const BigInt& b, BigInt& q, BigInt& r)
         {
-            size_t n = a.m_digits.size();
-            size_t m = b.m_digits.size();
             if (b.IsZero())
                 throw std::runtime_error("Division by zero");
             if (a.IsZero())
@@ -458,179 +506,121 @@ namespace NGIN::Math
                 r = BigInt(0);
                 return;
             }
-            if (AbsLess(a.Abs(), b.Abs()))
+            if (AbsLess(a, b))
             {
                 q = BigInt(0);
                 r = a;
                 return;
             }
-            if (m == 1)
+            if (b.m_digits.size() == 1)
             {
                 DivModBySingleLimb(a, b.m_digits[0], q, r);
             }
-            else if (n <= 4 && m <= 4)
-            {
-                NaiveDivMod(a, b, q, r);
-            }
-            else if (n < 256 && m < 256)
+            else
             {
                 KnuthDivMod(a, b, q, r);
             }
-            else
-            {
-                // Burnikel–Ziegler or Newton–Raphson for huge numbers
-
-                FastDivMod(a, b, q, r);
-            }
-            // Set quotient sign
             q.m_negative = (a.m_negative != b.m_negative) && !q.IsZero();
-            // Set remainder sign to match dividend
-            // if (a.m_negative && !r.IsZero())
-            //     r = -r;
+            r.m_negative = a.m_negative && !r.IsZero();
         }
 
         // --- Division helpers ---
         static void DivModBySingleLimb(const BigInt& a, UInt32 b, BigInt& q, BigInt& r)
         {
-            // Fast path: divide a by a single-limb b
-            q          = DivByUInt32(a.Abs(), b, nullptr);
-            UInt32 rem = 0;
-            DivByUInt32(a.Abs(), b, &rem);
-            r = BigInt(rem);
-        }
-
-        static void NaiveDivMod(const BigInt& a, const BigInt& b, BigInt& q, BigInt& r)
-        {
-            // Schoolbook division for tiny numbers
-            BigInt dividend = a.Abs();
-            BigInt divisor  = b.Abs();
-            q               = BigInt(0);
-            r               = dividend;
-            while (!AbsLess(r, divisor))
-            {
-                r = r - divisor;
-                q = q + BigInt(1);
-            }
+            UInt32 rem   = 0;
+            q            = DivByUInt32(a, b, &rem);
+            q.m_negative = false;
+            r            = BigInt(rem);
         }
 
         static void KnuthDivMod(const BigInt& a, const BigInt& b, BigInt& q, BigInt& r)
         {
-            using UInt           = UInt32;
-            BigInt      dividend = a.Abs();
-            BigInt      divisor  = b.Abs();
-            std::size_t n        = dividend.m_digits.size();
-            q.m_digits.assign(n, 0);
-            BigInt rem(0);
-            for (int i = int(n) - 1; i >= 0; --i)
+            const UIntSize divisorSize   = b.m_digits.size();
+            const UIntSize quotientSize  = a.m_digits.size() - divisorSize + 1;
+            const UInt32   normalization = BASE / (b.m_digits.back() + 1);
+
+            std::vector<UInt32> dividend = MultiplyDigitsByUInt32(a.m_digits, normalization);
+            std::vector<UInt32> divisor  = MultiplyDigitsByUInt32(b.m_digits, normalization);
+            dividend.resize(a.m_digits.size() + 1, 0);
+
+            q.m_digits.assign(quotientSize, 0);
+            q.m_negative = false;
+
+            for (UIntSize position = quotientSize; position-- > 0;)
             {
-                rem.m_digits.insert(rem.m_digits.begin(), dividend.m_digits[i]);
-                rem.Trim();
-                UInt low = 0, high = BASE - 1, qd = 0;
-                while (low <= high)
+                const UInt64 numerator =
+                        static_cast<UInt64>(dividend[position + divisorSize]) * BASE +
+                        dividend[position + divisorSize - 1];
+                UInt64 quotientDigit     = numerator / divisor.back();
+                UInt64 estimateRemainder = numerator % divisor.back();
+
+                if (quotientDigit == BASE)
                 {
-                    UInt   mid  = low + ((high - low) >> 1);
-                    BigInt prod = divisor * BigInt(mid);
-                    if (prod <= rem)
+                    --quotientDigit;
+                    estimateRemainder += divisor.back();
+                }
+                while (estimateRemainder < BASE &&
+                       quotientDigit * divisor[divisorSize - 2] >
+                               estimateRemainder * BASE + dividend[position + divisorSize - 2])
+                {
+                    --quotientDigit;
+                    estimateRemainder += divisor.back();
+                }
+
+                UInt64 borrow = 0;
+                for (UIntSize i = 0; i < divisorSize; ++i)
+                {
+                    const UInt64 product = quotientDigit * divisor[i] + borrow;
+                    const UInt32 low     = static_cast<UInt32>(product % BASE);
+                    borrow               = product / BASE;
+                    if (dividend[position + i] < low)
                     {
-                        qd  = mid;
-                        low = mid + 1;
+                        dividend[position + i] =
+                                static_cast<UInt32>(dividend[position + i] + BASE - low);
+                        ++borrow;
                     }
                     else
                     {
-                        high = mid - 1;
+                        dividend[position + i] -= low;
                     }
                 }
-                q.m_digits[i] = qd;
-                if (qd)
+
+                const bool overestimated         = dividend[position + divisorSize] < borrow;
+                dividend[position + divisorSize] = static_cast<UInt32>(
+                        dividend[position + divisorSize] + (overestimated ? BASE : 0) - borrow);
+                if (overestimated)
                 {
-                    BigInt prod = divisor * BigInt(qd);
-                    rem         = rem - prod;
+                    --quotientDigit;
+                    UInt64 carry = 0;
+                    for (UIntSize i = 0; i < divisorSize; ++i)
+                    {
+                        const UInt64 sum =
+                                static_cast<UInt64>(dividend[position + i]) + divisor[i] + carry;
+                        if (sum >= BASE)
+                        {
+                            dividend[position + i] = static_cast<UInt32>(sum - BASE);
+                            carry                  = 1;
+                        }
+                        else
+                        {
+                            dividend[position + i] = static_cast<UInt32>(sum);
+                            carry                  = 0;
+                        }
+                    }
+                    dividend[position + divisorSize] = static_cast<UInt32>(
+                            (dividend[position + divisorSize] + carry) % BASE);
                 }
+                q.m_digits[position] = static_cast<UInt32>(quotientDigit);
             }
+
             q.Trim();
-            r = rem;
-        }
-
-        static void FastDivMod(const BigInt& a, const BigInt& b, BigInt& q, BigInt& r)
-        {
-            // Burnikel–Ziegler division for huge numbers (blockwise recursive)
-            // This is a simplified version for demonstration, not fully optimized
-            // Reference: https://hal.inria.fr/inria-00072854/document
-            const size_t n = a.m_digits.size();
-            const size_t m = b.m_digits.size();
-            if (m == 0 || b.IsZero())
-                throw std::runtime_error("Division by zero");
-            if (n < m || a.IsZero())
-            {
-                q = BigInt(0);
-                r = a;
-                return;
-            }
-            // For small cases, fallback to Knuth
-            if (n < 512 || m < 32)
-            {
-                KnuthDivMod(a, b, q, r);
-                return;
-            }
-
-            // Choose block size k (must be >= m/2)
-            size_t k = (m + 1) / 2;
-            // Split a and b into blocks of k limbs
-            auto split_blocks = [](const BigInt& x, size_t blocksize) -> std::vector<BigInt> {
-                std::vector<BigInt> blocks;
-                size_t              total = x.m_digits.size();
-                for (size_t i = 0; i < total; i += blocksize)
-                {
-                    std::vector<UInt32> part;
-                    for (size_t j = i; j < std::min(i + blocksize, total); ++j)
-                        part.push_back(x.m_digits[j]);
-                    BigInt bpart;
-                    bpart.m_digits   = part;
-                    bpart.m_negative = false;
-                    bpart.Trim();
-                    blocks.push_back(bpart);
-                }
-                return blocks;
-            };
-
-            // Helper: shift left by k limbs (multiply by BASE^k)
-            auto shift_left_limbs = [](const BigInt& x, size_t limbs) -> BigInt {
-                if (x.IsZero())
-                    return x;
-                BigInt res = x;
-                res.m_digits.insert(res.m_digits.begin(), limbs, 0);
-                return res;
-            };
-
-            // Split a and b
-            std::vector<BigInt> a_blocks = split_blocks(a.Abs(), k);
-            std::vector<BigInt> b_blocks = split_blocks(b.Abs(), k);
-
-            // Compose b_hat = b shifted to align with a's highest block
-            size_t t     = a_blocks.size() - b_blocks.size();
-            BigInt b_hat = shift_left_limbs(b.Abs(), t * k);
-
-            BigInt rem = a.Abs();
-            q          = BigInt(0);
-            for (size_t i = t + 1; i-- > 0;)
-            {
-                // Estimate quotient digit for this block
-                BigInt qhat, rhat;
-                KnuthDivMod(rem, b_hat, qhat, rhat);
-                // q = q * BASE^{k} + qhat
-                q = shift_left_limbs(q, k);
-                q = q + qhat;
-                // rem = rhat
-                rem = rhat;
-                // Shift b_hat right by k limbs for next block
-                if (b_hat.m_digits.size() > k)
-                    b_hat.m_digits.erase(b_hat.m_digits.begin(), b_hat.m_digits.begin() + k);
-                else
-                    b_hat = BigInt(0);
-                b_hat.Trim();
-            }
-            q.Trim();
-            r = rem;
+            r.m_digits.assign(
+                    dividend.begin(),
+                    dividend.begin() + static_cast<std::ptrdiff_t>(divisorSize));
+            r.m_negative = false;
+            if (normalization != 1)
+                DivideDigitsByUInt32(r.m_digits, normalization);
+            r.Trim();
         }
 
 
@@ -638,7 +628,7 @@ namespace NGIN::Math
         {
             if (a.m_digits.size() != b.m_digits.size())
                 return a.m_digits.size() < b.m_digits.size();
-            for (Int64 i = a.m_digits.size() - 1; i >= 0; --i)
+            for (UIntSize i = a.m_digits.size(); i-- > 0;)
             {
                 if (a.m_digits[i] != b.m_digits[i])
                     return a.m_digits[i] < b.m_digits[i];
@@ -646,17 +636,14 @@ namespace NGIN::Math
             return false;
         }
 
-        [[nodiscard]] BigInt Abs() const
-        {
-            BigInt result     = *this;
-            result.m_negative = false;
-            return result;
-        }
-
         void Trim()
         {
+            if (m_digits.empty())
+                m_digits.push_back(0);
             while (m_digits.size() > 1 && m_digits.back() == 0)
                 m_digits.pop_back();
+            if (IsZero())
+                m_negative = false;
         }
     };
 }// namespace NGIN::Math
