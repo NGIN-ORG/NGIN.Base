@@ -10,10 +10,37 @@
 #include <span>
 #include <type_traits>
 
+#include "NGIN/Defines.hpp"
 #include "NGIN/SIMD/Vec.hpp"
 
 namespace NGIN::SIMD
 {
+    /// @brief Runtime-dispatched byte search using the best linked backend supported by the current CPU.
+    [[nodiscard]] NGIN_FOUNDATION_API auto FindEqByteRuntime(const std::uint8_t* data,
+                                                             std::size_t         length,
+                                                             std::uint8_t        value) noexcept -> std::size_t;
+
+    /// @brief Runtime-dispatched search for either byte candidate.
+    [[nodiscard]] NGIN_FOUNDATION_API auto FindAnyByteRuntime(const std::uint8_t* data,
+                                                              std::size_t         length,
+                                                              std::uint8_t        a,
+                                                              std::uint8_t        b) noexcept -> std::size_t;
+
+    /// @brief Runtime-dispatched search for any of three byte candidates.
+    [[nodiscard]] NGIN_FOUNDATION_API auto FindAnyByteRuntime(const std::uint8_t* data,
+                                                              std::size_t         length,
+                                                              std::uint8_t        a,
+                                                              std::uint8_t        b,
+                                                              std::uint8_t        c) noexcept -> std::size_t;
+
+    /// @brief Runtime-dispatched search for any of four byte candidates.
+    [[nodiscard]] NGIN_FOUNDATION_API auto FindAnyByteRuntime(const std::uint8_t* data,
+                                                              std::size_t         length,
+                                                              std::uint8_t        a,
+                                                              std::uint8_t        b,
+                                                              std::uint8_t        c,
+                                                              std::uint8_t        d) noexcept -> std::size_t;
+
     namespace detail
     {
         template<class Byte>
@@ -29,6 +56,86 @@ namespace NGIN::SIMD
             }
         }
     }// namespace detail
+
+    /// @brief Runtime-dispatched byte search for any one-byte element type.
+    template<class Byte>
+        requires(sizeof(Byte) == 1 && !std::is_same_v<std::remove_cv_t<Byte>, std::uint8_t>)
+    [[nodiscard]] inline auto FindEqByteRuntime(const Byte* data, std::size_t length, Byte value) noexcept -> std::size_t
+    {
+        return FindEqByteRuntime(reinterpret_cast<const std::uint8_t*>(data), length, detail::ToU8(value));
+    }
+
+    /// @brief Runtime-dispatched span search for one byte value.
+    template<class Byte>
+        requires(sizeof(Byte) == 1)
+    [[nodiscard]] inline auto FindEqByteRuntime(std::span<const Byte> data, Byte value) noexcept -> std::size_t
+    {
+        return FindEqByteRuntime(data.data(), data.size(), value);
+    }
+
+    template<class Byte>
+        requires(sizeof(Byte) == 1 && !std::is_same_v<std::remove_cv_t<Byte>, std::uint8_t>)
+    [[nodiscard]] inline auto FindAnyByteRuntime(const Byte* data, std::size_t length, Byte a, Byte b) noexcept -> std::size_t
+    {
+        return FindAnyByteRuntime(reinterpret_cast<const std::uint8_t*>(data), length, detail::ToU8(a), detail::ToU8(b));
+    }
+
+    template<class Byte>
+        requires(sizeof(Byte) == 1)
+    [[nodiscard]] inline auto FindAnyByteRuntime(std::span<const Byte> data, Byte a, Byte b) noexcept -> std::size_t
+    {
+        return FindAnyByteRuntime(data.data(), data.size(), a, b);
+    }
+
+    template<class Byte>
+        requires(sizeof(Byte) == 1 && !std::is_same_v<std::remove_cv_t<Byte>, std::uint8_t>)
+    [[nodiscard]] inline auto FindAnyByteRuntime(const Byte* data,
+                                                 std::size_t length,
+                                                 Byte        a,
+                                                 Byte        b,
+                                                 Byte        c) noexcept -> std::size_t
+    {
+        return FindAnyByteRuntime(reinterpret_cast<const std::uint8_t*>(data),
+                                  length,
+                                  detail::ToU8(a),
+                                  detail::ToU8(b),
+                                  detail::ToU8(c));
+    }
+
+    template<class Byte>
+        requires(sizeof(Byte) == 1)
+    [[nodiscard]] inline auto FindAnyByteRuntime(std::span<const Byte> data, Byte a, Byte b, Byte c) noexcept -> std::size_t
+    {
+        return FindAnyByteRuntime(data.data(), data.size(), a, b, c);
+    }
+
+    template<class Byte>
+        requires(sizeof(Byte) == 1 && !std::is_same_v<std::remove_cv_t<Byte>, std::uint8_t>)
+    [[nodiscard]] inline auto FindAnyByteRuntime(const Byte* data,
+                                                 std::size_t length,
+                                                 Byte        a,
+                                                 Byte        b,
+                                                 Byte        c,
+                                                 Byte        d) noexcept -> std::size_t
+    {
+        return FindAnyByteRuntime(reinterpret_cast<const std::uint8_t*>(data),
+                                  length,
+                                  detail::ToU8(a),
+                                  detail::ToU8(b),
+                                  detail::ToU8(c),
+                                  detail::ToU8(d));
+    }
+
+    template<class Byte>
+        requires(sizeof(Byte) == 1)
+    [[nodiscard]] inline auto FindAnyByteRuntime(std::span<const Byte> data,
+                                                 Byte                  a,
+                                                 Byte                  b,
+                                                 Byte                  c,
+                                                 Byte                  d) noexcept -> std::size_t
+    {
+        return FindAnyByteRuntime(data.data(), data.size(), a, b, c, d);
+    }
 
     /// @brief Returns the first index equal to @p value, or @p length when not found.
     /// @pre `Byte` is a one-byte type; @p data may be null only when @p length is zero.

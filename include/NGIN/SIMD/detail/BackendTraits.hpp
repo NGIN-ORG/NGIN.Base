@@ -16,14 +16,14 @@
 
 #include "NGIN/SIMD/Tags.hpp"
 
-#if defined(__AVX2__)
+#if NGIN_SIMD_HAS_AVX512 || NGIN_SIMD_HAS_AVX2
 #include <immintrin.h>
-#elif defined(__SSE2__)
+#elif NGIN_SIMD_HAS_SSE2
 #include <emmintrin.h>
 #include <xmmintrin.h>
 #endif
 
-#if defined(__ARM_NEON)
+#if NGIN_SIMD_HAS_NEON
 #include <arm_neon.h>
 #endif
 
@@ -74,33 +74,126 @@ namespace NGIN::SIMD::detail
         {
             static_assert(Lanes > 0, "Mask lane count must be positive.");
 
+            using word_type                       = std::uint64_t;
+            static constexpr int       word_bits  = 64;
+            static constexpr int       word_count = (Lanes + word_bits - 1) / word_bits;
+            static constexpr int       tail_lanes = Lanes % word_bits;
+            static constexpr word_type tail_mask  = tail_lanes == 0
+                                                            ? ~word_type {0}
+                                                            : (word_type {1} << tail_lanes) - 1;
+
             constexpr ArrayMaskStorage() noexcept = default;
             constexpr explicit ArrayMaskStorage(bool value) noexcept
             {
-                bits.fill(value);
+                words.fill(value ? ~word_type {0} : word_type {0});
+                words.back() &= tail_mask;
             }
 
             [[nodiscard]] constexpr auto Get(int index) const noexcept -> bool
             {
-                return bits[static_cast<std::size_t>(index)];
+                const auto lane = static_cast<unsigned>(index);
+                return ((words[lane / word_bits] >> (lane % word_bits)) & word_type {1}) != 0;
             }
 
             constexpr void Set(int index, bool value) noexcept
             {
-                bits[static_cast<std::size_t>(index)] = value;
+                const auto lane = static_cast<unsigned>(index);
+                const auto bit  = word_type {1} << (lane % word_bits);
+                auto&      word = words[lane / word_bits];
+                word            = value ? (word | bit) : (word & ~bit);
             }
 
-            [[nodiscard]] constexpr auto Data() noexcept -> bool*
+            [[nodiscard]] constexpr auto Data() noexcept -> word_type*
             {
-                return bits.data();
+                return words.data();
             }
 
-            [[nodiscard]] constexpr auto Data() const noexcept -> const bool*
+            [[nodiscard]] constexpr auto Data() const noexcept -> const word_type*
             {
-                return bits.data();
+                return words.data();
             }
 
-            std::array<bool, static_cast<std::size_t>(Lanes)> bits {};
+            [[nodiscard]] constexpr auto ToBits() const noexcept -> word_type
+                requires(Lanes <= word_bits)
+            {
+                return words[0] & tail_mask;
+            }
+
+            constexpr void SetBits(word_type bits) noexcept
+                requires(Lanes <= word_bits)
+            {
+                words[0] = bits & tail_mask;
+            }
+
+            [[nodiscard]] constexpr auto BitNot() const noexcept -> ArrayMaskStorage
+            {
+                ArrayMaskStorage result;
+                for (int index = 0; index < word_count; ++index)
+                {
+                    result.words[static_cast<std::size_t>(index)] = ~words[static_cast<std::size_t>(index)];
+                }
+                result.words.back() &= tail_mask;
+                return result;
+            }
+
+            [[nodiscard]] constexpr auto BitAnd(const ArrayMaskStorage& other) const noexcept -> ArrayMaskStorage
+            {
+                ArrayMaskStorage result;
+                for (int index = 0; index < word_count; ++index)
+                {
+                    result.words[static_cast<std::size_t>(index)] =
+                            words[static_cast<std::size_t>(index)] & other.words[static_cast<std::size_t>(index)];
+                }
+                return result;
+            }
+
+            [[nodiscard]] constexpr auto BitOr(const ArrayMaskStorage& other) const noexcept -> ArrayMaskStorage
+            {
+                ArrayMaskStorage result;
+                for (int index = 0; index < word_count; ++index)
+                {
+                    result.words[static_cast<std::size_t>(index)] =
+                            words[static_cast<std::size_t>(index)] | other.words[static_cast<std::size_t>(index)];
+                }
+                return result;
+            }
+
+            [[nodiscard]] constexpr auto BitXor(const ArrayMaskStorage& other) const noexcept -> ArrayMaskStorage
+            {
+                ArrayMaskStorage result;
+                for (int index = 0; index < word_count; ++index)
+                {
+                    result.words[static_cast<std::size_t>(index)] =
+                            words[static_cast<std::size_t>(index)] ^ other.words[static_cast<std::size_t>(index)];
+                }
+                return result;
+            }
+
+            [[nodiscard]] constexpr auto Any() const noexcept -> bool
+            {
+                for (const word_type word: words)
+                {
+                    if (word != 0)
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            [[nodiscard]] constexpr auto All() const noexcept -> bool
+            {
+                for (int index = 0; index + 1 < word_count; ++index)
+                {
+                    if (words[static_cast<std::size_t>(index)] != ~word_type {0})
+                    {
+                        return false;
+                    }
+                }
+                return words.back() == tail_mask;
+            }
+
+            std::array<word_type, static_cast<std::size_t>(word_count)> words {};
         };
 
         template<class T>
@@ -169,6 +262,34 @@ namespace NGIN::SIMD::detail
                 return std::bit_cast<T>(~currentBits);
             }
         }
+
+#if NGIN_SIMD_HAS_NEON
+        [[nodiscard]] inline auto NeonByteMaskToBits(uint8x16_t value) noexcept -> std::uint16_t
+        {
+#if defined(__aarch64__) || defined(_M_ARM64)
+            alignas(16) static constexpr std::uint8_t weights[16] {
+                    1, 2, 4, 8, 16, 32, 64, 128,
+                    1, 2, 4, 8, 16, 32, 64, 128};
+            const uint8x16_t    laneBits = vshrq_n_u8(value, 7);
+            const uint8x16_t    weighted = vmulq_u8(laneBits, vld1q_u8(weights));
+            const uint16x8_t    sums16   = vpaddlq_u8(weighted);
+            const uint32x4_t    sums32   = vpaddlq_u16(sums16);
+            const uint64x2_t    sums64   = vpaddlq_u32(sums32);
+            const std::uint64_t low      = vgetq_lane_u64(sums64, 0);
+            const std::uint64_t high     = vgetq_lane_u64(sums64, 1);
+            return static_cast<std::uint16_t>(low | (high << 8));
+#else
+            alignas(16) std::uint8_t lanes[16];
+            vst1q_u8(lanes, value);
+            std::uint16_t bits = 0;
+            for (int lane = 0; lane < 16; ++lane)
+            {
+                bits |= static_cast<std::uint16_t>((lanes[lane] >> 7) << lane);
+            }
+            return bits;
+#endif
+        }
+#endif
     }// namespace backend_detail
 
     template<class Backend, class T>
@@ -190,6 +311,8 @@ namespace NGIN::SIMD::detail
         {
             using StorageType = Storage<Lanes>;
             using MaskType    = MaskStorage<Lanes>;
+
+            static constexpr bool has_native_overrides = false;
 
             static constexpr auto Load(const T* pointer) noexcept -> StorageType
             {
@@ -570,66 +693,38 @@ namespace NGIN::SIMD::detail
 
             static constexpr auto MaskNot(const MaskType& mask) noexcept -> MaskType
             {
-                MaskType result {};
-                for (int lane = 0; lane < Lanes; ++lane)
-                {
-                    result.Set(lane, !mask.Get(lane));
-                }
-                return result;
+                return mask.BitNot();
             }
 
             static constexpr auto MaskAnd(const MaskType& lhs, const MaskType& rhs) noexcept -> MaskType
             {
-                MaskType result {};
-                for (int lane = 0; lane < Lanes; ++lane)
-                {
-                    result.Set(lane, lhs.Get(lane) && rhs.Get(lane));
-                }
-                return result;
+                return lhs.BitAnd(rhs);
             }
 
             static constexpr auto MaskOr(const MaskType& lhs, const MaskType& rhs) noexcept -> MaskType
             {
-                MaskType result {};
-                for (int lane = 0; lane < Lanes; ++lane)
-                {
-                    result.Set(lane, lhs.Get(lane) || rhs.Get(lane));
-                }
-                return result;
+                return lhs.BitOr(rhs);
             }
 
             static constexpr auto MaskXor(const MaskType& lhs, const MaskType& rhs) noexcept -> MaskType
             {
-                MaskType result {};
-                for (int lane = 0; lane < Lanes; ++lane)
-                {
-                    result.Set(lane, lhs.Get(lane) != rhs.Get(lane));
-                }
-                return result;
+                return lhs.BitXor(rhs);
             }
 
             static constexpr auto MaskAny(const MaskType& mask) noexcept -> bool
             {
-                for (int lane = 0; lane < Lanes; ++lane)
-                {
-                    if (mask.Get(lane))
-                    {
-                        return true;
-                    }
-                }
-                return false;
+                return mask.Any();
             }
 
             static constexpr auto MaskAll(const MaskType& mask) noexcept -> bool
             {
-                for (int lane = 0; lane < Lanes; ++lane)
-                {
-                    if (!mask.Get(lane))
-                    {
-                        return false;
-                    }
-                }
-                return true;
+                return mask.All();
+            }
+
+            static constexpr auto MaskToBits(const MaskType& mask) noexcept -> std::uint64_t
+                requires(Lanes <= 64)
+            {
+                return mask.ToBits();
             }
         };
     };
@@ -640,7 +735,7 @@ namespace NGIN::SIMD::detail
         static constexpr int native_lanes = BackendTraits<ScalarTag, T>::native_lanes;
     };
 
-#if defined(__SSE2__)
+#if NGIN_SIMD_HAS_SSE2
     template<>
     struct BackendTraits<SSE2Tag, float> : BackendTraits<ScalarTag, float>
     {
@@ -692,14 +787,12 @@ namespace NGIN::SIMD::detail
         using Storage  = BackendTraits<SSE2Tag, std::int32_t>::template Storage<BackendTraits<SSE2Tag, std::int32_t>::native_lanes>;
         using MaskType = BackendTraits<SSE2Tag, bool>::template MaskStorage<BackendTraits<SSE2Tag, std::int32_t>::native_lanes>;
 
+        static constexpr bool has_native_overrides = true;
+
         static inline auto MaskFromRegister(__m128i reg) noexcept -> MaskType
         {
-            MaskType  mask {};
-            const int bitmask = _mm_movemask_ps(_mm_castsi128_ps(reg));
-            for (int lane = 0; lane < BackendTraits<SSE2Tag, std::int32_t>::native_lanes; ++lane)
-            {
-                mask.Set(lane, ((bitmask >> lane) & 0x1) != 0);
-            }
+            MaskType mask {};
+            mask.SetBits(static_cast<std::uint8_t>(_mm_movemask_ps(_mm_castsi128_ps(reg))));
             return mask;
         }
 
@@ -921,13 +1014,12 @@ namespace NGIN::SIMD::detail
         using Storage  = BackendTraits<SSE2Tag, std::uint8_t>::template Storage<BackendTraits<SSE2Tag, std::uint8_t>::native_lanes>;
         using MaskType = BackendTraits<SSE2Tag, bool>::template MaskStorage<BackendTraits<SSE2Tag, std::uint8_t>::native_lanes>;
 
+        static constexpr bool has_native_overrides = true;
+
         static inline auto MaskFromBitmask(int bitmask) noexcept -> MaskType
         {
             MaskType mask {};
-            for (int lane = 0; lane < BackendTraits<SSE2Tag, std::uint8_t>::native_lanes; ++lane)
-            {
-                mask.Set(lane, ((bitmask >> lane) & 0x1) != 0);
-            }
+            mask.SetBits(static_cast<std::uint16_t>(bitmask));
             return mask;
         }
 
@@ -1051,13 +1143,12 @@ namespace NGIN::SIMD::detail
         using Storage  = BackendTraits<SSE2Tag, std::int8_t>::template Storage<BackendTraits<SSE2Tag, std::int8_t>::native_lanes>;
         using MaskType = BackendTraits<SSE2Tag, bool>::template MaskStorage<BackendTraits<SSE2Tag, std::int8_t>::native_lanes>;
 
+        static constexpr bool has_native_overrides = true;
+
         static inline auto MaskFromBitmask(int bitmask) noexcept -> MaskType
         {
             MaskType mask {};
-            for (int lane = 0; lane < BackendTraits<SSE2Tag, std::int8_t>::native_lanes; ++lane)
-            {
-                mask.Set(lane, ((bitmask >> lane) & 0x1) != 0);
-            }
+            mask.SetBits(static_cast<std::uint16_t>(bitmask));
             return mask;
         }
 
@@ -1173,14 +1264,12 @@ namespace NGIN::SIMD::detail
         using Storage  = BackendTraits<SSE2Tag, float>::template Storage<BackendTraits<SSE2Tag, float>::native_lanes>;
         using MaskType = BackendTraits<SSE2Tag, float>::template MaskStorage<BackendTraits<SSE2Tag, float>::native_lanes>;
 
+        static constexpr bool has_native_overrides = true;
+
         static inline auto MaskFromRegister(__m128 reg) noexcept -> MaskType
         {
-            MaskType  mask {};
-            const int bitmask = _mm_movemask_ps(reg);
-            for (int lane = 0; lane < BackendTraits<SSE2Tag, float>::native_lanes; ++lane)
-            {
-                mask.Set(lane, ((bitmask >> lane) & 0x1) != 0);
-            }
+            MaskType mask {};
+            mask.SetBits(static_cast<std::uint8_t>(_mm_movemask_ps(reg)));
             return mask;
         }
 
@@ -1427,14 +1516,12 @@ namespace NGIN::SIMD::detail
         using Storage  = BackendTraits<SSE2Tag, double>::template Storage<BackendTraits<SSE2Tag, double>::native_lanes>;
         using MaskType = BackendTraits<SSE2Tag, double>::template MaskStorage<BackendTraits<SSE2Tag, double>::native_lanes>;
 
+        static constexpr bool has_native_overrides = true;
+
         static inline auto MaskFromRegister(__m128d reg) noexcept -> MaskType
         {
-            MaskType  mask {};
-            const int bitmask = _mm_movemask_pd(reg);
-            for (int lane = 0; lane < BackendTraits<SSE2Tag, double>::native_lanes; ++lane)
-            {
-                mask.Set(lane, ((bitmask >> lane) & 0x1) != 0);
-            }
+            MaskType mask {};
+            mask.SetBits(static_cast<std::uint8_t>(_mm_movemask_pd(reg)));
             return mask;
         }
 
@@ -1620,9 +1707,9 @@ namespace NGIN::SIMD::detail
             return _mm_movemask_pd(MakeMask(mask)) == 0x3;
         }
     };
-#endif// defined(__SSE2__)
+#endif// NGIN_SIMD_HAS_SSE2
 
-#if defined(__AVX2__)
+#if NGIN_SIMD_HAS_AVX2
     template<>
     struct BackendTraits<AVX2Tag, float> : BackendTraits<SSE2Tag, float>
     {
@@ -1693,13 +1780,12 @@ namespace NGIN::SIMD::detail
         using Storage  = BackendTraits<AVX2Tag, std::uint8_t>::template Storage<BackendTraits<AVX2Tag, std::uint8_t>::native_lanes>;
         using MaskType = BackendTraits<AVX2Tag, bool>::template MaskStorage<BackendTraits<AVX2Tag, std::uint8_t>::native_lanes>;
 
+        static constexpr bool has_native_overrides = true;
+
         static inline auto MaskFromBitmask(int bitmask) noexcept -> MaskType
         {
             MaskType mask {};
-            for (int lane = 0; lane < BackendTraits<AVX2Tag, std::uint8_t>::native_lanes; ++lane)
-            {
-                mask.Set(lane, ((bitmask >> lane) & 0x1) != 0);
-            }
+            mask.SetBits(static_cast<std::uint32_t>(bitmask));
             return mask;
         }
 
@@ -1823,13 +1909,12 @@ namespace NGIN::SIMD::detail
         using Storage  = BackendTraits<AVX2Tag, std::int8_t>::template Storage<BackendTraits<AVX2Tag, std::int8_t>::native_lanes>;
         using MaskType = BackendTraits<AVX2Tag, bool>::template MaskStorage<BackendTraits<AVX2Tag, std::int8_t>::native_lanes>;
 
+        static constexpr bool has_native_overrides = true;
+
         static inline auto MaskFromBitmask(int bitmask) noexcept -> MaskType
         {
             MaskType mask {};
-            for (int lane = 0; lane < BackendTraits<AVX2Tag, std::int8_t>::native_lanes; ++lane)
-            {
-                mask.Set(lane, ((bitmask >> lane) & 0x1) != 0);
-            }
+            mask.SetBits(static_cast<std::uint32_t>(bitmask));
             return mask;
         }
 
@@ -1936,9 +2021,9 @@ namespace NGIN::SIMD::detail
             return MaskFromBitmask(_mm256_movemask_epi8(_mm256_or_si256(eqMask, gtMask)));
         }
     };
-#endif// defined(__AVX2__)
+#endif// NGIN_SIMD_HAS_AVX2
 
-#if defined(__ARM_NEON)
+#if NGIN_SIMD_HAS_AVX2
 
     template<>
     struct BackendTraits<AVX2Tag, float>::Ops<BackendTraits<AVX2Tag, float>::native_lanes>
@@ -1947,14 +2032,12 @@ namespace NGIN::SIMD::detail
         using Storage  = BackendTraits<AVX2Tag, float>::template Storage<BackendTraits<AVX2Tag, float>::native_lanes>;
         using MaskType = BackendTraits<AVX2Tag, float>::template MaskStorage<BackendTraits<AVX2Tag, float>::native_lanes>;
 
+        static constexpr bool has_native_overrides = true;
+
         static inline auto MaskFromRegister(__m256 reg) noexcept -> MaskType
         {
-            MaskType  mask {};
-            const int bitmask = _mm256_movemask_ps(reg);
-            for (int lane = 0; lane < BackendTraits<AVX2Tag, float>::native_lanes; ++lane)
-            {
-                mask.Set(lane, ((bitmask >> lane) & 0x1) != 0);
-            }
+            MaskType mask {};
+            mask.SetBits(static_cast<std::uint8_t>(_mm256_movemask_ps(reg)));
             return mask;
         }
 
@@ -2240,14 +2323,12 @@ namespace NGIN::SIMD::detail
         using Storage  = BackendTraits<AVX2Tag, double>::template Storage<BackendTraits<AVX2Tag, double>::native_lanes>;
         using MaskType = BackendTraits<AVX2Tag, double>::template MaskStorage<BackendTraits<AVX2Tag, double>::native_lanes>;
 
+        static constexpr bool has_native_overrides = true;
+
         static inline auto MaskFromRegister(__m256d reg) noexcept -> MaskType
         {
-            MaskType  mask {};
-            const int bitmask = _mm256_movemask_pd(reg);
-            for (int lane = 0; lane < BackendTraits<AVX2Tag, double>::native_lanes; ++lane)
-            {
-                mask.Set(lane, ((bitmask >> lane) & 0x1) != 0);
-            }
+            MaskType mask {};
+            mask.SetBits(static_cast<std::uint8_t>(_mm256_movemask_pd(reg)));
             return mask;
         }
 
@@ -2470,9 +2551,9 @@ namespace NGIN::SIMD::detail
             return _mm256_movemask_pd(MakeMask(mask)) == 0xF;
         }
     };
-#endif// defined(__AVX2__)
+#endif// NGIN_SIMD_HAS_AVX2
 
-#if defined(__ARM_NEON)
+#if NGIN_SIMD_HAS_NEON
     template<>
     struct BackendTraits<NeonTag, float> : BackendTraits<ScalarTag, float>
     {
@@ -2491,6 +2572,10 @@ namespace NGIN::SIMD::detail
         {
         };
     };
+
+#endif// NGIN_SIMD_HAS_NEON
+
+#if NGIN_SIMD_HAS_AVX2
 
     template<>
     struct BackendTraits<AVX2Tag, std::int32_t> : BackendTraits<SSE2Tag, std::int32_t>
@@ -2519,14 +2604,12 @@ namespace NGIN::SIMD::detail
         using Storage  = BackendTraits<AVX2Tag, std::int32_t>::template Storage<BackendTraits<AVX2Tag, std::int32_t>::native_lanes>;
         using MaskType = BackendTraits<AVX2Tag, bool>::template MaskStorage<BackendTraits<AVX2Tag, std::int32_t>::native_lanes>;
 
+        static constexpr bool has_native_overrides = true;
+
         static inline auto MaskFromRegister(__m256i reg) noexcept -> MaskType
         {
-            MaskType  mask {};
-            const int bitmask = _mm256_movemask_ps(_mm256_castsi256_ps(reg));
-            for (int lane = 0; lane < BackendTraits<AVX2Tag, std::int32_t>::native_lanes; ++lane)
-            {
-                mask.Set(lane, ((bitmask >> lane) & 0x1) != 0);
-            }
+            MaskType mask {};
+            mask.SetBits(static_cast<std::uint8_t>(_mm256_movemask_ps(_mm256_castsi256_ps(reg))));
             return mask;
         }
 
@@ -2736,12 +2819,19 @@ namespace NGIN::SIMD::detail
             return result;
         }
     };
+
+#endif// NGIN_SIMD_HAS_AVX2
+
+#if NGIN_SIMD_HAS_NEON
+    template<>
     struct BackendTraits<NeonTag, float>::Ops<BackendTraits<NeonTag, float>::native_lanes>
         : BackendTraits<NeonTag, float>::Base::template Ops<BackendTraits<NeonTag, float>::native_lanes>
     {
         using BaseOps  = BackendTraits<NeonTag, float>::Base::template Ops<BackendTraits<NeonTag, float>::native_lanes>;
         using Storage  = BackendTraits<NeonTag, float>::template Storage<BackendTraits<NeonTag, float>::native_lanes>;
         using MaskType = BackendTraits<NeonTag, float>::template MaskStorage<BackendTraits<NeonTag, float>::native_lanes>;
+
+        static constexpr bool has_native_overrides = true;
 
         static inline auto MaskFromRegister(uint32x4_t reg) noexcept -> MaskType
         {
@@ -2878,27 +2968,27 @@ namespace NGIN::SIMD::detail
 
         static auto CompareEq(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
         {
-            return MaskFromRegister(vreinterpretq_u32_f32(vceqq_f32(vld1q_f32(lhs.Data()), vld1q_f32(rhs.Data()))));
+            return MaskFromRegister(vceqq_f32(vld1q_f32(lhs.Data()), vld1q_f32(rhs.Data())));
         }
 
         static auto CompareLt(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
         {
-            return MaskFromRegister(vreinterpretq_u32_f32(vcltq_f32(vld1q_f32(lhs.Data()), vld1q_f32(rhs.Data()))));
+            return MaskFromRegister(vcltq_f32(vld1q_f32(lhs.Data()), vld1q_f32(rhs.Data())));
         }
 
         static auto CompareLe(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
         {
-            return MaskFromRegister(vreinterpretq_u32_f32(vcleq_f32(vld1q_f32(lhs.Data()), vld1q_f32(rhs.Data()))));
+            return MaskFromRegister(vcleq_f32(vld1q_f32(lhs.Data()), vld1q_f32(rhs.Data())));
         }
 
         static auto CompareGt(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
         {
-            return MaskFromRegister(vreinterpretq_u32_f32(vcgtq_f32(vld1q_f32(lhs.Data()), vld1q_f32(rhs.Data()))));
+            return MaskFromRegister(vcgtq_f32(vld1q_f32(lhs.Data()), vld1q_f32(rhs.Data())));
         }
 
         static auto CompareGe(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
         {
-            return MaskFromRegister(vreinterpretq_u32_f32(vcgeq_f32(vld1q_f32(lhs.Data()), vld1q_f32(rhs.Data()))));
+            return MaskFromRegister(vcgeq_f32(vld1q_f32(lhs.Data()), vld1q_f32(rhs.Data())));
         }
 
         static auto MaskNot(const MaskType& mask) noexcept -> MaskType
@@ -2978,6 +3068,8 @@ namespace NGIN::SIMD::detail
         using Storage  = BackendTraits<NeonTag, double>::template Storage<BackendTraits<NeonTag, double>::native_lanes>;
         using MaskType = BackendTraits<NeonTag, double>::template MaskStorage<BackendTraits<NeonTag, double>::native_lanes>;
 
+        static constexpr bool has_native_overrides = true;
+
         static inline auto MaskFromRegister(uint64x2_t reg) noexcept -> MaskType
         {
             alignas(16) uint64_t bits[BackendTraits<NeonTag, double>::native_lanes];
@@ -3030,7 +3122,8 @@ namespace NGIN::SIMD::detail
             const float64x2_t loadVec = vld1q_f64(pointer);
             const float64x2_t fillVec = vdupq_n_f64(fill);
             const uint64x2_t  blended = vorrq_u64(vandq_u64(maskVec, vreinterpretq_u64_f64(loadVec)),
-                                                  vandq_u64(vmvnq_u64(maskVec), vreinterpretq_u64_f64(fillVec)));
+                                                  vandq_u64(veorq_u64(maskVec, vdupq_n_u64(~std::uint64_t {0})),
+                                                            vreinterpretq_u64_f64(fillVec)));
             Storage           result;
             vst1q_f64(result.Data(), vreinterpretq_f64_u64(blended));
             return result;
@@ -3041,7 +3134,9 @@ namespace NGIN::SIMD::detail
             const uint64x2_t maskVec  = MakeMask(mask);
             const uint64x2_t srcBits  = vreinterpretq_u64_f64(vld1q_f64(storage.Data()));
             const uint64x2_t destBits = vreinterpretq_u64_f64(vld1q_f64(pointer));
-            const uint64x2_t blended  = vorrq_u64(vandq_u64(maskVec, srcBits), vandq_u64(vmvnq_u64(maskVec), destBits));
+            const uint64x2_t blended  = vorrq_u64(
+                    vandq_u64(maskVec, srcBits),
+                    vandq_u64(veorq_u64(maskVec, vdupq_n_u64(~std::uint64_t {0})), destBits));
             vst1q_f64(pointer, vreinterpretq_f64_u64(blended));
         }
 
@@ -3105,12 +3200,12 @@ namespace NGIN::SIMD::detail
 
         static auto CompareEq(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
         {
-            return MaskFromRegister(vreinterpretq_u64_f64(vceqq_f64(vld1q_f64(lhs.Data()), vld1q_f64(rhs.Data()))));
+            return MaskFromRegister(vceqq_f64(vld1q_f64(lhs.Data()), vld1q_f64(rhs.Data())));
         }
 
         static auto MaskNot(const MaskType& mask) noexcept -> MaskType
         {
-            return MaskFromRegister(vmvnq_u64(MakeMask(mask)));
+            return MaskFromRegister(veorq_u64(MakeMask(mask), vdupq_n_u64(~std::uint64_t {0})));
         }
 
         static auto MaskAnd(const MaskType& lhs, const MaskType& rhs) noexcept -> MaskType
@@ -3209,15 +3304,12 @@ namespace NGIN::SIMD::detail
         using Storage  = BackendTraits<NeonTag, std::uint8_t>::template Storage<BackendTraits<NeonTag, std::uint8_t>::native_lanes>;
         using MaskType = BackendTraits<NeonTag, bool>::template MaskStorage<BackendTraits<NeonTag, std::uint8_t>::native_lanes>;
 
+        static constexpr bool has_native_overrides = true;
+
         static inline auto MaskFromRegister(uint8x16_t reg) noexcept -> MaskType
         {
-            alignas(16) std::uint8_t bits[BackendTraits<NeonTag, std::uint8_t>::native_lanes];
-            vst1q_u8(bits, reg);
             MaskType mask {};
-            for (int lane = 0; lane < BackendTraits<NeonTag, std::uint8_t>::native_lanes; ++lane)
-            {
-                mask.Set(lane, bits[lane] != 0);
-            }
+            mask.SetBits(backend_detail::NeonByteMaskToBits(reg));
             return mask;
         }
 
@@ -3311,15 +3403,12 @@ namespace NGIN::SIMD::detail
         using Storage  = BackendTraits<NeonTag, std::int8_t>::template Storage<BackendTraits<NeonTag, std::int8_t>::native_lanes>;
         using MaskType = BackendTraits<NeonTag, bool>::template MaskStorage<BackendTraits<NeonTag, std::int8_t>::native_lanes>;
 
+        static constexpr bool has_native_overrides = true;
+
         static inline auto MaskFromRegister(uint8x16_t reg) noexcept -> MaskType
         {
-            alignas(16) std::uint8_t bits[BackendTraits<NeonTag, std::int8_t>::native_lanes];
-            vst1q_u8(bits, reg);
             MaskType mask {};
-            for (int lane = 0; lane < BackendTraits<NeonTag, std::int8_t>::native_lanes; ++lane)
-            {
-                mask.Set(lane, bits[lane] != 0);
-            }
+            mask.SetBits(backend_detail::NeonByteMaskToBits(reg));
             return mask;
         }
 
@@ -3349,7 +3438,7 @@ namespace NGIN::SIMD::detail
 
         static constexpr auto BitwiseAnd(const Storage& lhs, const Storage& rhs) noexcept -> Storage
         {
-            Storage result;
+            Storage    result;
             const auto lhsBits = vreinterpretq_u8_s8(vld1q_s8(lhs.Data()));
             const auto rhsBits = vreinterpretq_u8_s8(vld1q_s8(rhs.Data()));
             vst1q_s8(result.Data(), vreinterpretq_s8_u8(vandq_u8(lhsBits, rhsBits)));
@@ -3358,7 +3447,7 @@ namespace NGIN::SIMD::detail
 
         static constexpr auto BitwiseOr(const Storage& lhs, const Storage& rhs) noexcept -> Storage
         {
-            Storage result;
+            Storage    result;
             const auto lhsBits = vreinterpretq_u8_s8(vld1q_s8(lhs.Data()));
             const auto rhsBits = vreinterpretq_u8_s8(vld1q_s8(rhs.Data()));
             vst1q_s8(result.Data(), vreinterpretq_s8_u8(vorrq_u8(lhsBits, rhsBits)));
@@ -3367,7 +3456,7 @@ namespace NGIN::SIMD::detail
 
         static constexpr auto BitwiseXor(const Storage& lhs, const Storage& rhs) noexcept -> Storage
         {
-            Storage result;
+            Storage    result;
             const auto lhsBits = vreinterpretq_u8_s8(vld1q_s8(lhs.Data()));
             const auto rhsBits = vreinterpretq_u8_s8(vld1q_s8(rhs.Data()));
             vst1q_s8(result.Data(), vreinterpretq_s8_u8(veorq_u8(lhsBits, rhsBits)));
@@ -3376,7 +3465,7 @@ namespace NGIN::SIMD::detail
 
         static constexpr auto AndNot(const Storage& lhs, const Storage& rhs) noexcept -> Storage
         {
-            Storage result;
+            Storage    result;
             const auto lhsBits = vreinterpretq_u8_s8(vld1q_s8(lhs.Data()));
             const auto rhsBits = vreinterpretq_u8_s8(vld1q_s8(rhs.Data()));
             vst1q_s8(result.Data(), vreinterpretq_s8_u8(vbicq_u8(lhsBits, rhsBits)));
@@ -3439,6 +3528,8 @@ namespace NGIN::SIMD::detail
         using BaseOps  = BackendTraits<NeonTag, std::int32_t>::Base::template Ops<BackendTraits<NeonTag, std::int32_t>::native_lanes>;
         using Storage  = BackendTraits<NeonTag, std::int32_t>::template Storage<BackendTraits<NeonTag, std::int32_t>::native_lanes>;
         using MaskType = BackendTraits<NeonTag, bool>::template MaskStorage<BackendTraits<NeonTag, std::int32_t>::native_lanes>;
+
+        static constexpr bool has_native_overrides = true;
 
         static inline auto MaskFromRegister(uint32x4_t reg) noexcept -> MaskType
         {
@@ -3557,30 +3648,30 @@ namespace NGIN::SIMD::detail
 
         static auto CompareEq(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
         {
-            return MaskFromRegister(vreinterpretq_u32_s32(vceqq_s32(vld1q_s32(lhs.Data()), vld1q_s32(rhs.Data()))));
+            return MaskFromRegister(vceqq_s32(vld1q_s32(lhs.Data()), vld1q_s32(rhs.Data())));
         }
 
         static auto CompareLt(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
         {
-            return MaskFromRegister(vreinterpretq_u32_s32(vcltq_s32(vld1q_s32(lhs.Data()), vld1q_s32(rhs.Data()))));
+            return MaskFromRegister(vcltq_s32(vld1q_s32(lhs.Data()), vld1q_s32(rhs.Data())));
         }
 
         static auto CompareLe(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
         {
-            const uint32x4_t lt = vreinterpretq_u32_s32(vcltq_s32(vld1q_s32(lhs.Data()), vld1q_s32(rhs.Data())));
-            const uint32x4_t eq = vreinterpretq_u32_s32(vceqq_s32(vld1q_s32(lhs.Data()), vld1q_s32(rhs.Data())));
+            const uint32x4_t lt = vcltq_s32(vld1q_s32(lhs.Data()), vld1q_s32(rhs.Data()));
+            const uint32x4_t eq = vceqq_s32(vld1q_s32(lhs.Data()), vld1q_s32(rhs.Data()));
             return MaskFromRegister(vorrq_u32(lt, eq));
         }
 
         static auto CompareGt(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
         {
-            return MaskFromRegister(vreinterpretq_u32_s32(vcgtq_s32(vld1q_s32(lhs.Data()), vld1q_s32(rhs.Data()))));
+            return MaskFromRegister(vcgtq_s32(vld1q_s32(lhs.Data()), vld1q_s32(rhs.Data())));
         }
 
         static auto CompareGe(const Storage& lhs, const Storage& rhs) noexcept -> MaskType
         {
-            const uint32x4_t gt = vreinterpretq_u32_s32(vcgtq_s32(vld1q_s32(lhs.Data()), vld1q_s32(rhs.Data())));
-            const uint32x4_t eq = vreinterpretq_u32_s32(vceqq_s32(vld1q_s32(lhs.Data()), vld1q_s32(rhs.Data())));
+            const uint32x4_t gt = vcgtq_s32(vld1q_s32(lhs.Data()), vld1q_s32(rhs.Data()));
+            const uint32x4_t eq = vceqq_s32(vld1q_s32(lhs.Data()), vld1q_s32(rhs.Data()));
             return MaskFromRegister(vorrq_u32(gt, eq));
         }
 
@@ -3632,6 +3723,10 @@ namespace NGIN::SIMD::detail
             return true;
         }
     };
-#endif// defined(__ARM_NEON)
+#endif// NGIN_SIMD_HAS_NEON
 
 }// namespace NGIN::SIMD::detail
+
+#if NGIN_SIMD_HAS_AVX512
+#include "NGIN/SIMD/detail/BackendTraitsAVX512.hpp"
+#endif

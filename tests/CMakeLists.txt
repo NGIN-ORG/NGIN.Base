@@ -162,6 +162,14 @@ endif()
 
 ngin_base_configure_test_targets("${NGIN_BASE_TEST_TARGETS}")
 
+if(TARGET SIMD_AVX512RuntimeTestsTests AND NGIN_BASE_COMPILER_HAS_MAVX512_BASELINE)
+  set(_ngin_avx512_test_kernel "${CMAKE_CURRENT_SOURCE_DIR}/SIMD/fixtures/AVX512TestKernels.cpp")
+  target_sources(SIMD_AVX512RuntimeTestsTests PRIVATE "${_ngin_avx512_test_kernel}")
+  set_source_files_properties("${_ngin_avx512_test_kernel}"
+    PROPERTIES COMPILE_OPTIONS "${NGIN_BASE_SIMD_AVX512_COMPILE_OPTIONS}")
+  target_compile_definitions(SIMD_AVX512RuntimeTestsTests PRIVATE NGIN_SIMD_TEST_HAS_AVX512_KERNEL=1)
+endif()
+
 set(_ngin_base_package_matrix_root "${_base_binary_dir}/package-consumer-matrix")
 set(_ngin_base_package_matrix
   "Foundation|Foundation|FALSE|NGIN/Primitives.hpp|NGIN/Async/Task.hpp"

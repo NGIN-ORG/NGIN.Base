@@ -12,5 +12,18 @@ assume a particular instruction set unless their build explicitly establishes
 that minimum.
 
 SIMD code is verified through independent header compilation, scalar-focused
-tests, and CI builds with baseline and advanced x86 flags. ARM/NEON validation
-belongs on a native ARM runner rather than through an x86 compile-only claim.
+tests, baseline-safe separately compiled ISA kernels, x86 ISA builds, and a
+native ARM/NEON CI runner. An AVX-512 kernel test executes when the host supports
+the complete required feature set and reports a skip otherwise.
+
+The supported native backends are SSE2, AVX2, AVX-512F/BW/DQ/VL, and NEON.
+Backend operation sets expose a compile-time
+`has_native_overrides` marker so ISA builds fail when an enabled native-width
+type silently inherits the complete scalar operation set. Individual operations
+may still use scalar semantics; performance-sensitive call sites must be checked
+with equal-workload benchmarks and generated-code inspection.
+
+`RuntimeDispatchTable` resolves separately compiled function variants after CPU
+and OS-state detection. The Foundation library ships scalar plus applicable x86
+or Neon variants of the runtime byte scans. Compile-time `Vec<T>` remains
+explicitly fixed-width; runtime dispatch occurs at function boundaries.

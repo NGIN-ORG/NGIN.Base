@@ -60,7 +60,7 @@ namespace
     template<class Backend>
     void ValidateFastMathApproximation() noexcept
     {
-        using Vecf = Vec<float, Backend>;
+        using Vecf   = Vec<float, Backend>;
         using VecRef = Vec<float, ScalarTag, Vecf::lanes>;
         static_assert(VecRef::lanes == Vecf::lanes);
 
@@ -84,11 +84,11 @@ namespace
         const auto trigRefInput = VecRef::Load(trigInputData.data());
         const auto sqrtRefInput = VecRef::Load(sqrtInputData.data());
 
-        const auto fastExp    = Exp<FastMathPolicy>(expInput);
-        const auto fastLog    = Log<FastMathPolicy>(logInput);
-        const auto fastSin    = Sin<FastMathPolicy>(trigInput);
-        const auto fastCos    = Cos<FastMathPolicy>(trigInput);
-        const auto fastSqrt   = Sqrt<FastMathPolicy>(sqrtInput);
+        const auto fastExp  = Exp<FastMathPolicy>(expInput);
+        const auto fastLog  = Log<FastMathPolicy>(logInput);
+        const auto fastSin  = Sin<FastMathPolicy>(trigInput);
+        const auto fastCos  = Cos<FastMathPolicy>(trigInput);
+        const auto fastSqrt = Sqrt<FastMathPolicy>(sqrtInput);
 
         const auto referenceExp  = Exp<StrictMathPolicy>(expRefInput);
         const auto referenceLog  = Log<StrictMathPolicy>(logRefInput);
@@ -116,7 +116,7 @@ namespace
     {
         using Vecf = Vec<float, Backend>;
 
-        Vecf expInput {};
+        Vecf       expInput {};
         const auto positiveInf = std::numeric_limits<float>::infinity();
         const auto negativeInf = -std::numeric_limits<float>::infinity();
         const auto quietNan    = std::numeric_limits<float>::quiet_NaN();
@@ -188,6 +188,42 @@ namespace
 static_assert(detail::BackendTraits<ScalarTag, float>::native_lanes == 1);
 static_assert(std::is_same_v<Vec<float, ScalarTag, 4>::storage_type,
                              detail::BackendTraits<ScalarTag, float>::template Storage<4>>);
+static_assert(!detail::BackendTraits<ScalarTag, float>::template Ops<4>::has_native_overrides);
+
+#if NGIN_SIMD_HAS_SSE2
+static_assert(detail::BackendTraits<SSE2Tag, float>::template Ops<4>::has_native_overrides);
+static_assert(detail::BackendTraits<SSE2Tag, double>::template Ops<2>::has_native_overrides);
+static_assert(detail::BackendTraits<SSE2Tag, std::int32_t>::template Ops<4>::has_native_overrides);
+static_assert(detail::BackendTraits<SSE2Tag, std::uint8_t>::template Ops<16>::has_native_overrides);
+static_assert(detail::BackendTraits<SSE2Tag, std::int8_t>::template Ops<16>::has_native_overrides);
+#endif
+
+#if NGIN_SIMD_HAS_AVX2
+static_assert(detail::BackendTraits<AVX2Tag, float>::template Ops<8>::has_native_overrides);
+static_assert(detail::BackendTraits<AVX2Tag, double>::template Ops<4>::has_native_overrides);
+static_assert(detail::BackendTraits<AVX2Tag, std::int32_t>::template Ops<8>::has_native_overrides);
+static_assert(detail::BackendTraits<AVX2Tag, std::uint8_t>::template Ops<32>::has_native_overrides);
+static_assert(detail::BackendTraits<AVX2Tag, std::int8_t>::template Ops<32>::has_native_overrides);
+#endif
+
+#if NGIN_SIMD_HAS_AVX512
+static_assert(std::is_same_v<DefaultBackend, AVX512Tag>);
+static_assert(detail::BackendTraits<AVX512Tag, float>::template Ops<16>::has_native_overrides);
+static_assert(detail::BackendTraits<AVX512Tag, double>::template Ops<8>::has_native_overrides);
+static_assert(detail::BackendTraits<AVX512Tag, std::int32_t>::template Ops<16>::has_native_overrides);
+static_assert(detail::BackendTraits<AVX512Tag, std::uint8_t>::template Ops<64>::has_native_overrides);
+static_assert(detail::BackendTraits<AVX512Tag, std::int8_t>::template Ops<64>::has_native_overrides);
+#endif
+
+#if NGIN_SIMD_HAS_NEON
+static_assert(detail::BackendTraits<NeonTag, float>::template Ops<4>::has_native_overrides);
+#if defined(__aarch64__) || defined(__ARM_FEATURE_FP64)
+static_assert(detail::BackendTraits<NeonTag, double>::template Ops<2>::has_native_overrides);
+#endif
+static_assert(detail::BackendTraits<NeonTag, std::int32_t>::template Ops<4>::has_native_overrides);
+static_assert(detail::BackendTraits<NeonTag, std::uint8_t>::template Ops<16>::has_native_overrides);
+static_assert(detail::BackendTraits<NeonTag, std::int8_t>::template Ops<16>::has_native_overrides);
+#endif
 
 TEST_CASE("Vec scalar load/store round trip")
 {
@@ -314,6 +350,27 @@ TEST_CASE("MaskToBits encodes lane bits")
     CHECK(MaskToBits(mask) == 0x8D);
 }
 
+TEST_CASE("Packed masks preserve lanes across storage words")
+{
+    Mask<130, ScalarTag> mask {};
+    mask.SetLane(0, true);
+    mask.SetLane(63, true);
+    mask.SetLane(64, true);
+    mask.SetLane(129, true);
+
+    CHECK(Any(mask));
+    CHECK(mask.GetLane(0));
+    CHECK(mask.GetLane(63));
+    CHECK(mask.GetLane(64));
+    CHECK(mask.GetLane(129));
+    CHECK_FALSE(mask.GetLane(128));
+
+    const Mask<130, ScalarTag> all {true};
+    CHECK(All(all));
+    CHECK(None(mask & ~mask));
+    CHECK(All(mask | ~mask));
+}
+
 TEST_CASE("SIMD byte scan helpers")
 {
     constexpr std::array<std::uint8_t, 16> data {
@@ -343,14 +400,133 @@ TEST_CASE("SIMD byte scan helpers")
     CHECK(FindAnyByte<ScalarTag>(data.data(), data.size(),
                                  static_cast<std::uint8_t>('x'),
                                  static_cast<std::uint8_t>('y'),
-                                 static_cast<std::uint8_t>('o'))
-          == 14);
+                                 static_cast<std::uint8_t>('o')) == 14);
     CHECK(FindAnyByte<ScalarTag>(data.data(), data.size(),
                                  static_cast<std::uint8_t>('x'),
                                  static_cast<std::uint8_t>('y'),
                                  static_cast<std::uint8_t>('z'),
-                                 static_cast<std::uint8_t>('p'))
-          == 15);
+                                 static_cast<std::uint8_t>('p')) == 15);
+}
+
+TEST_CASE("SIMD runtime backend selection respects features and compiled variants")
+{
+    const CompiledBackends allCompiled {true, true, true, true, true};
+
+    RuntimeFeatures features {};
+    CHECK(SelectRuntimeBackend(features, allCompiled) == RuntimeBackend::Scalar);
+
+    features.neon = true;
+    CHECK(SelectRuntimeBackend(features, allCompiled) == RuntimeBackend::Neon);
+
+    features.sse2 = true;
+    CHECK(SelectRuntimeBackend(features, allCompiled) == RuntimeBackend::SSE2);
+
+    features.avx2 = true;
+    CHECK(SelectRuntimeBackend(features, allCompiled) == RuntimeBackend::AVX2);
+
+    features.avx512f  = true;
+    features.avx512bw = true;
+    features.avx512dq = true;
+    CHECK(SelectRuntimeBackend(features, allCompiled) == RuntimeBackend::AVX2);
+
+    features.avx512vl = true;
+    CHECK(SelectRuntimeBackend(features, allCompiled) == RuntimeBackend::AVX512);
+
+    const CompiledBackends withoutAVX512 {true, true, true, false, false};
+    CHECK(SelectRuntimeBackend(features, withoutAVX512) == RuntimeBackend::AVX2);
+}
+
+TEST_CASE("RuntimeDispatchTable chooses the highest available function")
+{
+    using Function        = auto (*)() noexcept -> int;
+    const Function scalar = +[]() noexcept { return 0; };
+    const Function sse2   = +[]() noexcept { return 1; };
+    const Function avx2   = +[]() noexcept { return 2; };
+    const Function avx512 = +[]() noexcept { return 3; };
+    const Function neon   = +[]() noexcept { return 4; };
+
+    const RuntimeDispatchTable<Function> table {scalar, sse2, avx2, avx512, neon};
+    RuntimeFeatures                      features {};
+    CHECK(table.Resolve(features)() == 0);
+
+    features.neon = true;
+    CHECK(table.Resolve(features)() == 4);
+    features.sse2 = true;
+    CHECK(table.Resolve(features)() == 1);
+    features.avx2 = true;
+    CHECK(table.Resolve(features)() == 2);
+    features.avx512f = features.avx512bw = features.avx512dq = features.avx512vl = true;
+    CHECK(table.Resolve(features)() == 3);
+
+    const RuntimeDispatchTable<Function> fallbackTable {scalar, sse2, avx2, nullptr, neon};
+    CHECK(fallbackTable.Resolve(features)() == 2);
+}
+
+TEST_CASE("Runtime-dispatched byte scans match scalar results")
+{
+    std::array<std::uint8_t, 257> data {};
+    std::fill(data.begin(), data.end(), static_cast<std::uint8_t>('a'));
+    data[129] = static_cast<std::uint8_t>('x');
+    data[193] = static_cast<std::uint8_t>('y');
+    data[256] = static_cast<std::uint8_t>('z');
+
+    CHECK(FindEqByteRuntime(data.data(), data.size(), static_cast<std::uint8_t>('x')) ==
+          FindEqByte<ScalarTag>(data.data(), data.size(), static_cast<std::uint8_t>('x')));
+    CHECK(FindEqByteRuntime(data.data(), data.size(), static_cast<std::uint8_t>('q')) == data.size());
+    CHECK(FindAnyByteRuntime(data.data(), data.size(),
+                             static_cast<std::uint8_t>('q'),
+                             static_cast<std::uint8_t>('y')) == 193);
+    CHECK(FindAnyByteRuntime(data.data(), data.size(),
+                             static_cast<std::uint8_t>('q'),
+                             static_cast<std::uint8_t>('r'),
+                             static_cast<std::uint8_t>('z')) == 256);
+    CHECK(FindAnyByteRuntime(data.data(), data.size(),
+                             static_cast<std::uint8_t>('q'),
+                             static_cast<std::uint8_t>('x'),
+                             static_cast<std::uint8_t>('y'),
+                             static_cast<std::uint8_t>('z')) == 129);
+
+    const RuntimeFeatures& features = GetRuntimeFeatures();
+    const CompiledBackends compiled = GetCompiledBackends();
+    const RuntimeBackend   selected = GetRuntimeBackend();
+    CHECK(selected == SelectRuntimeBackend(features, compiled));
+    CHECK(features.Supports(selected));
+    CHECK(compiled.Contains(selected));
+    CHECK_FALSE(RuntimeBackendName(selected).empty());
+
+    std::array<char, 5> characters {'a', 'b', 'x', 'c', 'd'};
+    CHECK(FindEqByteRuntime(std::span<const char> {characters}, 'x') == 2);
+    CHECK(FindAnyByteRuntime(std::span<const char> {characters}, 'q', 'd') == 4);
+}
+
+TEST_CASE("Runtime-dispatched scans preserve unaligned boundaries and tails")
+{
+    constexpr std::array<std::size_t, 12> lengths {0, 1, 15, 16, 17, 31, 32, 33, 127, 128, 129, 257};
+    std::array<std::uint8_t, 320>         storage {};
+    CHECK(FindEqByteRuntime(static_cast<const std::uint8_t*>(nullptr), 0, 0) == 0);
+
+    for (std::size_t offset = 0; offset < 32; ++offset)
+    {
+        for (const std::size_t length: lengths)
+        {
+            auto* const data = storage.data() + offset;
+            std::fill(data, data + length, static_cast<std::uint8_t>('a'));
+            CHECK(FindEqByteRuntime(data, length, static_cast<std::uint8_t>('x')) == length);
+
+            if (length != 0)
+            {
+                for (const std::size_t position: {std::size_t {0}, length / 2, length - 1})
+                {
+                    data[position] = static_cast<std::uint8_t>('x');
+                    CHECK(FindEqByteRuntime(data, length, static_cast<std::uint8_t>('x')) == position);
+                    CHECK(FindAnyByteRuntime(data, length,
+                                             static_cast<std::uint8_t>('q'),
+                                             static_cast<std::uint8_t>('x')) == position);
+                    data[position] = static_cast<std::uint8_t>('a');
+                }
+            }
+        }
+    }
 }
 
 TEST_CASE("Vec utilities Select Reverse Zip")
@@ -542,7 +718,7 @@ TEST_CASE("BitCast preserves representation")
     CHECK(roundTrip == Catch::Approx(value));
 }
 
-#if defined(__SSE2__)
+#if NGIN_SIMD_HAS_SSE2
 TEST_CASE("Vec SSE2 default lane resolution")
 {
     using VecSse = Vec<float, SSE2Tag>;
@@ -558,7 +734,7 @@ TEST_CASE("Vec SSE2 default lane resolution")
 }
 #endif
 
-#if defined(__SSE2__)
+#if NGIN_SIMD_HAS_SSE2
 TEST_CASE("Fast math policy SSE2 accuracy")
 {
     ValidateFastMathApproximation<SSE2Tag>();
@@ -570,7 +746,7 @@ TEST_CASE("Fast math policy SSE2 special cases")
 }
 #endif
 
-#if defined(__AVX2__)
+#if NGIN_SIMD_HAS_AVX2
 TEST_CASE("Vec AVX2 default lane resolution")
 {
     using VecAvx = Vec<float, AVX2Tag>;
@@ -587,7 +763,7 @@ TEST_CASE("Vec AVX2 default lane resolution")
 }
 #endif
 
-#if defined(__AVX2__)
+#if NGIN_SIMD_HAS_AVX2
 TEST_CASE("Fast math policy AVX2 accuracy")
 {
     ValidateFastMathApproximation<AVX2Tag>();
@@ -599,7 +775,7 @@ TEST_CASE("Fast math policy AVX2 special cases")
 }
 #endif
 
-#if defined(__SSE2__)
+#if NGIN_SIMD_HAS_SSE2
 TEST_CASE("Vec SSE2 masked load/store")
 {
     using VecSse  = Vec<float, SSE2Tag>;
@@ -663,7 +839,7 @@ TEST_CASE("Vec SSE2 gather/scatter")
 }
 #endif
 
-#if defined(__AVX2__)
+#if NGIN_SIMD_HAS_AVX2
 TEST_CASE("Vec AVX2 masked load/store")
 {
     using VecAvx  = Vec<float, AVX2Tag>;
@@ -743,7 +919,7 @@ TEST_CASE("Vec AVX2 gather/scatter")
 }
 #endif
 
-#if defined(__SSE2__)
+#if NGIN_SIMD_HAS_SSE2
 TEST_CASE("Vec SSE2 int operations")
 {
     using VecSseInt  = Vec<std::int32_t, SSE2Tag>;
@@ -768,7 +944,7 @@ TEST_CASE("Vec SSE2 int operations")
 }
 #endif
 
-#if defined(__AVX2__)
+#if NGIN_SIMD_HAS_AVX2
 TEST_CASE("Vec AVX2 int operations")
 {
     using VecAvxInt = Vec<std::int32_t, AVX2Tag>;
@@ -789,15 +965,100 @@ TEST_CASE("Vec AVX2 int operations")
 }
 #endif
 
-#if defined(__ARM_NEON)
+#if NGIN_SIMD_HAS_AVX512
+TEST_CASE("Vec AVX-512 float operations")
+{
+    using VecAvx512 = Vec<float, AVX512Tag>;
+    using IndexVec  = Vec<std::int32_t, AVX512Tag>;
+
+    alignas(64) std::array<float, VecAvx512::lanes> source {};
+    for (int lane = 0; lane < VecAvx512::lanes; ++lane)
+    {
+        source[static_cast<std::size_t>(lane)] = static_cast<float>(lane + 1);
+    }
+
+    const VecAvx512 loaded = VecAvx512::LoadAligned(source.data(), 64);
+    const VecAvx512 sum    = loaded + VecAvx512 {2.0F};
+    CHECK(sum.GetLane(0) == Catch::Approx(3.0F));
+    CHECK(sum.GetLane(15) == Catch::Approx(18.0F));
+    CHECK(All(sum > loaded));
+    CHECK(None(sum == loaded));
+
+    const VecAvx512 fused = Fma(loaded, VecAvx512 {2.0F}, VecAvx512 {1.0F});
+    CHECK(fused.GetLane(7) == Catch::Approx(17.0F));
+    CHECK(Abs(VecAvx512 {-3.0F}).GetLane(4) == Catch::Approx(3.0F));
+
+    VecAvx512::mask_type alternating {};
+    for (int lane = 0; lane < VecAvx512::lanes; ++lane)
+    {
+        alternating.SetLane(lane, lane % 2 == 0);
+    }
+    const VecAvx512 masked = VecAvx512::Load(source.data(), alternating, -1.0F);
+    CHECK(masked.GetLane(0) == Catch::Approx(1.0F));
+    CHECK(masked.GetLane(1) == Catch::Approx(-1.0F));
+
+    const IndexVec  indices  = IndexVec::Iota(15, -1);
+    const VecAvx512 gathered = VecAvx512::Gather(source.data(), indices);
+    CHECK(gathered.GetLane(0) == Catch::Approx(16.0F));
+    CHECK(gathered.GetLane(15) == Catch::Approx(1.0F));
+
+    alignas(64) std::array<float, VecAvx512::lanes> scattered {};
+    gathered.Scatter(scattered.data(), indices);
+    CHECK(scattered == source);
+}
+
+TEST_CASE("Vec AVX-512 double and integer operations")
+{
+    using VecDouble          = Vec<double, AVX512Tag>;
+    const VecDouble doubles  = VecDouble::Iota(1.0, 1.0);
+    const VecDouble quotient = (doubles * VecDouble {4.0}) / VecDouble {2.0};
+    CHECK(quotient.GetLane(0) == Catch::Approx(2.0));
+    CHECK(quotient.GetLane(7) == Catch::Approx(16.0));
+    CHECK(All(quotient >= doubles));
+
+    using VecInt          = Vec<std::int32_t, AVX512Tag>;
+    const VecInt integers = VecInt::Iota(-8, 1);
+    const VecInt squared  = integers * integers;
+    CHECK(squared.GetLane(0) == 64);
+    CHECK(squared.GetLane(8) == 0);
+    CHECK(Abs(integers).GetLane(0) == 8);
+    CHECK(Min(integers, VecInt {0}).GetLane(0) == -8);
+    CHECK(Max(integers, VecInt {0}).GetLane(15) == 7);
+    CHECK(Any(integers < VecInt {0}));
+    CHECK(Any(integers == VecInt {0}));
+}
+
+TEST_CASE("Vec AVX-512 byte operations and scan")
+{
+    using VecByte = Vec<std::uint8_t, AVX512Tag>;
+    alignas(64) std::array<std::uint8_t, VecByte::lanes> bytes {};
+    std::fill(bytes.begin(), bytes.end(), static_cast<std::uint8_t>(3));
+    bytes[47] = 9;
+
+    const VecByte loaded = VecByte::LoadAligned(bytes.data(), 64);
+    const auto    mask   = loaded == VecByte {9};
+    CHECK(MaskToBits(mask) == (std::uint64_t {1} << 47));
+    CHECK((loaded + VecByte {1}).GetLane(0) == 4);
+
+    std::array<std::uint8_t, 192> scanBytes {};
+    std::fill(scanBytes.begin(), scanBytes.end(), static_cast<std::uint8_t>('a'));
+    scanBytes[173] = static_cast<std::uint8_t>('z');
+    CHECK(FindEqByte<AVX512Tag>(scanBytes.data(), scanBytes.size(), static_cast<std::uint8_t>('z')) == 173);
+}
+#endif
+
+#if NGIN_SIMD_HAS_NEON
 TEST_CASE("Vec NEON smoke")
 {
     using VecNeon = Vec<float, NeonTag>;
-    alignas(16) float  data[VecNeon::lanes] {};
+    alignas(16) float  data[VecNeon::lanes] {1.0F, 2.0F, 3.0F, 4.0F};
     const auto         loaded = VecNeon::Load(data);
     VecNeon::mask_type mask {};
     loaded.Store(data);
     loaded.Store(data, mask);
+
+    CHECK(All(loaded == loaded));
+    CHECK(None(loaded < loaded));
 
     using IndexVecNeon  = Vec<int, NeonTag, VecNeon::lanes>;
     const auto indices  = IndexVecNeon::Iota(0, 1);
@@ -822,9 +1083,32 @@ TEST_CASE("Vec NEON int operations")
     CHECK(Any(mask));
     CHECK_FALSE(None(mask));
 }
+
+#if defined(__aarch64__) || defined(__ARM_FEATURE_FP64)
+TEST_CASE("Vec NEON double comparisons and masks")
+{
+    using VecNeonDouble  = Vec<double, NeonTag>;
+    using MaskNeonDouble = VecNeonDouble::mask_type;
+
+    alignas(16) double source[VecNeonDouble::lanes] {10.0, 20.0};
+    MaskNeonDouble     mask {};
+    mask.SetLane(0, true);
+
+    const auto loaded = VecNeonDouble::Load(source, mask, -1.0);
+    CHECK(loaded.GetLane(0) == Catch::Approx(10.0));
+    CHECK(loaded.GetLane(1) == Catch::Approx(-1.0));
+    CHECK(All(loaded == loaded));
+    CHECK(None(~(loaded == loaded)));
+
+    alignas(16) double destination[VecNeonDouble::lanes] {100.0, 100.0};
+    loaded.Store(destination, mask);
+    CHECK(destination[0] == Catch::Approx(10.0));
+    CHECK(destination[1] == Catch::Approx(100.0));
+}
+#endif
 #endif
 
-#if defined(__SSE2__)
+#if NGIN_SIMD_HAS_SSE2
 TEST_CASE("Vec SSE2 comparisons")
 {
     using VecSse = Vec<float, SSE2Tag>;
@@ -855,15 +1139,15 @@ TEST_CASE("Vec SSE2 comparisons")
 }
 #endif
 
-#if defined(__SSE2__)
+#if NGIN_SIMD_HAS_SSE2
 TEST_CASE("Vec SSE2 strict math matches scalar reference")
 {
     using VecSse    = Vec<float, SSE2Tag>;
     using VecScalar = Vec<float, ScalarTag, VecSse::lanes>;
 
     const std::array<float, VecSse::lanes> expValues {-0.5F, -0.1F, 0.25F, 0.75F};
-    const auto                            simdExp    = VecSse::Load(expValues.data());
-    const auto                            scalarExp  = VecScalar::Load(expValues.data());
+    const auto                             simdExp   = VecSse::Load(expValues.data());
+    const auto                             scalarExp = VecScalar::Load(expValues.data());
 
     const auto compareApprox = [](const auto& simdVec, const auto& scalarVec, float epsilon) {
         for (int lane = 0; lane < simdVec.lanes; ++lane)
@@ -888,29 +1172,29 @@ TEST_CASE("Vec SSE2 strict math matches scalar reference")
     compareApprox(Exp<StrictMathPolicy>(simdExp), Exp<StrictMathPolicy>(scalarExp), 1e-5F);
 
     const std::array<float, VecSse::lanes> logValues {0.125F, 0.5F, 1.5F, 4.0F};
-    const auto                             simdLog    = VecSse::Load(logValues.data());
-    const auto                             scalarLog  = VecScalar::Load(logValues.data());
+    const auto                             simdLog   = VecSse::Load(logValues.data());
+    const auto                             scalarLog = VecScalar::Load(logValues.data());
     compareApprox(Log<StrictMathPolicy>(simdLog), Log<StrictMathPolicy>(scalarLog), 1e-5F);
 
     const std::array<float, VecSse::lanes> trigValues {-3.0F, -1.0F, 0.5F, 2.5F};
-    const auto                             simdTrig    = VecSse::Load(trigValues.data());
-    const auto                             scalarTrig  = VecScalar::Load(trigValues.data());
+    const auto                             simdTrig   = VecSse::Load(trigValues.data());
+    const auto                             scalarTrig = VecScalar::Load(trigValues.data());
     compareApprox(Sin<StrictMathPolicy>(simdTrig), Sin<StrictMathPolicy>(scalarTrig), 1e-5F);
     compareApprox(Cos<StrictMathPolicy>(simdTrig), Cos<StrictMathPolicy>(scalarTrig), 1e-5F);
 
     const std::array<float, VecSse::lanes> sqrtValues {0.0F, 0.25F, 1.0F, 9.0F};
-    const auto                             simdSqrt    = VecSse::Load(sqrtValues.data());
-    const auto                             scalarSqrt  = VecScalar::Load(sqrtValues.data());
+    const auto                             simdSqrt   = VecSse::Load(sqrtValues.data());
+    const auto                             scalarSqrt = VecScalar::Load(sqrtValues.data());
     compareApprox(Sqrt<StrictMathPolicy>(simdSqrt), Sqrt<StrictMathPolicy>(scalarSqrt), 1e-5F);
 }
 #endif
 
-#if defined(__AVX2__)
+#if NGIN_SIMD_HAS_AVX2
 TEST_CASE("Vec AVX2 comparisons")
 {
     using VecAvx = Vec<float, AVX2Tag>;
 
-    const auto base = VecAvx::Iota(0.0F, 1.0F);
+    const auto base  = VecAvx::Iota(0.0F, 1.0F);
     auto       other = base;
     for (int lane = VecAvx::lanes / 2; lane < VecAvx::lanes; ++lane)
     {
@@ -933,7 +1217,7 @@ TEST_CASE("Vec AVX2 comparisons")
 }
 #endif
 
-#if defined(__AVX2__)
+#if NGIN_SIMD_HAS_AVX2
 TEST_CASE("Vec AVX2 strict math matches scalar reference")
 {
     using VecAvx    = Vec<float, AVX2Tag>;

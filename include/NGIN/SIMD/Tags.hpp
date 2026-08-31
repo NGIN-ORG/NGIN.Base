@@ -24,6 +24,7 @@ namespace NGIN::SIMD
     struct AVX2Tag final
     {
     };
+    /// @brief AVX-512F/BW/DQ/VL backend tag for explicitly compiled kernels.
     struct AVX512Tag final
     {
     };

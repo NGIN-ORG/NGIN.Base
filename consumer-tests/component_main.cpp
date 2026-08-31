@@ -1,5 +1,5 @@
 #if defined(NGIN_CONSUMER_FOUNDATION)
-#include <NGIN/Time/MonotonicClock.hpp>
+#include <NGIN/SIMD.hpp>
 #elif defined(NGIN_CONSUMER_EXECUTION)
 #include <NGIN/Execution/ThisThread.hpp>
 #elif defined(NGIN_CONSUMER_IO)
@@ -17,8 +17,10 @@
 int main()
 {
 #if defined(NGIN_CONSUMER_FOUNDATION)
-    static_cast<void>(NGIN::Time::MonotonicClock::Now());
-    return 0;
+    constexpr unsigned char bytes[] {'a', 'b', 'c'};
+    const auto              backend = NGIN::SIMD::GetRuntimeBackend();
+    const auto              found   = NGIN::SIMD::FindEqByteRuntime(bytes, 3, static_cast<unsigned char>('b'));
+    return NGIN::SIMD::GetRuntimeFeatures().Supports(backend) && found == 1 ? 0 : 1;
 #elif defined(NGIN_CONSUMER_EXECUTION)
     static_cast<void>(NGIN::Execution::ThisThread::HardwareConcurrency());
     return 0;

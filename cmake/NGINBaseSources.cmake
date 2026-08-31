@@ -1,6 +1,8 @@
 #-------------------------------------------------------------------------------
 # Source ownership groups
 #-------------------------------------------------------------------------------
+include(CheckCXXCompilerFlag)
+
 foreach(_ngin_component IN ITEMS FOUNDATION EXECUTION IO SERIALIZATION CRYPTO NET NETTLS)
   set(NGIN_BASE_${_ngin_component}_PRIVATE_DEFINITIONS)
   set(NGIN_BASE_${_ngin_component}_PRIVATE_INCLUDE_DIRECTORIES)
@@ -11,7 +13,72 @@ set(NGIN_BASE_CRYPTO_AVAILABLE_ALGORITHMS random)
 
 set(NGIN_BASE_FOUNDATION_SOURCES
   ${NGIN_BASE_ROOT_DIR}/src/CoreInit.cpp
+  ${NGIN_BASE_ROOT_DIR}/src/NGIN/SIMD/Runtime.cpp
+  ${NGIN_BASE_ROOT_DIR}/src/NGIN/SIMD/RuntimeScan.cpp
+  ${NGIN_BASE_ROOT_DIR}/src/NGIN/SIMD/RuntimeScan.scalar.cpp
 )
+
+# Runtime SIMD kernels are separate translation units so the baseline library
+# remains safe on older CPUs while the dispatcher can select newer ISAs.
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64|i[3-6]86|x86)$")
+  set(_ngin_simd_sse2_source ${NGIN_BASE_ROOT_DIR}/src/NGIN/SIMD/RuntimeScan.sse2.cpp)
+  set(_ngin_simd_avx2_source ${NGIN_BASE_ROOT_DIR}/src/NGIN/SIMD/RuntimeScan.avx2.cpp)
+  set(_ngin_simd_avx512_source ${NGIN_BASE_ROOT_DIR}/src/NGIN/SIMD/RuntimeScan.avx512.cpp)
+
+  if(MSVC)
+    # SSE2 is part of the x64 ABI. Only 32-bit MSVC needs an explicit option.
+    list(APPEND NGIN_BASE_FOUNDATION_SOURCES ${_ngin_simd_sse2_source})
+    if(CMAKE_SIZEOF_VOID_P EQUAL 4)
+      set_source_files_properties(${_ngin_simd_sse2_source} PROPERTIES COMPILE_OPTIONS "/arch:SSE2")
+    endif()
+    list(APPEND NGIN_BASE_FOUNDATION_PRIVATE_DEFINITIONS NGIN_SIMD_RUNTIME_COMPILED_SSE2=1)
+
+    check_cxx_compiler_flag("/arch:AVX2" NGIN_BASE_COMPILER_HAS_MAVX2)
+    if(NGIN_BASE_COMPILER_HAS_MAVX2)
+      list(APPEND NGIN_BASE_FOUNDATION_SOURCES ${_ngin_simd_avx2_source})
+      set_source_files_properties(${_ngin_simd_avx2_source} PROPERTIES COMPILE_OPTIONS "/arch:AVX2")
+      list(APPEND NGIN_BASE_FOUNDATION_PRIVATE_DEFINITIONS NGIN_SIMD_RUNTIME_COMPILED_AVX2=1)
+    endif()
+
+    check_cxx_compiler_flag("/arch:AVX512" NGIN_BASE_COMPILER_HAS_MAVX512_BASELINE)
+    if(NGIN_BASE_COMPILER_HAS_MAVX512_BASELINE)
+      set(NGIN_BASE_SIMD_AVX512_COMPILE_OPTIONS /arch:AVX512)
+      list(APPEND NGIN_BASE_FOUNDATION_SOURCES ${_ngin_simd_avx512_source})
+      set_source_files_properties(${_ngin_simd_avx512_source} PROPERTIES COMPILE_OPTIONS "/arch:AVX512")
+      list(APPEND NGIN_BASE_FOUNDATION_PRIVATE_DEFINITIONS NGIN_SIMD_RUNTIME_COMPILED_AVX512=1)
+    endif()
+  elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    check_cxx_compiler_flag("-msse2" NGIN_BASE_COMPILER_HAS_MSSE2)
+    check_cxx_compiler_flag("-mavx2" NGIN_BASE_COMPILER_HAS_MAVX2)
+    check_cxx_compiler_flag("-mavx512f -mavx512bw -mavx512dq -mavx512vl"
+      NGIN_BASE_COMPILER_HAS_MAVX512_BASELINE)
+    if(NGIN_BASE_COMPILER_HAS_MSSE2)
+      list(APPEND NGIN_BASE_FOUNDATION_SOURCES ${_ngin_simd_sse2_source})
+      set_source_files_properties(${_ngin_simd_sse2_source} PROPERTIES COMPILE_OPTIONS "-msse2")
+      list(APPEND NGIN_BASE_FOUNDATION_PRIVATE_DEFINITIONS NGIN_SIMD_RUNTIME_COMPILED_SSE2=1)
+    endif()
+    if(NGIN_BASE_COMPILER_HAS_MAVX2)
+      list(APPEND NGIN_BASE_FOUNDATION_SOURCES ${_ngin_simd_avx2_source})
+      set_source_files_properties(${_ngin_simd_avx2_source} PROPERTIES COMPILE_OPTIONS "-mavx2")
+      list(APPEND NGIN_BASE_FOUNDATION_PRIVATE_DEFINITIONS NGIN_SIMD_RUNTIME_COMPILED_AVX2=1)
+    endif()
+    if(NGIN_BASE_COMPILER_HAS_MAVX512_BASELINE)
+      set(NGIN_BASE_SIMD_AVX512_COMPILE_OPTIONS
+        -mavx512f -mavx512bw -mavx512dq -mavx512vl -mavx2)
+      list(APPEND NGIN_BASE_FOUNDATION_SOURCES ${_ngin_simd_avx512_source})
+      set_source_files_properties(${_ngin_simd_avx512_source}
+        PROPERTIES COMPILE_OPTIONS "-mavx512f;-mavx512bw;-mavx512dq;-mavx512vl;-mavx2")
+      list(APPEND NGIN_BASE_FOUNDATION_PRIVATE_DEFINITIONS NGIN_SIMD_RUNTIME_COMPILED_AVX512=1)
+    endif()
+  endif()
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64|arm)")
+  set(_ngin_simd_neon_source ${NGIN_BASE_ROOT_DIR}/src/NGIN/SIMD/RuntimeScan.neon.cpp)
+  list(APPEND NGIN_BASE_FOUNDATION_SOURCES ${_ngin_simd_neon_source})
+  if(NOT MSVC AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$")
+    set_source_files_properties(${_ngin_simd_neon_source} PROPERTIES COMPILE_OPTIONS "-mfpu=neon")
+  endif()
+  list(APPEND NGIN_BASE_FOUNDATION_PRIVATE_DEFINITIONS NGIN_SIMD_RUNTIME_COMPILED_NEON=1)
+endif()
 
 set(NGIN_BASE_EXECUTION_SOURCES
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/Execution/Fiber/FiberCommon.cpp

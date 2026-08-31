@@ -238,7 +238,7 @@ namespace NGIN::SIMD
             }
         }
 
-#if defined(__SSE2__) || defined(__AVX2__)
+#if NGIN_SIMD_HAS_SSE2 || NGIN_SIMD_HAS_AVX2
         namespace strict_vector_math
         {
             // Portions adapted from Julien Pommier's sse_mathfun (zlib license)
@@ -445,7 +445,7 @@ namespace NGIN::SIMD
                 return c;
             }
 
-#if defined(__AVX2__)
+#if NGIN_SIMD_HAS_AVX2
             [[nodiscard]] inline auto ExpPs256(__m256 value) noexcept -> __m256
             {
                 const __m128 low  = ExpPs(_mm256_castps256_ps128(value));
@@ -706,7 +706,7 @@ namespace NGIN::SIMD
 #endif
             }
         }// namespace fast_math_detail
-#endif// defined(__SSE2__) || defined(__AVX2__)
+#endif// NGIN_SIMD_HAS_SSE2 || NGIN_SIMD_HAS_AVX2
 
         template<class Policy>
         inline constexpr bool IsSupportedMathPolicy = std::is_same_v<Policy, StrictMathPolicy> ||
@@ -797,7 +797,7 @@ namespace NGIN::SIMD
             static constexpr bool supportsSqrt = false;
         };
 
-#if defined(__SSE2__)
+#if NGIN_SIMD_HAS_SSE2
         template<int Lanes>
         struct VectorizedMath<StrictMathPolicy, Vec<float, SSE2Tag, Lanes>>
         {
@@ -851,7 +851,7 @@ namespace NGIN::SIMD
         };
 #endif
 
-#if defined(__AVX2__)
+#if NGIN_SIMD_HAS_AVX2
         template<int Lanes>
         struct VectorizedMath<StrictMathPolicy, Vec<float, AVX2Tag, Lanes>>
         {
@@ -905,7 +905,29 @@ namespace NGIN::SIMD
         };
 #endif
 
-#if defined(__SSE2__)
+#if NGIN_SIMD_HAS_AVX512
+        template<int Lanes>
+        struct VectorizedMath<StrictMathPolicy, Vec<float, AVX512Tag, Lanes>>
+        {
+            using VecType                      = Vec<float, AVX512Tag, Lanes>;
+            static constexpr bool lane_match   = VecType::lanes == detail::BackendTraits<AVX512Tag, float>::native_lanes;
+            static constexpr bool supportsExp  = false;
+            static constexpr bool supportsLog  = false;
+            static constexpr bool supportsSin  = false;
+            static constexpr bool supportsCos  = false;
+            static constexpr bool supportsSqrt = lane_match;
+
+            [[nodiscard]] static auto Sqrt(const VecType& value) noexcept -> VecType
+            {
+                static_assert(lane_match);
+                VecType result;
+                _mm512_storeu_ps(result.storage.Data(), _mm512_sqrt_ps(_mm512_loadu_ps(value.storage.Data())));
+                return result;
+            }
+        };
+#endif
+
+#if NGIN_SIMD_HAS_SSE2
         template<>
         struct MathPolicyLane<FastMathPolicy, SSE2Tag, float>
         {
@@ -936,7 +958,7 @@ namespace NGIN::SIMD
         };
 #endif
 
-#if defined(__AVX2__)
+#if NGIN_SIMD_HAS_AVX2
         template<>
         struct MathPolicyLane<FastMathPolicy, AVX2Tag, float>
         {
@@ -964,6 +986,18 @@ namespace NGIN::SIMD
             {
                 return fast_math_detail::FastSqrtFloat(value);
             }
+        };
+#endif
+
+#if NGIN_SIMD_HAS_AVX512
+        template<>
+        struct MathPolicyLane<FastMathPolicy, AVX512Tag, float>
+        {
+            [[nodiscard]] static auto Exp(float value) noexcept -> float { return fast_math_detail::FastExpFloat(value); }
+            [[nodiscard]] static auto Log(float value) noexcept -> float { return fast_math_detail::FastLogFloat(value); }
+            [[nodiscard]] static auto Sin(float value) noexcept -> float { return fast_math_detail::FastSinFloat(value); }
+            [[nodiscard]] static auto Cos(float value) noexcept -> float { return fast_math_detail::FastCosFloat(value); }
+            [[nodiscard]] static auto Sqrt(float value) noexcept -> float { return fast_math_detail::FastSqrtFloat(value); }
         };
 #endif
 
@@ -1609,15 +1643,7 @@ namespace NGIN::SIMD
     [[nodiscard]] constexpr auto MaskToBits(const Mask<Lanes, Backend>& mask) noexcept -> std::uint64_t
     {
         static_assert(Lanes <= 64, "MaskToBits supports up to 64 lanes.");
-        std::uint64_t bits = 0;
-        for (int lane = 0; lane < Lanes; ++lane)
-        {
-            if (mask.GetLane(lane))
-            {
-                bits |= (std::uint64_t {1} << static_cast<unsigned>(lane));
-            }
-        }
-        return bits;
+        return Mask<Lanes, Backend>::operations::MaskToBits(mask.storage);
     }
 
     /// @brief Selects corresponding lanes from @p a when true and @p b when false.
