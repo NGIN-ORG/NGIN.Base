@@ -4,6 +4,22 @@
 
 namespace NGIN::Serialization::XML
 {
+    UInt32 detail::DocumentState::FindAttribute(TableRange range, std::string_view name) const noexcept
+    {
+        const auto nameAt = [&](UIntSize i) { return Text(attributes[range.begin + i].name); };
+        if (range.count >= NameIndex::Threshold)
+        {
+            const auto found = std::lower_bound(attributeIndexes.begin(), attributeIndexes.end(), range.begin,
+                                                [](const IndexedNames& entry, UIntSize offset) { return entry.begin < offset; });
+            if (found != attributeIndexes.end() && found->begin == range.begin)
+                return found->index.Find(name, range.count, nameAt);
+        }
+        for (UInt32 i = 0; i < range.count; ++i)
+            if (nameAt(i) == name)
+                return i;
+        return NameIndex::Missing;
+    }
+
     namespace
     {
         [[nodiscard]] const detail::NodeRecord*
@@ -122,21 +138,6 @@ namespace NGIN::Serialization::XML
         m_index          = node ? node->nextSibling : static_cast<UInt32>(-1);
         return *this;
     }
-    NodeView ChildRange::operator[](UIntSize index) const noexcept
-    {
-        if (!m_state || index >= m_count)
-            return {};
-        auto id = NodeId {m_begin};
-        while (index-- > 0)
-        {
-            const auto* node = Resolve(m_state, id);
-            if (!node)
-                return {};
-            id.value = node->nextSibling;
-        }
-        return NodeView {m_state, id};
-    }
-
     FilteredChildRange::Iterator::Iterator(const detail::DocumentState* state,
                                            UInt32                       index,
                                            UInt32                       end,
@@ -209,12 +210,18 @@ namespace NGIN::Serialization::XML
     }
     std::optional<AttributeView> ElementView::Attribute(std::string_view attributeName) const noexcept
     {
-        for (const AttributeView attribute: Attributes())
+        if (!IsValid())
+            return std::nullopt;
+        const auto range = m_state->elements[m_index].attributes;
+        if (range.count < detail::NameIndex::Threshold)
         {
-            if (attribute.Name() == attributeName)
-                return attribute;
+            for (UInt32 i = 0; i < range.count; ++i)
+                if (m_state->Text(m_state->attributes[range.begin + i].name) == attributeName)
+                    return AttributeView {m_state, range.begin + i};
+            return std::nullopt;
         }
-        return std::nullopt;
+        const UInt32 index = m_state->FindAttribute(range, attributeName);
+        return index == detail::NameIndex::Missing ? std::nullopt : std::optional<AttributeView> {AttributeView {m_state, range.begin + index}};
     }
     ChildRange ElementView::Children() const noexcept
     {

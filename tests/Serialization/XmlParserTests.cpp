@@ -158,8 +158,10 @@ TEST_CASE("XML semantic trivia policy explicitly controls comments and processin
     auto preserved = Parse("<root><!--note--><?tool ok?></root>", options);
     REQUIRE(preserved);
     REQUIRE(preserved.value().Root().Children().Size() == 2);
-    CHECK(preserved.value().Root().Children()[0].Kind() == XML::NodeKind::Comment);
-    CHECK(preserved.value().Root().Children()[1].Kind() ==
+    auto child = preserved.value().Root().Children().begin();
+    CHECK((*child).Kind() == XML::NodeKind::Comment);
+    ++child;
+    CHECK((*child).Kind() ==
           XML::NodeKind::ProcessingInstruction);
 }
 
@@ -420,4 +422,55 @@ TEST_CASE("XML memory accounting enforces retained DOM limits",
             limits);
     REQUIRE_FALSE(limited);
     CHECK(limited.error().code == ParseErrorCode::LimitExceeded);
+}
+
+TEST_CASE("XML wide attributes support indexed lookup and reject duplicates", "[serialization][xml]")
+{
+    for (UIntSize count: {15U, 16U, 17U, 64U, 1000U})
+    {
+        INFO("attributes=" << count);
+        std::string              attributes;
+        std::vector<std::string> keys;
+        for (UIntSize i = 0; i < count; ++i)
+        {
+            keys.push_back("key" + std::to_string(i));
+            attributes += ' ' + keys.back() + "=\"" + std::to_string(i) + '"';
+        }
+        auto parsed = XML::Parse("<root" + attributes + "><child" + attributes + "/></root>");
+        REQUIRE(parsed);
+        const auto root  = parsed->Root();
+        const auto child = (*root.Children().begin()).TryElement();
+        REQUIRE(child);
+        for (UIntSize i = 0; i < count; ++i)
+        {
+            REQUIRE(root.Attribute(keys[i]));
+            CHECK(root.Attribute(keys[i])->Value() == std::to_string(i));
+            CHECK(child->Attribute(keys[i])->Value() == std::to_string(i));
+        }
+        CHECK_FALSE(root.Attribute("absent"));
+        UIntSize order = 0;
+        for (const auto attribute: root.Attributes())
+            CHECK(attribute.Name() == keys[order++]);
+        auto rejected = XML::Parse("<root" + attributes + " key0=\"again\"/>");
+        REQUIRE_FALSE(rejected);
+        CHECK(rejected.error().code == ParseErrorCode::DuplicateName);
+        REQUIRE(rejected.error().related);
+        CHECK(rejected.error().related->begin == 6);
+
+        XML::Builder                builder;
+        std::vector<XML::Attribute> values;
+        for (const auto& key: keys)
+            values.push_back({key, "value"});
+        values.push_back({keys.front(), "duplicate"});
+        auto invalid = builder.Element("root", values, {});
+        REQUIRE_FALSE(invalid);
+        CHECK(invalid.error().code == XML::BuildErrorCode::InvalidContent);
+        values.pop_back();
+        auto element = builder.Element("root", values, {});
+        REQUIRE(element);
+        auto document = builder.Finish(*element);
+        REQUIRE(document);
+        for (const auto& key: keys)
+            CHECK(document->Root().Attribute(key)->Value() == "value");
+    }
 }

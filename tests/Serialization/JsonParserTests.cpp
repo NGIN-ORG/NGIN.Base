@@ -413,3 +413,97 @@ TEST_CASE("JSON memory accounting includes finalized value views",
     REQUIRE_FALSE(limited);
     CHECK(limited.error().code == ParseErrorCode::LimitExceeded);
 }
+
+TEST_CASE("JSON wide objects preserve lookup order and duplicate policies", "[serialization][json]")
+{
+    for (UIntSize count: {15U, 16U, 17U, 64U, 1000U})
+    {
+        INFO("members=" << count);
+        std::string              body;
+        std::vector<std::string> keys;
+        for (UIntSize i = 0; i < count; ++i)
+        {
+            keys.push_back("key" + std::to_string(i));
+            if (i)
+                body += ',';
+            body += '"' + keys.back() + "\":" + std::to_string(i);
+        }
+        const std::string nested = "{\"inner\":{" + body + "}," + body + "}";
+        auto              parsed = JSON::Parse(nested, {.source = SourceId {93}});
+        REQUIRE(parsed);
+        const auto root  = *parsed->Root().TryObject();
+        const auto inner = *root.Find("inner")->TryObject();
+        for (UIntSize i = 0; i < count; ++i)
+        {
+            REQUIRE(root.Find(keys[i]));
+            CHECK(root.Find(keys[i])->TryUInt64() == i);
+            CHECK(inner.Find(keys[i])->TryUInt64() == i);
+        }
+        CHECK_FALSE(root.Find("absent"));
+        CHECK_FALSE(inner.Find("absent"));
+        CHECK(root.Find("key0")->Span().source == SourceId {93});
+        UIntSize order = 0;
+        for (const auto member: inner)
+            CHECK(member.Key() == keys[order++]);
+
+        const std::string duplicate = "{" + body + R"(,"\u006bey0":99})";
+        auto              rejected  = JSON::Parse(duplicate);
+        REQUIRE_FALSE(rejected);
+        CHECK(rejected.error().code == ParseErrorCode::DuplicateName);
+        REQUIRE(rejected.error().related);
+        CHECK(rejected.error().related->begin == 1);
+        for (const auto policy: {JSON::DuplicateKeyPolicy::KeepFirst, JSON::DuplicateKeyPolicy::KeepLast, JSON::DuplicateKeyPolicy::Preserve})
+        {
+            auto normalized = JSON::Parse(duplicate, {.duplicateKeys = policy});
+            REQUIRE(normalized);
+            auto object = *normalized->Root().TryObject();
+            CHECK(object.Find("key0")->TryInt64() == (policy == JSON::DuplicateKeyPolicy::KeepLast ? 99 : 0));
+            CHECK(object.Size() == count + (policy == JSON::DuplicateKeyPolicy::Preserve ? 1 : 0));
+        }
+        JSON::Builder builder;
+        auto          value = builder.Int(7);
+        REQUIRE(value);
+        std::vector<JSON::ObjectMember> members;
+        for (const auto& key: keys)
+            members.push_back({key, *value});
+        members.push_back({keys.front(), *value});
+        auto invalid = builder.Object(members);
+        REQUIRE_FALSE(invalid);
+        CHECK(invalid.error().code == JSON::BuildErrorCode::DuplicateKey);
+        members.pop_back();
+        auto object = builder.Object(members);
+        REQUIRE(object);
+        auto document = builder.Finish(*object);
+        REQUIRE(document);
+        for (const auto& key: keys)
+            CHECK(document->Root().TryObject()->Find(key)->TryInt64() == 7);
+    }
+}
+
+TEST_CASE("JSON duplicate builder failures do not retain copied key strings", "[serialization][json][memory]")
+{
+    ParseLimits limits;
+    limits.maxTotalMemoryBytes = 8192;
+    JSON::Builder builder {limits};
+    auto          value = builder.Int(1);
+    REQUIRE(value);
+    std::vector<std::string> keys;
+    for (UIntSize i = 0; i < 32; ++i)
+        keys.push_back(std::string(80, 'a') + std::to_string(i));
+    std::vector<JSON::ObjectMember> members;
+    for (const auto& key: keys)
+        members.push_back({key, *value});
+    members.push_back(members.front());
+    for (UIntSize i = 0; i < 20; ++i)
+    {
+        auto rejected = builder.Object(members);
+        REQUIRE_FALSE(rejected);
+        CHECK(rejected.error().code == JSON::BuildErrorCode::DuplicateKey);
+    }
+    members.pop_back();
+    auto object = builder.Object(members);
+    REQUIRE(object);
+    auto document = builder.Finish(*object);
+    REQUIRE(document);
+    CHECK(document->Root().TryObject()->Find(keys.back())->TryInt64() == 1);
+}

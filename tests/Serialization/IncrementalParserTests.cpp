@@ -124,19 +124,21 @@ namespace
         sourceOptions.source                       = sourceId;
         JSON::IncrementalEventParser parser {handler, scratch, sourceOptions};
         UIntSize                     begin = 0;
+        UIntSize                     produced = 0;
         for (const auto end: ends)
         {
             if (end < begin || end > source.size())
                 throw std::runtime_error {"invalid JSON chunk boundary"};
             const auto fed = parser.Feed(source.substr(begin, end - begin));
-            if (fed.status != IncrementalParseStatus::NeedMoreInput)
+            produced += fed.eventsProduced;
+            if (fed.HasError())
                 throw std::runtime_error {"JSON feed did not request more input"};
             begin = end;
         }
         if (begin != source.size())
             throw std::runtime_error {"JSON chunks did not cover input"};
         const auto finished = parser.Finish();
-        if (!finished.IsComplete() || finished.eventsProduced != events.size())
+        if (!finished.IsComplete() || finished.eventsProduced + produced != events.size())
             throw std::runtime_error {"incremental JSON fixture did not parse"};
         return events;
     }
@@ -157,19 +159,21 @@ namespace
         sourceOptions.source                      = sourceId;
         XML::IncrementalEventParser parser {handler, scratch, sourceOptions};
         UIntSize                    begin = 0;
+        UIntSize                    produced = 0;
         for (const auto end: ends)
         {
             if (end < begin || end > source.size())
                 throw std::runtime_error {"invalid XML chunk boundary"};
             const auto fed = parser.Feed(source.substr(begin, end - begin));
-            if (fed.status != IncrementalParseStatus::NeedMoreInput)
+            produced += fed.eventsProduced;
+            if (fed.HasError())
                 throw std::runtime_error {"XML feed did not request more input"};
             begin = end;
         }
         if (begin != source.size())
             throw std::runtime_error {"XML chunks did not cover input"};
         const auto finished = parser.Finish();
-        if (!finished.IsComplete() || finished.eventsProduced != events.size())
+        if (!finished.IsComplete() || finished.eventsProduced + produced != events.size())
             throw std::runtime_error {"incremental XML fixture did not parse"};
         return events;
     }
@@ -282,10 +286,8 @@ TEST_CASE("incremental parsers preserve corpus semantics at every byte boundary"
             INFO(entry.path().filename().string() << " split=" << split);
             ParseScratch                 scratch;
             JSON::IncrementalEventParser parser {jsonHandler, scratch};
-            CHECK(parser.Feed(std::string_view {source}.substr(0, split)).status ==
-                  IncrementalParseStatus::NeedMoreInput);
-            CHECK(parser.Feed(std::string_view {source}.substr(split)).status ==
-                  IncrementalParseStatus::NeedMoreInput);
+            (void) parser.Feed(std::string_view {source}.substr(0, split));
+            (void) parser.Feed(std::string_view {source}.substr(split));
             CHECK(parser.Finish().HasError());
         }
     }
@@ -297,10 +299,8 @@ TEST_CASE("incremental parsers preserve corpus semantics at every byte boundary"
             INFO(entry.path().filename().string() << " split=" << split);
             ParseScratch                scratch;
             XML::IncrementalEventParser parser {xmlHandler, scratch};
-            CHECK(parser.Feed(std::string_view {source}.substr(0, split)).status ==
-                  IncrementalParseStatus::NeedMoreInput);
-            CHECK(parser.Feed(std::string_view {source}.substr(split)).status ==
-                  IncrementalParseStatus::NeedMoreInput);
+            (void) parser.Feed(std::string_view {source}.substr(0, split));
+            (void) parser.Feed(std::string_view {source}.substr(split));
             CHECK(parser.Finish().HasError());
         }
     }
@@ -322,23 +322,22 @@ TEST_CASE("incremental parsers keep limits errors and reset state global",
     CHECK(jsonLimit.diagnostic->span.source == SourceId {41});
     CHECK(jsonLimit.diagnostic->location.offset == 2);
 
-    limits.maxInputBytes       = 64;
-    limits.maxTotalMemoryBytes = 4;
+    limits.maxInputBytes       = 1024;
+    limits.maxTotalMemoryBytes = 32;
     JSON::IncrementalEventParser memoryLimitedJson {
             jsonHandler,
             jsonScratch,
             {.source = SourceId {41}},
             limits};
     CHECK(memoryLimitedJson.Feed("12").status == IncrementalParseStatus::NeedMoreInput);
-    const auto jsonMemoryLimit = memoryLimitedJson.Feed("345");
+    const auto jsonMemoryLimit = memoryLimitedJson.Feed(std::string(100, '3'));
     REQUIRE(jsonMemoryLimit.diagnostic);
     CHECK(jsonMemoryLimit.diagnostic->code == ParseErrorCode::LimitExceeded);
 
     JSON::IncrementalEventParser incompleteJson {jsonHandler, jsonScratch, {.source = SourceId {42}}, {}};
-    CHECK(incompleteJson.Feed(R"({"a":")"
-                              "\\uD83D")
-                  .status ==
-          IncrementalParseStatus::NeedMoreInput);
+    CHECK_FALSE(incompleteJson.Feed(R"({"a":")"
+                                    "\\uD83D")
+                        .HasError());
     const auto jsonIncomplete = incompleteJson.Finish();
     REQUIRE(jsonIncomplete.HasError());
     REQUIRE(jsonIncomplete.diagnostic);
@@ -354,10 +353,8 @@ TEST_CASE("incremental parsers keep limits errors and reset state global",
             malformedJsonScratch,
             {.source = SourceId {45}},
             {}};
-    CHECK(malformedJsonParser.Feed(std::string_view {malformedJson}.substr(0, 6)).status ==
-          IncrementalParseStatus::NeedMoreInput);
-    CHECK(malformedJsonParser.Feed(std::string_view {malformedJson}.substr(6)).status ==
-          IncrementalParseStatus::NeedMoreInput);
+    (void) malformedJsonParser.Feed(std::string_view {malformedJson}.substr(0, 6));
+    (void) malformedJsonParser.Feed(std::string_view {malformedJson}.substr(6));
     const auto malformedJsonResult = malformedJsonParser.Finish();
     REQUIRE(malformedJsonResult.diagnostic);
     CHECK(malformedJsonResult.diagnostic->code == jsonReference.error().code);
@@ -388,14 +385,14 @@ TEST_CASE("incremental parsers keep limits errors and reset state global",
     XML::IncrementalEventParser limitedXml {xmlHandler, xmlScratch, {.source = SourceId {43}}, limits};
     CHECK(limitedXml.Feed("<root").status == IncrementalParseStatus::NeedMoreInput);
     const auto xmlLimit = limitedXml.Feed("/>");
-    CHECK(xmlLimit.status == IncrementalParseStatus::NeedMoreInput);
+    CHECK(xmlLimit.status == IncrementalParseStatus::EventProduced);
     const auto xmlLimitExceeded = limitedXml.Feed(" ");
     REQUIRE(xmlLimitExceeded.HasError());
     REQUIRE(xmlLimitExceeded.diagnostic);
     CHECK(xmlLimitExceeded.diagnostic->code == ParseErrorCode::LimitExceeded);
 
     XML::IncrementalEventParser incompleteXml {xmlHandler, xmlScratch, {.source = SourceId {44}}, {}};
-    CHECK(incompleteXml.Feed("<root>&amp").status == IncrementalParseStatus::NeedMoreInput);
+    CHECK_FALSE(incompleteXml.Feed("<root>&amp").HasError());
     const auto xmlIncomplete = incompleteXml.Finish();
     REQUIRE(xmlIncomplete.HasError());
     REQUIRE(xmlIncomplete.diagnostic);
@@ -410,10 +407,8 @@ TEST_CASE("incremental parsers keep limits errors and reset state global",
             malformedXmlScratch,
             {.source = SourceId {46}},
             {}};
-    CHECK(malformedXmlParser.Feed(std::string_view {malformedXml}.substr(0, 9)).status ==
-          IncrementalParseStatus::NeedMoreInput);
-    CHECK(malformedXmlParser.Feed(std::string_view {malformedXml}.substr(9)).status ==
-          IncrementalParseStatus::NeedMoreInput);
+    (void) malformedXmlParser.Feed(std::string_view {malformedXml}.substr(0, 9));
+    (void) malformedXmlParser.Feed(std::string_view {malformedXml}.substr(9));
     const auto malformedXmlResult = malformedXmlParser.Finish();
     REQUIRE(malformedXmlResult.diagnostic);
     CHECK(malformedXmlResult.diagnostic->code == xmlReference.error().code);
@@ -423,8 +418,7 @@ TEST_CASE("incremental parsers keep limits errors and reset state global",
     XML::ParseOptions doctype;
     doctype.doctype = XML::DoctypePolicy::AllowWithoutExternalEntities;
     XML::IncrementalEventParser external {xmlHandler, xmlScratch, doctype};
-    CHECK(external.Feed(R"(<!DOCTYPE root SYSTEM "file:///secret"><root/>)").status ==
-          IncrementalParseStatus::NeedMoreInput);
+    (void) external.Feed(R"(<!DOCTYPE root SYSTEM "file:///secret"><root/>)");
     const auto externalResult = external.Finish();
     REQUIRE(externalResult.HasError());
     REQUIRE(externalResult.diagnostic);
@@ -458,11 +452,187 @@ TEST_CASE("incremental parsers propagate handler rejection exactly once",
     };
     ParseScratch                xmlScratch;
     XML::IncrementalEventParser xml {xmlHandler, xmlScratch};
-    CHECK(xml.Feed("<root/>").status == IncrementalParseStatus::NeedMoreInput);
+    CHECK(xml.Feed("<root/>").HasError());
     const auto xmlResult = xml.Finish();
     REQUIRE(xmlResult.HasError());
     REQUIRE(xmlResult.diagnostic);
     CHECK(xmlResult.diagnostic->code == ParseErrorCode::HandlerRejected);
     CHECK(xmlResult.diagnostic->consumerContext == 72);
     CHECK(xmlCalls == 1);
+}
+
+TEST_CASE("incremental parsers deliver during Feed with bounded retained storage", "[serialization][incremental][memory]")
+{
+    UIntSize     jsonCalls   = 0;
+    auto         jsonHandler = [&](const JSON::Event&) { ++jsonCalls; return JSON::EventAction::Continue(); };
+    ParseScratch jsonScratch;
+    ParseLimits  limits;
+    limits.maxTotalMemoryBytes = 4096;
+    JSON::IncrementalEventParser json {jsonHandler, jsonScratch, {}, limits};
+    CHECK(json.Feed("[").eventsProduced == 1);
+    for (UIntSize i = 0; i < 10000; ++i)
+    {
+        const auto result = json.Feed(i ? R"(,"line\nnext")" : R"("line\nnext")");
+        REQUIRE_FALSE(result.HasError());
+        CHECK(result.eventsProduced == 1);
+        CHECK(json.BufferedBytes() == 0);
+        CHECK(json.MemoryCommitted() <= limits.maxTotalMemoryBytes);
+    }
+    CHECK(jsonCalls == 10001);
+    CHECK(json.Feed("]").eventsProduced == 1);
+    CHECK(json.Finish().IsComplete());
+    CHECK(json.TotalBytes() > 100000);
+    CHECK(json.Finish().eventsProduced == 0);
+
+    UIntSize                    xmlCalls   = 0;
+    auto                        xmlHandler = [&](const XML::Event&) { ++xmlCalls; return XML::EventAction::Continue(); };
+    ParseScratch                xmlScratch;
+    XML::IncrementalEventParser xml {xmlHandler, xmlScratch, {}, limits};
+    CHECK(xml.Feed("<root>").eventsProduced == 1);
+    for (UIntSize i = 0; i < 10000; ++i)
+    {
+        const auto result = xml.Feed("<item a=\"&amp;\">text</item>");
+        REQUIRE_FALSE(result.HasError());
+        CHECK(result.eventsProduced == 4);
+        CHECK(xml.BufferedBytes() == 0);
+        CHECK(xml.MemoryCommitted() <= limits.maxTotalMemoryBytes);
+    }
+    CHECK(xmlCalls == 40001);
+    CHECK(xml.Feed("</root>").eventsProduced == 1);
+    CHECK(xml.Finish().IsComplete());
+    CHECK(xml.TotalBytes() > 200000);
+}
+
+TEST_CASE("incremental JSON duplicate policies and comments survive arbitrary chunk boundaries", "[serialization][incremental][json]")
+{
+    std::string source = "{/*before*/";
+    for (UIntSize i = 0; i < 80; ++i)
+        source += "\"key" + std::to_string(i) + "\":{\"a\":[1,2,]},";
+    source += R"("\u006bey0":{"a":[99]},//after)";
+    source += "\r\n}";
+    JSON::ParseOptions options;
+    options.comments       = JSON::CommentPolicy::Allow;
+    options.trailingCommas = JSON::TrailingCommaPolicy::Allow;
+    std::mt19937 random {573};
+    for (const auto policy: {JSON::DuplicateKeyPolicy::KeepFirst, JSON::DuplicateKeyPolicy::KeepLast, JSON::DuplicateKeyPolicy::Preserve})
+    {
+        options.duplicateKeys = policy;
+        const auto expected   = ParseJsonContiguous(source, options, SourceId {83});
+        for (UIntSize i = 0; i < 16; ++i)
+            CHECK(ParseJsonChunks(source, RandomEnds(source.size(), random), options, SourceId {83}) == expected);
+    }
+    options.duplicateKeys                = JSON::DuplicateKeyPolicy::Reject;
+    auto                         handler = [](const JSON::Event&) { return JSON::EventAction::Continue(); };
+    ParseScratch                 scratch;
+    JSON::IncrementalEventParser parser {handler, scratch, options};
+    for (char c: source)
+        (void) parser.Feed(std::string_view {&c, 1});
+    const auto result = parser.Finish();
+    REQUIRE(result.diagnostic);
+    CHECK(result.diagnostic->code == ParseErrorCode::DuplicateName);
+    REQUIRE(result.diagnostic->related);
+    CHECK(result.diagnostic->related->begin == source.find("\"key0\""));
+    CHECK(result.diagnostic->span.begin == source.find("\"\\u006bey0\""));
+}
+
+TEST_CASE("incremental XML validates wide split tags declarations and trailing content", "[serialization][incremental][xml]")
+{
+    std::string tag = "<root";
+    for (UIntSize i = 0; i < 80; ++i)
+        tag += " key" + std::to_string(i) + "=\"A&amp;B\"";
+    const std::string source = "\xef\xbb\xbf<?xml version=\"1.0\"?><!DOCTYPE root>" + tag + ">\r\n<!--x--><![CDATA[a>b]]><?task a?></root>";
+    XML::ParseOptions options;
+    options.trivia        = XML::TriviaPolicy::Preserve;
+    options.doctype       = XML::DoctypePolicy::AllowWithoutExternalEntities;
+    const auto   expected = ParseXmlContiguous(source, options, SourceId {84});
+    std::mt19937 random {573};
+    for (UIntSize i = 0; i < 16; ++i)
+        CHECK(ParseXmlChunks(source, RandomEnds(source.size(), random), options, SourceId {84}) == expected);
+    auto                        handler = [](const XML::Event&) { return XML::EventAction::Continue(); };
+    ParseScratch                scratch;
+    XML::IncrementalEventParser parser {handler, scratch, options};
+    const std::string           duplicate = tag + " key0=\"duplicate\"/>";
+    for (char c: duplicate)
+        (void) parser.Feed(std::string_view {&c, 1});
+    auto result = parser.Finish();
+    REQUIRE(result.diagnostic);
+    CHECK(result.diagnostic->code == ParseErrorCode::DuplicateName);
+    REQUIRE(result.diagnostic->related);
+    CHECK(result.diagnostic->related->begin == 6);
+    parser.Reset();
+    REQUIRE_FALSE(parser.Feed("<root/>").HasError());
+    CHECK(parser.Feed("<second/>").HasError());
+}
+
+TEST_CASE("incremental errors retain delivered events and global line positions", "[serialization][incremental][diagnostic]")
+{
+    UIntSize                     count   = 0;
+    auto                         handler = [&](const JSON::Event&) { ++count; return JSON::EventAction::Continue(); };
+    ParseScratch                 scratch;
+    JSON::IncrementalEventParser parser {handler, scratch, {.source = SourceId {85}}};
+    CHECK(parser.Feed("[1,\r").eventsProduced == 2);
+    CHECK(count == 2);
+    REQUIRE_FALSE(parser.Feed("\n").HasError());
+    auto result = parser.Feed("}");
+    REQUIRE(result.diagnostic);
+    CHECK(result.diagnostic->location.offset == 5);
+    CHECK(result.diagnostic->location.line == 2);
+    CHECK(result.diagnostic->location.column == 1);
+    CHECK(result.diagnostic->span.source == SourceId {85});
+    CHECK(count == 2);
+    CHECK(parser.Finish().HasError());
+    CHECK(count == 2);
+
+    auto                         throwing = [](const JSON::Event&) -> JSON::EventAction { throw std::runtime_error {"handler"}; };
+    JSON::IncrementalEventParser throwingParser {throwing, scratch};
+    CHECK_THROWS_AS(throwingParser.Feed("["), std::runtime_error);
+}
+
+TEST_CASE("incremental parsers agree with document validation on mutated inputs", "[serialization][incremental][validation]")
+{
+    const std::string jsonSeed  = R"({"a":[true,null,-1.2e3,"\u20ac"],"b":{"x":1}})";
+    const std::string xmlSeed   = "<root a=\"A&amp;B\"><child>text</child><!--c--><![CDATA[x]]></root>";
+    const std::string mutations = "{}[],:<>/!?\"'&;=x0 \r\n\\";
+    std::mt19937      random {615};
+    auto              jsonHandler = [](const JSON::Event&) { return JSON::EventAction::Continue(); };
+    auto              xmlHandler  = [](const XML::Event&) { return XML::EventAction::Continue(); };
+    for (UIntSize i = 0; i < 1000; ++i)
+    {
+        for (bool json: {true, false})
+        {
+            std::string    source = json ? jsonSeed : xmlSeed;
+            const UIntSize offset = random() % source.size();
+            if (i % 3 == 0)
+                source.erase(offset, 1);
+            else if (i % 3 == 1)
+                source.insert(offset, 1, mutations[random() % mutations.size()]);
+            else
+                source[offset] = mutations[random() % mutations.size()];
+            INFO("source=" << source);
+            ParseScratch scratch;
+            UIntSize     begin = 0;
+            if (json)
+            {
+                const bool                   expected = JSON::Parse(source).has_value();
+                JSON::IncrementalEventParser parser {jsonHandler, scratch};
+                for (const auto end: RandomEnds(source.size(), random))
+                {
+                    (void) parser.Feed(std::string_view {source}.substr(begin, end - begin));
+                    begin = end;
+                }
+                CHECK(parser.Finish().IsComplete() == expected);
+            }
+            else
+            {
+                const bool                  expected = XML::Parse(source).has_value();
+                XML::IncrementalEventParser parser {xmlHandler, scratch};
+                for (const auto end: RandomEnds(source.size(), random))
+                {
+                    (void) parser.Feed(std::string_view {source}.substr(begin, end - begin));
+                    begin = end;
+                }
+                CHECK(parser.Finish().IsComplete() == expected);
+            }
+        }
+    }
 }

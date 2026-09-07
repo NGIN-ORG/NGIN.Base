@@ -1,3 +1,5 @@
+#include "../IncrementalInput.hpp"
+#include "../NameIndex.hpp"
 #include <NGIN/Serialization/XML/XmlEventParser.hpp>
 
 #include <NGIN/Serialization/Core/InputCursor.hpp>
@@ -30,19 +32,11 @@ namespace NGIN::Serialization::XML::detail
         class SeenAttributes
         {
         public:
+            explicit SeenAttributes(NGIN::Serialization::detail::AllocationBudget& budget) : m_names(budget), m_overflow(NGIN::Serialization::detail::BudgetAllocator<SeenAttribute> {budget}) {}
             [[nodiscard]] const SeenAttribute* Find(std::string_view name) const noexcept
             {
-                for (UIntSize index = 0; index < m_inlineSize; ++index)
-                {
-                    if (m_inline[index].value == name)
-                        return &m_inline[index];
-                }
-                for (const auto& attribute: m_overflow)
-                {
-                    if (attribute.value == name)
-                        return &attribute;
-                }
-                return nullptr;
+                const UInt32 found = m_names.Find(name, m_inlineSize + m_overflow.size(), [&](UIntSize i) { return At(i).value; });
+                return found == NGIN::Serialization::detail::NameIndex::Missing ? nullptr : &At(found);
             }
 
             void Add(SeenAttribute attribute)
@@ -53,12 +47,15 @@ namespace NGIN::Serialization::XML::detail
                     return;
                 }
                 m_overflow.push_back(attribute);
+                m_names.Append(m_inlineSize + m_overflow.size(), [&](UIntSize i) { return At(i).value; });
             }
 
         private:
+            [[nodiscard]] const SeenAttribute&                       At(UIntSize i) const noexcept { return i < m_inline.size() ? m_inline[i] : m_overflow[i - m_inlineSize]; }
+            NGIN::Serialization::detail::NameIndex                   m_names;
             std::array<SeenAttribute, 4> m_inline {};
             UIntSize                     m_inlineSize {0};
-            std::vector<SeenAttribute>   m_overflow {};
+            NGIN::Serialization::detail::BudgetVector<SeenAttribute> m_overflow;
         };
 
         struct ParseContext
@@ -76,6 +73,7 @@ namespace NGIN::Serialization::XML::detail
             UIntSize         attributeCount {0};
             UIntSize         childCount {0};
             UIntSize         decodedBytes {0};
+            NGIN::Serialization::detail::AllocationBudget* allocationBudget {nullptr};
         };
 
         struct DepthGuard
@@ -237,6 +235,8 @@ namespace NGIN::Serialization::XML::detail
                 return raw;
 
             context.scratch->Reset();
+            if (!context.allocationBudget->SetExternalBytes((std::max) (context.scratch->Capacity(), raw.size())))
+                return Failure<std::string_view>(MakeErrorAt(context, ParseErrorCode::LimitExceeded, "XML event scratch memory limit exceeded", sourceOffset, sourceOffset + raw.size()));
             char* output = context.scratch->TryAllocate(raw.size());
             if (!output)
             {
@@ -597,22 +597,11 @@ namespace NGIN::Serialization::XML::detail
         }
 
         [[nodiscard]] NGIN::Utilities::Expected<void, ParseDiagnostic>
-        ParseElement(ParseContext& context)
+        ParseStartTag(ParseContext& context, NGIN::Utilities::Expected<ParsedName, ParseDiagnostic>& name, bool& selfClosing)
         {
             const UIntSize start = context.cursor.Offset();
-            if (context.depth >= context.limits.maxDepth)
-            {
-                return Failure<void>(
-                        MakeError(context, ParseErrorCode::DepthExceeded, "XML depth limit exceeded"));
-            }
-            auto counted = CountNode(context, start, start + 1);
-            if (!counted)
-                return counted;
-
-            ++context.depth;
-            DepthGuard depthGuard {context.depth};
             context.cursor.Advance();
-            auto name = ParseName(context);
+            name = ParseName(context);
             if (!name)
                 return Failure<void>(std::move(name.error()));
 
@@ -630,7 +619,7 @@ namespace NGIN::Serialization::XML::detail
             if (!started)
                 return started;
 
-            SeenAttributes attributes;
+            SeenAttributes attributes {*context.allocationBudget};
             while (true)
             {
                 const UIntSize beforeWhitespace = context.cursor.Offset();
@@ -638,6 +627,7 @@ namespace NGIN::Serialization::XML::detail
                 const bool separated = context.cursor.Offset() != beforeWhitespace;
                 if (StartsWith(context, "/>"))
                 {
+                    selfClosing             = true;
                     const UIntSize endStart = context.cursor.Offset();
                     context.cursor.Advance(2);
                     auto ended = Deliver(
@@ -756,7 +746,7 @@ namespace NGIN::Serialization::XML::detail
                 {
                     return Failure<void>(MakeErrorAt(
                             context,
-                            ParseErrorCode::OutOfMemory,
+                            context.allocationBudget->LimitExceeded() ? ParseErrorCode::LimitExceeded : ParseErrorCode::OutOfMemory,
                             "XML event attribute tracking allocation failed",
                             attributeStart,
                             context.cursor.Offset()));
@@ -777,6 +767,30 @@ namespace NGIN::Serialization::XML::detail
                 if (!delivered)
                     return delivered;
             }
+
+            return {};
+        }
+
+        [[nodiscard]] NGIN::Utilities::Expected<void, ParseDiagnostic>
+        ParseElement(ParseContext& context)
+        {
+            const UIntSize start = context.cursor.Offset();
+            if (context.depth >= context.limits.maxDepth)
+            {
+                return Failure<void>(
+                        MakeError(context, ParseErrorCode::DepthExceeded, "XML depth limit exceeded"));
+            }
+            auto counted = CountNode(context, start, start + 1);
+            if (!counted)
+                return counted;
+
+            ++context.depth;
+            DepthGuard                                             depthGuard {context.depth};
+            NGIN::Utilities::Expected<ParsedName, ParseDiagnostic> name;
+            bool                                                   selfClosing = false;
+            auto                                                   header      = ParseStartTag(context, name, selfClosing);
+            if (!header || selfClosing)
+                return header;
 
             while (true)
             {
@@ -945,15 +959,17 @@ namespace NGIN::Serialization::XML::detail
                           const ParseLimits&  limits)
     {
         const auto   source = input;
-        ParseContext context {
-                .cursor         = InputCursor {source},
-                .source         = source,
-                .sourceId       = options.source,
-                .options        = options,
-                .limits         = limits,
-                .scratch        = &scratch,
-                .handlerContext = handlerContext,
-                .callback       = callback,
+        NGIN::Serialization::detail::AllocationBudget allocationBudget {{}, limits.maxTotalMemoryBytes};
+        ParseContext                                  context {
+                                                 .cursor           = InputCursor {source},
+                                                 .source           = source,
+                                                 .sourceId         = options.source,
+                                                 .options          = options,
+                                                 .limits           = limits,
+                                                 .scratch          = &scratch,
+                                                 .handlerContext   = handlerContext,
+                                                 .callback         = callback,
+                                                 .allocationBudget = &allocationBudget,
         };
 
         if (source.size() > limits.maxInputBytes)
@@ -985,6 +1001,8 @@ namespace NGIN::Serialization::XML::detail
         }
 
         scratch.Reset();
+        if (!allocationBudget.SetExternalBytes(scratch.Capacity()))
+            return Failure<void>(MakeErrorAt(context, ParseErrorCode::LimitExceeded, "XML event scratch memory limit exceeded", 0, source.size()));
 
         if (StartsWith(context, "\xef\xbb\xbf"))
             context.cursor.Advance(3);
@@ -1071,5 +1089,286 @@ namespace NGIN::Serialization::XML::detail
                     "Content is not allowed after the XML root element"));
         }
         return {};
+    }
+    struct IncrementalEngine::Impl
+    {
+        using AllocationBudget = NGIN::Serialization::detail::AllocationBudget;
+        using BudgetString     = NGIN::Serialization::detail::BudgetString;
+        Impl(void* handlerState, EventCallback handlerCallback, ParseScratch& scratch, const ParseOptions& options, const ParseLimits& limits)
+            : budget({}, limits.maxTotalMemoryBytes), input(NGIN::Serialization::detail::IncrementalInput::Format::Xml, budget),
+              names(NGIN::Serialization::detail::BudgetAllocator<BudgetString> {budget}),
+              context {.cursor = InputCursor {std::string_view {}}, .source = {}, .options = options, .limits = limits, .scratch = &scratch},
+              handler(handlerState), callback(handlerCallback)
+        {
+            context.sourceId         = options.source;
+            context.allocationBudget = &budget;
+            context.handlerContext   = this;
+            context.callback         = [](void* state, const Event& event) { return static_cast<Impl*>(state)->DeliverEvent(event); };
+            scratch.Reset();
+        }
+        EventAction DeliverEvent(const Event& event)
+        {
+            Event global = event;
+            global.span.begin += input.Offset();
+            global.span.end += input.Offset();
+            ++events;
+            return callback(handler, global);
+        }
+        NGIN::Utilities::Expected<void, ParseDiagnostic> Error(ParseErrorCode code, const char* message)
+        {
+            return Failure<void>(MakeErrorAt(context, code, message, 0, context.source.size()));
+        }
+        NGIN::Utilities::Expected<void, ParseDiagnostic> Process(std::string_view token)
+        {
+            context.source = token;
+            context.cursor = InputCursor {token};
+            context.scratch->Reset();
+            if (!NGIN::Text::Unicode::IsValidUtf8(token) || !ContainsOnlyXmlCharacters(token))
+                return Error(ParseErrorCode::InvalidEncoding, "Invalid UTF-8 or forbidden XML character");
+            const bool inside = !names.empty();
+            if (input.Offset() == 0 && token.starts_with("\xef\xbb\xbf"))
+            {
+                declarationOffset = 3;
+                context.cursor.Advance(3);
+                if (!IsWhitespaceOnly(context.cursor.Remaining()))
+                    return Error(ParseErrorCode::InvalidDocumentStructure, "Content before XML root element");
+                return {};
+            }
+            if (token.starts_with("<!--"))
+                return ParseComment(context, inside);
+            if (token.starts_with("<?"))
+                return ParseProcessingInstruction(context, inside, input.Offset() == declarationOffset && IsXmlDeclaration(context));
+            if (token.starts_with("<!DOCTYPE"))
+            {
+                if (rootSeen || sawDoctype)
+                    return Error(ParseErrorCode::InvalidDocumentStructure, "Unexpected XML DOCTYPE");
+                sawDoctype = true;
+                return ParseDoctype(context);
+            }
+            if (token.starts_with("</"))
+            {
+                if (!inside)
+                    return Error(ParseErrorCode::InvalidDocumentStructure, "Unexpected XML end tag");
+                context.cursor.Advance(2);
+                auto closeName = ParseName(context);
+                if (!closeName)
+                    return Failure<void>(std::move(closeName.error()));
+                SkipWhitespace(context);
+                if (context.cursor.Peek() != '>')
+                    return Error(ParseErrorCode::InvalidToken, "Expected '>' after XML end tag");
+                context.cursor.Advance();
+                if (closeName->value != std::string_view {names.back().data(), names.back().size()})
+                    return Error(ParseErrorCode::MismatchedTag, "XML end tag does not match start tag");
+                auto delivered = Deliver(context, Event {.kind = EventKind::EndElement, .span = {context.sourceId, 0, token.size()}, .name = closeName->value});
+                names.pop_back();
+                return delivered;
+            }
+            if (token.starts_with("<![CDATA["))
+            {
+                if (!inside)
+                    return Error(ParseErrorCode::InvalidDocumentStructure, "CDATA outside XML root element");
+                if (!token.ends_with("]]>"))
+                    return Error(ParseErrorCode::UnexpectedEnd, "Unterminated XML CDATA section");
+                auto counted = CountNode(context, 0, token.size());
+                if (!counted)
+                    return counted;
+                counted = CountChild(context, 0, token.size());
+                if (!counted)
+                    return counted;
+                return Deliver(context, Event {.kind = EventKind::CData, .span = {context.sourceId, 0, token.size()}, .value = token.substr(9, token.size() - 12)});
+            }
+            if (token.starts_with("<!"))
+                return Error(ParseErrorCode::UnsupportedConstruct, "Unsupported XML declaration");
+            if (token.front() == '<')
+            {
+                if (!inside && rootSeen)
+                    return Error(ParseErrorCode::InvalidDocumentStructure, "Multiple XML root elements");
+                if (names.size() >= context.limits.maxDepth)
+                    return Error(ParseErrorCode::DepthExceeded, "XML depth limit exceeded");
+                auto counted = CountNode(context, 0, 1);
+                if (!counted)
+                    return counted;
+                if (inside)
+                {
+                    counted = CountChild(context, 0, 1);
+                    if (!counted)
+                        return counted;
+                }
+                rootSeen = true;
+                NGIN::Utilities::Expected<ParsedName, ParseDiagnostic> name;
+                bool                                                   selfClosing = false;
+                auto                                                   header      = ParseStartTag(context, name, selfClosing);
+                if (!header)
+                    return header;
+                if (!selfClosing)
+                    names.emplace_back(name->value.data(), name->value.size(), NGIN::Serialization::detail::BudgetAllocator<char> {budget});
+                return {};
+            }
+            if (!inside)
+            {
+                if (!IsWhitespaceOnly(token))
+                    return Error(ParseErrorCode::InvalidDocumentStructure, "Content outside XML root element");
+                return {};
+            }
+            if (token.find("]]>") != std::string_view::npos)
+                return Error(ParseErrorCode::InvalidToken, "']]>' is not allowed in XML character data");
+            if (context.options.trivia == TriviaPolicy::Discard && IsWhitespaceOnly(token))
+                return {};
+            auto text = DecodeText(context, token, 0, false);
+            if (!text)
+                return Failure<void>(std::move(text.error()));
+            auto counted = CountNode(context, 0, token.size());
+            if (!counted)
+                return counted;
+            counted = CountChild(context, 0, token.size());
+            if (!counted)
+                return counted;
+            return Deliver(context, Event {.kind = EventKind::Text, .span = {context.sourceId, 0, token.size()}, .value = *text});
+        }
+        bool Consume(std::string_view token)
+        {
+            auto parsed = Process(token);
+            if (!parsed)
+            {
+                diagnostic = std::move(parsed.error());
+                if (diagnostic->code == ParseErrorCode::HandlerRejected)
+                {
+                    const auto location  = SourceMap {token, context.sourceId}.Locate(diagnostic->span.begin);
+                    diagnostic->location = {location.offset, location.line, location.column};
+                }
+                input.Translate(*diagnostic);
+                return false;
+            }
+            return CheckMemory();
+        }
+        bool CheckMemory()
+        {
+            if (!budget.SetExternalBytes(context.scratch->Capacity()))
+            {
+                SetError(ParseErrorCode::LimitExceeded, "XML streaming memory limit exceeded");
+                return false;
+            }
+            return true;
+        }
+        void SetError(ParseErrorCode code, const char* message)
+        {
+            diagnostic           = ParseDiagnostic {};
+            diagnostic->code     = code;
+            diagnostic->message  = message;
+            diagnostic->location = {0, 1, 1};
+            diagnostic->span     = {context.sourceId, 0, 0};
+            input.Translate(*diagnostic);
+        }
+        IncrementalParseResult Result() const
+        {
+            return {.status         = diagnostic ? IncrementalParseStatus::Error : complete ? IncrementalParseStatus::Complete
+                                                                           : events         ? IncrementalParseStatus::EventProduced
+                                                                                            : IncrementalParseStatus::NeedMoreInput,
+                    .eventsProduced = events,
+                    .diagnostic     = diagnostic};
+        }
+        AllocationBudget                                        budget;
+        NGIN::Serialization::detail::IncrementalInput           input;
+        NGIN::Serialization::detail::BudgetVector<BudgetString> names;
+        ParseContext                                            context;
+        void*                                                   handler;
+        EventCallback                                           callback;
+        UIntSize                                                total {0}, events {0}, declarationOffset {0};
+        bool                                                    rootSeen {false}, sawDoctype {false}, complete {false};
+        std::optional<ParseDiagnostic>                          diagnostic;
+    };
+    IncrementalEngine::IncrementalEngine(void* handler, EventCallback callback, ParseScratch& scratch, const ParseOptions& options, const ParseLimits& limits)
+        : m_impl(std::make_unique<Impl>(handler, callback, scratch, options, limits)) {}
+    IncrementalEngine::~IncrementalEngine() = default;
+    IncrementalParseResult IncrementalEngine::Feed(std::string_view chunk)
+    {
+        auto& state  = *m_impl;
+        state.events = 0;
+        if (state.diagnostic)
+            return state.Result();
+        if (state.complete)
+        {
+            state.SetError(ParseErrorCode::InvalidDocumentStructure, "Reset the XML parser before feeding another document");
+            return state.Result();
+        }
+        if (chunk.size() > state.context.limits.maxInputBytes - state.total)
+        {
+            state.SetError(ParseErrorCode::LimitExceeded, "XML input byte limit exceeded");
+            state.diagnostic->location.offset = state.total;
+            state.diagnostic->span.begin      = state.total;
+            state.diagnostic->span.end        = state.total;
+            return state.Result();
+        }
+        if (!state.CheckMemory())
+            return state.Result();
+        state.total += chunk.size();
+        try
+        {
+            state.input.Feed(chunk, [&](std::string_view token) { return state.Consume(token); });
+            if (!state.diagnostic)
+                state.CheckMemory();
+        } catch (const std::bad_alloc&)
+        {
+            state.SetError(state.budget.LimitExceeded() ? ParseErrorCode::LimitExceeded : ParseErrorCode::OutOfMemory, "XML streaming allocation failed");
+        }
+        return state.Result();
+    }
+    IncrementalParseResult IncrementalEngine::Finish()
+    {
+        auto& state  = *m_impl;
+        state.events = 0;
+        if (state.complete || state.diagnostic)
+            return state.Result();
+        if (!state.CheckMemory())
+            return state.Result();
+        try
+        {
+            if (state.input.Finish([&](std::string_view token) { return state.Consume(token); }))
+            {
+                if (!state.rootSeen || !state.names.empty())
+                    state.SetError(ParseErrorCode::UnexpectedEnd, "Incomplete XML document");
+                else
+                    state.complete = true;
+            }
+        } catch (const std::bad_alloc&)
+        {
+            state.SetError(state.budget.LimitExceeded() ? ParseErrorCode::LimitExceeded : ParseErrorCode::OutOfMemory, "XML streaming allocation failed");
+        }
+        return state.Result();
+    }
+    void IncrementalEngine::Reset() noexcept
+    {
+        auto& state = *m_impl;
+        state.names.clear();
+        state.input.Reset();
+        state.context.scratch->Reset();
+        state.context.nodeCount      = 0;
+        state.context.attributeCount = 0;
+        state.context.childCount     = 0;
+        state.context.decodedBytes   = 0;
+        state.total                  = 0;
+        state.events                 = 0;
+        state.declarationOffset      = 0;
+        state.rootSeen               = false;
+        state.sawDoctype             = false;
+        state.complete               = false;
+        state.diagnostic.reset();
+        state.budget.ResetFailure();
+    }
+    UIntSize IncrementalEngine::TotalBytes() const noexcept
+    {
+        return m_impl->total;
+    }
+    UIntSize IncrementalEngine::BufferedBytes() const noexcept
+    {
+        return m_impl->input.BufferedBytes();
+    }
+    UIntSize IncrementalEngine::MemoryCommitted() const noexcept
+    {
+        return m_impl->budget.CommittedBytes() + m_impl->context.scratch->Capacity();
+    }
+    bool IncrementalEngine::IsComplete() const noexcept
+    {
+        return m_impl->complete;
     }
 }// namespace NGIN::Serialization::XML::detail

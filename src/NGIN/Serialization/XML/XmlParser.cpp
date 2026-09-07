@@ -1,4 +1,3 @@
-#include <NGIN/Serialization/XML/XmlEventParser.hpp>
 #include <NGIN/Serialization/XML/XmlParser.hpp>
 
 #include "XmlDocumentInternal.hpp"
@@ -630,6 +629,8 @@ namespace NGIN::Serialization::XML
 
             constexpr auto maxIndex       = (std::numeric_limits<UInt32>::max)();
             const UIntSize attributeBegin = context.state->attributes.size();
+            detail::NameIndex names {context.state->budget};
+            const auto        nameAt         = [&](UIntSize i) { return context.state->Text(context.state->attributes[attributeBegin + i].name); };
             bool           selfClosing    = false;
             try
             {
@@ -675,22 +676,13 @@ namespace NGIN::Serialization::XML
                         return Failure<NodeId>(std::move(attributeName.error()));
                     }
                     const UIntSize attributeNameEnd = context.cursor.Offset();
-                    for (UIntSize index = attributeBegin;
-                         index < context.state->attributes.size();
-                         ++index)
+                    const UInt32   duplicate        = names.Find(context.state->Text(attributeName.value()), context.state->attributes.size() - attributeBegin, nameAt);
+                    if (duplicate != detail::NameIndex::Missing)
                     {
-                        const auto& previous = context.state->attributes[index];
-                        if (context.state->Text(previous.name) == context.state->Text(attributeName.value()))
-                        {
-                            --context.depth;
-                            auto error    = MakeErrorAt(context,
-                                                        ParseErrorCode::DuplicateName,
-                                                        "Duplicate XML attribute",
-                                                        attributeNameStart,
-                                                        attributeNameEnd);
-                            error.related = context.state->TextSpan(previous.name);
-                            return Failure<NodeId>(std::move(error));
-                        }
+                        --context.depth;
+                        auto error    = MakeErrorAt(context, ParseErrorCode::DuplicateName, "Duplicate XML attribute", attributeNameStart, attributeNameEnd);
+                        error.related = context.state->TextSpan(context.state->attributes[attributeBegin + duplicate].name);
+                        return Failure<NodeId>(std::move(error));
                     }
                     SkipWhitespace(context);
                     if (context.cursor.Peek() != '=')
@@ -757,7 +749,10 @@ namespace NGIN::Serialization::XML
                             .span      = context.state->MakeSpan(attributeStart, context.cursor.Offset()),
                             .valueSpan = context.state->MakeSpan(valueStart, valueEnd),
                     });
+                    names.Append(context.state->attributes.size() - attributeBegin, nameAt);
                 }
+                if (!names.Empty())
+                    context.state->attributeIndexes.push_back(detail::IndexedNames {attributeBegin, std::move(names)});
             } catch (const std::bad_alloc&)
             {
                 --context.depth;
@@ -1169,32 +1164,4 @@ namespace NGIN::Serialization::XML
         }
     }
 
-    NGIN::Utilities::Expected<Document, ParseDiagnostic>
-    detail::ParseDocumentView(std::string_view input, ParseScratch& scratch,
-                              const ParseOptions& options, const ParseLimits& limits)
-    {
-        scratch.Reset();
-        try
-        {
-            auto state = std::make_unique<detail::DocumentState>(BorrowedTextView {input, options.source}, limits);
-            return ParseState(std::move(state), options, scratch);
-        } catch (const std::bad_alloc&)
-        {
-            ParseDiagnostic error;
-            error.code        = ParseErrorCode::OutOfMemory;
-            error.span.source = options.source;
-            error.message     = "Failed to allocate XML validation state";
-            return NGIN::Utilities::Unexpected<ParseDiagnostic>(std::move(error));
-        }
-    }
-
-    NGIN::Utilities::Expected<void, ParseDiagnostic>
-    detail::ValidateContiguous(std::string_view input, ParseScratch& scratch,
-                               const ParseOptions& options, const ParseLimits& limits)
-    {
-        auto validated = ParseDocumentView(input, scratch, options, limits);
-        if (!validated)
-            return NGIN::Utilities::Unexpected<ParseDiagnostic>(std::move(validated.error()));
-        return {};
-    }
 }// namespace NGIN::Serialization::XML

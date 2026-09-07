@@ -1,6 +1,6 @@
 # NGIN.Base serialization
 
-This component provides strict, in-memory JSON and XML facilities for NGIN
+This component provides strict JSON and XML document and event parsers for NGIN
 manifests, runtime metadata, editor protocols, and tool-driver JSONL.
 
 The public contract is intentionally format-specific. There is no generic
@@ -46,7 +46,14 @@ Extensions are explicit in `JSON::ParseOptions`. Duplicate handling supports
 `Reject`, `Preserve`, `KeepFirst`, and `KeepLast`.
 
 Use checked access (`TryInt64`, `TryUInt64`, `TryString`, `TryArray`,
-`TryObject`) and query views (`ObjectView::Find`) in normal code.
+`TryObject`) and query views (`ObjectView::Find`) in normal code. `Kind()` is
+the single storage-kind query. Checked access returns `std::nullopt` for a
+mismatch; it never substitutes a default value. `TryDouble()` converts any
+numeric kind and can lose integer precision.
+
+The redundant `GetType`, `As*`, and `FindPtr` APIs have been removed. Use `Kind`,
+the matching `Try*` accessor, and `Find` respectively. Removing `FindPtr` also
+removes the eager array of value views previously retained for every node.
 
 ## XML contract
 
@@ -78,6 +85,28 @@ source and syntax tokens, including declarations, comments, CDATA, processing
 instructions, quote choices, whitespace, and line endings. Writing a
 `SyntaxDocument` is byte-for-byte lossless.
 
+## Query and storage costs
+
+JSON arrays and XML attribute ranges provide constant-time subscripting. XML
+`Children()` is a forward range: use a range-for loop, with constant-time sibling
+increments and constant-time unfiltered `Size()`. Child subscripting has been
+removed because repeated indexing walked the sibling chain repeatedly.
+`Children(name)` filters during traversal; its `Size()` scans the siblings.
+
+Objects and attribute lists with fewer than 16 entries use a linear name scan
+without allocating an index. Wider containers build compact hash indexes for
+duplicate detection and retain them for queries. Lookup performs a binary search
+among indexed containers, then expected constant probe work plus key hashing.
+Hash collisions can degrade this; there is no worst-case constant-time guarantee.
+Iteration always retains source order. `Preserve` JSON lookup returns the first
+matching member.
+
+JSON uses compact source offsets, a single reusable pending-member stack, and
+sibling links while parsing arrays. It creates views on demand. XML retains its
+compact sibling tables. Indexes trade additional memory in wide XML attribute
+lists for faster parsing and repeated lookup. See
+[measurements and tradeoffs](../../../docs/SerializationPerformance.md).
+
 ## Limits and diagnostics
 
 `ParseLimits` bounds input bytes, depth, nodes, members/attributes, decoded
@@ -95,45 +124,49 @@ first duplicate name. Event-handler aborts retain the handler's numeric
 `XML::EventParser::ParseContiguous` deliver typed events from one complete
 contiguous input. Their names intentionally do not claim chunked input.
 
-`JSON::IncrementalEventParser` and `XML::IncrementalEventParser` accept an
-arbitrary sequence of `Feed()` chunks followed by `Finish()`. Their state
-machine is deliberately transactional:
+`JSON::IncrementalEventParser` and `XML::IncrementalEventParser` accept arbitrary
+`Feed()` chunks followed by `Finish()`:
 
-- accepting: `Feed()` retains bytes and returns `NeedMoreInput` without calling
-  the handler
-- finishing: `Finish()` validates the complete retained document, then emits
-  its events exactly once and returns `Complete` with `eventsProduced`
-- complete: repeated `Finish()` is idempotent; a new document requires
-  `Reset()`
-- failed: the diagnostic remains stable until `Reset()`
+- `Feed()` consumes complete tokens and invokes callbacks immediately. It returns
+  `EventProduced` if callbacks ran, otherwise `NeedMoreInput`.
+- `Finish()` consumes any final token and checks that the document is complete.
+  Each result's `eventsProduced` counts callbacks during that call, including
+  callbacks before a parse error or handler rejection.
+- A later error does not retract callbacks already delivered. Consumers requiring
+  atomic updates must stage their own changes until `Finish()` succeeds.
+- Repeated successful `Finish()` is idempotent; errors remain stable until
+  `Reset()`. A new document requires `Reset()`.
 
-Validation-before-emission means a token split across chunks cannot cause a
-duplicate callback when more bytes arrive. It also preserves the contiguous
-parser's duplicate-key, trivia, namespace, `DOCTYPE`, UTF-8, escape, entity,
-and diagnostic behavior. The common result enum reserves `EventProduced` for
-future parsers that can safely commit partial events; these transactional
-parsers complete emission during `Finish()`.
+Completed input is released. Retained storage consists of the largest unfinished
+token, reusable decoding scratch, and open-container state. JSON duplicate checking
+also retains decoded keys of open objects. Memory is bounded by these structures
+and `maxTotalMemoryBytes`, rather than total stream length. A very large single
+string, XML text run, or start tag still requires correspondingly large storage.
+`BufferedBytes()` reports pending token bytes; `MemoryCommitted()` includes
+retained dynamic parser and scratch capacity, excluding fixed object storage.
 
-The retained source counts against `maxTotalMemoryBytes`, and
-`maxInputBytes`/total-memory accounting spans all feeds. Byte offsets and
-`SourceId` values are relative to the whole accumulated source. Event values
-are callback-scoped—including values assembled from multiple chunks—and must
-be copied if retained. `Reset()` keeps source and scratch capacity, making one
-parser reusable for complete JSONL records.
+`KeepLast` JSON is the exception: it buffers the document until `Finish()` and
+parses it once through the DOM path, since later duplicate keys can replace
+previous values. Select `Reject`, `Preserve`, or `KeepFirst` for early callbacks.
+
+Input, node/member, and decoded-byte limits are cumulative across feeds. Source
+spans and diagnostics use global byte offsets and `ParseOptions::source`.
+Event text is valid only during its callback and must be copied if retained.
+`Reset()` clears state and counters while retaining reusable capacity. Handler
+exceptions propagate; reset the parser before reuse after an exception.
 
 Event parsers also accept `std::string_view` directly, with source identity
 provided in `ParseOptions::source`.
 
-Handlers are concepts rather than virtual interfaces and return
-`EventAction`. Borrowed unescaped values follow input lifetime; decoded values
-are valid only for the current handler invocation and must be copied if
-retained.
+Handlers satisfy a concept and return `EventAction`; delivery uses a function
+pointer adapter without a virtual handler interface.
 
 JSON events are emitted directly from the parser without constructing a DOM
 for `Reject`, `Preserve`, and `KeepFirst` duplicate-key policies. `KeepLast`
 requires object buffering to suppress a previously encountered value and
-therefore uses the semantic DOM path. Start-container, end-container, and key
-event spans cover their individual source tokens.
+therefore uses the semantic DOM path. For the direct event path, start-container,
+end-container, and key spans cover individual source tokens. The `KeepLast` DOM
+path retains its complete-value/member spans.
 
 XML events are also emitted directly without constructing a semantic document.
 Start-element spans cover the
@@ -183,6 +216,6 @@ comments, and CDATA splitting are centralized here.
 - checked-in corpus: `tests/Serialization/Corpus/`
 - libFuzzer entry points: `tests/Serialization/Fuzz/`
 - workload benchmarks: `benchmarks/JsonBenchmarks.cpp` and
-  `benchmarks/XmlBenchmarks.cpp`
+  `benchmarks/XmlBenchmarks.cpp`; before/after workloads: `benchmarks/SerializationWorkloads.cpp`
 
 The fuzz targets are enabled with `NGIN_BASE_BUILD_FUZZERS=ON` on Clang.

@@ -2,16 +2,24 @@
 
 #include "JsonDocumentInternal.hpp"
 
+#include <algorithm>
 #include <limits>
 
 namespace NGIN::Serialization::JSON
 {
-    void detail::DocumentState::FinalizeViews()
+    UInt32 detail::DocumentState::FindMember(UIntSize begin, UIntSize count, std::string_view key) const noexcept
     {
-        valueViews.clear();
-        valueViews.reserve(nodes.size());
-        for (UIntSize index = 0; index < nodes.size(); ++index)
-            valueViews.push_back(ValueView {this, NodeId {static_cast<UInt32>(index)}});
+        if (count >= NameIndex::Threshold)
+        {
+            const auto found = std::lower_bound(indexes.begin(), indexes.end(), begin,
+                                                [](const IndexedNames& entry, UIntSize offset) { return entry.begin < offset; });
+            if (found != indexes.end() && found->begin == begin)
+                return found->index.Find(key, count, [&](UIntSize i) { return members[begin + i].key.View(); });
+        }
+        for (UIntSize i = 0; i < count; ++i)
+            if (members[begin + i].key.View() == key)
+                return static_cast<UInt32>(i);
+        return NameIndex::Missing;
     }
 
     namespace
@@ -36,7 +44,7 @@ namespace NGIN::Serialization::JSON
     SourceSpan ValueView::Span() const noexcept
     {
         const auto* node = Resolve(m_state, m_id);
-        return node ? node->span : SourceSpan {};
+        return node ? m_state->ExpandSpan(node->span) : SourceSpan {};
     }
 
     bool ValueView::IsNull() const noexcept { return IsValid() && Kind() == ValueKind::Null; }
@@ -116,46 +124,25 @@ namespace NGIN::Serialization::JSON
     {
         const auto* node = Resolve(m_state, m_id);
         return node && node->kind == ValueKind::Array
-                     ? std::optional<ArrayView> {
-                               ArrayView {m_state,
-                                          node->payload.rangeValue.begin,
-                                          node->payload.rangeValue.count,
-                                          node->span}}
-                     : std::nullopt;
+                       ? std::optional<ArrayView> {
+                                 ArrayView {m_state,
+                                            node->payload.rangeValue.begin,
+                                            node->payload.rangeValue.count,
+                                            m_state->ExpandSpan(node->span)}}
+                       : std::nullopt;
     }
 
     std::optional<ObjectView> ValueView::TryObject() const noexcept
     {
         const auto* node = Resolve(m_state, m_id);
         return node && node->kind == ValueKind::Object
-                     ? std::optional<ObjectView> {
-                               ObjectView {m_state,
-                                           node->payload.rangeValue.begin,
-                                           node->payload.rangeValue.count,
-                                           node->span}}
-                     : std::nullopt;
+                       ? std::optional<ObjectView> {
+                                 ObjectView {m_state,
+                                             node->payload.rangeValue.begin,
+                                             node->payload.rangeValue.count,
+                                             m_state->ExpandSpan(node->span)}}
+                       : std::nullopt;
     }
-
-    ValueView::Type ValueView::GetType() const noexcept
-    {
-        switch (Kind())
-        {
-            case ValueKind::Null: return Type::Null;
-            case ValueKind::Bool: return Type::Bool;
-            case ValueKind::Int64:
-            case ValueKind::UInt64:
-            case ValueKind::Double: return Type::Number;
-            case ValueKind::String: return Type::String;
-            case ValueKind::Array: return Type::Array;
-            case ValueKind::Object: return Type::Object;
-        }
-        return Type::Null;
-    }
-    bool ValueView::AsBool() const noexcept { return TryBool().value_or(false); }
-    F64 ValueView::AsNumber() const noexcept { return TryDouble().value_or(0.0); }
-    std::string_view ValueView::AsString() const noexcept { return TryString().value_or(std::string_view {}); }
-    ArrayView ValueView::AsArray() const noexcept { return TryArray().value_or(ArrayView {}); }
-    ObjectView ValueView::AsObject() const noexcept { return TryObject().value_or(ObjectView {}); }
 
     bool MemberView::IsValid() const noexcept
     {
@@ -174,7 +161,7 @@ namespace NGIN::Serialization::JSON
 
     SourceSpan MemberView::Span() const noexcept
     {
-        return IsValid() ? m_state->members[m_index].span : SourceSpan {};
+        return IsValid() ? m_state->ExpandSpan(m_state->members[m_index].span) : SourceSpan {};
     }
 
     ValueView ArrayView::Iterator::operator*() const noexcept
@@ -272,25 +259,16 @@ namespace NGIN::Serialization::JSON
     {
         if (!IsValid())
             return std::nullopt;
-        for (UIntSize index = 0; index < m_count; ++index)
+        if (m_count < detail::NameIndex::Threshold)
         {
-            const auto& member = m_state->members[m_begin + index];
-            if (member.key.View() == key)
-                return ValueView {m_state, member.value};
+            for (UIntSize i = m_begin; i < m_begin + m_count; ++i)
+                if (m_state->members[i].key.View() == key)
+                    return ValueView {m_state, m_state->members[i].value};
+            return std::nullopt;
         }
-        return std::nullopt;
-    }
-    const ValueView* ObjectView::FindPtr(std::string_view key) const noexcept
-    {
-        if (!IsValid())
-            return nullptr;
-        for (UIntSize index = 0; index < m_count; ++index)
-        {
-            const auto& member = m_state->members[m_begin + index];
-            if (member.key.View() == key && member.value.value < m_state->valueViews.size())
-                return &m_state->valueViews[member.value.value];
-        }
-        return nullptr;
+        const UInt32 index = m_state->FindMember(m_begin, m_count, key);
+        return index == detail::NameIndex::Missing ? std::nullopt
+                                                   : std::optional<ValueView> {ValueView {m_state, m_state->members[m_begin + index].value}};
     }
 
     ObjectView::Iterator ObjectView::begin() const noexcept

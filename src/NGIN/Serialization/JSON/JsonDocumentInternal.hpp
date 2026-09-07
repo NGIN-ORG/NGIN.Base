@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../NameIndex.hpp"
 #include "../SourceBuffer.hpp"
 #include <NGIN/Serialization/Core/ParseLimits.hpp>
 #include <NGIN/Serialization/Core/ParseResources.hpp>
@@ -15,6 +16,18 @@
 
 namespace NGIN::Serialization::JSON::detail
 {
+    using NGIN::Serialization::detail::AllocationBudget;
+    using NGIN::Serialization::detail::BudgetAllocator;
+    using NGIN::Serialization::detail::BudgetVector;
+    using NGIN::Serialization::detail::IndexedNames;
+    using NGIN::Serialization::detail::NameIndex;
+    struct StoredSpan
+    {
+        UIntSize begin {0};
+        UIntSize end {0};
+        StoredSpan() = default;
+        StoredSpan(SourceSpan span) noexcept : begin(span.begin), end(span.end) {}
+    };
     struct StringRef
     {
         const char* data {nullptr};
@@ -50,7 +63,8 @@ namespace NGIN::Serialization::JSON::detail
     struct NodeRecord
     {
         ValueKind   kind {ValueKind::Null};
-        SourceSpan  span {};
+        UInt32      nextSibling {NameIndex::Missing};
+        StoredSpan  span {};
         NodePayload payload {};
     };
 
@@ -58,7 +72,7 @@ namespace NGIN::Serialization::JSON::detail
     {
         StringRef  key {};
         NodeId     value {};
-        SourceSpan span {};
+        StoredSpan span {};
     };
 
     struct DocumentState
@@ -69,10 +83,13 @@ namespace NGIN::Serialization::JSON::detail
             : ownedSource(std::move(input)),
               source(ownedSource->View()),
               sourceId(ownedSource->Source()),
-              arena(resources.allocator,
-                    parseLimits.maxTotalMemoryBytes,
-                    resources.initialArenaBlockBytes),
-              limits(parseLimits)
+              limits(parseLimits),
+              budget(resources.allocator, source.size() <= limits.maxTotalMemoryBytes ? limits.maxTotalMemoryBytes - source.size() : 0),
+              arena(Memory::PolyAllocatorRef {budget}, budget.MaxSize(), resources.initialArenaBlockBytes),
+              nodes(BudgetAllocator<NodeRecord> {budget}),
+              elements(BudgetAllocator<NodeId> {budget}),
+              members(BudgetAllocator<MemberRecord> {budget}),
+              indexes(BudgetAllocator<IndexedNames> {budget})
         {
         }
 
@@ -81,10 +98,13 @@ namespace NGIN::Serialization::JSON::detail
                                const ParseResources& resources = {})
             : source(input.View()),
               sourceId(input.Source()),
-              arena(resources.allocator,
-                    parseLimits.maxTotalMemoryBytes,
-                    resources.initialArenaBlockBytes),
-              limits(parseLimits)
+              limits(parseLimits),
+              budget(resources.allocator, limits.maxTotalMemoryBytes),
+              arena(Memory::PolyAllocatorRef {budget}, budget.MaxSize(), resources.initialArenaBlockBytes),
+              nodes(BudgetAllocator<NodeRecord> {budget}),
+              elements(BudgetAllocator<NodeId> {budget}),
+              members(BudgetAllocator<MemberRecord> {budget}),
+              indexes(BudgetAllocator<IndexedNames> {budget})
         {
         }
 
@@ -99,18 +119,13 @@ namespace NGIN::Serialization::JSON::detail
                    nodes.size() * sizeof(NodeRecord) +
                    elements.size() * sizeof(NodeId) +
                    members.size() * sizeof(MemberRecord) +
-                   valueViews.size() * sizeof(ValueView) +
+                   IndexMemoryUsed() +
                    arena.UsedBytes();
         }
 
         [[nodiscard]] UIntSize MemoryCommitted() const noexcept
         {
-            return (ownedSource ? source.size() : 0) +
-                   nodes.capacity() * sizeof(NodeRecord) +
-                   elements.capacity() * sizeof(NodeId) +
-                   members.capacity() * sizeof(MemberRecord) +
-                   valueViews.capacity() * sizeof(ValueView) +
-                   arena.CommittedBytes();
+            return (ownedSource ? source.size() : 0) + budget.CommittedBytes();
         }
 
         [[nodiscard]] bool WithinMemoryLimit() const noexcept
@@ -118,17 +133,27 @@ namespace NGIN::Serialization::JSON::detail
             return MemoryCommitted() <= limits.maxTotalMemoryBytes;
         }
 
-        void FinalizeViews();
+        [[nodiscard]] SourceSpan ExpandSpan(StoredSpan span) const noexcept { return {sourceId, span.begin, span.end}; }
+        [[nodiscard]] UIntSize   IndexMemoryUsed() const noexcept
+        {
+            UIntSize bytes = indexes.size() * sizeof(IndexedNames);
+            for (const auto& entry: indexes)
+                bytes += entry.index.MemoryUsed();
+            return bytes;
+        }
+        [[nodiscard]] UInt32 FindMember(UIntSize begin, UIntSize count, std::string_view key) const noexcept;
+
 
         std::optional<OwnedTextBuffer> ownedSource {};
         std::string_view               source {};
         SourceId                       sourceId {};
-        SegmentedArena                 arena;
         ParseLimits                    limits {};
-        std::vector<NodeRecord>        nodes {};
-        std::vector<NodeId>            elements {};
-        std::vector<MemberRecord>      members {};
-        std::vector<ValueView>         valueViews {};
+        AllocationBudget               budget;
+        SegmentedArena                 arena;
+        BudgetVector<NodeRecord>       nodes;
+        BudgetVector<NodeId>           elements;
+        BudgetVector<MemberRecord>     members;
+        BudgetVector<IndexedNames>     indexes;
         NodeId                         root {};
     };
 

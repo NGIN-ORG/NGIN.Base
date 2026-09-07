@@ -1,5 +1,5 @@
-#include <NGIN/Serialization/JSON/JsonEventParser.hpp>
 #include <NGIN/Serialization/JSON/JsonParser.hpp>
+#include <array>
 
 #include "JsonDocumentInternal.hpp"
 
@@ -26,12 +26,40 @@ namespace NGIN::Serialization::JSON
             SourceSpan        span {};
         };
 
+        // One small stack shared by all nested objects avoids per-object allocations.
+        class PendingMembers
+        {
+        public:
+            explicit PendingMembers(detail::AllocationBudget& budget) : m_overflow(detail::BudgetAllocator<detail::MemberRecord> {budget}) {}
+            UIntSize              size() const noexcept { return m_size; }
+            detail::MemberRecord& operator[](UIntSize i) noexcept { return i < m_inline.size() ? m_inline[i] : m_overflow[i - m_inline.size()]; }
+            void                  push_back(const detail::MemberRecord& member)
+            {
+                if (m_size < m_inline.size())
+                    m_inline[m_size] = member;
+                else
+                    m_overflow.push_back(member);
+                ++m_size;
+            }
+            void resize(UIntSize size) noexcept
+            {
+                m_overflow.resize(size > m_inline.size() ? size - m_inline.size() : 0);
+                m_size = size;
+            }
+
+        private:
+            std::array<detail::MemberRecord, 8>        m_inline;
+            detail::BudgetVector<detail::MemberRecord> m_overflow;
+            UIntSize                                   m_size {0};
+        };
+
         struct ParseContext
         {
             InputCursor            cursor;
             ParseOptions           options;
             detail::DocumentState* state {nullptr};
             ParseScratch*          scratch {nullptr};
+            PendingMembers         pendingMembers {state->budget};
             UIntSize               depth {0};
             UIntSize               decodedBytes {0};
         };
@@ -473,7 +501,7 @@ namespace NGIN::Serialization::JSON
             } catch (const std::bad_alloc&)
             {
                 return Failure<NodeId>(MakeErrorAt(ctx,
-                                                   ParseErrorCode::OutOfMemory,
+                                                   ctx.state->budget.LimitExceeded() ? ParseErrorCode::LimitExceeded : ParseErrorCode::OutOfMemory,
                                                    "JSON node allocation failed",
                                                    node.span.begin,
                                                    node.span.end));
@@ -496,7 +524,9 @@ namespace NGIN::Serialization::JSON
             if (!trivia)
                 return Failure<NodeId>(std::move(trivia.error()));
 
-            std::vector<NodeId> values;
+            NodeId   first {};
+            NodeId   last {};
+            UIntSize valueCount = 0;
             if (ctx.cursor.Peek() == ']')
             {
                 ctx.cursor.Advance();
@@ -508,13 +538,12 @@ namespace NGIN::Serialization::JSON
                     auto value = ParseValue(ctx);
                     if (!value)
                         return value;
-                    try
-                    {
-                        values.push_back(value.value());
-                    } catch (const std::bad_alloc&)
-                    {
-                        return Failure<NodeId>(MakeError(ctx, ParseErrorCode::OutOfMemory, "JSON array allocation failed"));
-                    }
+                    if (last.IsValid())
+                        ctx.state->nodes[last.value].nextSibling = value.value().value;
+                    else
+                        first = value.value();
+                    last = value.value();
+                    ++valueCount;
 
                     auto postValue = SkipTrivia(ctx);
                     if (!postValue)
@@ -554,7 +583,7 @@ namespace NGIN::Serialization::JSON
 
             --ctx.depth;
             if (ctx.state->elements.size() > ctx.state->limits.maxMembers ||
-                values.size() > ctx.state->limits.maxMembers - ctx.state->elements.size())
+                valueCount > ctx.state->limits.maxMembers - ctx.state->elements.size())
             {
                 return Failure<NodeId>(MakeErrorAt(ctx,
                                                    ParseErrorCode::LimitExceeded,
@@ -566,11 +595,14 @@ namespace NGIN::Serialization::JSON
             const UIntSize begin = ctx.state->elements.size();
             try
             {
-                ctx.state->elements.insert(ctx.state->elements.end(), values.begin(), values.end());
+                if (begin + valueCount > ctx.state->elements.capacity())
+                    ctx.state->elements.reserve((std::max) (begin + valueCount, ctx.state->elements.capacity() * 2));
+                for (NodeId id = first; id.IsValid(); id.value = ctx.state->nodes[id.value].nextSibling)
+                    ctx.state->elements.push_back(id);
             } catch (const std::bad_alloc&)
             {
                 return Failure<NodeId>(MakeErrorAt(ctx,
-                                                   ParseErrorCode::OutOfMemory,
+                                                   ctx.state->budget.LimitExceeded() ? ParseErrorCode::LimitExceeded : ParseErrorCode::OutOfMemory,
                                                    "JSON array storage allocation failed",
                                                    start,
                                                    ctx.cursor.Offset()));
@@ -579,7 +611,7 @@ namespace NGIN::Serialization::JSON
             detail::NodeRecord node;
             node.kind               = ValueKind::Array;
             node.span               = SourceSpan {ctx.state->sourceId, start, ctx.cursor.Offset()};
-            node.payload.rangeValue = detail::NodeRange {begin, values.size()};
+            node.payload.rangeValue = detail::NodeRange {begin, valueCount};
             return AddNode(ctx, node);
         }
 
@@ -596,7 +628,9 @@ namespace NGIN::Serialization::JSON
             if (!trivia)
                 return Failure<NodeId>(std::move(trivia.error()));
 
-            std::vector<detail::MemberRecord> members;
+            const UIntSize    pendingBegin = ctx.pendingMembers.size();
+            detail::NameIndex names {ctx.state->budget};
+            auto              nameAt = [&](UIntSize i) { return ctx.pendingMembers[pendingBegin + i].key.View(); };
             if (ctx.cursor.Peek() == '}')
             {
                 ctx.cursor.Advance();
@@ -634,58 +668,26 @@ namespace NGIN::Serialization::JSON
                             },
                     };
 
-                    auto duplicate = members.end();
-                    for (auto iterator = members.begin(); iterator != members.end(); ++iterator)
+                    const UIntSize count     = ctx.pendingMembers.size() - pendingBegin;
+                    const UInt32   duplicate = ctx.options.duplicateKeys == DuplicateKeyPolicy::Preserve
+                                                       ? detail::NameIndex::Missing
+                                                       : names.Find(member.key.View(), count, nameAt);
+                    if (duplicate != detail::NameIndex::Missing)
                     {
-                        if (iterator->key.View() == member.key.View())
+                        if (ctx.options.duplicateKeys == DuplicateKeyPolicy::Reject)
                         {
-                            duplicate = iterator;
-                            break;
+                            auto error    = MakeErrorAt(ctx, ParseErrorCode::DuplicateName, "Duplicate JSON object key",
+                                                        key.value().span.begin, key.value().span.end);
+                            error.related = ctx.state->ExpandSpan(ctx.pendingMembers[pendingBegin + duplicate].span);
+                            return Failure<NodeId>(std::move(error));
                         }
-                    }
-
-                    if (duplicate != members.end())
-                    {
-                        switch (ctx.options.duplicateKeys)
-                        {
-                            case DuplicateKeyPolicy::Reject: {
-                                auto error    = MakeErrorAt(ctx,
-                                                            ParseErrorCode::DuplicateName,
-                                                            "Duplicate JSON object key",
-                                                            key.value().span.begin,
-                                                            key.value().span.end);
-                                error.related = duplicate->span;
-                                return Failure<NodeId>(std::move(error));
-                            }
-                            case DuplicateKeyPolicy::KeepFirst:
-                                break;
-                            case DuplicateKeyPolicy::KeepLast:
-                                *duplicate = member;
-                                break;
-                            case DuplicateKeyPolicy::Preserve:
-                                try
-                                {
-                                    members.push_back(member);
-                                } catch (const std::bad_alloc&)
-                                {
-                                    return Failure<NodeId>(MakeError(ctx,
-                                                                     ParseErrorCode::OutOfMemory,
-                                                                     "JSON object allocation failed"));
-                                }
-                                break;
-                        }
+                        if (ctx.options.duplicateKeys == DuplicateKeyPolicy::KeepLast)
+                            ctx.pendingMembers[pendingBegin + duplicate] = member;
                     }
                     else
                     {
-                        try
-                        {
-                            members.push_back(member);
-                        } catch (const std::bad_alloc&)
-                        {
-                            return Failure<NodeId>(MakeError(ctx,
-                                                             ParseErrorCode::OutOfMemory,
-                                                             "JSON object allocation failed"));
-                        }
+                        ctx.pendingMembers.push_back(member);
+                        names.Append(count + 1, nameAt);
                     }
 
                     auto postValue = SkipTrivia(ctx);
@@ -726,7 +728,7 @@ namespace NGIN::Serialization::JSON
 
             --ctx.depth;
             if (ctx.state->members.size() > ctx.state->limits.maxMembers ||
-                members.size() > ctx.state->limits.maxMembers - ctx.state->members.size())
+                (ctx.pendingMembers.size() - pendingBegin) > ctx.state->limits.maxMembers - ctx.state->members.size())
             {
                 return Failure<NodeId>(MakeErrorAt(ctx,
                                                    ParseErrorCode::LimitExceeded,
@@ -738,11 +740,17 @@ namespace NGIN::Serialization::JSON
             const UIntSize begin = ctx.state->members.size();
             try
             {
-                ctx.state->members.insert(ctx.state->members.end(), members.begin(), members.end());
+                const UIntSize count = ctx.pendingMembers.size() - pendingBegin;
+                if (begin + count > ctx.state->members.capacity())
+                    ctx.state->members.reserve((std::max) (begin + count, ctx.state->members.capacity() * 2));
+                for (UIntSize i = pendingBegin; i < ctx.pendingMembers.size(); ++i)
+                    ctx.state->members.push_back(ctx.pendingMembers[i]);
+                if (!names.Empty())
+                    ctx.state->indexes.push_back(detail::IndexedNames {begin, std::move(names)});
             } catch (const std::bad_alloc&)
             {
                 return Failure<NodeId>(MakeErrorAt(ctx,
-                                                   ParseErrorCode::OutOfMemory,
+                                                   ctx.state->budget.LimitExceeded() ? ParseErrorCode::LimitExceeded : ParseErrorCode::OutOfMemory,
                                                    "JSON object storage allocation failed",
                                                    start,
                                                    ctx.cursor.Offset()));
@@ -751,7 +759,8 @@ namespace NGIN::Serialization::JSON
             detail::NodeRecord node;
             node.kind               = ValueKind::Object;
             node.span               = SourceSpan {ctx.state->sourceId, start, ctx.cursor.Offset()};
-            node.payload.rangeValue = detail::NodeRange {begin, members.size()};
+            node.payload.rangeValue = detail::NodeRange {begin, ctx.pendingMembers.size() - pendingBegin};
+            ctx.pendingMembers.resize(pendingBegin);
             return AddNode(ctx, node);
         }
 
@@ -914,7 +923,6 @@ namespace NGIN::Serialization::JSON
                 return ParseNumber(ctx);
 
             detail::NodeRecord node;
-            node.span.source = ctx.state->sourceId;
             node.span.begin  = start;
             if (token == 'n' && MatchLiteral(ctx, "null"))
             {
@@ -989,30 +997,36 @@ namespace NGIN::Serialization::JSON
                     .scratch     = scratch,
             };
 
-            auto root = ParseValue(context);
-            if (!root)
-                return Failure<Document>(std::move(root.error()));
-            state->root = root.value();
-
-            auto trivia = SkipTrivia(context);
-            if (!trivia)
-                return Failure<Document>(std::move(trivia.error()));
-            if (!context.cursor.IsEof())
+            try
             {
-                return Failure<Document>(MakeError(context,
-                                                   ParseErrorCode::TrailingCharacters,
-                                                   "Trailing characters after JSON value"));
+                auto root = ParseValue(context);
+                if (!root)
+                    return Failure<Document>(std::move(root.error()));
+                state->root = root.value();
+
+                auto trivia = SkipTrivia(context);
+                if (!trivia)
+                    return Failure<Document>(std::move(trivia.error()));
+                if (!context.cursor.IsEof())
+                {
+                    return Failure<Document>(MakeError(context,
+                                                       ParseErrorCode::TrailingCharacters,
+                                                       "Trailing characters after JSON value"));
+                }
+
+                if (!state->WithinMemoryLimit())
+                {
+                    return Failure<Document>(MakeErrorAt(context,
+                                                         ParseErrorCode::LimitExceeded,
+                                                         "JSON total memory limit exceeded",
+                                                         0,
+                                                         state->source.size()));
+                }
+            } catch (const std::bad_alloc&)
+            {
+                return Failure<Document>(MakeError(context, state->budget.LimitExceeded() ? ParseErrorCode::LimitExceeded : ParseErrorCode::OutOfMemory, "JSON parse allocation failed"));
             }
 
-            state->FinalizeViews();
-            if (!state->WithinMemoryLimit())
-            {
-                return Failure<Document>(MakeErrorAt(context,
-                                                     ParseErrorCode::LimitExceeded,
-                                                     "JSON total memory limit exceeded",
-                                                     0,
-                                                     state->source.size()));
-            }
             return detail::DocumentAccess::MakeDocument(std::move(state));
         }
     }// namespace
@@ -1065,13 +1079,4 @@ namespace NGIN::Serialization::JSON
         }
     }
 
-    NGIN::Utilities::Expected<void, ParseDiagnostic>
-    detail::ValidateContiguous(std::string_view input, ParseScratch& scratch,
-                               const ParseOptions& options, const ParseLimits& limits)
-    {
-        auto validated = ParseDocumentView(input, scratch, options, limits);
-        if (!validated)
-            return NGIN::Utilities::Unexpected<ParseDiagnostic>(std::move(validated.error()));
-        return {};
-    }
 }// namespace NGIN::Serialization::JSON

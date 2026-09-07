@@ -197,9 +197,6 @@ namespace NGIN::Serialization::XML
         [[nodiscard]] UIntSize Size() const noexcept { return m_count; }
         /// @brief Returns whether the range contains no child nodes.
         [[nodiscard]] bool Empty() const noexcept { return m_count == 0; }
-        /// @brief Returns the child node at @p index.
-        /// @pre @p index is less than Size().
-        [[nodiscard]] NodeView operator[](UIntSize index) const noexcept;
         /// @brief Returns an iterator to the first child node.
         [[nodiscard]] Iterator begin() const noexcept
         {

@@ -110,7 +110,7 @@ namespace NGIN::Serialization::XML
             {
                 if (attached.size() < state->nodes.size())
                     state->nodes.pop_back();
-                return Failure<NodeId>(BuildErrorCode::OutOfMemory, "XML builder node allocation failed");
+                return Failure<NodeId>(state->budget.LimitExceeded() ? BuildErrorCode::MemoryLimitExceeded : BuildErrorCode::OutOfMemory, "XML builder node allocation failed");
             }
             return NodeId {static_cast<UInt32>(state->nodes.size() - 1)};
         }
@@ -135,7 +135,7 @@ namespace NGIN::Serialization::XML
             return Failure<NodeId>(BuildErrorCode::InvalidContent, "XML text contains an invalid character");
         const auto copy = m_impl->Copy(value);
         if (!copy)
-            return Failure<NodeId>(BuildErrorCode::OutOfMemory, "XML text allocation failed");
+            return Failure<NodeId>(m_impl->state->budget.LimitExceeded() ? BuildErrorCode::MemoryLimitExceeded : BuildErrorCode::OutOfMemory, "XML text allocation failed");
         return m_impl->Add(detail::NodeRecord {.kind = NodeKind::Text, .text = *copy});
     }
 
@@ -147,7 +147,7 @@ namespace NGIN::Serialization::XML
             return Failure<NodeId>(BuildErrorCode::InvalidContent, "XML CDATA contains an invalid character");
         const auto copy = m_impl->Copy(value);
         if (!copy)
-            return Failure<NodeId>(BuildErrorCode::OutOfMemory, "XML CDATA allocation failed");
+            return Failure<NodeId>(m_impl->state->budget.LimitExceeded() ? BuildErrorCode::MemoryLimitExceeded : BuildErrorCode::OutOfMemory, "XML CDATA allocation failed");
         return m_impl->Add(detail::NodeRecord {.kind = NodeKind::CData, .text = *copy});
     }
 
@@ -160,7 +160,7 @@ namespace NGIN::Serialization::XML
             return Failure<NodeId>(BuildErrorCode::AlreadyFinished, "XML builder has already been finished");
         const auto copy = m_impl->Copy(value);
         if (!copy)
-            return Failure<NodeId>(BuildErrorCode::OutOfMemory, "XML comment allocation failed");
+            return Failure<NodeId>(m_impl->state->budget.LimitExceeded() ? BuildErrorCode::MemoryLimitExceeded : BuildErrorCode::OutOfMemory, "XML comment allocation failed");
         return m_impl->Add(detail::NodeRecord {.kind = NodeKind::Comment, .text = *copy});
     }
 
@@ -180,7 +180,7 @@ namespace NGIN::Serialization::XML
         const auto targetCopy = m_impl->Copy(target);
         const auto valueCopy  = m_impl->Copy(value);
         if (!targetCopy || !valueCopy)
-            return Failure<NodeId>(BuildErrorCode::OutOfMemory, "XML processing instruction allocation failed");
+            return Failure<NodeId>(m_impl->state->budget.LimitExceeded() ? BuildErrorCode::MemoryLimitExceeded : BuildErrorCode::OutOfMemory, "XML processing instruction allocation failed");
         return m_impl->Add(detail::NodeRecord {
                 .kind = NodeKind::ProcessingInstruction,
                 .name = *targetCopy,
@@ -215,11 +215,6 @@ namespace NGIN::Serialization::XML
             if (!IsXmlText(attributes[left].value))
                 return Failure<NodeId>(BuildErrorCode::InvalidContent,
                                        "XML attribute value contains an invalid character");
-            for (UIntSize right = left + 1; right < attributes.size(); ++right)
-            {
-                if (attributes[left].name == attributes[right].name)
-                    return Failure<NodeId>(BuildErrorCode::InvalidContent, "XML element has duplicate attributes");
-            }
         }
         for (UIntSize index = 0; index < children.size(); ++index)
         {
@@ -241,6 +236,14 @@ namespace NGIN::Serialization::XML
         const UIntSize elementIndex   = m_impl->state->elements.size();
         try
         {
+            detail::NameIndex names {m_impl->state->budget};
+            const auto        nameAt = [&](UIntSize i) { return attributes[i].name; };
+            for (UIntSize i = 0; i < attributes.size(); ++i)
+            {
+                if (names.Find(attributes[i].name, i, nameAt) != detail::NameIndex::Missing)
+                    return Failure<NodeId>(BuildErrorCode::InvalidContent, "XML element has duplicate attributes");
+                names.Append(i + 1, nameAt);
+            }
             m_impl->state->attributes.reserve(attributeBegin + attributes.size());
             for (const auto& attribute: attributes)
             {
@@ -249,7 +252,7 @@ namespace NGIN::Serialization::XML
                 if (!key || !value)
                 {
                     m_impl->state->attributes.resize(attributeBegin);
-                    return Failure<NodeId>(BuildErrorCode::OutOfMemory, "XML attribute allocation failed");
+                    return Failure<NodeId>(m_impl->state->budget.LimitExceeded() ? BuildErrorCode::MemoryLimitExceeded : BuildErrorCode::OutOfMemory, "XML attribute allocation failed");
                 }
                 m_impl->state->attributes.push_back(
                         detail::AttributeRecord {.name = *key, .value = *value});
@@ -258,7 +261,7 @@ namespace NGIN::Serialization::XML
             if (!elementName)
             {
                 m_impl->state->attributes.resize(attributeBegin);
-                return Failure<NodeId>(BuildErrorCode::OutOfMemory, "XML element name allocation failed");
+                return Failure<NodeId>(m_impl->state->budget.LimitExceeded() ? BuildErrorCode::MemoryLimitExceeded : BuildErrorCode::OutOfMemory, "XML element name allocation failed");
             }
             m_impl->state->elements.push_back(detail::ElementRecord {
                     .name       = *elementName,
@@ -271,10 +274,13 @@ namespace NGIN::Serialization::XML
                             static_cast<UInt32>(children.size()),
                     },
             });
+            if (!names.Empty())
+                m_impl->state->attributeIndexes.push_back(detail::IndexedNames {attributeBegin, std::move(names)});
         } catch (const std::bad_alloc&)
         {
             m_impl->state->attributes.resize(attributeBegin);
-            return Failure<NodeId>(BuildErrorCode::OutOfMemory, "XML element allocation failed");
+            m_impl->state->elements.resize(elementIndex);
+            return Failure<NodeId>(m_impl->state->budget.LimitExceeded() ? BuildErrorCode::MemoryLimitExceeded : BuildErrorCode::OutOfMemory, "XML element allocation failed");
         }
 
         auto result = m_impl->Add(detail::NodeRecord {
@@ -286,6 +292,8 @@ namespace NGIN::Serialization::XML
         if (!result)
         {
             m_impl->state->elements.pop_back();
+            if (!m_impl->state->attributeIndexes.empty() && m_impl->state->attributeIndexes.back().begin == attributeBegin)
+                m_impl->state->attributeIndexes.pop_back();
             m_impl->state->attributes.resize(attributeBegin);
             return result;
         }

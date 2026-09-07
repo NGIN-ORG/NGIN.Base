@@ -1,3 +1,4 @@
+#include "../IncrementalInput.hpp"
 #include "JsonDocumentInternal.hpp"
 #include <NGIN/Serialization/JSON/JsonEventParser.hpp>
 
@@ -43,6 +44,7 @@ namespace NGIN::Serialization::JSON::detail
             UIntSize         nodeCount {0};
             UIntSize         memberCount {0};
             UIntSize         decodedBytes {0};
+            NGIN::Serialization::detail::AllocationBudget* allocationBudget {nullptr};
         };
 
         [[nodiscard]] SourceLocation Locate(std::string_view source,
@@ -350,6 +352,9 @@ namespace NGIN::Serialization::JSON::detail
                                                          span.end));
             }
 
+            if (rawLength > context.limits.maxTotalMemoryBytes - context.scratch->Size() ||
+                !context.allocationBudget->SetExternalBytes((std::max) (context.scratch->Capacity(), context.scratch->Size() + rawLength)))
+                return Failure<ParsedString>(MakeErrorAt(context, ParseErrorCode::LimitExceeded, "JSON event scratch memory limit exceeded", tokenStart, span.end));
             char* output = context.scratch->TryAllocate(rawLength);
             if (!output)
             {
@@ -627,7 +632,9 @@ namespace NGIN::Serialization::JSON::detail
             if (!started)
                 return started;
 
-            std::vector<SeenKey> keys;
+            BudgetVector<SeenKey> keys {BudgetAllocator<SeenKey> {*context.allocationBudget}};
+            NameIndex             names {*context.allocationBudget};
+            const auto            nameAt = [&](UIntSize i) { return keys[i].value; };
             auto                 trivia = SkipTrivia(context);
             if (!trivia)
                 return trivia;
@@ -650,12 +657,9 @@ namespace NGIN::Serialization::JSON::detail
                     const SeenKey* duplicate = nullptr;
                     if (context.options.duplicateKeys != DuplicateKeyPolicy::Preserve)
                     {
-                        const auto found = std::find_if(
-                                keys.begin(), keys.end(), [&](const SeenKey& candidate) {
-                                    return candidate.value == key.value().value;
-                                });
-                        if (found != keys.end())
-                            duplicate = &*found;
+                        const UInt32 found = names.Find(key.value().value, keys.size(), nameAt);
+                        if (found != NameIndex::Missing)
+                            duplicate = &keys[found];
                     }
                     if (duplicate &&
                         context.options.duplicateKeys == DuplicateKeyPolicy::Reject)
@@ -693,11 +697,12 @@ namespace NGIN::Serialization::JSON::detail
                                         .value = key.value().value,
                                         .span  = key.value().span,
                                 });
+                                names.Append(keys.size(), nameAt);
                             } catch (const std::bad_alloc&)
                             {
                                 return Failure<void>(MakeErrorAt(
                                         context,
-                                        ParseErrorCode::OutOfMemory,
+                                        context.allocationBudget->LimitExceeded() ? ParseErrorCode::LimitExceeded : ParseErrorCode::OutOfMemory,
                                         "JSON event key tracking allocation failed",
                                         key.value().span.begin,
                                         key.value().span.end));
@@ -1110,15 +1115,17 @@ namespace NGIN::Serialization::JSON::detail
         }
 
         const auto   source = input;
-        ParseContext context {
-                .cursor         = InputCursor {source},
-                .source         = source,
-                .sourceId       = options.source,
-                .options        = options,
-                .limits         = limits,
-                .scratch        = &scratch,
-                .handlerContext = handlerContext,
-                .callback       = callback,
+        NGIN::Serialization::detail::AllocationBudget allocationBudget {{}, limits.maxTotalMemoryBytes};
+        ParseContext                                  context {
+                                                 .cursor           = InputCursor {source},
+                                                 .source           = source,
+                                                 .sourceId         = options.source,
+                                                 .options          = options,
+                                                 .limits           = limits,
+                                                 .scratch          = &scratch,
+                                                 .handlerContext   = handlerContext,
+                                                 .callback         = callback,
+                                                 .allocationBudget = &allocationBudget,
         };
 
         if (source.size() > limits.maxInputBytes)
@@ -1140,6 +1147,8 @@ namespace NGIN::Serialization::JSON::detail
         }
 
         scratch.Reset();
+        if (source.size() > limits.maxTotalMemoryBytes)
+            return Failure<void>(MakeErrorAt(context, ParseErrorCode::LimitExceeded, "JSON event scratch memory limit exceeded", 0, source.size()));
         try
         {
             // A full-input reserve keeps all decoded string views stable until
@@ -1153,6 +1162,8 @@ namespace NGIN::Serialization::JSON::detail
             return Failure<void>(std::move(error));
         }
 
+        if (!allocationBudget.SetExternalBytes(scratch.Capacity()))
+            return Failure<void>(MakeErrorAt(context, ParseErrorCode::LimitExceeded, "JSON event scratch memory limit exceeded", 0, source.size()));
         auto parsed = ParseValue(context, true);
         if (!parsed)
             return parsed;
@@ -1168,5 +1179,320 @@ namespace NGIN::Serialization::JSON::detail
                     "Trailing characters after JSON value"));
         }
         return {};
+    }
+    struct IncrementalEngine::Impl
+    {
+        enum class State
+        {
+            ArrayFirst,
+            ArrayValue,
+            ArrayComma,
+            ObjectFirst,
+            ObjectKey,
+            ObjectColon,
+            ObjectValue,
+            ObjectComma
+        };
+        struct Key
+        {
+            NGIN::Serialization::detail::BudgetString text;
+            SourceSpan                                span;
+        };
+        struct Frame
+        {
+            Frame(State initial, bool deliver, AllocationBudget& budget)
+                : state(initial), emit(deliver), keys(BudgetAllocator<Key> {budget}), names(budget) {}
+            State             state;
+            bool              emit, keepMember {true};
+            BudgetVector<Key> keys;
+            NameIndex         names;
+        };
+        Impl(void* handlerState, EventCallback handlerCallback, ParseScratch& scratch, const ParseOptions& options, const ParseLimits& limits)
+            : budget({}, limits.maxTotalMemoryBytes), input(NGIN::Serialization::detail::IncrementalInput::Format::Json, budget),
+              frames(BudgetAllocator<Frame> {budget}), buffered(BudgetAllocator<char> {budget}),
+              context {.cursor = InputCursor {std::string_view {}}, .source = {}, .options = options, .limits = limits, .scratch = &scratch},
+              handler(handlerState), callback(handlerCallback)
+        {
+            context.sourceId         = options.source;
+            context.allocationBudget = &budget;
+            context.handlerContext   = this;
+            context.callback         = [](void* state, const Event& event) { return static_cast<Impl*>(state)->DeliverEvent(event); };
+            scratch.Reset();
+        }
+        EventAction DeliverEvent(const Event& event)
+        {
+            Event global = event;
+            global.span.begin += input.Offset();
+            global.span.end += input.Offset();
+            ++events;
+            return callback(handler, global);
+        }
+        NGIN::Utilities::Expected<void, ParseDiagnostic> Error(ParseErrorCode code, const char* message)
+        {
+            return Failure<void>(MakeErrorAt(context, code, message, 0, context.source.size()));
+        }
+        NGIN::Utilities::Expected<void, ParseDiagnostic> Process(std::string_view token)
+        {
+            context.source = token;
+            context.cursor = InputCursor {token};
+            context.scratch->Reset();
+            if (context.options.utf8 == Utf8Policy::Validate && !NGIN::Text::Unicode::IsValidUtf8(token))
+                return Error(ParseErrorCode::InvalidEncoding, "JSON input is not valid UTF-8");
+            const char c = token.front();
+            if (c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '/')
+                return SkipTrivia(context);
+            if (!frames.empty())
+            {
+                auto& frame = frames.back();
+                if (c == ']' || c == '}')
+                {
+                    const bool array      = c == ']';
+                    const bool empty      = frame.state == (array ? State::ArrayFirst : State::ObjectFirst);
+                    const bool afterValue = frame.state == (array ? State::ArrayComma : State::ObjectComma);
+                    const bool afterComma = frame.state == (array ? State::ArrayValue : State::ObjectKey);
+                    if (!empty && !afterValue && !(afterComma && context.options.trailingCommas == TrailingCommaPolicy::Allow))
+                        return Error(ParseErrorCode::UnexpectedCharacter, "Unexpected JSON container end");
+                    const bool emit = frame.emit;
+                    frames.pop_back();
+                    return Deliver(context, Event {.kind = array ? EventKind::EndArray : EventKind::EndObject, .span = {context.sourceId, 0, 1}}, emit);
+                }
+                if (frame.state == State::ArrayComma || frame.state == State::ObjectComma)
+                {
+                    if (c != ',')
+                        return Error(ParseErrorCode::InvalidToken, "Expected comma or container end");
+                    frame.state = frame.state == State::ArrayComma ? State::ArrayValue : State::ObjectKey;
+                    return {};
+                }
+                if (frame.state == State::ObjectColon)
+                {
+                    if (c != ':')
+                        return Error(ParseErrorCode::InvalidToken, "Expected colon after JSON key");
+                    frame.state = State::ObjectValue;
+                    return {};
+                }
+                if (frame.state == State::ObjectFirst || frame.state == State::ObjectKey)
+                {
+                    if (c != '"')
+                        return Error(ParseErrorCode::InvalidToken, "Expected JSON object key");
+                    auto key = ParseString(context);
+                    if (!key)
+                        return Failure<void>(std::move(key.error()));
+                    const auto   nameAt    = [&](UIntSize i) { return std::string_view {frame.keys[i].text.data(), frame.keys[i].text.size()}; };
+                    const UInt32 duplicate = context.options.duplicateKeys == DuplicateKeyPolicy::Preserve ? NameIndex::Missing : frame.names.Find(key->value, frame.keys.size(), nameAt);
+                    if (duplicate != NameIndex::Missing && context.options.duplicateKeys == DuplicateKeyPolicy::Reject)
+                    {
+                        auto error    = MakeErrorAt(context, ParseErrorCode::DuplicateName, "Duplicate JSON object key", 0, token.size());
+                        error.related = frame.keys[duplicate].span;
+                        return Failure<void>(std::move(error));
+                    }
+                    frame.keepMember = duplicate == NameIndex::Missing;
+                    if (frame.keepMember)
+                    {
+                        if (context.memberCount >= context.limits.maxMembers)
+                            return Error(ParseErrorCode::LimitExceeded, "JSON member limit exceeded");
+                        ++context.memberCount;
+                        if (context.options.duplicateKeys != DuplicateKeyPolicy::Preserve)
+                        {
+                            frame.keys.push_back(Key {NGIN::Serialization::detail::BudgetString {key->value.data(), key->value.size(), BudgetAllocator<char> {budget}}, {context.sourceId, input.Offset(), input.Offset() + token.size()}});
+                            frame.names.Append(frame.keys.size(), nameAt);
+                        }
+                    }
+                    frame.state = State::ObjectColon;
+                    return Deliver(context, Event {.kind = EventKind::Key, .span = key->span, .text = key->value}, frame.emit && frame.keepMember);
+                }
+            }
+            else if (rootSeen)
+                return Error(ParseErrorCode::TrailingCharacters, "Trailing characters after JSON value");
+            bool emit = true;
+            if (!frames.empty())
+            {
+                auto&      frame = frames.back();
+                const bool array = frame.state == State::ArrayFirst || frame.state == State::ArrayValue;
+                if (array)
+                {
+                    if (context.memberCount >= context.limits.maxMembers)
+                        return Error(ParseErrorCode::LimitExceeded, "JSON member limit exceeded");
+                    ++context.memberCount;
+                }
+                emit        = frame.emit && (array || frame.keepMember);
+                frame.state = array ? State::ArrayComma : State::ObjectComma;
+            }
+            else
+                rootSeen = true;
+            if (c == '{' || c == '[')
+            {
+                if (frames.size() >= context.limits.maxDepth)
+                    return Error(ParseErrorCode::DepthExceeded, "JSON depth limit exceeded");
+                auto counted = BeginValue(context, 0);
+                if (!counted)
+                    return counted;
+                frames.emplace_back(c == '[' ? State::ArrayFirst : State::ObjectFirst, emit, budget);
+                return Deliver(context, Event {.kind = c == '[' ? EventKind::StartArray : EventKind::StartObject, .span = {context.sourceId, 0, 1}}, emit);
+            }
+            auto parsed = ParseValue(context, emit);
+            if (!parsed)
+                return parsed;
+            if (!context.cursor.IsEof())
+                return Error(ParseErrorCode::InvalidToken, "Invalid JSON value token");
+            return {};
+        }
+        bool Consume(std::string_view token)
+        {
+            auto parsed = Process(token);
+            if (!parsed)
+            {
+                diagnostic = std::move(parsed.error());
+                if (diagnostic->code == ParseErrorCode::HandlerRejected)
+                {
+                    const auto location  = Locate(token, context.sourceId, diagnostic->span.begin);
+                    diagnostic->location = {location.offset, location.line, location.column};
+                }
+                input.Translate(*diagnostic, false);// Stored duplicate-key spans already use global offsets.
+                return false;
+            }
+            return CheckMemory();
+        }
+        bool CheckMemory()
+        {
+            if (!budget.SetExternalBytes(context.scratch->Capacity()))
+            {
+                SetError(ParseErrorCode::LimitExceeded, "JSON streaming memory limit exceeded");
+                return false;
+            }
+            return true;
+        }
+        void SetError(ParseErrorCode code, const char* message)
+        {
+            diagnostic           = ParseDiagnostic {};
+            diagnostic->code     = code;
+            diagnostic->message  = message;
+            diagnostic->location = {0, 1, 1};
+            diagnostic->span     = {context.sourceId, 0, 0};
+            input.Translate(*diagnostic);
+        }
+        IncrementalParseResult Result() const
+        {
+            return {.status         = diagnostic ? IncrementalParseStatus::Error : complete ? IncrementalParseStatus::Complete
+                                                                           : events         ? IncrementalParseStatus::EventProduced
+                                                                                            : IncrementalParseStatus::NeedMoreInput,
+                    .eventsProduced = events,
+                    .diagnostic     = diagnostic};
+        }
+        AllocationBudget                              budget;
+        NGIN::Serialization::detail::IncrementalInput input;
+        BudgetVector<Frame>                           frames;
+        NGIN::Serialization::detail::BudgetString     buffered;
+        ParseContext                                  context;
+        void*                                         handler;
+        EventCallback                                 callback;
+        UIntSize                                      total {0}, events {0};
+        bool                                          rootSeen {false}, complete {false};
+        std::optional<ParseDiagnostic>                diagnostic;
+    };
+
+    IncrementalEngine::IncrementalEngine(void* handler, EventCallback callback, ParseScratch& scratch, const ParseOptions& options, const ParseLimits& limits)
+        : m_impl(std::make_unique<Impl>(handler, callback, scratch, options, limits)) {}
+    IncrementalEngine::~IncrementalEngine() = default;
+    IncrementalParseResult IncrementalEngine::Feed(std::string_view chunk)
+    {
+        auto& state  = *m_impl;
+        state.events = 0;
+        if (state.diagnostic)
+            return state.Result();
+        if (state.complete)
+        {
+            state.SetError(ParseErrorCode::InvalidDocumentStructure, "Reset the JSON parser before feeding another document");
+            return state.Result();
+        }
+        if (chunk.size() > state.context.limits.maxInputBytes - state.total)
+        {
+            state.SetError(ParseErrorCode::LimitExceeded, "JSON input byte limit exceeded");
+            state.diagnostic->location.offset = state.total;
+            state.diagnostic->span.begin      = state.total;
+            state.diagnostic->span.end        = state.total;
+            return state.Result();
+        }
+        if (!state.CheckMemory())
+            return state.Result();
+        state.total += chunk.size();
+        try
+        {
+            if (state.context.options.duplicateKeys == DuplicateKeyPolicy::KeepLast)
+                state.buffered.append(chunk.data(), chunk.size());
+            else
+                state.input.Feed(chunk, [&](std::string_view token) { return state.Consume(token); });
+            if (!state.diagnostic)
+                state.CheckMemory();
+        } catch (const std::bad_alloc&)
+        {
+            state.SetError(state.budget.LimitExceeded() ? ParseErrorCode::LimitExceeded : ParseErrorCode::OutOfMemory, "JSON streaming allocation failed");
+        }
+        return state.Result();
+    }
+    IncrementalParseResult IncrementalEngine::Finish()
+    {
+        auto& state  = *m_impl;
+        state.events = 0;
+        if (state.complete || state.diagnostic)
+            return state.Result();
+        if (!state.CheckMemory())
+            return state.Result();
+        try
+        {
+            if (state.context.options.duplicateKeys == DuplicateKeyPolicy::KeepLast)
+            {
+                auto limits = state.context.limits;
+                limits.maxTotalMemoryBytes -= state.budget.CommittedBytes() + state.context.scratch->Capacity();
+                auto parsed = ParseEventsContiguous({state.buffered.data(), state.buffered.size()}, &state, [](void* context, const Event& event) { return static_cast<Impl*>(context)->DeliverEvent(event); }, *state.context.scratch, state.context.options, limits);
+                if (!parsed)
+                    state.diagnostic = std::move(parsed.error());
+                else
+                    state.complete = true;
+            }
+            else if (state.input.Finish([&](std::string_view token) { return state.Consume(token); }))
+            {
+                if (!state.rootSeen || !state.frames.empty())
+                    state.SetError(ParseErrorCode::UnexpectedEnd, "Incomplete JSON document");
+                else
+                    state.complete = true;
+            }
+        } catch (const std::bad_alloc&)
+        {
+            state.SetError(state.budget.LimitExceeded() ? ParseErrorCode::LimitExceeded : ParseErrorCode::OutOfMemory, "JSON streaming allocation failed");
+        }
+        return state.Result();
+    }
+    void IncrementalEngine::Reset() noexcept
+    {
+        auto& state = *m_impl;
+        state.frames.clear();
+        state.buffered.clear();
+        state.input.Reset();
+        state.context.scratch->Reset();
+        state.context.nodeCount    = 0;
+        state.context.memberCount  = 0;
+        state.context.decodedBytes = 0;
+        state.total                = 0;
+        state.events               = 0;
+        state.rootSeen             = false;
+        state.complete             = false;
+        state.diagnostic.reset();
+        state.budget.ResetFailure();
+    }
+    UIntSize IncrementalEngine::TotalBytes() const noexcept
+    {
+        return m_impl->total;
+    }
+    UIntSize IncrementalEngine::BufferedBytes() const noexcept
+    {
+        return m_impl->context.options.duplicateKeys == DuplicateKeyPolicy::KeepLast ? m_impl->buffered.size() : m_impl->input.BufferedBytes();
+    }
+    UIntSize IncrementalEngine::MemoryCommitted() const noexcept
+    {
+        return m_impl->budget.CommittedBytes() + m_impl->context.scratch->Capacity();
+    }
+    bool IncrementalEngine::IsComplete() const noexcept
+    {
+        return m_impl->complete;
     }
 }// namespace NGIN::Serialization::JSON::detail

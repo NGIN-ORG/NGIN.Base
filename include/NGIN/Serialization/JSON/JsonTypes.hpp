@@ -53,16 +53,6 @@ namespace NGIN::Serialization::JSON
     class NGIN_SERIALIZATION_API ValueView
     {
     public:
-        enum class Type : UInt8
-        {
-            Null,
-            Bool,
-            Number,
-            String,
-            Array,
-            Object,
-        };
-
         /// @brief Constructs an invalid value view.
         constexpr ValueView() noexcept = default;
 
@@ -106,24 +96,6 @@ namespace NGIN::Serialization::JSON
         [[nodiscard]] std::optional<ArrayView> TryArray() const noexcept;
         /// @brief Returns an object view when the value is an object.
         [[nodiscard]] std::optional<ObjectView> TryObject() const noexcept;
-
-        /// @brief Returns the broad compatibility type used by legacy-style checked accessors.
-        [[nodiscard]] Type GetType() const noexcept;
-        /// @brief Returns the Boolean value.
-        /// @pre IsBool() is true; a failed check aborts in assertion-enabled builds.
-        [[nodiscard]] bool AsBool() const noexcept;
-        /// @brief Returns any numeric value converted to floating point.
-        /// @pre IsNumber() is true; a failed check aborts in assertion-enabled builds.
-        [[nodiscard]] F64 AsNumber() const noexcept;
-        /// @brief Returns a borrowed decoded string.
-        /// @pre IsString() is true; the view remains valid only while the document lives.
-        [[nodiscard]] std::string_view AsString() const noexcept;
-        /// @brief Returns this value as an array view.
-        /// @pre IsArray() is true.
-        [[nodiscard]] ArrayView AsArray() const noexcept;
-        /// @brief Returns this value as an object view.
-        /// @pre IsObject() is true.
-        [[nodiscard]] ObjectView AsObject() const noexcept;
 
         /// @brief Returns the document-local node identifier.
         [[nodiscard]] NodeId Id() const noexcept { return m_id; }
@@ -291,9 +263,6 @@ namespace NGIN::Serialization::JSON
         [[nodiscard]] MemberView MemberAt(UIntSize index) const noexcept;
         /// @brief Finds a member value by decoded key.
         [[nodiscard]] std::optional<ValueView> Find(std::string_view key) const noexcept;
-        /// @brief Returns a pointer to a found value stored in document state, or null.
-        /// @note The pointer is invalidated when the owning document is destroyed.
-        [[nodiscard]] const ValueView* FindPtr(std::string_view key) const noexcept;
         /// @brief Returns an iterator to the first member.
         [[nodiscard]] Iterator begin() const noexcept;
         /// @brief Returns the past-the-end iterator.

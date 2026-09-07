@@ -49,7 +49,7 @@ namespace NGIN::Serialization::JSON
                 state->nodes.push_back(node);
             } catch (const std::bad_alloc&)
             {
-                return Failure<NodeId>(BuildErrorCode::OutOfMemory, "JSON builder node allocation failed");
+                return Failure<NodeId>(state->budget.LimitExceeded() ? BuildErrorCode::MemoryLimitExceeded : BuildErrorCode::OutOfMemory, "JSON builder node allocation failed");
             }
 
             if (!state->WithinMemoryLimit())
@@ -123,7 +123,7 @@ namespace NGIN::Serialization::JSON
 
         const auto copy = m_impl->state->arena.CopyString(value);
         if (!value.empty() && copy.data() == nullptr)
-            return Failure<NodeId>(BuildErrorCode::OutOfMemory, "JSON string allocation failed");
+            return Failure<NodeId>(m_impl->state->budget.LimitExceeded() ? BuildErrorCode::MemoryLimitExceeded : BuildErrorCode::OutOfMemory, "JSON string allocation failed");
 
         detail::NodeRecord node {.kind = ValueKind::String};
         node.payload.stringValue = detail::StringRef {copy.data(), copy.size()};
@@ -146,7 +146,7 @@ namespace NGIN::Serialization::JSON
             m_impl->state->elements.insert(m_impl->state->elements.end(), values.begin(), values.end());
         } catch (const std::bad_alloc&)
         {
-            return Failure<NodeId>(BuildErrorCode::OutOfMemory, "JSON array allocation failed");
+            return Failure<NodeId>(m_impl->state->budget.LimitExceeded() ? BuildErrorCode::MemoryLimitExceeded : BuildErrorCode::OutOfMemory, "JSON array allocation failed");
         }
 
         detail::NodeRecord node {.kind = ValueKind::Array};
@@ -171,46 +171,50 @@ namespace NGIN::Serialization::JSON
         {
             if (!NGIN::Text::Unicode::IsValidUtf8(members[left].key))
                 return Failure<NodeId>(BuildErrorCode::InvalidString, "JSON object key is not valid UTF-8");
-            for (UIntSize right = left + 1; right < members.size(); ++right)
-            {
-                if (members[left].key == members[right].key)
-                    return Failure<NodeId>(BuildErrorCode::DuplicateKey,
-                                           "JSON builder object contains a duplicate key");
-            }
         }
         try
         {
+            detail::NameIndex names {m_impl->state->budget};
+            const auto        nameAt = [&](UIntSize i) { return members[i].key; };
+            for (UIntSize i = 0; i < members.size(); ++i)
+            {
+                if (names.Find(members[i].key, i, nameAt) != detail::NameIndex::Missing)
+                    return Failure<NodeId>(BuildErrorCode::DuplicateKey, "JSON builder object contains a duplicate key");
+                if (!m_impl->Valid(members[i].value))
+                    return Failure<NodeId>(BuildErrorCode::InvalidHandle, "JSON object contains an invalid value handle");
+                names.Append(i + 1, nameAt);
+            }
             m_impl->state->members.reserve(begin + members.size());
             for (const auto& member: members)
             {
-                if (!m_impl->Valid(member.value))
-                {
-                    m_impl->state->members.resize(begin);
-                    return Failure<NodeId>(BuildErrorCode::InvalidHandle,
-                                           "JSON object contains an invalid value handle");
-                }
                 const auto key = m_impl->state->arena.CopyString(member.key);
                 if (!member.key.empty() && key.data() == nullptr)
                 {
                     m_impl->state->members.resize(begin);
-                    return Failure<NodeId>(BuildErrorCode::OutOfMemory, "JSON object key allocation failed");
+                    return Failure<NodeId>(m_impl->state->budget.LimitExceeded() ? BuildErrorCode::MemoryLimitExceeded : BuildErrorCode::OutOfMemory, "JSON object key allocation failed");
                 }
                 m_impl->state->members.push_back(detail::MemberRecord {
                         .key   = detail::StringRef {key.data(), key.size()},
                         .value = member.value,
                 });
             }
+            if (!names.Empty())
+                m_impl->state->indexes.push_back(detail::IndexedNames {begin, std::move(names)});
         } catch (const std::bad_alloc&)
         {
             m_impl->state->members.resize(begin);
-            return Failure<NodeId>(BuildErrorCode::OutOfMemory, "JSON object allocation failed");
+            return Failure<NodeId>(m_impl->state->budget.LimitExceeded() ? BuildErrorCode::MemoryLimitExceeded : BuildErrorCode::OutOfMemory, "JSON object allocation failed");
         }
 
         detail::NodeRecord node {.kind = ValueKind::Object};
         node.payload.rangeValue = detail::NodeRange {begin, members.size()};
         auto result             = m_impl->Add(node);
         if (!result)
+        {
             m_impl->state->members.resize(begin);
+            if (!m_impl->state->indexes.empty() && m_impl->state->indexes.back().begin == begin)
+                m_impl->state->indexes.pop_back();
+        }
         return result;
     }
 
@@ -222,13 +226,6 @@ namespace NGIN::Serialization::JSON
             return Failure<Document>(BuildErrorCode::InvalidHandle, "JSON builder root handle is invalid");
 
         m_impl->state->root = root;
-        try
-        {
-            m_impl->state->FinalizeViews();
-        } catch (const std::bad_alloc&)
-        {
-            return Failure<Document>(BuildErrorCode::OutOfMemory, "JSON view allocation failed");
-        }
         if (!m_impl->state->WithinMemoryLimit())
             return Failure<Document>(BuildErrorCode::MemoryLimitExceeded, "JSON builder memory limit exceeded");
         return detail::DocumentAccess::MakeDocument(std::move(m_impl->state));
