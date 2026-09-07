@@ -2,6 +2,8 @@
 /// @brief UDP socket wrapper.
 #pragma once
 
+#include <NGIN/Async/Cancellation.hpp>
+#include <NGIN/IO/Runtime.hpp>
 #include <NGIN/Net/Sockets/SocketHandle.hpp>
 #include <NGIN/Net/Types/AddressFamily.hpp>
 #include <NGIN/Net/Types/Buffer.hpp>
@@ -19,7 +21,6 @@ namespace NGIN::Async
 
 namespace NGIN::Net
 {
-    class NetworkDriver;
 
     /// @brief Result for UDP receive operations.
     struct DatagramReceiveResult final
@@ -29,11 +30,19 @@ namespace NGIN::Net
     };
 
     /// @brief UDP socket with non-blocking Try* operations.
+    /// @note Async operations require a bound, non-stopped runtime; otherwise they fault with InvalidTaskUsage.
+    /// Their optional token is linked with TaskContext cancellation. Do not move or destroy
+    /// the socket while an operation is pending. Concurrent access requires caller synchronization.
     class NGIN_NET_API UdpSocket final
     {
     public:
         /// @brief Constructs a closed UDP socket.
         UdpSocket() noexcept = default;
+        /// @brief Binds asynchronous operations to a borrowed I/O runtime without starting workers.
+        /// @note The runtime must outlive this socket and its operations. Accepted sockets inherit it.
+        explicit UdpSocket(NGIN::IO::Runtime& runtime) noexcept : m_runtime(&runtime) {}
+        /// @brief Returns the borrowed runtime, or null for an unbound synchronous socket.
+        [[nodiscard]] NGIN::IO::Runtime* GetRuntime() const noexcept { return m_runtime; }
         /// @brief UDP sockets are non-copyable because they uniquely own a native socket.
         UdpSocket(const UdpSocket&) = delete;
         /// @brief UDP sockets are non-copy-assignable because they uniquely own a native socket.
@@ -62,17 +71,15 @@ namespace NGIN::Net
         /// @brief Attempts to receive one datagram into scatter/gather buffers without blocking.
         NetExpected<DatagramReceiveResult> TryReceiveFromSegments(MutableBufferSegmentSpan destination) noexcept;
 
-        /// @brief Asynchronously sends one datagram using driver readiness and cancellation.
+        /// @brief Asynchronously sends one datagram using the bound runtime and context cancellation.
         NGIN::Async::Task<NGIN::UInt32, NetError> SendToAsync(NGIN::Async::TaskContext&      ctx,
-                                                              NetworkDriver&                 driver,
                                                               Endpoint                       remoteEndpoint,
                                                               ConstByteSpan                  payload,
-                                                              NGIN::Async::CancellationToken token);
-        /// @brief Asynchronously receives one datagram using driver readiness and cancellation.
+                                                              NGIN::Async::CancellationToken token = {});
+        /// @brief Asynchronously receives one datagram using the bound runtime and context cancellation.
         NGIN::Async::Task<DatagramReceiveResult, NetError> ReceiveFromAsync(NGIN::Async::TaskContext&      ctx,
-                                                                            NetworkDriver&                 driver,
                                                                             ByteSpan                       destination,
-                                                                            NGIN::Async::CancellationToken token);
+                                                                            NGIN::Async::CancellationToken token = {});
 
         /// @brief Returns mutable access to the owned native-handle wrapper.
         [[nodiscard]] SocketHandle& Handle() noexcept { return m_handle; }
@@ -80,6 +87,7 @@ namespace NGIN::Net
         [[nodiscard]] const SocketHandle& Handle() const noexcept { return m_handle; }
 
     private:
-        SocketHandle m_handle {};
+        NGIN::IO::Runtime* m_runtime {nullptr};
+        SocketHandle       m_handle {};
     };
 }// namespace NGIN::Net

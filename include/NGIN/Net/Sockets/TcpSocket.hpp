@@ -2,6 +2,8 @@
 /// @brief TCP socket wrapper.
 #pragma once
 
+#include <NGIN/Async/Cancellation.hpp>
+#include <NGIN/IO/Runtime.hpp>
 #include <NGIN/Net/Sockets/SocketHandle.hpp>
 #include <NGIN/Net/Types/AddressFamily.hpp>
 #include <NGIN/Net/Types/Buffer.hpp>
@@ -22,14 +24,21 @@ namespace NGIN::Async
 
 namespace NGIN::Net
 {
-    class NetworkDriver;
 
     /// @brief TCP socket with non-blocking Try* operations.
+    /// @note Async operations require a bound, non-stopped runtime; otherwise they fault with InvalidTaskUsage.
+    /// Their optional token is linked with TaskContext cancellation. Do not move or destroy
+    /// the socket while an operation is pending. Concurrent access requires caller synchronization.
     class NGIN_NET_API TcpSocket final
     {
     public:
         /// @brief Constructs a closed TCP socket.
         TcpSocket() noexcept = default;
+        /// @brief Binds asynchronous operations to a borrowed I/O runtime without starting workers.
+        /// @note The runtime must outlive this socket and its operations. Accepted sockets inherit it.
+        explicit TcpSocket(NGIN::IO::Runtime& runtime) noexcept : m_runtime(&runtime) {}
+        /// @brief Returns the borrowed runtime, or null for an unbound synchronous socket.
+        [[nodiscard]] NGIN::IO::Runtime* GetRuntime() const noexcept { return m_runtime; }
 
         /// @brief TCP sockets are non-copyable because they uniquely own a native socket.
         TcpSocket(const TcpSocket&) = delete;
@@ -47,11 +56,10 @@ namespace NGIN::Net
         /// @brief Attempts a non-blocking connection.
         /// @return True when connected, false while connection remains in progress.
         NetExpected<bool> TryConnect(Endpoint remoteEndpoint) noexcept;
-        /// @brief Asynchronously connects using driver readiness and cancellation.
+        /// @brief Asynchronously connects using the bound runtime and context cancellation.
         NGIN::Async::Task<void, NetError> ConnectAsync(NGIN::Async::TaskContext&      ctx,
-                                                       NetworkDriver&                 driver,
                                                        Endpoint                       remoteEndpoint,
-                                                       NGIN::Async::CancellationToken token);
+                                                       NGIN::Async::CancellationToken token = {});
 
         /// @brief Connects synchronously to a remote endpoint.
         NetExpected<void> Connect(Endpoint remoteEndpoint);
@@ -67,14 +75,12 @@ namespace NGIN::Net
 
         /// @brief Asynchronously sends bytes, retrying readiness until progress or cancellation.
         NGIN::Async::Task<NGIN::UInt32, NetError> SendAsync(NGIN::Async::TaskContext&      ctx,
-                                                            NetworkDriver&                 driver,
                                                             ConstByteSpan                  data,
-                                                            NGIN::Async::CancellationToken token);
+                                                            NGIN::Async::CancellationToken token = {});
         /// @brief Asynchronously receives bytes, waiting for readiness as required.
         NGIN::Async::Task<NGIN::UInt32, NetError> ReceiveAsync(NGIN::Async::TaskContext&      ctx,
-                                                               NetworkDriver&                 driver,
                                                                ByteSpan                       destination,
-                                                               NGIN::Async::CancellationToken token);
+                                                               NGIN::Async::CancellationToken token = {});
 
         /// @brief Disables reads, writes, or both directions on the connected socket.
         NetExpected<void> Shutdown(ShutdownMode mode) noexcept;
@@ -87,14 +93,15 @@ namespace NGIN::Net
         [[nodiscard]] const SocketHandle& Handle() const noexcept { return m_handle; }
 
     private:
-        explicit TcpSocket(SocketHandle&& handle, bool nonBlocking) noexcept
-            : m_handle(std::move(handle)), m_nonBlocking(nonBlocking)
+        explicit TcpSocket(SocketHandle&& handle, bool nonBlocking, NGIN::IO::Runtime* runtime) noexcept
+            : m_runtime(runtime), m_handle(std::move(handle)), m_nonBlocking(nonBlocking)
         {
         }
 
         friend class TcpListener;
 
-        SocketHandle m_handle {};
-        bool         m_nonBlocking {true};
+        NGIN::IO::Runtime* m_runtime {nullptr};
+        SocketHandle       m_handle {};
+        bool               m_nonBlocking {true};
     };
 }// namespace NGIN::Net

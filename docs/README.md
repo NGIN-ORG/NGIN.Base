@@ -23,3 +23,5 @@
 
 Public headers are the API source of truth. Implementation planning is tracked
 outside this documentation tree; Git history preserves completed designs.
+
+- [Shared I/O runtime](IORuntime.md): lazy file/socket backends, resource binding, and shutdown.

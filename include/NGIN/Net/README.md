@@ -8,7 +8,7 @@ Key Types:
 - Addressing: AddressFamily, IpAddress, Endpoint.
 - Errors: NetErrorCode, NetError, NetExpected.
 - Buffers: Buffer, BufferPool<Allocator>, BufferSegment.
-- Runtime: NetworkDriver.
+- Runtime: NGIN::IO::Runtime (shared with filesystem I/O).
 - Sockets: TcpSocket, TcpListener, UdpSocket.
 - Transport: IByteStream, IDatagramChannel, TcpByteStream, UdpDatagramChannel, ByteStreamBuilder, DatagramBuilder.
 - Filters: LengthPrefixedMessageStream (message framing over IByteStream).
@@ -16,7 +16,7 @@ Key Types:
 Usage Notes:
 - Try* APIs are non-blocking and report errors via NetExpected.
 - Async APIs use typed `Task<T, NetError>` results; cancellation and faults stay in the async layer.
-- Async methods require TaskContext and NetworkDriver.
+- Async methods require TaskContext and a socket bound to IO::Runtime.
 - Filters wrap transports to add semantics like framing, compression, or metrics.
 - TLS is the separate `NetTLS` component; include `<NGIN/NetTLS.hpp>` and link
   `NGIN::Base::NetTLS` when encrypted streams are required.
@@ -24,8 +24,8 @@ Usage Notes:
 - ByteStreamBuilder::BuildLengthPrefixed() returns NetExpected<std::unique_ptr<LengthPrefixedMessageStream>>.
 
 Performance Notes:
-- No hidden threads; worker threads are explicit.
-- No allocations on hot paths when BufferPool is used.
+- IO::Runtime lazily owns a network thread by default; Manual mode supports external polling.
+- BufferPool allows reuse of payload storage.
 
 Testing Guidance:
 - Loopback-only tests for TCP/UDP.

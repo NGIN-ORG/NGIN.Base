@@ -1,6 +1,7 @@
 #pragma once
 
 #include <NGIN/Serialization/Core/IncrementalParse.hpp>
+#include <NGIN/Serialization/Core/ParseScratch.hpp>
 #include <NGIN/Serialization/JSON/JsonParser.hpp>
 
 #include <algorithm>
@@ -66,12 +67,15 @@ namespace NGIN::Serialization::JSON
         using EventCallback = EventAction (*)(void*, const Event&);
 
         [[nodiscard]] NGIN_SERIALIZATION_API NGIN::Utilities::Expected<void, ParseDiagnostic>
-                                             ParseEventsContiguous(BorrowedTextView    input,
+                                             ParseEventsContiguous(std::string_view    input,
                                                                    void*               handlerContext,
                                                                    EventCallback       callback,
                                                                    ParseScratch&       scratch,
                                                                    const ParseOptions& options,
                                                                    const ParseLimits&  limits);
+        [[nodiscard]] NGIN_SERIALIZATION_API NGIN::Utilities::Expected<void, ParseDiagnostic>
+                                             ValidateContiguous(std::string_view input, ParseScratch& scratch,
+                                                                const ParseOptions& options, const ParseLimits& limits);
     }// namespace detail
 
     /// @brief Event delivery over one complete contiguous input.
@@ -83,29 +87,16 @@ namespace NGIN::Serialization::JSON
     class EventParser
     {
     public:
-        /// @brief Parses one complete borrowed input and synchronously delivers events.
+        /// @brief Parses one complete input and synchronously delivers events.
         /// @note Event text views are valid only for the handler invocation.
         template<EventHandler Handler>
         [[nodiscard]] static NGIN::Utilities::Expected<void, ParseDiagnostic>
-        ParseContiguous(BorrowedTextView    input,
+        ParseContiguous(std::string_view    input,
                         Handler&            handler,
                         ParseScratch&       scratch,
                         const ParseOptions& options = {},
                         const ParseLimits&  limits  = {})
         {
-            // KeepLast requires buffering a complete object so the prior value can
-            // be replaced without emitting it. Retain the DOM path for this uncommon
-            // normalization policy; all streaming-compatible policies use the
-            // allocation-light direct parser.
-            if (options.duplicateKeys == DuplicateKeyPolicy::KeepLast)
-            {
-                NGIN::Utilities::Expected<BorrowedDocument, ParseDiagnostic> parsed =
-                        ParseBorrowed(input, scratch, options, limits);
-                if (!parsed)
-                    return NGIN::Utilities::Unexpected<ParseDiagnostic>(std::move(parsed.error()));
-                return Emit(parsed.value().Root(), handler);
-            }
-
             return detail::ParseEventsContiguous(
                     input,
                     &handler,
@@ -117,95 +108,6 @@ namespace NGIN::Serialization::JSON
                     limits);
         }
 
-    private:
-        template<EventHandler Handler>
-        [[nodiscard]] static NGIN::Utilities::Expected<void, ParseDiagnostic>
-        Deliver(const Event& event, Handler& handler)
-        {
-            const EventAction action = handler(event);
-            if (action.continueParsing)
-                return {};
-            ParseDiagnostic diagnostic;
-            diagnostic.code            = ParseErrorCode::HandlerRejected;
-            diagnostic.span            = event.span;
-            diagnostic.location.offset = event.span.begin;
-            diagnostic.consumerContext = action.consumerContext;
-            diagnostic.message         = "JSON event handler stopped parsing";
-            return NGIN::Utilities::Unexpected<ParseDiagnostic>(std::move(diagnostic));
-        }
-
-        template<EventHandler Handler>
-        [[nodiscard]] static NGIN::Utilities::Expected<void, ParseDiagnostic>
-        Emit(ValueView value, Handler& handler)
-        {
-            Event event {.span = value.Span()};
-            switch (value.Kind())
-            {
-                case ValueKind::Null:
-                    event.kind = EventKind::Null;
-                    return Deliver(event, handler);
-                case ValueKind::Bool:
-                    event.kind      = EventKind::Bool;
-                    event.boolValue = *value.TryBool();
-                    return Deliver(event, handler);
-                case ValueKind::Int64:
-                    event.kind     = EventKind::Int64;
-                    event.intValue = *value.TryInt64();
-                    return Deliver(event, handler);
-                case ValueKind::UInt64:
-                    event.kind      = EventKind::UInt64;
-                    event.uintValue = *value.TryUInt64();
-                    return Deliver(event, handler);
-                case ValueKind::Double:
-                    event.kind        = EventKind::Double;
-                    event.doubleValue = *value.TryDouble();
-                    return Deliver(event, handler);
-                case ValueKind::String:
-                    event.kind = EventKind::String;
-                    event.text = *value.TryString();
-                    return Deliver(event, handler);
-                case ValueKind::Array: {
-                    event.kind                                                 = EventKind::StartArray;
-                    NGIN::Utilities::Expected<void, ParseDiagnostic> delivered = Deliver(event, handler);
-                    if (!delivered)
-                        return delivered;
-                    const std::optional<ArrayView> array = value.TryArray();
-                    for (const ValueView child: *array)
-                    {
-                        NGIN::Utilities::Expected<void, ParseDiagnostic> result = Emit(child, handler);
-                        if (!result)
-                            return result;
-                    }
-                    event.kind = EventKind::EndArray;
-                    return Deliver(event, handler);
-                }
-                case ValueKind::Object: {
-                    event.kind                                                 = EventKind::StartObject;
-                    NGIN::Utilities::Expected<void, ParseDiagnostic> delivered = Deliver(event, handler);
-                    if (!delivered)
-                        return delivered;
-                    const std::optional<ObjectView> object = value.TryObject();
-                    for (const MemberView member: *object)
-                    {
-                        Event                                            key {.kind = EventKind::Key,
-                                                                              .span = member.Span(),
-                                                                              .text = member.Key()};
-                        NGIN::Utilities::Expected<void, ParseDiagnostic> keyResult = Deliver(key, handler);
-                        if (!keyResult)
-                            return keyResult;
-                        NGIN::Utilities::Expected<void, ParseDiagnostic> result = Emit(member.Value(), handler);
-                        if (!result)
-                            return result;
-                    }
-                    event.kind = EventKind::EndObject;
-                    return Deliver(event, handler);
-                }
-            }
-            ParseDiagnostic diagnostic;
-            diagnostic.code    = ParseErrorCode::InvalidToken;
-            diagnostic.message = "Unknown JSON event value";
-            return NGIN::Utilities::Unexpected<ParseDiagnostic>(std::move(diagnostic));
-        }
     };
 
     /// @brief Chunk-fed JSON event parser with stable global limits and source offsets.
@@ -222,9 +124,8 @@ namespace NGIN::Serialization::JSON
                 Handler&            handler,
                 ParseScratch&       scratch,
                 const ParseOptions& options = {},
-                const ParseLimits&  limits  = {},
-                const SourceId      source  = {})
-            : m_handler(&handler), m_scratch(&scratch), m_options(options), m_limits(limits), m_source(source)
+                const ParseLimits&  limits  = {})
+            : m_handler(&handler), m_scratch(&scratch), m_options(options), m_limits(limits)
         {
         }
 
@@ -283,7 +184,7 @@ namespace NGIN::Serialization::JSON
             ParseDiagnostic diagnostic;
             diagnostic.code            = code;
             diagnostic.location.offset = m_buffer.size();
-            diagnostic.span            = {.source = m_source, .begin = m_buffer.size(), .end = m_buffer.size()};
+            diagnostic.span            = {.source = m_options.source, .begin = m_buffer.size(), .end = m_buffer.size()};
             diagnostic.message         = message;
             return diagnostic;
         }
@@ -302,11 +203,10 @@ namespace NGIN::Serialization::JSON
 
         [[nodiscard]] IncrementalParseResult TryComplete()
         {
-            const BorrowedTextView input            = BorrowedTextView {m_buffer, m_source};
+            const std::string_view input            = m_buffer;
             ParseLimits            completionLimits = m_limits;
             completionLimits.maxTotalMemoryBytes -= m_buffer.size();
-            NGIN::Utilities::Expected<BorrowedDocument, ParseDiagnostic> validated =
-                    ParseBorrowed(input, *m_scratch, m_options, completionLimits);
+            auto validated = detail::ValidateContiguous(input, *m_scratch, m_options, completionLimits);
             if (!validated)
                 return Fail(std::move(validated.error()));
 
@@ -327,7 +227,6 @@ namespace NGIN::Serialization::JSON
         ParseScratch*                  m_scratch {nullptr};
         ParseOptions                   m_options {};
         ParseLimits                    m_limits {};
-        SourceId                       m_source {};
         std::string                    m_buffer {};
         bool                           m_complete {false};
         bool                           m_error {false};

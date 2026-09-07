@@ -1,30 +1,15 @@
 #include <NGIN/IO/LocalFileSystem.hpp>
 
 #include "AsyncDispatch.hpp"
+#include "RuntimeBackend.hpp"
 
 namespace NGIN::IO
 {
-    LocalFileSystem::LocalFileSystem()
-        : m_asyncDriver(std::make_shared<FileSystemDriver>())
+    LocalFileSystem::LocalFileSystem() noexcept = default;
+    LocalFileSystem::LocalFileSystem(Runtime& runtime) noexcept : m_runtime(&runtime) {}
+    std::shared_ptr<NGIN::IO::detail::FileSystemDriver> LocalFileSystem::AcquireDriver() const
     {
-    }
-
-    LocalFileSystem::LocalFileSystem(std::shared_ptr<FileSystemDriver> asyncDriver)
-        : m_asyncDriver(std::move(asyncDriver))
-    {
-        if (!m_asyncDriver)
-        {
-            m_asyncDriver = std::make_shared<FileSystemDriver>();
-        }
-    }
-
-    void LocalFileSystem::BindAsyncDriver(std::shared_ptr<FileSystemDriver> asyncDriver) noexcept
-    {
-        m_asyncDriver = std::move(asyncDriver);
-        if (!m_asyncDriver)
-        {
-            m_asyncDriver = std::make_shared<FileSystemDriver>();
-        }
+        return m_runtime ? detail::RuntimeAccess::Files(*m_runtime) : nullptr;
     }
 
     ResultVoid LocalFileSystem::Move(const Path& from, const Path& to, const CopyOptions& options) noexcept
@@ -66,8 +51,16 @@ namespace NGIN::IO
     AsyncTask<FileInfo> LocalFileSystem::GetInfoAsync(
             NGIN::Async::TaskContext& ctx, Path path, MetadataOptions options)
     {
+        const std::shared_ptr<NGIN::IO::detail::FileSystemDriver> driver = AcquireDriver();
+        if (!driver)
+        {
+            const auto fault = NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidTaskUsage, 0,
+                                                           "Async filesystem operations require a bound, running IO::Runtime");
+            co_return NGIN::Async::Completion<FileInfo, IOError>::Faulted(fault);
+        }
+
         auto completion = co_await detail::DispatchToDriver(
-                *m_asyncDriver, ctx, [this, path = std::move(path), options]() mutable noexcept {
+                *driver, ctx, [this, path = std::move(path), options]() mutable noexcept {
                     return GetInfo(path, options);
                 });
 
@@ -92,8 +85,17 @@ namespace NGIN::IO
     AsyncTaskVoid LocalFileSystem::CopyFileAsync(
             NGIN::Async::TaskContext& ctx, Path from, Path to, CopyOptions options)
     {
+        const std::shared_ptr<NGIN::IO::detail::FileSystemDriver> driver = AcquireDriver();
+        if (!driver)
+        {
+            const auto fault = NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidTaskUsage, 0,
+                                                           "Async filesystem operations require a bound, running IO::Runtime");
+            co_await NGIN::Async::Faulted(fault);
+            co_return;
+        }
+
         auto completion = co_await detail::DispatchToDriver(
-                *m_asyncDriver,
+                *driver,
                 ctx,
                 [this, from = std::move(from), to = std::move(to), options]() mutable noexcept {
                     return CopyFile(from, to, options);

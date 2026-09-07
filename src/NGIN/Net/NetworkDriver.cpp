@@ -1,4 +1,4 @@
-#include <NGIN/Net/Runtime/NetworkDriver.hpp>
+#include "NetworkDriver.hpp"
 
 #include "SocketPlatform.hpp"
 
@@ -7,8 +7,6 @@
 #include <NGIN/Async/TaskContext.hpp>
 #include <NGIN/Execution/ExecutorRef.hpp>
 #include <NGIN/Execution/ThisThread.hpp>
-#include <NGIN/Execution/Thread.hpp>
-#include <NGIN/Execution/ThreadName.hpp>
 
 #if defined(NGIN_PLATFORM_WINDOWS)
 #include <NGIN/Net/Sockets/UdpSocket.hpp>
@@ -77,7 +75,7 @@ namespace NGIN::Net
         };
 #endif
 
-        explicit Impl(NetworkDriverOptions options)
+        explicit Impl(NGIN::IO::Runtime::NetworkOptions options)
             : m_options(options)
         {
 #if defined(NGIN_PLATFORM_WINDOWS)
@@ -655,17 +653,8 @@ namespace NGIN::Net
         void Run()
         {
             const int timeoutMs = GetPollTimeoutMs();
-            if (m_options.workerThreads == 0)
-            {
-                while (!m_stop.load(std::memory_order_acquire))
-                {
-                    PollOnce(timeoutMs);
-                }
-                return;
-            }
-
-            StartWorkers();
-            JoinWorkers();
+            while (!m_stop.load(std::memory_order_acquire))
+                PollOnce(timeoutMs);
         }
 
         void Stop() noexcept
@@ -676,14 +665,12 @@ namespace NGIN::Net
         void Shutdown() noexcept
         {
             Stop();
-            JoinWorkers();
         }
 
-        NetworkDriverOptions                 m_options {};
-        std::mutex                           m_mutex {};
-        std::vector<Waiter*>                 m_waiters {};
-        std::atomic<bool>                    m_stop {false};
-        std::vector<NGIN::Execution::Thread> m_workers {};
+        NGIN::IO::Runtime::NetworkOptions m_options {};
+        std::mutex                        m_mutex {};
+        std::vector<Waiter*>              m_waiters {};
+        std::atomic<bool>                 m_stop {false};
 #if defined(NGIN_PLATFORM_WINDOWS)
         HANDLE m_iocp {nullptr};
 #endif
@@ -1676,80 +1663,8 @@ namespace NGIN::Net
         };
 #endif
 
-        void StartWorkers()
-        {
-            if (!m_workers.empty())
-            {
-                return;
-            }
-
-            const int timeoutMs = GetPollTimeoutMs();
-            m_workers.reserve(m_options.workerThreads);
-            for (NGIN::UInt32 i = 0; i < m_options.workerThreads; ++i)
-            {
-                NGIN::Execution::Thread::Options options {};
-                options.name = MakeIndexedThreadName("NGIN.NetW", i);
-                m_workers.emplace_back([this, timeoutMs]() {
-                    while (!m_stop.load(std::memory_order_acquire))
-                    {
-                        PollOnce(timeoutMs);
-                    }
-                },
-                                       options);
-            }
-        }
-
-        void JoinWorkers() noexcept
-        {
-            for (auto& worker: m_workers)
-            {
-                if (worker.IsJoinable())
-                {
-                    worker.Join();
-                }
-            }
-        }
-
-        static NGIN::Execution::ThreadName MakeIndexedThreadName(std::string_view prefix, std::size_t index) noexcept
-        {
-            std::array<char, NGIN::Execution::ThreadName::MaxBytes + 1> buffer {};
-            const auto                                                  prefixLen = std::min<std::size_t>(prefix.size(), NGIN::Execution::ThreadName::MaxBytes);
-            for (std::size_t i = 0; i < prefixLen; ++i)
-            {
-                buffer[i] = prefix[i];
-            }
-
-            std::size_t pos = prefixLen;
-            if (pos < NGIN::Execution::ThreadName::MaxBytes)
-            {
-                buffer[pos++] = '.';
-            }
-
-            std::array<char, 24> digits {};
-            std::size_t          digitCount = 0;
-            auto                 value      = index;
-            do
-            {
-                digits[digitCount++] = static_cast<char>('0' + (value % 10));
-                value /= 10;
-            } while (value != 0 && digitCount < digits.size());
-
-            while (digitCount > 0 && pos < NGIN::Execution::ThreadName::MaxBytes)
-            {
-                buffer[pos++] = digits[--digitCount];
-            }
-            buffer[pos] = '\0';
-
-            return NGIN::Execution::ThreadName(std::string_view(buffer.data(), pos));
-        }
-
         int GetPollTimeoutMs() const noexcept
         {
-            if (m_options.busyPoll)
-            {
-                return 0;
-            }
-
             const auto value = m_options.pollInterval.GetValue();
             if (value <= 0.0)
             {
@@ -1975,8 +1890,8 @@ namespace NGIN::Net
 #endif
     };
 
-    NetworkDriver::NetworkDriver()
-        : m_impl(std::make_unique<Impl>(NetworkDriverOptions {}))
+    NetworkDriver::NetworkDriver(NGIN::IO::Runtime::NetworkOptions options)
+        : m_impl(std::make_unique<Impl>(options))
     {
     }
 
@@ -1986,13 +1901,6 @@ namespace NGIN::Net
         {
             m_impl->Shutdown();
         }
-    }
-
-    std::unique_ptr<NetworkDriver> NetworkDriver::Create(NetworkDriverOptions options)
-    {
-        auto driver    = std::unique_ptr<NetworkDriver>(new NetworkDriver());
-        driver->m_impl = std::make_unique<Impl>(options);
-        return driver;
     }
 
     void NetworkDriver::Run()
@@ -2082,4 +1990,13 @@ namespace NGIN::Net
         return Impl::SubmitAccept(ctx, *m_impl, handle, token);
     }
 #endif
+}// namespace NGIN::Net
+
+namespace NGIN::Net
+{
+    std::shared_ptr<NetworkDriver> AcquireNetworkDriver(NGIN::IO::Runtime& runtime)
+    {
+        auto backend = NGIN::IO::detail::RuntimeAccess::Network(runtime, +[](const NGIN::IO::Runtime::NetworkOptions& options) -> std::shared_ptr<NGIN::IO::detail::NetworkBackend> { return std::make_shared<NetworkDriver>(options); });
+        return std::static_pointer_cast<NetworkDriver>(backend);
+    }
 }// namespace NGIN::Net

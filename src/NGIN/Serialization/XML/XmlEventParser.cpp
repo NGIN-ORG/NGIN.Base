@@ -937,18 +937,18 @@ namespace NGIN::Serialization::XML::detail
     }// namespace
 
     NGIN::Utilities::Expected<void, ParseDiagnostic>
-    ParseEventsContiguous(BorrowedTextView    input,
+    ParseEventsContiguous(std::string_view    input,
                           void*               handlerContext,
                           EventCallback       callback,
                           ParseScratch&       scratch,
                           const ParseOptions& options,
                           const ParseLimits&  limits)
     {
-        const auto   source = input.View();
+        const auto   source = input;
         ParseContext context {
                 .cursor         = InputCursor {source},
                 .source         = source,
-                .sourceId       = input.Source(),
+                .sourceId       = options.source,
                 .options        = options,
                 .limits         = limits,
                 .scratch        = &scratch,

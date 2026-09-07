@@ -18,12 +18,7 @@ namespace
     using namespace NGIN::Serialization;
     namespace JSON = NGIN::Serialization::JSON;
 
-    [[nodiscard]] auto Parse(std::string_view          source,
-                             const JSON::ParseOptions& options = {},
-                             const ParseLimits&        limits  = {})
-    {
-        return JSON::Parse(OwnedTextBuffer {source}, options, limits);
-    }
+    using JSON::Parse;
 }// namespace
 
 TEST_CASE("JSON parser exposes checked immutable views", "[serialization][json]")
@@ -49,7 +44,7 @@ TEST_CASE("JSON parser exposes checked immutable views", "[serialization][json]"
 
 TEST_CASE("JSON owning documents survive temporary input and document moves", "[serialization][json][ownership]")
 {
-    auto parsed = JSON::Parse(OwnedTextBuffer {std::string {"{\"value\":\"owned\"}"}});
+    auto parsed = JSON::Parse(std::string {"{\"value\":\"owned\"}"});
     REQUIRE(parsed);
     const auto     beforeMove = parsed.value().Root();
     JSON::Document moved      = std::move(parsed.value());
@@ -57,34 +52,50 @@ TEST_CASE("JSON owning documents survive temporary input and document moves", "[
     REQUIRE(*moved.Root().TryObject()->Find("value")->TryString() == "owned");
 }
 
-TEST_CASE("JSON borrowed parsing is explicit", "[serialization][json][ownership]")
+TEST_CASE("JSON string-view parsing owns source and decoded strings", "[serialization][json][ownership]")
 {
-    std::string  source = R"({"value":"borrowed"})";
-    ParseScratch scratch;
-    auto         parsed = JSON::ParseBorrowed(BorrowedTextView {source}, scratch);
-    REQUIRE(parsed);
-    CHECK(parsed.value().SourceText().data() == source.data());
-    CHECK(*parsed.value().Root().TryObject()->Find("value")->TryString() == "borrowed");
-
-    source                  = R"({"value":"a\nb"})";
-    UIntSize warmedCapacity = 0;
+    JSON::Document document;
     {
-        auto decoded = JSON::ParseBorrowed(BorrowedTextView {source}, scratch);
-        REQUIRE(decoded);
-        CHECK(*decoded.value().Root().TryObject()->Find("value")->TryString() == "a\nb");
-        warmedCapacity = scratch.Capacity();
+        std::string       source   = R"({"plain":"original","escaped":"a\nb"})";
+        const std::string expected = source;
+        source += "trailing bytes outside the view";
+        auto parsed = JSON::Parser::Parse(std::string_view {source.data(), expected.size()});
+        REQUIRE(parsed);
+        source.assign(source.size(), 'x');
+        CHECK(parsed.value().SourceText() == expected);
+        document = std::move(parsed.value());
     }
-    auto reused = JSON::ParseBorrowed(BorrowedTextView {source}, scratch);
-    REQUIRE(reused);
-    CHECK(scratch.Capacity() == warmedCapacity);
+    const auto object = *document.Root().TryObject();
+    CHECK(*object.Find("plain")->TryString() == "original");
+    CHECK(*object.Find("escaped")->TryString() == "a\nb");
 }
 
-TEST_CASE("JSON in-situ parsing is explicit and decodes within owned mutable input",
-          "[serialization][json][ownership]")
+TEST_CASE("JSON string-view parsing rejects empty input and enforces copy limits", "[serialization][json][limits]")
 {
-    auto parsed = JSON::ParseInSitu(MutableTextBuffer {R"({"text":"a\nb"})"});
-    REQUIRE(parsed);
-    CHECK(*parsed.value().Root().TryObject()->Find("text")->TryString() == "a\nb");
+    CHECK_FALSE(JSON::Parse(std::string_view {}));
+    CHECK_FALSE(JSON::Parse("{invalid}"));
+    ParseLimits limits;
+    limits.maxInputBytes = 3;
+    auto inputLimited    = JSON::Parse("null", {}, limits);
+    REQUIRE_FALSE(inputLimited);
+    CHECK(inputLimited.error().code == ParseErrorCode::LimitExceeded);
+    limits                     = {};
+    limits.maxTotalMemoryBytes = 3;
+    auto memoryLimited         = JSON::Parse("null", {}, limits);
+    REQUIRE_FALSE(memoryLimited);
+    CHECK(memoryLimited.error().code == ParseErrorCode::LimitExceeded);
+}
+
+TEST_CASE("JSON documents remain independent across parses", "[serialization][json][ownership]")
+{
+    std::string source = R"({"value":"a\nb"})";
+    auto        first  = JSON::Parse(source);
+    REQUIRE(first);
+    source      = R"({"value":"x\ny"})";
+    auto second = JSON::Parse(source);
+    REQUIRE(second);
+    CHECK(*first.value().Root().TryObject()->Find("value")->TryString() == "a\nb");
+    CHECK(*second.value().Root().TryObject()->Find("value")->TryString() == "x\ny");
 }
 
 TEST_CASE("JSON preserves the full integer domain", "[serialization][json][number]")
@@ -272,7 +283,7 @@ TEST_CASE("JSON contiguous event parser preserves exact numeric categories and h
     };
     ParseScratch scratch;
     auto         stopped = JSON::EventParser::ParseContiguous(
-            BorrowedTextView {R"({"maximum":18446744073709551615,"stop":null})"},
+            R"({"maximum":18446744073709551615,"stop":null})",
             handler,
             scratch);
     REQUIRE_FALSE(stopped);
@@ -301,7 +312,7 @@ TEST_CASE("JSON direct event parser preserves order decoded text policies and to
     ParseScratch      scratch;
     const std::string source = R"({"line":"a\nb","values":[null,true,-2,18446744073709551615]})";
     auto              result = JSON::EventParser::ParseContiguous(
-            BorrowedTextView {source, SourceId {9}}, handler, scratch);
+            source, handler, scratch, {.source = SourceId {9}});
     REQUIRE(result);
     REQUIRE(events.size() == 11);
     CHECK(events[0].kind == JSON::EventKind::StartObject);
@@ -323,7 +334,7 @@ TEST_CASE("JSON direct event parser preserves order decoded text policies and to
     comments.trailingCommas = JSON::TrailingCommaPolicy::Allow;
     events.clear();
     result = JSON::EventParser::ParseContiguous(
-            BorrowedTextView {R"([1,/* accepted */2,])"}, handler, scratch, comments);
+            R"([1,/* accepted */2,])", handler, scratch, comments);
     REQUIRE(result);
     CHECK(events.size() == 4);
 }
@@ -343,7 +354,7 @@ TEST_CASE("JSON direct event parser applies duplicate and resource-limit policie
 
     ParseScratch scratch;
     auto         duplicate = JSON::EventParser::ParseContiguous(
-            BorrowedTextView {R"({"x":1,"x":2})"}, handler, scratch);
+            R"({"x":1,"x":2})", handler, scratch);
     REQUIRE_FALSE(duplicate);
     CHECK(duplicate.error().code == ParseErrorCode::DuplicateName);
     REQUIRE(duplicate.error().related);
@@ -355,7 +366,7 @@ TEST_CASE("JSON direct event parser applies duplicate and resource-limit policie
     keys.clear();
     values.clear();
     auto kept = JSON::EventParser::ParseContiguous(
-            BorrowedTextView {R"({"x":1,"x":{"ignored":2},"y":3})"},
+            R"({"x":1,"x":{"ignored":2},"y":3})",
             handler,
             scratch,
             keepFirst);
@@ -366,12 +377,12 @@ TEST_CASE("JSON direct event parser applies duplicate and resource-limit policie
     ParseLimits limits;
     limits.maxNodes = 2;
     auto limited    = JSON::EventParser::ParseContiguous(
-            BorrowedTextView {R"([1,2])"}, handler, scratch, {}, limits);
+            R"([1,2])", handler, scratch, {}, limits);
     REQUIRE_FALSE(limited);
     CHECK(limited.error().code == ParseErrorCode::LimitExceeded);
 
     auto invalid = JSON::EventParser::ParseContiguous(
-            BorrowedTextView {R"({"x":[1,2})"}, handler, scratch);
+            R"({"x":[1,2})", handler, scratch);
     REQUIRE_FALSE(invalid);
     CHECK(invalid.error().code != ParseErrorCode::HandlerRejected);
 
@@ -382,7 +393,7 @@ TEST_CASE("JSON direct event parser applies duplicate and resource-limit policie
     };
     CHECK_THROWS_AS(
             JSON::EventParser::ParseContiguous(
-                    BorrowedTextView {"null"}, throwingHandler, scratch),
+                    "null", throwingHandler, scratch),
             std::runtime_error);
 }
 
@@ -396,7 +407,7 @@ TEST_CASE("JSON memory accounting includes finalized value views",
     ParseLimits limits;
     limits.maxTotalMemoryBytes = baseline.value().MemoryCommitted() - 1;
     auto limited               = JSON::Parse(
-            OwnedTextBuffer {R"({"items":[1,2,3,4],"nested":{"enabled":true}})"},
+            R"({"items":[1,2,3,4],"nested":{"enabled":true}})",
             {},
             limits);
     REQUIRE_FALSE(limited);

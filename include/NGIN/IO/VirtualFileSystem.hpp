@@ -46,6 +46,8 @@ namespace NGIN::IO
     public:
         /// @brief Creates a mount translating @p mountPoint into @p realRoot.
         LocalMount(Path realRoot, MountPoint mountPoint = {});
+        /// @brief Creates an async-capable mount borrowing a shared I/O runtime.
+        LocalMount(Runtime& runtime, Path realRoot, MountPoint mountPoint = {});
 
         /// @copydoc IVirtualMount::GetMountPoint
         [[nodiscard]] const MountPoint& GetMountPoint() const noexcept override;

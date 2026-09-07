@@ -97,7 +97,7 @@ namespace NGIN::Crypto::Tokens
         [[nodiscard]] CryptoExpected<JwtAlgorithm> ParseHeaderAlgorithm(std::string_view headerJson)
         {
             auto document = NGIN::Serialization::JSON::Parser::Parse(
-                    NGIN::Serialization::OwnedTextBuffer {headerJson});
+                    headerJson);
             if (!document.has_value() || !document.value().Root().IsObject())
             {
                 return std::unexpected(ParseError());
@@ -116,7 +116,7 @@ namespace NGIN::Crypto::Tokens
         [[nodiscard]] CryptoExpected<JwtClaims> ParseClaims(std::string_view payloadJson)
         {
             auto document = NGIN::Serialization::JSON::Parser::Parse(
-                    NGIN::Serialization::OwnedTextBuffer {payloadJson});
+                    payloadJson);
             if (!document.has_value() || !document.value().Root().IsObject())
             {
                 return std::unexpected(ParseError());
@@ -238,7 +238,7 @@ namespace NGIN::Crypto::Tokens
         ParsePayloadDocument(const JwtCompactToken& token)
         {
             auto document = NGIN::Serialization::JSON::Parser::Parse(
-                    NGIN::Serialization::OwnedTextBuffer {token.payloadJson});
+                    token.payloadJson);
             if (!document.has_value() || !document.value().Root().IsObject())
             {
                 return std::unexpected(ParseError());

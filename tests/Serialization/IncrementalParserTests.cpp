@@ -78,9 +78,11 @@ namespace
             events.push_back(Capture(event));
             return JSON::EventAction::Continue();
         };
+        auto sourceOptions   = options;
+        sourceOptions.source = sourceId;
         ParseScratch scratch;
         auto         result = JSON::EventParser::ParseContiguous(
-                BorrowedTextView {source, sourceId}, handler, scratch, options);
+                source, handler, scratch, sourceOptions);
         if (!result)
             throw std::runtime_error {"contiguous JSON fixture did not parse"};
         return events;
@@ -96,9 +98,11 @@ namespace
             events.push_back(Capture(event));
             return XML::EventAction::Continue();
         };
+        auto sourceOptions   = options;
+        sourceOptions.source = sourceId;
         ParseScratch scratch;
         auto         result = XML::EventParser::ParseContiguous(
-                BorrowedTextView {source, sourceId}, handler, scratch, options);
+                source, handler, scratch, sourceOptions);
         if (!result)
             throw std::runtime_error {"contiguous XML fixture did not parse"};
         return events;
@@ -116,7 +120,9 @@ namespace
             return JSON::EventAction::Continue();
         };
         ParseScratch                 scratch;
-        JSON::IncrementalEventParser parser {handler, scratch, options, ParseLimits {}, sourceId};
+        auto                         sourceOptions = options;
+        sourceOptions.source                       = sourceId;
+        JSON::IncrementalEventParser parser {handler, scratch, sourceOptions};
         UIntSize                     begin = 0;
         for (const auto end: ends)
         {
@@ -147,7 +153,9 @@ namespace
             return XML::EventAction::Continue();
         };
         ParseScratch                scratch;
-        XML::IncrementalEventParser parser {handler, scratch, options, ParseLimits {}, sourceId};
+        auto                        sourceOptions = options;
+        sourceOptions.source                      = sourceId;
+        XML::IncrementalEventParser parser {handler, scratch, sourceOptions};
         UIntSize                    begin = 0;
         for (const auto end: ends)
         {
@@ -305,7 +313,7 @@ TEST_CASE("incremental parsers keep limits errors and reset state global",
     ParseScratch jsonScratch;
     ParseLimits  limits;
     limits.maxInputBytes = 4;
-    JSON::IncrementalEventParser limitedJson {jsonHandler, jsonScratch, {}, limits, SourceId {41}};
+    JSON::IncrementalEventParser limitedJson {jsonHandler, jsonScratch, {.source = SourceId {41}}, limits};
     CHECK(limitedJson.Feed("12").status == IncrementalParseStatus::NeedMoreInput);
     const auto jsonLimit = limitedJson.Feed("345");
     REQUIRE(jsonLimit.HasError());
@@ -319,15 +327,14 @@ TEST_CASE("incremental parsers keep limits errors and reset state global",
     JSON::IncrementalEventParser memoryLimitedJson {
             jsonHandler,
             jsonScratch,
-            {},
-            limits,
-            SourceId {41}};
+            {.source = SourceId {41}},
+            limits};
     CHECK(memoryLimitedJson.Feed("12").status == IncrementalParseStatus::NeedMoreInput);
     const auto jsonMemoryLimit = memoryLimitedJson.Feed("345");
     REQUIRE(jsonMemoryLimit.diagnostic);
     CHECK(jsonMemoryLimit.diagnostic->code == ParseErrorCode::LimitExceeded);
 
-    JSON::IncrementalEventParser incompleteJson {jsonHandler, jsonScratch, {}, {}, SourceId {42}};
+    JSON::IncrementalEventParser incompleteJson {jsonHandler, jsonScratch, {.source = SourceId {42}}, {}};
     CHECK(incompleteJson.Feed(R"({"a":")"
                               "\\uD83D")
                   .status ==
@@ -339,17 +346,14 @@ TEST_CASE("incremental parsers keep limits errors and reset state global",
     CHECK(jsonIncomplete.diagnostic->span.source == SourceId {42});
 
     const std::string malformedJson = "{\"a\":1,\n\"b\":]}";
-    ParseScratch      jsonReferenceScratch;
-    const auto        jsonReference = JSON::ParseBorrowed(
-            BorrowedTextView {malformedJson, SourceId {45}}, jsonReferenceScratch);
+    const auto        jsonReference = JSON::Parse(malformedJson, {.source = SourceId {45}});
     REQUIRE_FALSE(jsonReference);
     ParseScratch                 malformedJsonScratch;
     JSON::IncrementalEventParser malformedJsonParser {
             jsonHandler,
             malformedJsonScratch,
-            {},
-            {},
-            SourceId {45}};
+            {.source = SourceId {45}},
+            {}};
     CHECK(malformedJsonParser.Feed(std::string_view {malformedJson}.substr(0, 6)).status ==
           IncrementalParseStatus::NeedMoreInput);
     CHECK(malformedJsonParser.Feed(std::string_view {malformedJson}.substr(6)).status ==
@@ -381,7 +385,7 @@ TEST_CASE("incremental parsers keep limits errors and reset state global",
     ParseScratch xmlScratch;
     limits               = {};
     limits.maxInputBytes = 7;
-    XML::IncrementalEventParser limitedXml {xmlHandler, xmlScratch, {}, limits, SourceId {43}};
+    XML::IncrementalEventParser limitedXml {xmlHandler, xmlScratch, {.source = SourceId {43}}, limits};
     CHECK(limitedXml.Feed("<root").status == IncrementalParseStatus::NeedMoreInput);
     const auto xmlLimit = limitedXml.Feed("/>");
     CHECK(xmlLimit.status == IncrementalParseStatus::NeedMoreInput);
@@ -390,7 +394,7 @@ TEST_CASE("incremental parsers keep limits errors and reset state global",
     REQUIRE(xmlLimitExceeded.diagnostic);
     CHECK(xmlLimitExceeded.diagnostic->code == ParseErrorCode::LimitExceeded);
 
-    XML::IncrementalEventParser incompleteXml {xmlHandler, xmlScratch, {}, {}, SourceId {44}};
+    XML::IncrementalEventParser incompleteXml {xmlHandler, xmlScratch, {.source = SourceId {44}}, {}};
     CHECK(incompleteXml.Feed("<root>&amp").status == IncrementalParseStatus::NeedMoreInput);
     const auto xmlIncomplete = incompleteXml.Finish();
     REQUIRE(xmlIncomplete.HasError());
@@ -398,17 +402,14 @@ TEST_CASE("incremental parsers keep limits errors and reset state global",
     CHECK(xmlIncomplete.diagnostic->span.source == SourceId {44});
 
     const std::string malformedXml = "<root>\n<child></root>";
-    ParseScratch      xmlReferenceScratch;
-    const auto        xmlReference = XML::ParseBorrowed(
-            BorrowedTextView {malformedXml, SourceId {46}}, xmlReferenceScratch);
+    const auto        xmlReference = XML::Parse(malformedXml, {.source = SourceId {46}});
     REQUIRE_FALSE(xmlReference);
     ParseScratch                malformedXmlScratch;
     XML::IncrementalEventParser malformedXmlParser {
             xmlHandler,
             malformedXmlScratch,
-            {},
-            {},
-            SourceId {46}};
+            {.source = SourceId {46}},
+            {}};
     CHECK(malformedXmlParser.Feed(std::string_view {malformedXml}.substr(0, 9)).status ==
           IncrementalParseStatus::NeedMoreInput);
     CHECK(malformedXmlParser.Feed(std::string_view {malformedXml}.substr(9)).status ==

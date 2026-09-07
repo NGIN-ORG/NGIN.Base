@@ -1,9 +1,9 @@
 #pragma once
 
+#include "FileSystemDriver.hpp"
 #include <NGIN/Async/Cancellation.hpp>
 #include <NGIN/Async/TaskContext.hpp>
 #include <NGIN/Execution/ExecutorRef.hpp>
-#include <NGIN/IO/FileSystemDriver.hpp>
 
 #include <atomic>
 #include <memory>
@@ -39,7 +39,7 @@ namespace NGIN::IO::detail
                       "driver dispatch results must be movable into shared completion state without throwing");
 
     public:
-        DriverDispatchAwaiter(FileSystemDriver& driver, NGIN::Async::TaskContext& ctx, TOperation operation)
+        DriverDispatchAwaiter(NGIN::IO::detail::FileSystemDriver& driver, NGIN::Async::TaskContext& ctx, TOperation operation)
             : m_driver(driver), m_resumeExecutor(ctx.GetExecutor()), m_cancellation(ctx.GetCancellationToken()), m_operation(std::move(operation)), m_state(std::make_shared<State>())
         {
         }
@@ -195,15 +195,15 @@ namespace NGIN::IO::detail
             m_state->CompleteFault(std::move(fault));
         }
 
-        FileSystemDriver&              m_driver;
-        NGIN::Execution::ExecutorRef   m_resumeExecutor {};
-        NGIN::Async::CancellationToken m_cancellation {};
-        TOperation                     m_operation;
-        std::shared_ptr<State>         m_state {};
+        NGIN::IO::detail::FileSystemDriver& m_driver;
+        NGIN::Execution::ExecutorRef        m_resumeExecutor {};
+        NGIN::Async::CancellationToken      m_cancellation {};
+        TOperation                          m_operation;
+        std::shared_ptr<State>              m_state {};
     };
 
     template<typename TOperation>
-    auto DispatchToDriver(FileSystemDriver& driver, NGIN::Async::TaskContext& ctx, TOperation operation)
+    auto DispatchToDriver(NGIN::IO::detail::FileSystemDriver& driver, NGIN::Async::TaskContext& ctx, TOperation operation)
     {
         using ResultType = std::invoke_result_t<TOperation&>;
         return DriverDispatchAwaiter<ResultType, TOperation>(driver, ctx, std::move(operation));

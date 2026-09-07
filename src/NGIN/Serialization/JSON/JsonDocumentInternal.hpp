@@ -1,9 +1,11 @@
 #pragma once
 
+#include "../SourceBuffer.hpp"
 #include <NGIN/Serialization/Core/ParseLimits.hpp>
 #include <NGIN/Serialization/Core/ParseResources.hpp>
+#include <NGIN/Serialization/Core/ParseScratch.hpp>
 #include <NGIN/Serialization/Core/SegmentedArena.hpp>
-#include <NGIN/Serialization/Core/SourceBuffer.hpp>
+#include <NGIN/Serialization/JSON/JsonParser.hpp>
 #include <NGIN/Serialization/JSON/JsonTypes.hpp>
 
 #include <optional>
@@ -137,9 +139,9 @@ namespace NGIN::Serialization::JSON::detail
             return Document {std::move(state)};
         }
 
-        [[nodiscard]] static BorrowedDocument MakeBorrowedDocument(std::unique_ptr<DocumentState> state) noexcept
-        {
-            return BorrowedDocument {std::move(state)};
-        }
     };
+    // Temporary document for synchronous event validation/emission only.
+    [[nodiscard]] NGIN::Utilities::Expected<Document, ParseDiagnostic>
+    ParseDocumentView(std::string_view input, ParseScratch& scratch,
+                      const ParseOptions& options, const ParseLimits& limits);
 }// namespace NGIN::Serialization::JSON::detail

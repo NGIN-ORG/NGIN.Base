@@ -2,10 +2,10 @@
 
 #include "SocketPlatform.hpp"
 
+#include "NetworkDriver.hpp"
 #include <NGIN/Async/Cancellation.hpp>
 #include <NGIN/Async/Task.hpp>
 #include <NGIN/Async/TaskContext.hpp>
-#include <NGIN/Net/Runtime/NetworkDriver.hpp>
 
 #include <utility>
 
@@ -65,18 +65,32 @@ namespace NGIN::Net
             return NGIN::Utilities::Unexpected(detail::LastError());
         }
 
-        TcpSocket socket(detail::FromNative(sock), true);
+        TcpSocket socket(detail::FromNative(sock), true, m_runtime);
         (void) detail::SetNonBlocking(socket.Handle(), true);
         return socket;
     }
 
     NGIN::Async::Task<TcpSocket, NetError> TcpListener::AcceptAsync(NGIN::Async::TaskContext&      ctx,
-                                                                    NetworkDriver&                 driver,
                                                                     NGIN::Async::CancellationToken token)
     {
+        const std::shared_ptr<NetworkDriver> backend = m_runtime ? AcquireNetworkDriver(*m_runtime) : nullptr;
+        if (!backend)
+        {
+            const auto fault = NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidTaskUsage, 0,
+                                                           "Async socket operations require a bound, running IO::Runtime");
+            co_return NGIN::Async::Completion<TcpSocket, NetError>::Faulted(fault);
+        }
+        NetworkDriver& driver           = *backend;
+        auto           operationContext = ctx.WithLinkedCancellationToken(token);
+        token                           = operationContext.GetCancellationToken();
+        if (token.IsCancellationRequested())
+        {
+            co_return NGIN::Async::Completion<TcpSocket, NetError>::Canceled();
+        }
+
 #if defined(NGIN_PLATFORM_WINDOWS)
         auto handle = co_await driver.SubmitAccept(ctx, m_handle, token);
-        co_return TcpSocket(std::move(handle), true);
+        co_return TcpSocket(std::move(handle), true, m_runtime);
 #else
         for (;;)
         {

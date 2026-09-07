@@ -80,7 +80,7 @@ namespace NGIN::Crypto::Tokens
         ParseJsonObject(std::string_view json)
         {
             auto document = NGIN::Serialization::JSON::Parser::Parse(
-                    NGIN::Serialization::OwnedTextBuffer {json});
+                    json);
             if (!document.has_value() || !document.value().Root().IsObject())
             {
                 return std::unexpected(ParseError());

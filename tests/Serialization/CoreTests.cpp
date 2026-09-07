@@ -71,7 +71,7 @@ TEST_CASE("injected allocator failures become diagnostics rather than terminatio
     };
 
     auto json = JSON::Parse(
-            OwnedTextBuffer {std::string_view {R"({"value":"de\ncoded"})"}},
+            std::string_view {R"({"value":"de\ncoded"})"},
             {},
             {},
             resources);
@@ -80,10 +80,35 @@ TEST_CASE("injected allocator failures become diagnostics rather than terminatio
 
     allocator.allocations = 0;
     auto xml              = XML::Parse(
-            OwnedTextBuffer {std::string_view {R"(<root value="de&amp;coded"/>)"}},
+            std::string_view {R"(<root value="de&amp;coded"/>)"},
             {},
             {},
             resources);
     REQUIRE_FALSE(xml);
     CHECK(xml.error().code == ParseErrorCode::OutOfMemory);
+}
+
+TEST_CASE("document parse options preserve source identity", "[serialization][core][source]")
+{
+    using namespace NGIN::Serialization;
+    const SourceId source {17};
+    auto           json = JSON::Parse(R"({"x":1})", {.source = source});
+    REQUIRE(json);
+    CHECK(json.value().Root().Span().source == source);
+    auto xml = XML::Parse("<root/>", {.source = source});
+    REQUIRE(xml);
+    CHECK(xml.value().Root().Span().source == source);
+    auto syntax = XML::ParseSyntax("<root/>", {.source = source});
+    REQUIRE(syntax);
+    REQUIRE_FALSE(syntax.value().Tokens().empty());
+    CHECK(syntax.value().Tokens().front().span.source == source);
+    auto badJson = JSON::Parse("[", {.source = source});
+    REQUIRE_FALSE(badJson);
+    CHECK(badJson.error().span.source == source);
+    auto badXml = XML::Parse("<root>", {.source = source});
+    REQUIRE_FALSE(badXml);
+    CHECK(badXml.error().span.source == source);
+    auto badSyntax = XML::ParseSyntax("<root>", {.source = source});
+    REQUIRE_FALSE(badSyntax);
+    CHECK(badSyntax.error().span.source == source);
 }

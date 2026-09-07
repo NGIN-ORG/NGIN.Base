@@ -133,7 +133,6 @@ namespace NGIN::Serialization::JSON
         friend class ObjectView;
         friend class MemberView;
         friend class Document;
-        friend class BorrowedDocument;
         friend class Builder;
         friend struct detail::DocumentState;
 
@@ -360,46 +359,4 @@ namespace NGIN::Serialization::JSON
         std::unique_ptr<detail::DocumentState> m_state;
     };
 
-    /// @brief Explicitly non-owning JSON document tied to a caller-owned source.
-    class NGIN_SERIALIZATION_API BorrowedDocument
-    {
-    public:
-        /// @brief Constructs an empty borrowed document.
-        BorrowedDocument() noexcept;
-        /// @brief Releases parsed state without releasing caller-owned source storage.
-        ~BorrowedDocument();
-
-        /// @brief Transfers parsed state and its source borrowing relationship.
-        BorrowedDocument(BorrowedDocument&&) noexcept;
-        /// @brief Replaces this state with another borrowed document's state.
-        BorrowedDocument& operator=(BorrowedDocument&&) noexcept;
-        /// @brief Borrowed documents are non-copyable because their views refer directly to state.
-        BorrowedDocument(const BorrowedDocument&) = delete;
-        /// @brief Borrowed documents are non-copy-assignable because their views refer directly to state.
-        BorrowedDocument& operator=(const BorrowedDocument&) = delete;
-
-        /// @brief Returns whether the document contains parsed state.
-        [[nodiscard]] bool IsValid() const noexcept;
-        /// @brief Returns the root value view.
-        /// @note The caller-owned source and this document must outlive every returned view.
-        [[nodiscard]] ValueView Root() const noexcept;
-        /// @brief Returns a view of the caller-owned source text.
-        [[nodiscard]] std::string_view SourceText() const noexcept;
-        /// @brief Returns bytes currently used by document arenas.
-        [[nodiscard]] UIntSize MemoryUsed() const noexcept;
-        /// @brief Returns bytes committed by document arenas.
-        [[nodiscard]] UIntSize MemoryCommitted() const noexcept;
-        /// @brief Returns the number of stored JSON value nodes.
-        [[nodiscard]] UIntSize NodeCount() const noexcept;
-        /// @brief Returns the number of stored object members.
-        [[nodiscard]] UIntSize MemberCount() const noexcept;
-
-    private:
-        friend class Parser;
-        friend struct detail::DocumentAccess;
-
-        explicit BorrowedDocument(std::unique_ptr<detail::DocumentState> state) noexcept;
-
-        std::unique_ptr<detail::DocumentState> m_state;
-    };
 }// namespace NGIN::Serialization::JSON

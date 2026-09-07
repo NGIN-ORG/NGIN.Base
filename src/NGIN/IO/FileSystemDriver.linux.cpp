@@ -33,7 +33,7 @@ namespace NGIN::IO::detail
     class IoUringNativeFileBackend final : public NativeFileBackend
     {
     public:
-        explicit IoUringNativeFileBackend(const FileSystemDriver::Options& options)
+        explicit IoUringNativeFileBackend(const NGIN::IO::detail::FileSystemDriver::Options& options)
         {
             io_uring_params params {};
             const auto      entryCount = options.queueDepthHint == 0 ? 64u : options.queueDepthHint;
@@ -50,11 +50,11 @@ namespace NGIN::IO::detail
             m_cqRing = ::mmap(nullptr, cqRingSize, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE, m_ringFd, IORING_OFF_CQ_RING);
             m_sqes   = static_cast<io_uring_sqe*>(
                     ::mmap(nullptr,
-                           params.sq_entries * sizeof(io_uring_sqe),
-                           PROT_READ | PROT_WRITE,
-                           MAP_SHARED | MAP_POPULATE,
-                           m_ringFd,
-                           IORING_OFF_SQES));
+                             params.sq_entries * sizeof(io_uring_sqe),
+                             PROT_READ | PROT_WRITE,
+                             MAP_SHARED | MAP_POPULATE,
+                             m_ringFd,
+                             IORING_OFF_SQES));
 
             if (m_sqRing == MAP_FAILED || m_cqRing == MAP_FAILED || m_sqes == MAP_FAILED)
             {
@@ -91,9 +91,9 @@ namespace NGIN::IO::detail
             CleanupMappings();
         }
 
-        [[nodiscard]] FileSystemDriver::ActiveBackend GetActiveBackend() const noexcept override
+        [[nodiscard]] NGIN::IO::detail::FileSystemDriver::ActiveBackend GetActiveBackend() const noexcept override
         {
-            return m_initialized ? FileSystemDriver::ActiveBackend::NativeIoUring : FileSystemDriver::ActiveBackend::None;
+            return m_initialized ? NGIN::IO::detail::FileSystemDriver::ActiveBackend::NativeIoUring : NGIN::IO::detail::FileSystemDriver::ActiveBackend::None;
         }
 
         [[nodiscard]] bool Submit(NativeFileRequest request) noexcept override
@@ -317,10 +317,10 @@ namespace NGIN::IO::detail
         std::thread                    m_worker {};
     };
 
-    std::unique_ptr<NativeFileBackend> CreateNativeFileBackend(const FileSystemDriver::Options& options)
+    std::unique_ptr<NativeFileBackend> CreateNativeFileBackend(const NGIN::IO::detail::FileSystemDriver::Options& options)
     {
         auto backend = std::make_unique<IoUringNativeFileBackend>(options);
-        if (backend->GetActiveBackend() != FileSystemDriver::ActiveBackend::None)
+        if (backend->GetActiveBackend() != NGIN::IO::detail::FileSystemDriver::ActiveBackend::None)
         {
             return backend;
         }

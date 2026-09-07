@@ -477,7 +477,7 @@ namespace NGIN::IO
     }// namespace
 
     [[nodiscard]] AsyncFileHandle detail::MakeAsyncPosixFileHandle(
-            std::shared_ptr<FileSystemDriver> driver, OpenedAsyncPosixFile opened)
+            std::shared_ptr<NGIN::IO::detail::FileSystemDriver> driver, OpenedAsyncPosixFile opened)
     {
         auto state      = std::make_shared<LocalAsyncFileState>();
         state->driver   = std::move(driver);
@@ -491,8 +491,16 @@ namespace NGIN::IO
     AsyncTask<AsyncFileHandle> LocalFileSystem::OpenFileAsync(
             NGIN::Async::TaskContext& ctx, Path path, FileOpenOptions options)
     {
+        const std::shared_ptr<NGIN::IO::detail::FileSystemDriver> driver = AcquireDriver();
+        if (!driver)
+        {
+            const auto fault = NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidTaskUsage, 0,
+                                                           "Async filesystem operations require a bound, running IO::Runtime");
+            co_return NGIN::Async::Completion<AsyncFileHandle, IOError>::Faulted(fault);
+        }
+
         auto completion = co_await detail::DispatchToDriver(
-                *m_asyncDriver, ctx, [path = std::move(path), options]() mutable noexcept {
+                *driver, ctx, [path = std::move(path), options]() mutable noexcept {
                     return detail::OpenAsyncPosixFile(path, options);
                 });
 
@@ -511,7 +519,7 @@ namespace NGIN::IO
             co_return std::move(opened).error();
         }
 
-        co_return detail::MakeAsyncPosixFileHandle(m_asyncDriver, std::move(opened).value());
+        co_return detail::MakeAsyncPosixFileHandle(driver, std::move(opened).value());
     }
 }// namespace NGIN::IO
 

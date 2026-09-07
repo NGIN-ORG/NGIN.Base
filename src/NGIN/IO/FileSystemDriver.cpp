@@ -1,4 +1,4 @@
-#include <NGIN/IO/FileSystemDriver.hpp>
+#include "FileSystemDriver.hpp"
 
 #include "NativeFileSystemBackend.hpp"
 
@@ -6,22 +6,17 @@ namespace NGIN::IO::detail
 {
     NativeFileBackend* GetNativeFileBackend(FileSystemDriver& driver) noexcept
     {
-        return driver.m_nativeBackend.get();
+        return driver.HasNativeBackend() ? driver.m_nativeBackend.get() : nullptr;
     }
 
     const NativeFileBackend* GetNativeFileBackend(const FileSystemDriver& driver) noexcept
     {
-        return driver.m_nativeBackend.get();
+        return driver.HasNativeBackend() ? driver.m_nativeBackend.get() : nullptr;
     }
 }// namespace NGIN::IO::detail
 
-namespace NGIN::IO
+namespace NGIN::IO::detail
 {
-    FileSystemDriver::FileSystemDriver()
-        : FileSystemDriver(Options {})
-    {
-    }
-
     FileSystemDriver::FileSystemDriver(Options options)
         : m_options(std::move(options))
     {
@@ -47,4 +42,4 @@ namespace NGIN::IO
     }
 
     FileSystemDriver::~FileSystemDriver() = default;
-}// namespace NGIN::IO
+}// namespace NGIN::IO::detail

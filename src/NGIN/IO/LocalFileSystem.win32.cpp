@@ -1623,21 +1623,21 @@ namespace NGIN::IO
 
         struct LocalAsyncFileState final
         {
-            std::shared_ptr<FileSystemDriver> driver {};
-            HANDLE                            handle {INVALID_HANDLE_VALUE};
-            Path                              path {};
-            bool                              canRead {false};
-            bool                              canWrite {false};
-            bool                              appendMode {false};
-            UInt64                            cursor {0};
-            mutable std::mutex                mutex {};
+            std::shared_ptr<NGIN::IO::detail::FileSystemDriver> driver {};
+            HANDLE                                              handle {INVALID_HANDLE_VALUE};
+            Path                                                path {};
+            bool                                                canRead {false};
+            bool                                                canWrite {false};
+            bool                                                appendMode {false};
+            UInt64                                              cursor {0};
+            mutable std::mutex                                  mutex {};
         };
 
         struct LocalAsyncDirectoryState final
         {
-            std::shared_ptr<FileSystemDriver>     driver {};
-            std::unique_ptr<LocalDirectoryHandle> handle {};
-            Path                                  path {};
+            std::shared_ptr<NGIN::IO::detail::FileSystemDriver> driver {};
+            std::unique_ptr<LocalDirectoryHandle>               handle {};
+            Path                                                path {};
         };
 
         extern const AsyncDirectoryHandle::Operations LocalAsyncDirectoryOperations;
@@ -2283,7 +2283,7 @@ namespace NGIN::IO
         };
 
         [[nodiscard]] AsyncFileHandle MakeAsyncFileHandle(
-                std::shared_ptr<FileSystemDriver> driver, OpenedAsyncWindowsFile opened)
+                std::shared_ptr<NGIN::IO::detail::FileSystemDriver> driver, OpenedAsyncWindowsFile opened)
         {
             auto state        = std::make_shared<LocalAsyncFileState>();
             state->driver     = std::move(driver);
@@ -2447,8 +2447,16 @@ namespace NGIN::IO
     AsyncTask<AsyncFileHandle> LocalFileSystem::OpenFileAsync(
             NGIN::Async::TaskContext& ctx, Path path, FileOpenOptions options)
     {
+        const std::shared_ptr<NGIN::IO::detail::FileSystemDriver> driver = AcquireDriver();
+        if (!driver)
+        {
+            const auto fault = NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidTaskUsage, 0,
+                                                           "Async filesystem operations require a bound, running IO::Runtime");
+            co_return NGIN::Async::Completion<AsyncFileHandle, IOError>::Faulted(fault);
+        }
+
         auto completion = co_await detail::DispatchToDriver(
-                *m_asyncDriver, ctx, [path = std::move(path), options]() mutable noexcept {
+                *driver, ctx, [path = std::move(path), options]() mutable noexcept {
                     return OpenAsyncWindowsFile(path, options);
                 });
         if (completion.IsCanceled())
@@ -2464,14 +2472,22 @@ namespace NGIN::IO
         auto opened = std::move(*completion.result);
         if (!opened)
             co_return NGIN::Utilities::Unexpected<IOError>(std::move(opened).error());
-        co_return MakeAsyncFileHandle(m_asyncDriver, std::move(opened).value());
+        co_return MakeAsyncFileHandle(driver, std::move(opened).value());
     }
 
     AsyncTask<AsyncDirectoryHandle> LocalFileSystem::OpenDirectoryAsync(
             NGIN::Async::TaskContext& ctx, Path path)
     {
+        const std::shared_ptr<NGIN::IO::detail::FileSystemDriver> driver = AcquireDriver();
+        if (!driver)
+        {
+            const auto fault = NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidTaskUsage, 0,
+                                                           "Async filesystem operations require a bound, running IO::Runtime");
+            co_return NGIN::Async::Completion<AsyncDirectoryHandle, IOError>::Faulted(fault);
+        }
+
         const Path normalizedPath = path.LexicallyNormal();
-        auto       completion     = co_await detail::DispatchToDriver(*m_asyncDriver, ctx, [path = std::move(path)]() mutable noexcept {
+        auto       completion     = co_await detail::DispatchToDriver(*driver, ctx, [path = std::move(path)]() mutable noexcept {
             return LocalDirectoryHandle::Open(path);
         });
         if (completion.IsCanceled())
@@ -2489,7 +2505,7 @@ namespace NGIN::IO
             co_return NGIN::Utilities::Unexpected<IOError>(std::move(opened).error());
 
         auto state    = std::make_shared<LocalAsyncDirectoryState>();
-        state->driver = m_asyncDriver;
+        state->driver = driver;
         state->handle = std::move(opened).value();
         state->path   = normalizedPath;
         co_return AsyncDirectoryHandle(std::move(state), &LocalAsyncDirectoryOperations);

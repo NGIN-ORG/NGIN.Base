@@ -88,6 +88,7 @@ set(NGIN_BASE_IO_SOURCES
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/Path.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/Process.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/VirtualFileSystem.cpp
+  ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/Runtime.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/FileSystemDriver.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/FileSystemUtilities.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/LocalFileSystem.cpp

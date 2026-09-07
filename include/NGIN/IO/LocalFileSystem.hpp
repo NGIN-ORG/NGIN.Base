@@ -1,26 +1,28 @@
 #pragma once
 
-#include <NGIN/IO/FileSystemDriver.hpp>
 #include <NGIN/IO/IAsyncFileSystem.hpp>
 #include <NGIN/IO/IFileSystem.hpp>
+#include <NGIN/IO/Runtime.hpp>
 
 #include <memory>
 
 namespace NGIN::IO
 {
+    namespace detail
+    {
+        class FileSystemDriver;
+    }
     /// @brief Platform-local implementation of the synchronous and asynchronous filesystem contracts.
     class NGIN_IO_API LocalFileSystem final : public IFileSystem, public IAsyncFileSystem
     {
     public:
-        /// @brief Constructs a local filesystem with no asynchronous driver bound.
-        LocalFileSystem();
-        /// @brief Constructs a local filesystem bound to an asynchronous driver.
-        explicit LocalFileSystem(std::shared_ptr<FileSystemDriver> asyncDriver);
-
-        /// @brief Replaces the driver used by subsequently created asynchronous operations.
-        void BindAsyncDriver(std::shared_ptr<FileSystemDriver> asyncDriver) noexcept;
-        /// @brief Returns the currently bound asynchronous driver, if any.
-        [[nodiscard]] const std::shared_ptr<FileSystemDriver>& GetAsyncDriver() const noexcept { return m_asyncDriver; }
+        /// @brief Constructs a synchronous filesystem with no runtime or background workers.
+        LocalFileSystem() noexcept;
+        /// @brief Borrows a runtime for async operations. Binding does not start workers.
+        /// @note The runtime must outlive this filesystem and its async operations.
+        explicit LocalFileSystem(Runtime& runtime) noexcept;
+        /// @brief Returns the borrowed runtime, or null for a synchronous-only filesystem.
+        [[nodiscard]] Runtime* GetRuntime() const noexcept { return m_runtime; }
 
         /// @copydoc IFileSystem::GetCapabilities
         [[nodiscard]] FileSystemCapabilities GetCapabilities() const noexcept override;
@@ -103,6 +105,7 @@ namespace NGIN::IO
                 NGIN::Async::TaskContext& ctx, Path from, Path to, CopyOptions options = {}) override;
 
     private:
-        std::shared_ptr<FileSystemDriver> m_asyncDriver;
+        std::shared_ptr<detail::FileSystemDriver> AcquireDriver() const;
+        Runtime*                                  m_runtime {nullptr};
     };
 }// namespace NGIN::IO

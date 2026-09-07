@@ -484,6 +484,15 @@ namespace NGIN::IO
         m_mountPoint.virtualPrefix.Normalize();
     }
 
+    LocalMount::LocalMount(Runtime& runtime, Path realRoot, MountPoint mountPoint)
+        : m_realRoot(std::move(realRoot)), m_mountPoint(std::move(mountPoint)), m_localFileSystem(runtime)
+    {
+        m_realRoot.Normalize();
+        if (m_mountPoint.virtualPrefix.IsEmpty())
+            m_mountPoint.virtualPrefix = Path {"/"};
+        m_mountPoint.virtualPrefix.Normalize();
+    }
+
     const MountPoint& LocalMount::GetMountPoint() const noexcept
     {
         return m_mountPoint;

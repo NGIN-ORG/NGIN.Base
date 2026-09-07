@@ -1,6 +1,7 @@
 #pragma once
 
 #include <NGIN/Primitives.hpp>
+#include <NGIN/Serialization/Core/SourceSpan.hpp>
 
 namespace NGIN::Serialization::XML
 {
@@ -20,5 +21,7 @@ namespace NGIN::Serialization::XML
     {
         TriviaPolicy  trivia {TriviaPolicy::Discard};
         DoctypePolicy doctype {DoctypePolicy::Reject};
+        /// @brief Source identity attached to spans and diagnostics.
+        SourceId source {};
     };
 }// namespace NGIN::Serialization::XML

@@ -1,9 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <NGIN/Async/Cancellation.hpp>
-#include <NGIN/IO/FileSystemDriver.hpp>
+#include <NGIN/Execution/ThreadPoolScheduler.hpp>
 #include <NGIN/IO/FileSystemUtilities.hpp>
 #include <NGIN/IO/LocalFileSystem.hpp>
+#include <NGIN/IO/Runtime.hpp>
 #include <NGIN/IO/VirtualFileSystem.hpp>
 
 #include <array>
@@ -212,10 +213,12 @@ TEST_CASE("IO.VirtualFileSystem directory handles scope relative operations", "[
 
 TEST_CASE("IO.VirtualFileSystem async file operations use value handles", "[IO][VirtualFileSystem][Async]")
 {
-    NGIN::IO::LocalFileSystem backingFs;
-    const auto                realRoot = MakeTempDir(backingFs);
+    NGIN::Execution::ThreadPoolScheduler scheduler {1};
+    NGIN::IO::Runtime                    runtime;
+    NGIN::IO::LocalFileSystem            backingFs(runtime);
+    const auto                           realRoot = MakeTempDir(backingFs);
 
-    auto mount = std::make_shared<NGIN::IO::LocalMount>(realRoot, NGIN::IO::MountPoint {.virtualPrefix = NGIN::IO::Path {"/v"}});
+    auto mount = std::make_shared<NGIN::IO::LocalMount>(runtime, realRoot, NGIN::IO::MountPoint {.virtualPrefix = NGIN::IO::Path {"/v"}});
 
     NGIN::IO::VirtualFileSystem vfs;
     vfs.AddMount(mount);
@@ -224,8 +227,7 @@ TEST_CASE("IO.VirtualFileSystem async file operations use value handles", "[IO][
     const std::string payload     = "virtual async payload";
     REQUIRE(NGIN::IO::WriteAllText(vfs, virtualFile, payload).has_value());
 
-    NGIN::IO::FileSystemDriver driver;
-    auto                       ctx = driver.MakeTaskContext();
+    auto ctx = NGIN::Async::TaskContext(scheduler);
 
     NGIN::IO::FileOpenOptions options;
     options.access      = NGIN::IO::FileAccess::Read;
@@ -268,10 +270,12 @@ TEST_CASE("IO.VirtualFileSystem async file operations use value handles", "[IO][
 
 TEST_CASE("IO.VirtualFileSystem async directory handles stay mount scoped", "[IO][VirtualFileSystem][Async]")
 {
-    NGIN::IO::LocalFileSystem backingFs;
-    const auto                realRoot = MakeTempDir(backingFs);
+    NGIN::Execution::ThreadPoolScheduler scheduler {1};
+    NGIN::IO::Runtime                    runtime;
+    NGIN::IO::LocalFileSystem            backingFs(runtime);
+    const auto                           realRoot = MakeTempDir(backingFs);
 
-    auto mount = std::make_shared<NGIN::IO::LocalMount>(realRoot, NGIN::IO::MountPoint {.virtualPrefix = NGIN::IO::Path {"/v"}});
+    auto mount = std::make_shared<NGIN::IO::LocalMount>(runtime, realRoot, NGIN::IO::MountPoint {.virtualPrefix = NGIN::IO::Path {"/v"}});
 
     NGIN::IO::VirtualFileSystem vfs;
     vfs.AddMount(mount);
@@ -282,8 +286,7 @@ TEST_CASE("IO.VirtualFileSystem async directory handles stay mount scoped", "[IO
     REQUIRE(backingFs.CreateDirectories(realRoot.Join("nested")).has_value());
     REQUIRE(NGIN::IO::WriteAllText(vfs, virtualFile, "inside").has_value());
 
-    NGIN::IO::FileSystemDriver driver;
-    auto                       ctx = driver.MakeTaskContext();
+    auto ctx = NGIN::Async::TaskContext(scheduler);
 
     auto directoryTask = vfs.OpenDirectoryAsync(ctx, virtualDir);
     auto directoryOpen = RunAsyncTask(directoryTask, ctx);
@@ -314,25 +317,26 @@ TEST_CASE("IO.VirtualFileSystem async directory handles stay mount scoped", "[IO
 
 TEST_CASE("IO.VirtualFileSystem async copy crosses mounts and cleans canceled destinations", "[IO][VirtualFileSystem][Async]")
 {
-    NGIN::IO::LocalFileSystem backingFs;
-    const auto                root       = MakeTempDir(backingFs);
-    const auto                sourceRoot = root.Join("async-source");
-    const auto                targetRoot = root.Join("async-target");
+    NGIN::Execution::ThreadPoolScheduler scheduler {1};
+    NGIN::IO::Runtime                    runtime;
+    NGIN::IO::LocalFileSystem            backingFs(runtime);
+    const auto                           root       = MakeTempDir(backingFs);
+    const auto                           sourceRoot = root.Join("async-source");
+    const auto                           targetRoot = root.Join("async-target");
     REQUIRE(backingFs.CreateDirectories(sourceRoot).has_value());
     REQUIRE(backingFs.CreateDirectories(targetRoot).has_value());
 
     NGIN::IO::VirtualFileSystem vfs;
-    vfs.AddMount(std::make_shared<NGIN::IO::LocalMount>(
-            sourceRoot, NGIN::IO::MountPoint {.virtualPrefix = NGIN::IO::Path {"/source"}}));
-    vfs.AddMount(std::make_shared<NGIN::IO::LocalMount>(
-            targetRoot, NGIN::IO::MountPoint {.virtualPrefix = NGIN::IO::Path {"/target"}}));
+    vfs.AddMount(std::make_shared<NGIN::IO::LocalMount>(runtime,
+                                                        sourceRoot, NGIN::IO::MountPoint {.virtualPrefix = NGIN::IO::Path {"/source"}}));
+    vfs.AddMount(std::make_shared<NGIN::IO::LocalMount>(runtime,
+                                                        targetRoot, NGIN::IO::MountPoint {.virtualPrefix = NGIN::IO::Path {"/target"}}));
 
     REQUIRE(vfs.CreateDirectories(NGIN::IO::Path {"/source/tree/nested"}).has_value());
     REQUIRE(NGIN::IO::WriteAllText(vfs, NGIN::IO::Path {"/source/tree/nested/data.txt"}, "async-cross-mount").has_value());
 
-    NGIN::IO::FileSystemDriver driver;
-    auto                       ctx = driver.MakeTaskContext();
-    NGIN::IO::CopyOptions      recursive;
+    auto                  ctx = NGIN::Async::TaskContext(scheduler);
+    NGIN::IO::CopyOptions recursive;
     recursive.recursive = true;
     auto copyTask       = vfs.CopyFileAsync(
             ctx, NGIN::IO::Path {"/source/tree"}, NGIN::IO::Path {"/target/tree"}, recursive);
@@ -344,7 +348,7 @@ TEST_CASE("IO.VirtualFileSystem async copy crosses mounts and cleans canceled de
 
     NGIN::Async::CancellationSource cancellation;
     cancellation.Cancel();
-    auto canceledContext = driver.MakeTaskContext(cancellation.GetToken());
+    auto canceledContext = NGIN::Async::TaskContext(scheduler, cancellation.GetToken());
     auto canceledTask    = vfs.CopyFileAsync(
             canceledContext,
             NGIN::IO::Path {"/source/tree"},

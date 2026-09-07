@@ -1,7 +1,7 @@
 #pragma once
 
+#include "FileSystemDriver.hpp"
 #include <NGIN/Async/AsyncFault.hpp>
-#include <NGIN/IO/FileSystemDriver.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -49,11 +49,11 @@ namespace NGIN::IO::detail
     public:
         virtual ~NativeFileBackend() = default;
 
-        [[nodiscard]] virtual FileSystemDriver::ActiveBackend GetActiveBackend() const noexcept          = 0;
-        [[nodiscard]] virtual bool                            Submit(NativeFileRequest request) noexcept = 0;
+        [[nodiscard]] virtual NGIN::IO::detail::FileSystemDriver::ActiveBackend GetActiveBackend() const noexcept          = 0;
+        [[nodiscard]] virtual bool                                              Submit(NativeFileRequest request) noexcept = 0;
     };
 
-    [[nodiscard]] std::unique_ptr<NativeFileBackend> CreateNativeFileBackend(const FileSystemDriver::Options& options);
-    [[nodiscard]] NativeFileBackend*                 GetNativeFileBackend(FileSystemDriver& driver) noexcept;
-    [[nodiscard]] const NativeFileBackend*           GetNativeFileBackend(const FileSystemDriver& driver) noexcept;
+    [[nodiscard]] std::unique_ptr<NativeFileBackend> CreateNativeFileBackend(const NGIN::IO::detail::FileSystemDriver::Options& options);
+    [[nodiscard]] NativeFileBackend*                 GetNativeFileBackend(NGIN::IO::detail::FileSystemDriver& driver) noexcept;
+    [[nodiscard]] const NativeFileBackend*           GetNativeFileBackend(const NGIN::IO::detail::FileSystemDriver& driver) noexcept;
 }// namespace NGIN::IO::detail

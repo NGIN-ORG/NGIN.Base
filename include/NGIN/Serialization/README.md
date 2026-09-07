@@ -8,21 +8,22 @@ archive layer.
 
 ## Ownership
 
-Every parse call states its lifetime model:
+Use `JSON::Parse(text)` or `XML::Parse(text)` for ordinary parsing:
 
-- `JSON::Parse(OwnedTextBuffer)` and `XML::Parse(OwnedTextBuffer)` return
-  self-contained, movable documents.
-- `ParseBorrowed(BorrowedTextView, ParseScratch&)` returns a
-  `BorrowedDocument`. Views are valid only while the input and document remain
-  alive. The scratch object is reusable workspace and is not retained by the
-  completed document; `ParseScratch::Reset()` retains capacity.
-- `JSON::ParseInSitu(MutableTextBuffer)` and
-  `XML::ParseInSitu(MutableTextBuffer)` explicitly permit string decoding in
-  the owned mutable source. They still return self-contained documents.
-- `XML::ParseSyntax(OwnedTextBuffer)` returns the lossless syntax document used
-  by formatter-style tools.
+```cpp
+auto document = JSON::Parse(R"({"name":"NGIN","count":3})");
+```
 
-Passing a bare `std::string_view` is deliberately not an owning parse.
+Both accept `std::string_view`, including literals, `std::string`, and existing
+views. The parser copies the input into a self-contained, movable document.
+The input is needed only during the call and may then be modified or destroyed.
+`XML::ParseSyntax(text)` has the same ownership guarantee and preserves exact
+source bytes for formatter-style tools. Input and total-memory limits are
+checked before copying; allocation failures return a parse diagnostic.
+
+Set `ParseOptions::source` when spans and diagnostics need a caller-defined
+`SourceId`. Every document parse returns an owning document; views borrow only
+from that document.
 
 Documents own compact indexed node/member tables. XML child traversal uses
 compact sibling IDs rather than a second child-pointer table. `ValueView`,
@@ -69,12 +70,8 @@ Semantic nodes carry source spans. `ElementView::Attribute`,
 `ElementView::Children(name)`, `FirstChild`, and `FirstText` provide
 allocation-free queries.
 
-`XML::ParseInSitu` compacts entity references and normalizes line endings
-directly into its owned mutable source. Semantic string views therefore point
-into that buffer without decoded-string allocations. Spans retain original
-input offsets, but `SourceText()` is mutated and is not a lossless copy of the
-authored XML. Use `XML::Parse` when exact source bytes must survive, and
-`ParseSyntax` for formatter/editor round trips.
+`XML::Parse` preserves the input in `SourceText()` while storing decoded text
+separately. Use `ParseSyntax` for formatter/editor round trips.
 
 `ParseSyntax` validates with the same semantic rules while retaining the exact
 source and syntax tokens, including declarations, comments, CDATA, processing
@@ -124,6 +121,9 @@ are callback-scoped—including values assembled from multiple chunks—and must
 be copied if retained. `Reset()` keeps source and scratch capacity, making one
 parser reusable for complete JSONL records.
 
+Event parsers also accept `std::string_view` directly, with source identity
+provided in `ParseOptions::source`.
+
 Handlers are concepts rather than virtual interfaces and return
 `EventAction`. Borrowed unescaped values follow input lifetime; decoded values
 are valid only for the current handler invocation and must be copied if
@@ -144,8 +144,8 @@ are emitted only when `TriviaPolicy::Preserve` is selected.
 
 JSONL consumers may keep one incremental parser and `ParseScratch` per stream,
 call `Finish()` for each complete line, and `Reset()` before the next record.
-When line framing already provides contiguous records, `JSON::ParseBorrowed`
-remains the lower-overhead path.
+When line framing already provides contiguous records, use `JSON::Parse` for
+a document or `EventParser::ParseContiguous` for synchronous event delivery.
 
 ## Building and writing
 

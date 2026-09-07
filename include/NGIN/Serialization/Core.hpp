@@ -11,7 +11,6 @@
 #include <NGIN/Serialization/Core/ParseResources.hpp>
 #include <NGIN/Serialization/Core/ParseScratch.hpp>
 #include <NGIN/Serialization/Core/SegmentedArena.hpp>
-#include <NGIN/Serialization/Core/SourceBuffer.hpp>
 #include <NGIN/Serialization/Core/SourceMap.hpp>
 #include <NGIN/Serialization/Core/SourceSpan.hpp>
 #include <NGIN/Serialization/Core/TextSink.hpp>

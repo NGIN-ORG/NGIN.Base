@@ -2,10 +2,10 @@
 
 #include "SocketPlatform.hpp"
 
+#include "NetworkDriver.hpp"
 #include <NGIN/Async/Cancellation.hpp>
 #include <NGIN/Async/Task.hpp>
 #include <NGIN/Async/TaskContext.hpp>
-#include <NGIN/Net/Runtime/NetworkDriver.hpp>
 
 #if !defined(NGIN_PLATFORM_WINDOWS)
 #include <sys/uio.h>
@@ -325,11 +325,25 @@ namespace NGIN::Net
     }
 
     NGIN::Async::Task<NGIN::UInt32, NetError> UdpSocket::SendToAsync(NGIN::Async::TaskContext&      ctx,
-                                                                     NetworkDriver&                 driver,
                                                                      Endpoint                       remoteEndpoint,
                                                                      ConstByteSpan                  payload,
                                                                      NGIN::Async::CancellationToken token)
     {
+        const std::shared_ptr<NetworkDriver> backend = m_runtime ? AcquireNetworkDriver(*m_runtime) : nullptr;
+        if (!backend)
+        {
+            const auto fault = NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidTaskUsage, 0,
+                                                           "Async socket operations require a bound, running IO::Runtime");
+            co_return NGIN::Async::Completion<NGIN::UInt32, NetError>::Faulted(fault);
+        }
+        NetworkDriver& driver           = *backend;
+        auto           operationContext = ctx.WithLinkedCancellationToken(token);
+        token                           = operationContext.GetCancellationToken();
+        if (token.IsCancellationRequested())
+        {
+            co_return NGIN::Async::Completion<NGIN::UInt32, NetError>::Canceled();
+        }
+
 #if defined(NGIN_PLATFORM_WINDOWS)
         co_return co_await driver.SubmitSendTo(ctx, m_handle, remoteEndpoint, payload, token);
 #else
@@ -352,10 +366,24 @@ namespace NGIN::Net
     }
 
     NGIN::Async::Task<DatagramReceiveResult, NetError> UdpSocket::ReceiveFromAsync(NGIN::Async::TaskContext&      ctx,
-                                                                                   NetworkDriver&                 driver,
                                                                                    ByteSpan                       destination,
                                                                                    NGIN::Async::CancellationToken token)
     {
+        const std::shared_ptr<NetworkDriver> backend = m_runtime ? AcquireNetworkDriver(*m_runtime) : nullptr;
+        if (!backend)
+        {
+            const auto fault = NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidTaskUsage, 0,
+                                                           "Async socket operations require a bound, running IO::Runtime");
+            co_return NGIN::Async::Completion<DatagramReceiveResult, NetError>::Faulted(fault);
+        }
+        NetworkDriver& driver           = *backend;
+        auto           operationContext = ctx.WithLinkedCancellationToken(token);
+        token                           = operationContext.GetCancellationToken();
+        if (token.IsCancellationRequested())
+        {
+            co_return NGIN::Async::Completion<DatagramReceiveResult, NetError>::Canceled();
+        }
+
 #if defined(NGIN_PLATFORM_WINDOWS)
         co_return co_await driver.SubmitReceiveFrom(ctx, m_handle, destination, token);
 #else

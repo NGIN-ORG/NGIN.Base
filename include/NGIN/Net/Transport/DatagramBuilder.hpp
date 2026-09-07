@@ -16,11 +16,10 @@ namespace NGIN::Net::Transport
         /// @brief Constructs an empty datagram-channel builder.
         DatagramBuilder() noexcept = default;
 
-        /// @brief Selects a UDP socket and borrows the driver used by the resulting channel.
-        DatagramBuilder& FromUdpSocket(UdpSocket&& socket, NetworkDriver& driver) noexcept
+        /// @brief Selects a UDP socket with its existing runtime binding.
+        DatagramBuilder& FromUdpSocket(UdpSocket&& socket) noexcept
         {
             m_socket    = std::move(socket);
-            m_driver    = &driver;
             m_hasSocket = true;
             return *this;
         }
@@ -28,21 +27,19 @@ namespace NGIN::Net::Transport
         /// @brief Consumes the selected socket and builds a UDP datagram-channel adapter.
         [[nodiscard]] NGIN::Net::NetExpected<std::unique_ptr<IDatagramChannel>> Build()
         {
-            if (!m_hasSocket || !m_driver)
+            if (!m_hasSocket)
             {
                 return NGIN::Utilities::Unexpected(NGIN::Net::NetError {NGIN::Net::NetErrorCode::Unknown, 0});
             }
             std::unique_ptr<UdpDatagramChannel> channel =
-                    std::make_unique<UdpDatagramChannel>(std::move(m_socket), *m_driver);
+                    std::make_unique<UdpDatagramChannel>(std::move(m_socket));
             m_hasSocket                           = false;
-            m_driver                              = nullptr;
             std::unique_ptr<IDatagramChannel> out = std::move(channel);
             return out;
         }
 
     private:
-        UdpSocket      m_socket {};
-        NetworkDriver* m_driver {nullptr};
-        bool           m_hasSocket {false};
+        UdpSocket m_socket {};
+        bool      m_hasSocket {false};
     };
 }// namespace NGIN::Net::Transport

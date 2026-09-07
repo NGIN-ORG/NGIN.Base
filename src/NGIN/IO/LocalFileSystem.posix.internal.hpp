@@ -23,12 +23,12 @@ namespace NGIN::IO::detail
 
     struct LocalAsyncFileState final
     {
-        std::shared_ptr<FileSystemDriver> driver {};
-        Path                              path {};
-        bool                              canRead {false};
-        bool                              canWrite {false};
-        int                               fd {-1};
-        mutable std::mutex                mutex {};
+        std::shared_ptr<NGIN::IO::detail::FileSystemDriver> driver {};
+        Path                                                path {};
+        bool                                                canRead {false};
+        bool                                                canWrite {false};
+        int                                                 fd {-1};
+        mutable std::mutex                                  mutex {};
     };
 
     [[nodiscard]] inline IOErrorCode MapErrnoCode(const int code) noexcept
@@ -166,9 +166,9 @@ namespace NGIN::IO::detail
             const Path& path, const FileOpenOptions& options) noexcept
     {
         OpenedAsyncPosixFile opened;
-        opened.path     = path;
-        opened.canRead  = options.access == FileAccess::Read || options.access == FileAccess::ReadWrite;
-        opened.canWrite = options.access == FileAccess::Write || options.access == FileAccess::ReadWrite || options.access == FileAccess::Append;
+        opened.path           = path;
+        opened.canRead        = options.access == FileAccess::Read || options.access == FileAccess::ReadWrite;
+        opened.canWrite       = options.access == FileAccess::Write || options.access == FileAccess::ReadWrite || options.access == FileAccess::Append;
         const auto nativePath = path.ToNative();
         opened.fd             = ::open(nativePath.CStr(), BuildOpenFlags(options), 0666);
         if (opened.fd < 0)
@@ -291,12 +291,12 @@ namespace NGIN::IO::detail
         std::lock_guard<std::mutex> guard(state.mutex);
         if (state.fd >= 0)
         {
-            (void)::close(state.fd);
+            (void) ::close(state.fd);
             state.fd = -1;
         }
         return {};
     }
 
     [[nodiscard]] AsyncFileHandle MakeAsyncPosixFileHandle(
-            std::shared_ptr<FileSystemDriver> driver, OpenedAsyncPosixFile opened);
-}
+            std::shared_ptr<NGIN::IO::detail::FileSystemDriver> driver, OpenedAsyncPosixFile opened);
+}// namespace NGIN::IO::detail

@@ -2,6 +2,7 @@
 /// @brief Async I/O driver for socket readiness.
 #pragma once
 
+#include "../IO/RuntimeBackend.hpp"
 #include <memory>
 
 #if defined(NGIN_PLATFORM_WINDOWS)
@@ -24,22 +25,15 @@ namespace NGIN::Async
 
 namespace NGIN::Net
 {
+    std::shared_ptr<class NetworkDriver> AcquireNetworkDriver(NGIN::IO::Runtime& runtime);
     class TcpSocket;
     class TcpListener;
     class UdpSocket;
     class SocketHandle;
     struct DatagramReceiveResult;
 
-    /// @brief Network driver configuration.
-    struct NetworkDriverOptions final
-    {
-        NGIN::UInt32              workerThreads {0};
-        bool                      busyPoll {false};
-        NGIN::Units::Milliseconds pollInterval {1.0};
-    };
-
     /// @brief Explicit async runtime for socket readiness.
-    class NGIN_NET_API NetworkDriver final
+    class NetworkDriver final : public NGIN::IO::detail::NetworkBackend
     {
     public:
         /// @brief Drivers are non-copyable because they own runtime and platform state.
@@ -54,8 +48,7 @@ namespace NGIN::Net
         /// @brief Stops the driver and releases all platform resources.
         ~NetworkDriver();
 
-        /// @brief Creates a network driver using the requested worker and polling policy.
-        static std::unique_ptr<NetworkDriver> Create(NetworkDriverOptions options);
+        explicit NetworkDriver(NGIN::IO::Runtime::NetworkOptions options);
 
         /// @brief Runs the driver loop until Stop() is requested.
         void Run();
@@ -74,8 +67,6 @@ namespace NGIN::Net
                                                             NGIN::Async::CancellationToken token);
 
     private:
-        NetworkDriver();
-
 #if defined(NGIN_PLATFORM_WINDOWS)
         friend class TcpSocket;
         friend class UdpSocket;

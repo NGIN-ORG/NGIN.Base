@@ -34,12 +34,12 @@ TEST_CASE("checked-in JSON corpus matches the strict default profile",
     for (const auto& entry: fs::directory_iterator(CorpusRoot() / "json" / "valid"))
     {
         INFO(entry.path().filename().string());
-        CHECK(NGIN::Serialization::JSON::Parse(OwnedTextBuffer {Read(entry.path())}));
+        CHECK(NGIN::Serialization::JSON::Parse(Read(entry.path())));
     }
     for (const auto& entry: fs::directory_iterator(CorpusRoot() / "json" / "invalid"))
     {
         INFO(entry.path().filename().string());
-        CHECK_FALSE(NGIN::Serialization::JSON::Parse(OwnedTextBuffer {Read(entry.path())}));
+        CHECK_FALSE(NGIN::Serialization::JSON::Parse(Read(entry.path())));
     }
 }
 
@@ -49,11 +49,11 @@ TEST_CASE("checked-in XML corpus matches the secure semantic profile",
     for (const auto& entry: fs::directory_iterator(CorpusRoot() / "xml" / "valid"))
     {
         INFO(entry.path().filename().string());
-        CHECK(NGIN::Serialization::XML::Parse(OwnedTextBuffer {Read(entry.path())}));
+        CHECK(NGIN::Serialization::XML::Parse(Read(entry.path())));
     }
     for (const auto& entry: fs::directory_iterator(CorpusRoot() / "xml" / "invalid"))
     {
         INFO(entry.path().filename().string());
-        CHECK_FALSE(NGIN::Serialization::XML::Parse(OwnedTextBuffer {Read(entry.path())}));
+        CHECK_FALSE(NGIN::Serialization::XML::Parse(Read(entry.path())));
     }
 }

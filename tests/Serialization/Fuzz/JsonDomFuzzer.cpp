@@ -11,9 +11,8 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
     NGIN::Serialization::ParseLimits limits;
     limits.maxInputBytes = 1024 * 1024;
     limits.maxTotalMemoryBytes = 8 * 1024 * 1024;
-    auto result = NGIN::Serialization::JSON::Parse(
-            NGIN::Serialization::OwnedTextBuffer {
-                    std::string_view {reinterpret_cast<const char*>(data), size}},
+    auto result                = NGIN::Serialization::JSON::Parse(
+            std::string_view {reinterpret_cast<const char*>(data), size},
             {},
             limits);
     (void)result;

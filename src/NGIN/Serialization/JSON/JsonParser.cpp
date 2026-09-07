@@ -1,3 +1,4 @@
+#include <NGIN/Serialization/JSON/JsonEventParser.hpp>
 #include <NGIN/Serialization/JSON/JsonParser.hpp>
 
 #include "JsonDocumentInternal.hpp"
@@ -30,7 +31,6 @@ namespace NGIN::Serialization::JSON
             InputCursor            cursor;
             ParseOptions           options;
             detail::DocumentState* state {nullptr};
-            char*                  mutableBase {nullptr};
             ParseScratch*          scratch {nullptr};
             UIntSize               depth {0};
             UIntSize               decodedBytes {0};
@@ -304,9 +304,7 @@ namespace NGIN::Serialization::JSON
             }
 
             char* output = nullptr;
-            if (ctx.mutableBase)
-                output = ctx.mutableBase + tokenStart + 1;
-            else if (ctx.scratch)
+            if (ctx.scratch)
                 output = ctx.scratch->TryAllocate(rawLength);
             else
                 output = static_cast<char*>(ctx.state->arena.Allocate(rawLength, alignof(char)));
@@ -950,12 +948,10 @@ namespace NGIN::Serialization::JSON
                                                (std::min) (start + 1, ctx.state->source.size())));
         }
 
-        template<class DocumentType>
-        [[nodiscard]] NGIN::Utilities::Expected<DocumentType, ParseDiagnostic>
+        [[nodiscard]] NGIN::Utilities::Expected<Document, ParseDiagnostic>
         ParseState(std::unique_ptr<detail::DocumentState> state,
                    const ParseOptions&                    options,
-                   char*                                  mutableBase = nullptr,
-                   ParseScratch*                          scratch     = nullptr)
+                   ParseScratch*                          scratch = nullptr)
         {
             if (state->source.size() > state->limits.maxInputBytes)
             {
@@ -964,11 +960,11 @@ namespace NGIN::Serialization::JSON
                         .options = options,
                         .state   = state.get(),
                 };
-                return Failure<DocumentType>(MakeErrorAt(context,
-                                                         ParseErrorCode::LimitExceeded,
-                                                         "JSON input byte limit exceeded",
-                                                         0,
-                                                         state->source.size()));
+                return Failure<Document>(MakeErrorAt(context,
+                                                     ParseErrorCode::LimitExceeded,
+                                                     "JSON input byte limit exceeded",
+                                                     0,
+                                                     state->source.size()));
             }
 
             if (options.utf8 == Utf8Policy::Validate &&
@@ -979,113 +975,103 @@ namespace NGIN::Serialization::JSON
                         .options = options,
                         .state   = state.get(),
                 };
-                return Failure<DocumentType>(MakeErrorAt(context,
-                                                         ParseErrorCode::InvalidEncoding,
-                                                         "JSON input is not valid UTF-8",
-                                                         0,
-                                                         state->source.size()));
+                return Failure<Document>(MakeErrorAt(context,
+                                                     ParseErrorCode::InvalidEncoding,
+                                                     "JSON input is not valid UTF-8",
+                                                     0,
+                                                     state->source.size()));
             }
 
             ParseContext context {
                     .cursor      = InputCursor(state->source),
                     .options     = options,
                     .state       = state.get(),
-                    .mutableBase = mutableBase,
                     .scratch     = scratch,
             };
 
             auto root = ParseValue(context);
             if (!root)
-                return Failure<DocumentType>(std::move(root.error()));
+                return Failure<Document>(std::move(root.error()));
             state->root = root.value();
 
             auto trivia = SkipTrivia(context);
             if (!trivia)
-                return Failure<DocumentType>(std::move(trivia.error()));
+                return Failure<Document>(std::move(trivia.error()));
             if (!context.cursor.IsEof())
             {
-                return Failure<DocumentType>(MakeError(context,
-                                                       ParseErrorCode::TrailingCharacters,
-                                                       "Trailing characters after JSON value"));
+                return Failure<Document>(MakeError(context,
+                                                   ParseErrorCode::TrailingCharacters,
+                                                   "Trailing characters after JSON value"));
             }
 
             state->FinalizeViews();
             if (!state->WithinMemoryLimit())
             {
-                return Failure<DocumentType>(MakeErrorAt(context,
-                                                         ParseErrorCode::LimitExceeded,
-                                                         "JSON total memory limit exceeded",
-                                                         0,
-                                                         state->source.size()));
+                return Failure<Document>(MakeErrorAt(context,
+                                                     ParseErrorCode::LimitExceeded,
+                                                     "JSON total memory limit exceeded",
+                                                     0,
+                                                     state->source.size()));
             }
-            if constexpr (std::same_as<DocumentType, Document>)
-                return detail::DocumentAccess::MakeDocument(std::move(state));
-            else
-                return detail::DocumentAccess::MakeBorrowedDocument(std::move(state));
+            return detail::DocumentAccess::MakeDocument(std::move(state));
         }
     }// namespace
 
     NGIN::Utilities::Expected<Document, ParseDiagnostic>
-    Parser::Parse(OwnedTextBuffer       input,
-                  const ParseOptions&   options,
-                  const ParseLimits&    limits,
-                  const ParseResources& resources)
+    Parser::Parse(std::string_view input, const ParseOptions& options,
+                  const ParseLimits& limits, const ParseResources& resources)
     {
         try
         {
+            if (input.size() > limits.maxInputBytes || input.size() > limits.maxTotalMemoryBytes)
+            {
+                ParseDiagnostic error;
+                error.code     = ParseErrorCode::LimitExceeded;
+                error.span     = SourceSpan {options.source, 0, input.size()};
+                error.location = ParseLocation {0, 1, 1};
+                error.message  = "JSON input exceeds parsing limits";
+                return NGIN::Utilities::Unexpected<ParseDiagnostic>(std::move(error));
+            }
             auto state = std::make_unique<detail::DocumentState>(
-                    std::move(input), limits, resources);
-            return ParseState<Document>(std::move(state), options);
+                    OwnedTextBuffer {input, options.source}, limits, resources);
+            return ParseState(std::move(state), options);
         } catch (const std::bad_alloc&)
         {
             ParseDiagnostic error;
-            error.code    = ParseErrorCode::OutOfMemory;
+            error.code        = ParseErrorCode::OutOfMemory;
+            error.span.source = options.source;
             error.message = "Failed to allocate JSON document";
             return NGIN::Utilities::Unexpected<ParseDiagnostic>(std::move(error));
         }
     }
 
     NGIN::Utilities::Expected<Document, ParseDiagnostic>
-    Parser::ParseInSitu(MutableTextBuffer     input,
-                        const ParseOptions&   options,
-                        const ParseLimits&    limits,
-                        const ParseResources& resources)
-    {
-        try
-        {
-            auto owned = std::move(input).TakeOwned();
-            auto state = std::make_unique<detail::DocumentState>(
-                    std::move(owned), limits, resources);
-            char* mutableBase = state->ownedSource->Text().Data();
-            return ParseState<Document>(std::move(state), options, mutableBase);
-        } catch (const std::bad_alloc&)
-        {
-            ParseDiagnostic error;
-            error.code    = ParseErrorCode::OutOfMemory;
-            error.message = "Failed to allocate in-situ JSON document";
-            return NGIN::Utilities::Unexpected<ParseDiagnostic>(std::move(error));
-        }
-    }
-
-    NGIN::Utilities::Expected<BorrowedDocument, ParseDiagnostic>
-    Parser::ParseBorrowed(BorrowedTextView      input,
-                          ParseScratch&         scratch,
-                          const ParseOptions&   options,
-                          const ParseLimits&    limits,
-                          const ParseResources& resources)
+    detail::ParseDocumentView(std::string_view input, ParseScratch& scratch,
+                              const ParseOptions& options, const ParseLimits& limits)
     {
         scratch.Reset();
         try
         {
-            scratch.Reserve(input.View().size());
-            auto state = std::make_unique<detail::DocumentState>(input, limits, resources);
-            return ParseState<BorrowedDocument>(std::move(state), options, nullptr, &scratch);
+            scratch.Reserve(input.size());
+            auto state = std::make_unique<detail::DocumentState>(BorrowedTextView {input, options.source}, limits);
+            return ParseState(std::move(state), options, &scratch);
         } catch (const std::bad_alloc&)
         {
             ParseDiagnostic error;
-            error.code    = ParseErrorCode::OutOfMemory;
-            error.message = "Failed to allocate borrowed JSON document";
+            error.code        = ParseErrorCode::OutOfMemory;
+            error.span.source = options.source;
+            error.message     = "Failed to allocate JSON validation state";
             return NGIN::Utilities::Unexpected<ParseDiagnostic>(std::move(error));
         }
+    }
+
+    NGIN::Utilities::Expected<void, ParseDiagnostic>
+    detail::ValidateContiguous(std::string_view input, ParseScratch& scratch,
+                               const ParseOptions& options, const ParseLimits& limits)
+    {
+        auto validated = ParseDocumentView(input, scratch, options, limits);
+        if (!validated)
+            return NGIN::Utilities::Unexpected<ParseDiagnostic>(std::move(validated.error()));
+        return {};
     }
 }// namespace NGIN::Serialization::JSON

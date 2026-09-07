@@ -27,7 +27,7 @@ int main()
 #elif defined(NGIN_CONSUMER_IO)
     return NGIN::IO::Path {"a/../b"}.LexicallyNormal().View() == "b" ? 0 : 1;
 #elif defined(NGIN_CONSUMER_SERIALIZATION)
-    return NGIN::Serialization::JSON::Parse(NGIN::Serialization::OwnedTextBuffer {"{}"}) ? 0 : 1;
+    return NGIN::Serialization::JSON::Parse("{}") ? 0 : 1;
 #elif defined(NGIN_CONSUMER_CRYPTO)
     return NGIN::Crypto::Random::IsAvailable() ? 0 : 1;
 #elif defined(NGIN_CONSUMER_NET)

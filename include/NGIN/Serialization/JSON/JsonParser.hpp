@@ -3,12 +3,10 @@
 #include <NGIN/Serialization/Core/ParseError.hpp>
 #include <NGIN/Serialization/Core/ParseLimits.hpp>
 #include <NGIN/Serialization/Core/ParseResources.hpp>
-#include <NGIN/Serialization/Core/ParseScratch.hpp>
-#include <NGIN/Serialization/Core/SourceBuffer.hpp>
 #include <NGIN/Serialization/JSON/JsonTypes.hpp>
 #include <NGIN/Utilities/Expected.hpp>
 
-#include <utility>
+#include <string_view>
 
 namespace NGIN::Serialization::JSON
 {
@@ -49,64 +47,31 @@ namespace NGIN::Serialization::JSON
         TrailingCommaPolicy trailingCommas {TrailingCommaPolicy::Reject};
         DuplicateKeyPolicy  duplicateKeys {DuplicateKeyPolicy::Reject};
         Utf8Policy          utf8 {Utf8Policy::Validate};
+        /// @brief Source identity attached to spans and diagnostics.
+        SourceId source {};
     };
 
-    /// @brief JSON parser with explicit source-ownership entry points.
+    /// @brief Parses UTF-8 text into self-contained documents.
     class NGIN_SERIALIZATION_API Parser
     {
     public:
-        /// @brief Parses owned UTF-8 input into a self-contained immutable document.
+        /// @brief Parses text into an owning immutable document.
+        /// @note Input is needed only during this call; returned views refer to document-owned storage.
         [[nodiscard]] static NGIN::Utilities::Expected<Document, ParseDiagnostic>
-        Parse(OwnedTextBuffer       input,
+        Parse(std::string_view      input,
               const ParseOptions&   options   = {},
               const ParseLimits&    limits    = {},
               const ParseResources& resources = {});
-
-        /// @brief Parses mutable owned input, permitting in-situ decoding optimizations.
-        [[nodiscard]] static NGIN::Utilities::Expected<Document, ParseDiagnostic>
-        ParseInSitu(MutableTextBuffer     input,
-                    const ParseOptions&   options   = {},
-                    const ParseLimits&    limits    = {},
-                    const ParseResources& resources = {});
-
-        /// @brief Parses caller-owned input using reusable scratch storage.
-        /// @note The input and scratch storage must outlive the returned document and its views.
-        [[nodiscard]] static NGIN::Utilities::Expected<BorrowedDocument, ParseDiagnostic>
-        ParseBorrowed(BorrowedTextView      input,
-                      ParseScratch&         scratch,
-                      const ParseOptions&   options   = {},
-                      const ParseLimits&    limits    = {},
-                      const ParseResources& resources = {});
     };
 
-    /// @brief Parses owned UTF-8 input into a self-contained immutable document.
+    /// @brief Parses text into an owning immutable document.
+    /// @note Input may be modified or destroyed after this call; views remain tied to the returned document.
     [[nodiscard]] inline NGIN::Utilities::Expected<Document, ParseDiagnostic>
-    Parse(OwnedTextBuffer       input,
+    Parse(std::string_view      input,
           const ParseOptions&   options   = {},
           const ParseLimits&    limits    = {},
           const ParseResources& resources = {})
     {
-        return Parser::Parse(std::move(input), options, limits, resources);
-    }
-
-    /// @brief Parses mutable owned input, permitting in-situ decoding optimizations.
-    [[nodiscard]] inline NGIN::Utilities::Expected<Document, ParseDiagnostic>
-    ParseInSitu(MutableTextBuffer     input,
-                const ParseOptions&   options   = {},
-                const ParseLimits&    limits    = {},
-                const ParseResources& resources = {})
-    {
-        return Parser::ParseInSitu(std::move(input), options, limits, resources);
-    }
-
-    /// @brief Parses caller-owned input using reusable scratch storage.
-    [[nodiscard]] inline NGIN::Utilities::Expected<BorrowedDocument, ParseDiagnostic>
-    ParseBorrowed(BorrowedTextView      input,
-                  ParseScratch&         scratch,
-                  const ParseOptions&   options   = {},
-                  const ParseLimits&    limits    = {},
-                  const ParseResources& resources = {})
-    {
-        return Parser::ParseBorrowed(input, scratch, options, limits, resources);
+        return Parser::Parse(input, options, limits, resources);
     }
 }// namespace NGIN::Serialization::JSON

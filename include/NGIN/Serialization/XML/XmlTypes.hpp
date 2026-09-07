@@ -70,7 +70,6 @@ namespace NGIN::Serialization::XML
     private:
         friend class ElementView;
         friend class Document;
-        friend class BorrowedDocument;
         friend class ChildRange;
 
         NodeView(const detail::DocumentState* state, NodeId id) noexcept;
@@ -321,7 +320,6 @@ namespace NGIN::Serialization::XML
     private:
         friend class NodeView;
         friend class Document;
-        friend class BorrowedDocument;
         friend class FilteredChildRange;
         friend struct detail::DocumentState;
 
@@ -374,52 +372,6 @@ namespace NGIN::Serialization::XML
         friend class Builder;
         friend struct detail::DocumentAccess;
         explicit Document(std::unique_ptr<detail::DocumentState> state) noexcept;
-        std::unique_ptr<detail::DocumentState> m_state;
-    };
-
-    /// @brief XML semantic document whose source storage remains owned by the caller.
-    class NGIN_SERIALIZATION_API BorrowedDocument
-    {
-    public:
-        /// @brief Constructs an empty borrowed document.
-        BorrowedDocument() noexcept;
-        /// @brief Releases parsed state without releasing caller-owned source storage.
-        ~BorrowedDocument();
-        /// @brief Transfers parsed state and its source borrowing relationship.
-        BorrowedDocument(BorrowedDocument&&) noexcept;
-        /// @brief Replaces this state with another borrowed document's state.
-        BorrowedDocument& operator=(BorrowedDocument&&) noexcept;
-        /// @brief Borrowed documents are non-copyable because views refer directly to state.
-        BorrowedDocument(const BorrowedDocument&) = delete;
-        /// @brief Borrowed documents are non-copy-assignable because views refer directly to state.
-        BorrowedDocument& operator=(const BorrowedDocument&) = delete;
-
-        /// @brief Returns whether the document contains parsed state.
-        [[nodiscard]] bool IsValid() const noexcept;
-        /// @brief Returns the root element.
-        /// @note The caller-owned source and this document must outlive every returned view.
-        [[nodiscard]] ElementView Root() const noexcept;
-        /// @brief Returns a view of the caller-owned source text.
-        [[nodiscard]] std::string_view SourceText() const noexcept;
-        /// @brief Returns bytes currently used by document arenas.
-        [[nodiscard]] UIntSize MemoryUsed() const noexcept;
-        /// @brief Returns bytes currently committed by document arenas.
-        [[nodiscard]] UIntSize MemoryCommitted() const noexcept;
-        /// @brief Returns the peak committed arena size observed while parsing.
-        [[nodiscard]] UIntSize PeakMemoryCommitted() const noexcept;
-        /// @brief Returns the number of arena allocation operations.
-        [[nodiscard]] UIntSize AllocationCount() const noexcept;
-        /// @brief Returns the number of stored semantic nodes.
-        [[nodiscard]] UIntSize NodeCount() const noexcept;
-        /// @brief Returns the number of stored elements.
-        [[nodiscard]] UIntSize ElementCount() const noexcept;
-        /// @brief Returns the number of stored attributes.
-        [[nodiscard]] UIntSize AttributeCount() const noexcept;
-
-    private:
-        friend class Parser;
-        friend struct detail::DocumentAccess;
-        explicit BorrowedDocument(std::unique_ptr<detail::DocumentState> state) noexcept;
         std::unique_ptr<detail::DocumentState> m_state;
     };
 

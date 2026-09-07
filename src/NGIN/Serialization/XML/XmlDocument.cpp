@@ -291,43 +291,6 @@ namespace NGIN::Serialization::XML
     UIntSize Document::AttributeCount() const noexcept
     { return m_state ? m_state->attributes.size() : 0; }
 
-    BorrowedDocument::BorrowedDocument() noexcept                              = default;
-    BorrowedDocument::~BorrowedDocument()                                      = default;
-    BorrowedDocument::BorrowedDocument(BorrowedDocument&&) noexcept            = default;
-    BorrowedDocument& BorrowedDocument::operator=(BorrowedDocument&&) noexcept = default;
-    BorrowedDocument::BorrowedDocument(std::unique_ptr<detail::DocumentState> state) noexcept
-        : m_state(std::move(state))
-    {
-    }
-    bool BorrowedDocument::IsValid() const noexcept
-    {
-        const auto* root = m_state ? m_state->Node(m_state->root) : nullptr;
-        return root && root->kind == NodeKind::Element;
-    }
-    ElementView BorrowedDocument::Root() const noexcept
-    {
-        const auto* root = IsValid() ? m_state->Node(m_state->root) : nullptr;
-        return root ? ElementView {m_state.get(), ElementIndex(*root)} : ElementView {};
-    }
-    std::string_view BorrowedDocument::SourceText() const noexcept
-    {
-        return m_state ? m_state->source : std::string_view {};
-    }
-    UIntSize BorrowedDocument::MemoryUsed() const noexcept
-    { return m_state ? m_state->MemoryUsed() : 0; }
-    UIntSize BorrowedDocument::MemoryCommitted() const noexcept
-    { return m_state ? m_state->MemoryCommitted() : 0; }
-    UIntSize BorrowedDocument::PeakMemoryCommitted() const noexcept
-    { return m_state ? m_state->PeakMemoryCommitted() : 0; }
-    UIntSize BorrowedDocument::AllocationCount() const noexcept
-    { return m_state ? m_state->budget.AllocationCount() : 0; }
-    UIntSize BorrowedDocument::NodeCount() const noexcept
-    { return m_state ? m_state->nodes.size() : 0; }
-    UIntSize BorrowedDocument::ElementCount() const noexcept
-    { return m_state ? m_state->elements.size() : 0; }
-    UIntSize BorrowedDocument::AttributeCount() const noexcept
-    { return m_state ? m_state->attributes.size() : 0; }
-
     SyntaxDocument::SyntaxDocument() noexcept                            = default;
     SyntaxDocument::~SyntaxDocument()                                    = default;
     SyntaxDocument::SyntaxDocument(SyntaxDocument&&) noexcept            = default;

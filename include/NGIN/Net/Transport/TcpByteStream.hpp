@@ -5,7 +5,6 @@
 #include <utility>
 
 #include <NGIN/Async/Task.hpp>
-#include <NGIN/Net/Runtime/NetworkDriver.hpp>
 #include <NGIN/Net/Sockets/TcpSocket.hpp>
 #include <NGIN/Net/Transport/IByteStream.hpp>
 
@@ -15,10 +14,10 @@ namespace NGIN::Net::Transport
     class TcpByteStream final : public IByteStream
     {
     public:
-        /// @brief Takes ownership of a TCP socket and borrows its network driver.
-        /// @note The driver must outlive this stream and all outstanding operations.
-        TcpByteStream(TcpSocket&& socket, NetworkDriver& driver) noexcept
-            : m_socket(std::move(socket)), m_driver(&driver)
+        /// @brief Takes ownership of a TCP socket with its existing runtime binding.
+        /// @note The runtime must outlive this stream and all outstanding operations.
+        TcpByteStream(TcpSocket&& socket) noexcept
+            : m_socket(std::move(socket))
         {
         }
 
@@ -27,7 +26,7 @@ namespace NGIN::Net::Transport
                                                                        NGIN::Net::ByteSpan            destination,
                                                                        NGIN::Async::CancellationToken token) override
         {
-            return ReadImpl(ctx, m_socket, m_driver, destination, token);
+            return m_socket.ReceiveAsync(ctx, destination, token);
         }
 
         /// @copydoc IByteStream::WriteAsync
@@ -35,7 +34,7 @@ namespace NGIN::Net::Transport
                                                                         NGIN::Net::ConstByteSpan       source,
                                                                         NGIN::Async::CancellationToken token) override
         {
-            return WriteImpl(ctx, m_socket, m_driver, source, token);
+            return m_socket.SendAsync(ctx, source, token);
         }
 
         /// @copydoc IByteStream::Close
@@ -51,35 +50,6 @@ namespace NGIN::Net::Transport
         [[nodiscard]] const TcpSocket& Socket() const noexcept { return m_socket; }
 
     private:
-        static NGIN::Async::Task<NGIN::UInt32, NGIN::Net::NetError> ReadImpl(NGIN::Async::TaskContext&      ctx,
-                                                                             TcpSocket&                     socket,
-                                                                             NetworkDriver*                 driver,
-                                                                             NGIN::Net::ByteSpan            destination,
-                                                                             NGIN::Async::CancellationToken token)
-        {
-            if (!driver)
-            {
-                co_return NGIN::Async::Completion<NGIN::UInt32, NGIN::Net::NetError>::Faulted(
-                        NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidTaskUsage));
-            }
-            co_return co_await socket.ReceiveAsync(ctx, *driver, destination, token);
-        }
-
-        static NGIN::Async::Task<NGIN::UInt32, NGIN::Net::NetError> WriteImpl(NGIN::Async::TaskContext&      ctx,
-                                                                              TcpSocket&                     socket,
-                                                                              NetworkDriver*                 driver,
-                                                                              NGIN::Net::ConstByteSpan       source,
-                                                                              NGIN::Async::CancellationToken token)
-        {
-            if (!driver)
-            {
-                co_return NGIN::Async::Completion<NGIN::UInt32, NGIN::Net::NetError>::Faulted(
-                        NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidTaskUsage));
-            }
-            co_return co_await socket.SendAsync(ctx, *driver, source, token);
-        }
-
-        TcpSocket      m_socket {};
-        NetworkDriver* m_driver {nullptr};
+        TcpSocket m_socket {};
     };
 }// namespace NGIN::Net::Transport

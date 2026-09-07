@@ -5,7 +5,6 @@
 #include <utility>
 
 #include <NGIN/Async/Task.hpp>
-#include <NGIN/Net/Runtime/NetworkDriver.hpp>
 #include <NGIN/Net/Sockets/UdpSocket.hpp>
 #include <NGIN/Net/Transport/IDatagramChannel.hpp>
 
@@ -15,10 +14,10 @@ namespace NGIN::Net::Transport
     class UdpDatagramChannel final : public IDatagramChannel
     {
     public:
-        /// @brief Takes ownership of a UDP socket and borrows its network driver.
-        /// @note The driver must outlive this channel and all outstanding operations.
-        UdpDatagramChannel(UdpSocket&& socket, NetworkDriver& driver) noexcept
-            : m_socket(std::move(socket)), m_driver(&driver)
+        /// @brief Takes ownership of a UDP socket with its existing runtime binding.
+        /// @note The runtime must outlive this channel and all outstanding operations.
+        UdpDatagramChannel(UdpSocket&& socket) noexcept
+            : m_socket(std::move(socket))
         {
         }
 
@@ -28,7 +27,7 @@ namespace NGIN::Net::Transport
                                                                NGIN::Net::ConstByteSpan       payload,
                                                                NGIN::Async::CancellationToken token) override
         {
-            return SendImpl(ctx, m_socket, m_driver, remoteEndpoint, payload, token);
+            return SendImpl(ctx, m_socket, remoteEndpoint, payload, token);
         }
 
         /// @copydoc IDatagramChannel::ReceiveAsync
@@ -36,7 +35,7 @@ namespace NGIN::Net::Transport
                                                                               NGIN::Net::Buffer&             receiveBuffer,
                                                                               NGIN::Async::CancellationToken token) override
         {
-            return ReceiveImpl(ctx, m_socket, m_driver, receiveBuffer, token);
+            return ReceiveImpl(ctx, m_socket, receiveBuffer, token);
         }
 
         /// @brief Returns mutable access to the owned UDP socket.
@@ -47,32 +46,19 @@ namespace NGIN::Net::Transport
     private:
         static NGIN::Async::Task<void, NGIN::Net::NetError> SendImpl(NGIN::Async::TaskContext&      ctx,
                                                                      UdpSocket&                     socket,
-                                                                     NetworkDriver*                 driver,
                                                                      NGIN::Net::Endpoint            remoteEndpoint,
                                                                      NGIN::Net::ConstByteSpan       payload,
                                                                      NGIN::Async::CancellationToken token)
         {
-            if (!driver)
-            {
-                co_await NGIN::Async::Faulted(
-                        NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidTaskUsage));
-                co_return;
-            }
-            static_cast<void>(co_await socket.SendToAsync(ctx, *driver, remoteEndpoint, payload, token));
+            static_cast<void>(co_await socket.SendToAsync(ctx, remoteEndpoint, payload, token));
             co_return;
         }
 
         static NGIN::Async::Task<ReceivedDatagram, NGIN::Net::NetError> ReceiveImpl(NGIN::Async::TaskContext&      ctx,
                                                                                     UdpSocket&                     socket,
-                                                                                    NetworkDriver*                 driver,
                                                                                     NGIN::Net::Buffer&             receiveBuffer,
                                                                                     NGIN::Async::CancellationToken token)
         {
-            if (!driver)
-            {
-                co_return NGIN::Async::Completion<ReceivedDatagram, NGIN::Net::NetError>::Faulted(
-                        NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidTaskUsage));
-            }
             if (!receiveBuffer.data || receiveBuffer.capacity == 0)
             {
                 co_return NGIN::Async::Completion<ReceivedDatagram, NGIN::Net::NetError>::Faulted(
@@ -81,7 +67,6 @@ namespace NGIN::Net::Transport
 
             DatagramReceiveResult result = co_await socket.ReceiveFromAsync(
                     ctx,
-                    *driver,
                     NGIN::Net::ByteSpan {receiveBuffer.data, receiveBuffer.capacity},
                     token);
 
@@ -94,7 +79,6 @@ namespace NGIN::Net::Transport
             co_return datagram;
         }
 
-        UdpSocket      m_socket {};
-        NetworkDriver* m_driver {nullptr};
+        UdpSocket m_socket {};
     };
 }// namespace NGIN::Net::Transport

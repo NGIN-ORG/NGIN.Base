@@ -19,9 +19,9 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
     xml += "\">";
     xml.append(bytes);
     xml += "</root>";
-    (void)NGIN::Serialization::JSON::Parse(
-            NGIN::Serialization::OwnedTextBuffer {json});
-    (void)NGIN::Serialization::XML::Parse(
-            NGIN::Serialization::OwnedTextBuffer {xml});
+    (void) NGIN::Serialization::JSON::Parse(
+            json);
+    (void) NGIN::Serialization::XML::Parse(
+            xml);
     return 0;
 }

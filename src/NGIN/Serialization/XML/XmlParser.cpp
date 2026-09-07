@@ -1,3 +1,4 @@
+#include <NGIN/Serialization/XML/XmlEventParser.hpp>
 #include <NGIN/Serialization/XML/XmlParser.hpp>
 
 #include "XmlDocumentInternal.hpp"
@@ -24,7 +25,6 @@ namespace NGIN::Serialization::XML
             detail::DocumentState*    state {nullptr};
             ParseScratch*             scratch {nullptr};
             std::vector<SyntaxToken>* syntaxTokens {nullptr};
-            char*                     mutableBase {nullptr};
             UIntSize                  depth {0};
             UIntSize                  decodedBytes {0};
         };
@@ -314,22 +314,12 @@ namespace NGIN::Serialization::XML
             if (!needsDecode)
                 return context.state->SourceText(sourceOffset, raw.size());
 
-            char* temporary = context.mutableBase
-                                      ? context.mutableBase + sourceOffset
-                                      : nullptr;
+            context.scratch->Reset();
+            char* temporary = context.scratch->TryAllocate(raw.size());
             if (!temporary)
             {
-                context.scratch->Reset();
-                temporary = context.scratch->TryAllocate(raw.size());
-                if (!temporary)
-                {
-                    return Failure<detail::TextRef>(
-                            MakeErrorAt(context,
-                                        ParseErrorCode::OutOfMemory,
-                                        "XML entity decoding allocation failed",
-                                        sourceOffset,
-                                        sourceOffset + raw.size()));
-                }
+                return Failure<detail::TextRef>(MakeErrorAt(context, ParseErrorCode::OutOfMemory,
+                                                            "XML entity decoding allocation failed", sourceOffset, sourceOffset + raw.size()));
             }
 
             const auto decoded = DecodeXmlText(raw, temporary);
@@ -370,12 +360,6 @@ namespace NGIN::Serialization::XML
                                     "Decoded XML text limit exceeded",
                                     sourceOffset,
                                     sourceOffset + raw.size()));
-            }
-
-            if (context.mutableBase)
-            {
-                context.decodedBytes += decoded.size;
-                return context.state->SourceText(sourceOffset, decoded.size);
             }
 
             const auto copy = context.state->arena.CopyString(std::string_view {temporary, decoded.size});
@@ -998,13 +982,11 @@ namespace NGIN::Serialization::XML
             return node;
         }
 
-        template<class DocumentType>
-        [[nodiscard]] NGIN::Utilities::Expected<DocumentType, ParseDiagnostic>
+        [[nodiscard]] NGIN::Utilities::Expected<Document, ParseDiagnostic>
         ParseState(std::unique_ptr<detail::DocumentState> state,
                    const ParseOptions&                    options,
                    ParseScratch&                          scratch,
-                   std::vector<SyntaxToken>*              syntaxTokens = nullptr,
-                   char*                                  mutableBase  = nullptr)
+                   std::vector<SyntaxToken>*              syntaxTokens = nullptr)
         {
             ParseContext context {
                     .cursor       = InputCursor {state->source},
@@ -1012,26 +994,25 @@ namespace NGIN::Serialization::XML
                     .state        = state.get(),
                     .scratch      = &scratch,
                     .syntaxTokens = syntaxTokens,
-                    .mutableBase  = mutableBase,
             };
             if (state->source.size() > state->limits.maxInputBytes)
-                return Failure<DocumentType>(MakeErrorAt(context,
-                                                         ParseErrorCode::LimitExceeded,
-                                                         "XML input byte limit exceeded",
-                                                         0,
-                                                         state->source.size()));
+                return Failure<Document>(MakeErrorAt(context,
+                                                     ParseErrorCode::LimitExceeded,
+                                                     "XML input byte limit exceeded",
+                                                     0,
+                                                     state->source.size()));
             if (state->source.size() >= detail::TextRef::DecodedBit)
-                return Failure<DocumentType>(MakeErrorAt(context,
-                                                         ParseErrorCode::LimitExceeded,
-                                                         "XML input exceeds the compact DOM address space",
-                                                         0,
-                                                         state->source.size()));
+                return Failure<Document>(MakeErrorAt(context,
+                                                     ParseErrorCode::LimitExceeded,
+                                                     "XML input exceeds the compact DOM address space",
+                                                     0,
+                                                     state->source.size()));
             if (!IsValidXmlUtf8(state->source))
-                return Failure<DocumentType>(MakeErrorAt(context,
-                                                         ParseErrorCode::InvalidEncoding,
-                                                         "XML input is not valid XML 1.0 UTF-8",
-                                                         0,
-                                                         state->source.size()));
+                return Failure<Document>(MakeErrorAt(context,
+                                                     ParseErrorCode::InvalidEncoding,
+                                                     "XML input is not valid XML 1.0 UTF-8",
+                                                     0,
+                                                     state->source.size()));
 
             if (StartsWith(context, "\xef\xbb\xbf"))
                 context.cursor.Advance(3);
@@ -1039,7 +1020,7 @@ namespace NGIN::Serialization::XML
             {
                 auto declaration = ParseProcessingInstruction(context, std::nullopt, true);
                 if (!declaration)
-                    return Failure<DocumentType>(std::move(declaration.error()));
+                    return Failure<Document>(std::move(declaration.error()));
             }
 
             bool sawDoctype = false;
@@ -1050,24 +1031,24 @@ namespace NGIN::Serialization::XML
                 {
                     auto comment = ParseComment(context, std::nullopt);
                     if (!comment)
-                        return Failure<DocumentType>(std::move(comment.error()));
+                        return Failure<Document>(std::move(comment.error()));
                 }
                 else if (StartsWith(context, "<?"))
                 {
                     auto instruction = ParseProcessingInstruction(context, std::nullopt, false);
                     if (!instruction)
-                        return Failure<DocumentType>(std::move(instruction.error()));
+                        return Failure<Document>(std::move(instruction.error()));
                 }
                 else if (StartsWith(context, "<!DOCTYPE"))
                 {
                     if (sawDoctype)
-                        return Failure<DocumentType>(MakeError(context,
-                                                               ParseErrorCode::InvalidDocumentStructure,
-                                                               "XML document contains multiple DOCTYPE declarations"));
+                        return Failure<Document>(MakeError(context,
+                                                           ParseErrorCode::InvalidDocumentStructure,
+                                                           "XML document contains multiple DOCTYPE declarations"));
                     sawDoctype   = true;
                     auto doctype = ParseDoctype(context);
                     if (!doctype)
-                        return Failure<DocumentType>(std::move(doctype.error()));
+                        return Failure<Document>(std::move(doctype.error()));
                 }
                 else
                 {
@@ -1076,11 +1057,11 @@ namespace NGIN::Serialization::XML
             }
 
             if (context.cursor.Peek() != '<' || StartsWith(context, "</"))
-                return Failure<DocumentType>(
+                return Failure<Document>(
                         MakeError(context, ParseErrorCode::InvalidDocumentStructure, "XML document requires one root element"));
             auto root = ParseElement(context);
             if (!root)
-                return Failure<DocumentType>(std::move(root.error()));
+                return Failure<Document>(std::move(root.error()));
             state->root = root.value();
 
             while (true)
@@ -1090,13 +1071,13 @@ namespace NGIN::Serialization::XML
                 {
                     auto comment = ParseComment(context, std::nullopt);
                     if (!comment)
-                        return Failure<DocumentType>(std::move(comment.error()));
+                        return Failure<Document>(std::move(comment.error()));
                 }
                 else if (StartsWith(context, "<?"))
                 {
                     auto instruction = ParseProcessingInstruction(context, std::nullopt, false);
                     if (!instruction)
-                        return Failure<DocumentType>(std::move(instruction.error()));
+                        return Failure<Document>(std::move(instruction.error()));
                 }
                 else
                 {
@@ -1105,122 +1086,115 @@ namespace NGIN::Serialization::XML
             }
             SkipWhitespace(context);
             if (!context.cursor.IsEof())
-                return Failure<DocumentType>(MakeError(context,
-                                                       ParseErrorCode::InvalidDocumentStructure,
-                                                       "Content is not allowed after the XML root element"));
+                return Failure<Document>(MakeError(context,
+                                                   ParseErrorCode::InvalidDocumentStructure,
+                                                   "Content is not allowed after the XML root element"));
 
             if (!state->WithinMemoryLimit())
             {
-                return Failure<DocumentType>(MakeErrorAt(context,
-                                                         ParseErrorCode::LimitExceeded,
-                                                         "XML total memory limit exceeded",
-                                                         0,
-                                                         state->source.size()));
+                return Failure<Document>(MakeErrorAt(context,
+                                                     ParseErrorCode::LimitExceeded,
+                                                     "XML total memory limit exceeded",
+                                                     0,
+                                                     state->source.size()));
             }
-            if constexpr (std::same_as<DocumentType, Document>)
-                return detail::DocumentAccess::MakeDocument(std::move(state));
-            else
-                return detail::DocumentAccess::MakeBorrowedDocument(std::move(state));
+            return detail::DocumentAccess::MakeDocument(std::move(state));
         }
     }// namespace
 
     NGIN::Utilities::Expected<Document, ParseDiagnostic>
-    Parser::Parse(OwnedTextBuffer       input,
-                  const ParseOptions&   options,
-                  const ParseLimits&    limits,
-                  const ParseResources& resources)
+    Parser::Parse(std::string_view input, const ParseOptions& options,
+                  const ParseLimits& limits, const ParseResources& resources)
     {
         try
         {
+            if (input.size() > limits.maxInputBytes || input.size() > limits.maxTotalMemoryBytes)
+            {
+                ParseDiagnostic error;
+                error.code     = ParseErrorCode::LimitExceeded;
+                error.span     = SourceSpan {options.source, 0, input.size()};
+                error.location = ParseLocation {0, 1, 1};
+                error.message  = "XML input exceeds parsing limits";
+                return NGIN::Utilities::Unexpected<ParseDiagnostic>(std::move(error));
+            }
+            auto state = std::make_unique<detail::DocumentState>(
+                    OwnedTextBuffer {input, options.source}, limits, resources);
             ParseScratch scratch;
-            return ParseState<Document>(
-                    std::make_unique<detail::DocumentState>(
-                            std::move(input), limits, resources),
-                    options,
-                    scratch);
+            return ParseState(std::move(state), options, scratch);
         } catch (const std::bad_alloc&)
         {
             ParseDiagnostic error;
-            error.code    = ParseErrorCode::OutOfMemory;
+            error.code        = ParseErrorCode::OutOfMemory;
+            error.span.source = options.source;
             error.message = "Failed to allocate XML document";
             return NGIN::Utilities::Unexpected<ParseDiagnostic>(std::move(error));
         }
     }
 
-    NGIN::Utilities::Expected<Document, ParseDiagnostic>
-    Parser::ParseInSitu(MutableTextBuffer     input,
-                        const ParseOptions&   options,
-                        const ParseLimits&    limits,
-                        const ParseResources& resources)
-    {
-        try
-        {
-            ParseScratch scratch;
-            auto         owned = std::move(input).TakeOwned();
-            auto         state = std::make_unique<detail::DocumentState>(
-                    std::move(owned), limits, resources);
-            char* mutableBase = state->ownedSource->Text().Data();
-            return ParseState<Document>(
-                    std::move(state), options, scratch, nullptr, mutableBase);
-        } catch (const std::bad_alloc&)
-        {
-            ParseDiagnostic error;
-            error.code    = ParseErrorCode::OutOfMemory;
-            error.message = "Failed to allocate in-situ XML document";
-            return NGIN::Utilities::Unexpected<ParseDiagnostic>(std::move(error));
-        }
-    }
-
-    NGIN::Utilities::Expected<BorrowedDocument, ParseDiagnostic>
-    Parser::ParseBorrowed(BorrowedTextView      input,
-                          ParseScratch&         scratch,
-                          const ParseOptions&   options,
-                          const ParseLimits&    limits,
-                          const ParseResources& resources)
-    {
-        scratch.Reset();
-        try
-        {
-            return ParseState<BorrowedDocument>(
-                    std::make_unique<detail::DocumentState>(input, limits, resources),
-                    options,
-                    scratch);
-        } catch (const std::bad_alloc&)
-        {
-            ParseDiagnostic error;
-            error.code    = ParseErrorCode::OutOfMemory;
-            error.message = "Failed to allocate borrowed XML document";
-            return NGIN::Utilities::Unexpected<ParseDiagnostic>(std::move(error));
-        }
-    }
-
     NGIN::Utilities::Expected<SyntaxDocument, ParseDiagnostic>
-    Parser::ParseSyntax(OwnedTextBuffer       input,
-                        const ParseOptions&   options,
-                        const ParseLimits&    limits,
-                        const ParseResources& resources)
+    Parser::ParseSyntax(std::string_view input, const ParseOptions& options,
+                        const ParseLimits& limits, const ParseResources& resources)
     {
         try
         {
+            if (input.size() > limits.maxInputBytes || input.size() > limits.maxTotalMemoryBytes)
+            {
+                ParseDiagnostic error;
+                error.code     = ParseErrorCode::LimitExceeded;
+                error.span     = SourceSpan {options.source, 0, input.size()};
+                error.location = ParseLocation {0, 1, 1};
+                error.message  = "XML input exceeds parsing limits";
+                return NGIN::Utilities::Unexpected<ParseDiagnostic>(std::move(error));
+            }
             ParseScratch scratch;
-            auto         syntax = std::make_unique<detail::SyntaxState>();
-            syntax->source      = std::move(input);
-            auto state          = std::make_unique<detail::DocumentState>(
-                    syntax->source.Borrow(), limits, resources);
+            auto         syntax        = std::make_unique<detail::SyntaxState>();
+            syntax->source             = OwnedTextBuffer {input, options.source};
+            ParseLimits semanticLimits = limits;
+            semanticLimits.maxTotalMemoryBytes -= input.size();
+            auto state           = std::make_unique<detail::DocumentState>(syntax->source.Borrow(), semanticLimits, resources);
             auto syntaxOptions   = options;
             syntaxOptions.trivia = TriviaPolicy::Preserve;
-            auto parsed          = ParseState<Document>(
-                    std::move(state), syntaxOptions, scratch, &syntax->tokens);
+            auto parsed          = ParseState(std::move(state), syntaxOptions, scratch, &syntax->tokens);
             if (!parsed)
-                return Failure<SyntaxDocument>(std::move(parsed.error()));
+                return NGIN::Utilities::Unexpected<ParseDiagnostic>(std::move(parsed.error()));
             syntax->valid = true;
             return SyntaxDocument {std::move(syntax)};
         } catch (const std::bad_alloc&)
         {
             ParseDiagnostic error;
-            error.code    = ParseErrorCode::OutOfMemory;
-            error.message = "Failed to allocate XML syntax document";
+            error.code        = ParseErrorCode::OutOfMemory;
+            error.span.source = options.source;
+            error.message     = "Failed to allocate XML document";
             return NGIN::Utilities::Unexpected<ParseDiagnostic>(std::move(error));
         }
+    }
+
+    NGIN::Utilities::Expected<Document, ParseDiagnostic>
+    detail::ParseDocumentView(std::string_view input, ParseScratch& scratch,
+                              const ParseOptions& options, const ParseLimits& limits)
+    {
+        scratch.Reset();
+        try
+        {
+            auto state = std::make_unique<detail::DocumentState>(BorrowedTextView {input, options.source}, limits);
+            return ParseState(std::move(state), options, scratch);
+        } catch (const std::bad_alloc&)
+        {
+            ParseDiagnostic error;
+            error.code        = ParseErrorCode::OutOfMemory;
+            error.span.source = options.source;
+            error.message     = "Failed to allocate XML validation state";
+            return NGIN::Utilities::Unexpected<ParseDiagnostic>(std::move(error));
+        }
+    }
+
+    NGIN::Utilities::Expected<void, ParseDiagnostic>
+    detail::ValidateContiguous(std::string_view input, ParseScratch& scratch,
+                               const ParseOptions& options, const ParseLimits& limits)
+    {
+        auto validated = ParseDocumentView(input, scratch, options, limits);
+        if (!validated)
+            return NGIN::Utilities::Unexpected<ParseDiagnostic>(std::move(validated.error()));
+        return {};
     }
 }// namespace NGIN::Serialization::XML

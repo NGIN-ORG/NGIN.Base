@@ -1,6 +1,7 @@
 #pragma once
 
 #include <NGIN/Serialization/Core/IncrementalParse.hpp>
+#include <NGIN/Serialization/Core/ParseScratch.hpp>
 #include <NGIN/Serialization/XML/XmlParser.hpp>
 
 #include <algorithm>
@@ -59,12 +60,15 @@ namespace NGIN::Serialization::XML
         using EventCallback = EventAction (*)(void*, const Event&);
 
         [[nodiscard]] NGIN_SERIALIZATION_API NGIN::Utilities::Expected<void, ParseDiagnostic>
-                                             ParseEventsContiguous(BorrowedTextView    input,
+                                             ParseEventsContiguous(std::string_view    input,
                                                                    void*               handlerContext,
                                                                    EventCallback       callback,
                                                                    ParseScratch&       scratch,
                                                                    const ParseOptions& options,
                                                                    const ParseLimits&  limits);
+        [[nodiscard]] NGIN_SERIALIZATION_API NGIN::Utilities::Expected<void, ParseDiagnostic>
+                                             ValidateContiguous(std::string_view input, ParseScratch& scratch,
+                                                                const ParseOptions& options, const ParseLimits& limits);
     }// namespace detail
 
     /// @brief Event delivery over one complete contiguous XML input.
@@ -75,11 +79,11 @@ namespace NGIN::Serialization::XML
     class EventParser
     {
     public:
-        /// @brief Parses one complete borrowed input and synchronously delivers events.
+        /// @brief Parses one complete input and synchronously delivers events.
         /// @note Decoded event views are valid only for the handler invocation.
         template<EventHandler Handler>
         [[nodiscard]] static NGIN::Utilities::Expected<void, ParseDiagnostic>
-        ParseContiguous(BorrowedTextView    input,
+        ParseContiguous(std::string_view    input,
                         Handler&            handler,
                         ParseScratch&       scratch,
                         const ParseOptions& options = {},
@@ -110,9 +114,8 @@ namespace NGIN::Serialization::XML
                 Handler&            handler,
                 ParseScratch&       scratch,
                 const ParseOptions& options = {},
-                const ParseLimits&  limits  = {},
-                const SourceId      source  = {})
-            : m_handler(&handler), m_scratch(&scratch), m_options(options), m_limits(limits), m_source(source)
+                const ParseLimits&  limits  = {})
+            : m_handler(&handler), m_scratch(&scratch), m_options(options), m_limits(limits)
         {
         }
 
@@ -170,7 +173,7 @@ namespace NGIN::Serialization::XML
             ParseDiagnostic diagnostic;
             diagnostic.code            = code;
             diagnostic.location.offset = m_buffer.size();
-            diagnostic.span            = {.source = m_source, .begin = m_buffer.size(), .end = m_buffer.size()};
+            diagnostic.span            = {.source = m_options.source, .begin = m_buffer.size(), .end = m_buffer.size()};
             diagnostic.message         = message;
             return diagnostic;
         }
@@ -189,11 +192,10 @@ namespace NGIN::Serialization::XML
 
         [[nodiscard]] IncrementalParseResult TryComplete()
         {
-            const BorrowedTextView input            = BorrowedTextView {m_buffer, m_source};
+            const std::string_view input            = m_buffer;
             ParseLimits            completionLimits = m_limits;
             completionLimits.maxTotalMemoryBytes -= m_buffer.size();
-            NGIN::Utilities::Expected<BorrowedDocument, ParseDiagnostic> validated =
-                    ParseBorrowed(input, *m_scratch, m_options, completionLimits);
+            auto validated = detail::ValidateContiguous(input, *m_scratch, m_options, completionLimits);
             if (!validated)
                 return Fail(std::move(validated.error()));
 
@@ -214,7 +216,6 @@ namespace NGIN::Serialization::XML
         ParseScratch*                  m_scratch {nullptr};
         ParseOptions                   m_options {};
         ParseLimits                    m_limits {};
-        SourceId                       m_source {};
         std::string                    m_buffer {};
         bool                           m_complete {false};
         bool                           m_error {false};

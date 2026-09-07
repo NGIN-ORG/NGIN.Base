@@ -1,3 +1,4 @@
+#include "JsonDocumentInternal.hpp"
 #include <NGIN/Serialization/JSON/JsonEventParser.hpp>
 
 #include <NGIN/SIMD/Scan.hpp>
@@ -998,19 +999,121 @@ namespace NGIN::Serialization::JSON::detail
         }
     }// namespace
 
+    namespace
+    {
+        template<EventHandler Handler>
+        [[nodiscard]] static NGIN::Utilities::Expected<void, ParseDiagnostic>
+        Deliver(const Event& event, Handler& handler)
+        {
+            const EventAction action = handler(event);
+            if (action.continueParsing)
+                return {};
+            ParseDiagnostic diagnostic;
+            diagnostic.code            = ParseErrorCode::HandlerRejected;
+            diagnostic.span            = event.span;
+            diagnostic.location.offset = event.span.begin;
+            diagnostic.consumerContext = action.consumerContext;
+            diagnostic.message         = "JSON event handler stopped parsing";
+            return NGIN::Utilities::Unexpected<ParseDiagnostic>(std::move(diagnostic));
+        }
+
+        template<EventHandler Handler>
+        [[nodiscard]] static NGIN::Utilities::Expected<void, ParseDiagnostic>
+        Emit(ValueView value, Handler& handler)
+        {
+            Event event {.span = value.Span()};
+            switch (value.Kind())
+            {
+                case ValueKind::Null:
+                    event.kind = EventKind::Null;
+                    return Deliver(event, handler);
+                case ValueKind::Bool:
+                    event.kind      = EventKind::Bool;
+                    event.boolValue = *value.TryBool();
+                    return Deliver(event, handler);
+                case ValueKind::Int64:
+                    event.kind     = EventKind::Int64;
+                    event.intValue = *value.TryInt64();
+                    return Deliver(event, handler);
+                case ValueKind::UInt64:
+                    event.kind      = EventKind::UInt64;
+                    event.uintValue = *value.TryUInt64();
+                    return Deliver(event, handler);
+                case ValueKind::Double:
+                    event.kind        = EventKind::Double;
+                    event.doubleValue = *value.TryDouble();
+                    return Deliver(event, handler);
+                case ValueKind::String:
+                    event.kind = EventKind::String;
+                    event.text = *value.TryString();
+                    return Deliver(event, handler);
+                case ValueKind::Array: {
+                    event.kind                                                 = EventKind::StartArray;
+                    NGIN::Utilities::Expected<void, ParseDiagnostic> delivered = Deliver(event, handler);
+                    if (!delivered)
+                        return delivered;
+                    const std::optional<ArrayView> array = value.TryArray();
+                    for (const ValueView child: *array)
+                    {
+                        NGIN::Utilities::Expected<void, ParseDiagnostic> result = Emit(child, handler);
+                        if (!result)
+                            return result;
+                    }
+                    event.kind = EventKind::EndArray;
+                    return Deliver(event, handler);
+                }
+                case ValueKind::Object: {
+                    event.kind                                                 = EventKind::StartObject;
+                    NGIN::Utilities::Expected<void, ParseDiagnostic> delivered = Deliver(event, handler);
+                    if (!delivered)
+                        return delivered;
+                    const std::optional<ObjectView> object = value.TryObject();
+                    for (const MemberView member: *object)
+                    {
+                        Event                                            key {.kind = EventKind::Key,
+                                                                              .span = member.Span(),
+                                                                              .text = member.Key()};
+                        NGIN::Utilities::Expected<void, ParseDiagnostic> keyResult = Deliver(key, handler);
+                        if (!keyResult)
+                            return keyResult;
+                        NGIN::Utilities::Expected<void, ParseDiagnostic> result = Emit(member.Value(), handler);
+                        if (!result)
+                            return result;
+                    }
+                    event.kind = EventKind::EndObject;
+                    return Deliver(event, handler);
+                }
+            }
+            ParseDiagnostic diagnostic;
+            diagnostic.code    = ParseErrorCode::InvalidToken;
+            diagnostic.message = "Unknown JSON event value";
+            return NGIN::Utilities::Unexpected<ParseDiagnostic>(std::move(diagnostic));
+        }
+    }// namespace
+
     NGIN::Utilities::Expected<void, ParseDiagnostic>
-    ParseEventsContiguous(BorrowedTextView    input,
+    ParseEventsContiguous(std::string_view    input,
                           void*               handlerContext,
                           EventCallback       callback,
                           ParseScratch&       scratch,
                           const ParseOptions& options,
                           const ParseLimits&  limits)
     {
-        const auto   source = input.View();
+        // KeepLast needs object buffering to suppress values replaced by later members.
+        if (options.duplicateKeys == DuplicateKeyPolicy::KeepLast)
+        {
+            auto parsed = ParseDocumentView(input, scratch, options, limits);
+            if (!parsed)
+                return NGIN::Utilities::Unexpected<ParseDiagnostic>(std::move(parsed.error()));
+            auto handler = [handlerContext, callback](const Event& event) { return callback(handlerContext, event); };
+            return Emit(parsed.value().Root(), handler);
+        }
+
+        const auto   source = input;
         ParseContext context {
                 .cursor         = InputCursor {source},
                 .source         = source,
-                .sourceId       = input.Source(),
+                .sourceId       = options.source,
                 .options        = options,
                 .limits         = limits,
                 .scratch        = &scratch,

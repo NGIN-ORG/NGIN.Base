@@ -345,40 +345,4 @@ namespace NGIN::Serialization::JSON
     UIntSize Document::NodeCount() const noexcept { return m_state ? m_state->nodes.size() : 0; }
     UIntSize Document::MemberCount() const noexcept { return m_state ? m_state->members.size() : 0; }
 
-    BorrowedDocument::BorrowedDocument() noexcept = default;
-    BorrowedDocument::~BorrowedDocument()         = default;
-    BorrowedDocument::BorrowedDocument(BorrowedDocument&&) noexcept = default;
-    BorrowedDocument& BorrowedDocument::operator=(BorrowedDocument&&) noexcept = default;
-
-    BorrowedDocument::BorrowedDocument(std::unique_ptr<detail::DocumentState> state) noexcept
-        : m_state(std::move(state))
-    {
-    }
-
-    bool BorrowedDocument::IsValid() const noexcept
-    {
-        return m_state && m_state->Node(m_state->root);
-    }
-
-    ValueView BorrowedDocument::Root() const noexcept
-    {
-        return IsValid() ? ValueView {m_state.get(), m_state->root} : ValueView {};
-    }
-
-    std::string_view BorrowedDocument::SourceText() const noexcept
-    {
-        return m_state ? m_state->source : std::string_view {};
-    }
-
-    UIntSize BorrowedDocument::MemoryUsed() const noexcept
-    {
-        return m_state ? m_state->MemoryUsed() : 0;
-    }
-
-    UIntSize BorrowedDocument::MemoryCommitted() const noexcept
-    {
-        return m_state ? m_state->MemoryCommitted() : 0;
-    }
-    UIntSize BorrowedDocument::NodeCount() const noexcept { return m_state ? m_state->nodes.size() : 0; }
-    UIntSize BorrowedDocument::MemberCount() const noexcept { return m_state ? m_state->members.size() : 0; }
 }// namespace NGIN::Serialization::JSON

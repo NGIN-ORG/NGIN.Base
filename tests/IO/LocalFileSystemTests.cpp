@@ -1,9 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <NGIN/Async/Cancellation.hpp>
-#include <NGIN/IO/FileSystemDriver.hpp>
+#include <NGIN/Execution/ThreadPoolScheduler.hpp>
 #include <NGIN/IO/FileSystemUtilities.hpp>
 #include <NGIN/IO/LocalFileSystem.hpp>
+#include <NGIN/IO/Runtime.hpp>
 
 #include <array>
 #include <chrono>
@@ -319,15 +320,16 @@ TEST_CASE("IO.LocalFileSystem atomic text writes replace existing content", "[IO
 
 TEST_CASE("IO.LocalFileSystem async file operations use value handles", "[IO][LocalFileSystem][Async]")
 {
-    NGIN::IO::LocalFileSystem fs;
-    const auto                root     = MakeTempDir(fs);
-    const auto                filePath = root.Join("async.bin");
+    NGIN::Execution::ThreadPoolScheduler scheduler {1};
+    NGIN::IO::Runtime                    runtime;
+    NGIN::IO::LocalFileSystem            fs(runtime);
+    const auto                           root     = MakeTempDir(fs);
+    const auto                           filePath = root.Join("async.bin");
 
     const std::string payload = "async local filesystem payload";
     REQUIRE(NGIN::IO::WriteAllText(fs, filePath, payload).has_value());
 
-    NGIN::IO::FileSystemDriver driver;
-    auto                       ctx = driver.MakeTaskContext();
+    auto ctx = NGIN::Async::TaskContext(scheduler);
 
     NGIN::IO::FileOpenOptions readOptions;
     readOptions.access      = NGIN::IO::FileAccess::Read;
@@ -362,16 +364,17 @@ TEST_CASE("IO.LocalFileSystem async file operations use value handles", "[IO][Lo
     RemoveTempDir(fs, root);
 }
 
-TEST_CASE("IO.LocalFileSystem async utility helpers work through FileSystemDriver", "[IO][LocalFileSystem][Async]")
+TEST_CASE("IO.LocalFileSystem async utility helpers work through IO::Runtime", "[IO][LocalFileSystem][Async]")
 {
-    NGIN::IO::LocalFileSystem fs;
-    const auto                root    = MakeTempDir(fs);
-    const auto                source  = root.Join("source.bin");
-    const auto                copied  = root.Join("copied.bin");
-    const std::string         payload = "worker-backed async helper payload";
+    NGIN::Execution::ThreadPoolScheduler scheduler {1};
+    NGIN::IO::Runtime                    runtime;
+    NGIN::IO::LocalFileSystem            fs(runtime);
+    const auto                           root    = MakeTempDir(fs);
+    const auto                           source  = root.Join("source.bin");
+    const auto                           copied  = root.Join("copied.bin");
+    const std::string                    payload = "worker-backed async helper payload";
 
-    NGIN::IO::FileSystemDriver driver;
-    auto                       ctx = driver.MakeTaskContext();
+    auto ctx = NGIN::Async::TaskContext(scheduler);
 
     auto writeTask = NGIN::IO::WriteAllBytesAsync(
             fs,
@@ -406,16 +409,17 @@ TEST_CASE("IO.LocalFileSystem async utility helpers work through FileSystemDrive
 
 TEST_CASE("IO.LocalFileSystem async directory handles scope relative operations", "[IO][LocalFileSystem][Async]")
 {
-    NGIN::IO::LocalFileSystem fs;
-    const auto                root      = MakeTempDir(fs);
-    const auto                nestedDir = root.Join("nested");
-    const auto                childDir  = nestedDir.Join("child");
+    NGIN::Execution::ThreadPoolScheduler scheduler {1};
+    NGIN::IO::Runtime                    runtime;
+    NGIN::IO::LocalFileSystem            fs(runtime);
+    const auto                           root      = MakeTempDir(fs);
+    const auto                           nestedDir = root.Join("nested");
+    const auto                           childDir  = nestedDir.Join("child");
 
     REQUIRE(fs.CreateDirectories(childDir).has_value());
     REQUIRE(NGIN::IO::WriteAllText(fs, nestedDir.Join("seed.txt"), "seed").has_value());
 
-    NGIN::IO::FileSystemDriver driver;
-    auto                       ctx = driver.MakeTaskContext();
+    auto ctx = NGIN::Async::TaskContext(scheduler);
 
     auto directoryTask = fs.OpenDirectoryAsync(ctx, nestedDir);
     auto directoryOpen = RunAsyncTask(directoryTask, ctx);
@@ -458,16 +462,17 @@ TEST_CASE("IO.LocalFileSystem async directory handles scope relative operations"
 
 TEST_CASE("IO.LocalFileSystem async operations observe cancellation before dispatch", "[IO][LocalFileSystem][Async]")
 {
-    NGIN::IO::LocalFileSystem fs;
-    const auto                root     = MakeTempDir(fs);
-    const auto                filePath = root.Join("cancel.txt");
+    NGIN::Execution::ThreadPoolScheduler scheduler {1};
+    NGIN::IO::Runtime                    runtime;
+    NGIN::IO::LocalFileSystem            fs(runtime);
+    const auto                           root     = MakeTempDir(fs);
+    const auto                           filePath = root.Join("cancel.txt");
 
     REQUIRE(NGIN::IO::WriteAllText(fs, filePath, "cancel me").has_value());
 
-    NGIN::IO::FileSystemDriver      driver;
     NGIN::Async::CancellationSource cancellation;
     cancellation.Cancel();
-    auto ctx = driver.MakeTaskContext(cancellation.GetToken());
+    auto ctx = NGIN::Async::TaskContext(scheduler, cancellation.GetToken());
 
     NGIN::IO::FileOpenOptions options;
     options.access      = NGIN::IO::FileAccess::Read;

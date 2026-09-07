@@ -166,7 +166,7 @@ namespace
 
         for (const auto& input: cases)
         {
-            auto result = JSON::Parse(OwnedTextBuffer {input.source});
+            auto result = JSON::Parse(input.source);
             if (result.has_value() != input.valid)
             {
                 std::cerr << "NGIN preflight disagreed with expected validity for '" << input.name << "'.\n";
@@ -188,7 +188,6 @@ namespace
                   << std::setw(12) << "Nodes"
                   << std::setw(14) << "Owned used"
                   << std::setw(14) << "Owned cap"
-                  << std::setw(14) << "Borrow cap"
                   << std::setw(14) << "Arena allocs"
                   << '\n';
 
@@ -201,17 +200,9 @@ namespace
             const ParseResources ownedResources {
                     .allocator = Memory::PolyAllocatorRef {ownedAllocator},
             };
-            auto owned = JSON::Parse(OwnedTextBuffer {input.source}, {}, {}, ownedResources);
+            auto owned = JSON::Parse(input.source, {}, {}, ownedResources);
 
-            CountingAllocator    borrowedAllocator;
-            const ParseResources borrowedResources {
-                    .allocator = Memory::PolyAllocatorRef {borrowedAllocator},
-            };
-            ParseScratch scratch;
-            auto         borrowed = JSON::ParseBorrowed(
-                    BorrowedTextView {input.source}, scratch, {}, {}, borrowedResources);
-
-            if (!owned || !borrowed)
+            if (!owned)
                 continue;
 
             std::cout << std::left << std::setw(20) << input.name
@@ -219,7 +210,6 @@ namespace
                       << std::setw(12) << owned.value().NodeCount()
                       << std::setw(14) << owned.value().MemoryUsed()
                       << std::setw(14) << owned.value().MemoryCommitted()
-                      << std::setw(14) << borrowed.value().MemoryCommitted()
                       << std::setw(14) << ownedAllocator.allocationCount
                       << '\n';
         }
@@ -260,7 +250,6 @@ int main()
         return 1;
 
     std::vector<BatchScale> scales;
-    ParseScratch            borrowedScratch;
 
     for (const auto& input: cases)
     {
@@ -272,30 +261,7 @@ int main()
                 "JSON/NGIN owning/" + input.name,
                 operations,
                 [inputPtr](BenchmarkContext& context) {
-                    auto result = JSON::Parse(OwnedTextBuffer {inputPtr->source});
-                    context.doNotOptimize(result.has_value());
-                    if (result)
-                        context.doNotOptimize(result.value().NodeCount());
-                });
-
-        RegisterBatched(
-                scales,
-                "JSON/NGIN borrowed/" + input.name,
-                operations,
-                [inputPtr, &borrowedScratch](BenchmarkContext& context) {
-                    auto result = JSON::ParseBorrowed(
-                            BorrowedTextView {inputPtr->source}, borrowedScratch);
-                    context.doNotOptimize(result.has_value());
-                    if (result)
-                        context.doNotOptimize(result.value().NodeCount());
-                });
-
-        RegisterBatched(
-                scales,
-                "JSON/NGIN in-situ/" + input.name,
-                operations,
-                [inputPtr](BenchmarkContext& context) {
-                    auto result = JSON::ParseInSitu(MutableTextBuffer {inputPtr->source});
+                    auto result = JSON::Parse(inputPtr->source);
                     context.doNotOptimize(result.has_value());
                     if (result)
                         context.doNotOptimize(result.value().NodeCount());
@@ -315,12 +281,12 @@ int main()
                 BatchSize(input->source.size()),
                 [input, &eventScratch, &eventHandler](BenchmarkContext& context) {
                     auto result = JSON::EventParser::ParseContiguous(
-                            BorrowedTextView {input->source}, eventHandler, eventScratch);
+                            input->source, eventHandler, eventScratch);
                     context.doNotOptimize(result.has_value());
                 });
     }
 
-    auto parsedForWrite = JSON::Parse(OwnedTextBuffer {cases[3].source});
+    auto parsedForWrite = JSON::Parse(cases[3].source);
     RegisterBatched(
             scales,
             "JSON/NGIN writer/array-100KiB",

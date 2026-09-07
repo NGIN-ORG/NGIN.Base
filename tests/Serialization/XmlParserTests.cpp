@@ -16,12 +16,7 @@ namespace
     using namespace NGIN::Serialization;
     namespace XML = NGIN::Serialization::XML;
 
-    [[nodiscard]] auto Parse(std::string_view         source,
-                             const XML::ParseOptions& options = {},
-                             const ParseLimits&       limits  = {})
-    {
-        return XML::Parse(OwnedTextBuffer {source}, options, limits);
-    }
+    using XML::Parse;
 }// namespace
 
 TEST_CASE("XML parser exposes allocation-free semantic queries", "[serialization][xml]")
@@ -45,27 +40,75 @@ TEST_CASE("XML parser exposes allocation-free semantic queries", "[serialization
     CHECK(count == 2);
 }
 
-TEST_CASE("XML owning and borrowed documents make source lifetime explicit", "[serialization][xml][ownership]")
+TEST_CASE("XML documents survive temporary input and document moves", "[serialization][xml][ownership]")
 {
-    auto owned = XML::Parse(OwnedTextBuffer {std::string {"<root><child/></root>"}});
+    auto owned = XML::Parse(std::string {"<root><child/></root>"});
     REQUIRE(owned);
     const auto    rootBeforeMove = owned.value().Root();
     XML::Document moved          = std::move(owned.value());
     CHECK(rootBeforeMove.FirstChild("child"));
     CHECK(moved.Root().FirstChild("child"));
-
-    std::string  source = "<borrowed value=\"yes\"/>";
-    ParseScratch scratch;
-    auto         borrowed = XML::ParseBorrowed(BorrowedTextView {source}, scratch);
-    REQUIRE(borrowed);
-    CHECK(borrowed.value().SourceText().data() == source.data());
 }
 
-TEST_CASE("XML in-situ parsing decodes into the owned source buffer",
-          "[serialization][xml][ownership][in-situ]")
+TEST_CASE("XML string-view parsing owns source and decoded strings", "[serialization][xml][ownership]")
 {
-    auto parsed = XML::ParseInSitu(
-            MutableTextBuffer {R"(<root value="A &amp; B">line&#10;two&#x21;</root>)"});
+    XML::Document document;
+    {
+        std::string       source   = R"(<root plain="original" escaped="A&amp;B">line&#10;two</root>)";
+        const std::string expected = source;
+        source += "trailing bytes outside the view";
+        auto parsed = XML::Parser::Parse(std::string_view {source.data(), expected.size()});
+        REQUIRE(parsed);
+        source.assign(source.size(), 'x');
+        CHECK(parsed.value().SourceText() == expected);
+        document = std::move(parsed.value());
+    }
+    CHECK(document.Root().Attribute("plain")->Value() == "original");
+    CHECK(document.Root().Attribute("escaped")->Value() == "A&B");
+    CHECK(*document.Root().FirstText() == "line\ntwo");
+}
+
+TEST_CASE("XML string-view syntax parsing owns exact source bytes", "[serialization][xml][ownership][syntax]")
+{
+    const std::string expected = "<?xml version='1.0'?>\r\n<root value='A&amp;B'/>\r\n";
+    auto              syntax   = [&] {
+        std::string source = expected + "trailing bytes outside the view";
+        return XML::Parser::ParseSyntax(std::string_view {source.data(), expected.size()});
+    }();
+    REQUIRE(syntax);
+    XML::SyntaxDocument moved  = std::move(syntax.value());
+    auto                output = XML::Writer::Write(moved);
+    REQUIRE(output);
+    CHECK(output.value() == expected);
+}
+
+TEST_CASE("XML string-view parsing rejects empty input and enforces copy limits", "[serialization][xml][limits]")
+{
+    CHECK_FALSE(XML::Parse(std::string_view {}));
+    CHECK_FALSE(XML::ParseSyntax(std::string_view {}));
+    CHECK_FALSE(XML::Parse("<root>"));
+    CHECK_FALSE(XML::ParseSyntax("<root>"));
+    ParseLimits limits;
+    for (bool inputLimit: {true, false})
+    {
+        limits = {};
+        if (inputLimit)
+            limits.maxInputBytes = 3;
+        else
+            limits.maxTotalMemoryBytes = 3;
+        auto semantic = XML::Parse("<root/>", {}, limits);
+        REQUIRE_FALSE(semantic);
+        CHECK(semantic.error().code == ParseErrorCode::LimitExceeded);
+        auto syntax = XML::ParseSyntax("<root/>", {}, limits);
+        REQUIRE_FALSE(syntax);
+        CHECK(syntax.error().code == ParseErrorCode::LimitExceeded);
+    }
+}
+
+TEST_CASE("XML parsing decodes entities while preserving source text",
+          "[serialization][xml][ownership]")
+{
+    auto parsed = XML::Parse(R"(<root value="A &amp; B">line&#10;two&#x21;</root>)");
     REQUIRE(parsed);
 
     const auto root  = parsed.value().Root();
@@ -76,10 +119,7 @@ TEST_CASE("XML in-situ parsing decodes into the owned source buffer",
     CHECK(*root.FirstText() == "line\ntwo!");
 
     const auto source = parsed.value().SourceText();
-    CHECK(value->Value().data() >= source.data());
-    CHECK(value->Value().data() < source.data() + source.size());
-    CHECK(root.FirstText()->data() >= source.data());
-    CHECK(root.FirstText()->data() < source.data() + source.size());
+    CHECK(source == R"(<root value="A &amp; B">line&#10;two&#x21;</root>)");
 }
 
 TEST_CASE("XML parser enforces one root and matching tags", "[serialization][xml][well-formed]")
@@ -166,7 +206,7 @@ TEST_CASE("XML syntax documents preserve comments and formatting byte-for-byte",
             "<?xml version=\"1.0\"?>\r\n"
             "<!-- heading -->\r\n"
             "<root x='1'>\r\n  <child />\r\n</root>\r\n";
-    auto syntax = XML::ParseSyntax(OwnedTextBuffer {source});
+    auto syntax = XML::ParseSyntax(source);
     REQUIRE(syntax);
     REQUIRE(syntax.value().Tokens().size() >= 6);
     auto written = XML::Writer::Write(syntax.value());
@@ -259,7 +299,7 @@ TEST_CASE("XML contiguous event parser delivers decoded semantic events",
     };
     ParseScratch scratch;
     auto         result = XML::EventParser::ParseContiguous(
-            BorrowedTextView {"<root x=\"1\">A&amp;B</root>"}, handler, scratch);
+            "<root x=\"1\">A&amp;B</root>", handler, scratch);
     REQUIRE(result);
     REQUIRE(kinds.size() == 4);
     CHECK(kinds[0] == XML::EventKind::StartElement);
@@ -286,9 +326,10 @@ TEST_CASE("XML event parser preserves semantic order, trivia, source identity, a
 
     XML::ParseOptions options;
     options.trivia = XML::TriviaPolicy::Preserve;
+    options.source = sourceId;
     ParseScratch scratch;
     auto         result = XML::EventParser::ParseContiguous(
-            BorrowedTextView {source, sourceId}, handler, scratch, options);
+            source, handler, scratch, options);
 
     REQUIRE(result);
     REQUIRE(events.size() == 9);
@@ -325,7 +366,7 @@ TEST_CASE("XML event parser reports duplicate attributes and resource limits",
     ParseScratch scratch;
 
     auto duplicate = XML::EventParser::ParseContiguous(
-            BorrowedTextView {R"(<root x="1" x="2"/>)"}, handler, scratch);
+            R"(<root x="1" x="2"/>)", handler, scratch);
     REQUIRE_FALSE(duplicate);
     CHECK(duplicate.error().code == ParseErrorCode::DuplicateName);
     CHECK(duplicate.error().related.has_value());
@@ -333,14 +374,14 @@ TEST_CASE("XML event parser reports duplicate attributes and resource limits",
     ParseLimits limits;
     limits.maxDepth = 1;
     auto depth      = XML::EventParser::ParseContiguous(
-            BorrowedTextView {"<root><child/></root>"}, handler, scratch, {}, limits);
+            "<root><child/></root>", handler, scratch, {}, limits);
     REQUIRE_FALSE(depth);
     CHECK(depth.error().code == ParseErrorCode::DepthExceeded);
 
     limits          = {};
     limits.maxNodes = 1;
     auto nodes      = XML::EventParser::ParseContiguous(
-            BorrowedTextView {"<root><child/></root>"}, handler, scratch, {}, limits);
+            "<root><child/></root>", handler, scratch, {}, limits);
     REQUIRE_FALSE(nodes);
     CHECK(nodes.error().code == ParseErrorCode::LimitExceeded);
 }
@@ -353,7 +394,7 @@ TEST_CASE("XML event parser preserves handler control flow",
         return XML::EventAction::Stop(42);
     };
     auto stopped = XML::EventParser::ParseContiguous(
-            BorrowedTextView {"<root/>"}, stoppingHandler, scratch);
+            "<root/>", stoppingHandler, scratch);
     REQUIRE_FALSE(stopped);
     CHECK(stopped.error().code == ParseErrorCode::HandlerRejected);
     CHECK(stopped.error().consumerContext == 42);
@@ -374,7 +415,7 @@ TEST_CASE("XML memory accounting enforces retained DOM limits",
     ParseLimits limits;
     limits.maxTotalMemoryBytes = baseline.value().MemoryCommitted() - 1;
     auto limited               = XML::Parse(
-            OwnedTextBuffer {"<root><item/><item/><nested><value/></nested></root>"},
+            "<root><item/><item/><nested><value/></nested></root>",
             {},
             limits);
     REQUIRE_FALSE(limited);

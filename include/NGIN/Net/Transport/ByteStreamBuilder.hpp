@@ -17,11 +17,10 @@ namespace NGIN::Net::Transport
         /// @brief Constructs an empty byte-stream builder.
         ByteStreamBuilder() noexcept = default;
 
-        /// @brief Selects a TCP socket and borrows the driver used by the resulting stream.
-        ByteStreamBuilder& FromTcpSocket(TcpSocket&& socket, NetworkDriver& driver) noexcept
+        /// @brief Selects a TCP socket with its existing runtime binding.
+        ByteStreamBuilder& FromTcpSocket(TcpSocket&& socket) noexcept
         {
             m_socket    = std::move(socket);
-            m_driver    = &driver;
             m_hasSocket = true;
             return *this;
         }
@@ -29,13 +28,12 @@ namespace NGIN::Net::Transport
         /// @brief Consumes the selected socket and builds a TCP byte-stream adapter.
         [[nodiscard]] NGIN::Net::NetExpected<std::unique_ptr<IByteStream>> Build()
         {
-            if (!m_hasSocket || !m_driver)
+            if (!m_hasSocket)
             {
                 return NGIN::Utilities::Unexpected(NGIN::Net::NetError {NGIN::Net::NetErrorCode::Unknown, 0});
             }
-            std::unique_ptr<TcpByteStream> stream = std::make_unique<TcpByteStream>(std::move(m_socket), *m_driver);
+            std::unique_ptr<TcpByteStream> stream = std::make_unique<TcpByteStream>(std::move(m_socket));
             m_hasSocket                           = false;
-            m_driver                              = nullptr;
             std::unique_ptr<IByteStream> out      = std::move(stream);
             return out;
         }
@@ -43,22 +41,20 @@ namespace NGIN::Net::Transport
         /// @brief Consumes the selected socket and builds a length-prefixed message stream.
         [[nodiscard]] NGIN::Net::NetExpected<std::unique_ptr<Filters::LengthPrefixedMessageStream>> BuildLengthPrefixed()
         {
-            if (!m_hasSocket || !m_driver)
+            if (!m_hasSocket)
             {
                 return NGIN::Utilities::Unexpected(NGIN::Net::NetError {NGIN::Net::NetErrorCode::Unknown, 0});
             }
-            std::unique_ptr<TcpByteStream>                        base = std::make_unique<TcpByteStream>(std::move(m_socket), *m_driver);
+            std::unique_ptr<TcpByteStream>                        base = std::make_unique<TcpByteStream>(std::move(m_socket));
             std::unique_ptr<Filters::LengthPrefixedMessageStream> stream =
                     std::make_unique<Filters::LengthPrefixedMessageStream>(std::move(base));
             m_hasSocket                                               = false;
-            m_driver                                                  = nullptr;
             std::unique_ptr<Filters::LengthPrefixedMessageStream> out = std::move(stream);
             return out;
         }
 
     private:
-        TcpSocket      m_socket {};
-        NetworkDriver* m_driver {nullptr};
-        bool           m_hasSocket {false};
+        TcpSocket m_socket {};
+        bool      m_hasSocket {false};
     };
 }// namespace NGIN::Net::Transport

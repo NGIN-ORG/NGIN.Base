@@ -34,7 +34,7 @@ namespace NGIN::IO::detail
     class IocpNativeFileBackend final : public NativeFileBackend
     {
     public:
-        explicit IocpNativeFileBackend(const FileSystemDriver::Options&)
+        explicit IocpNativeFileBackend(const NGIN::IO::detail::FileSystemDriver::Options&)
         {
             m_completionPort = ::CreateIoCompletionPort(INVALID_HANDLE_VALUE, nullptr, 0, 0);
             if (m_completionPort == nullptr)
@@ -63,9 +63,9 @@ namespace NGIN::IO::detail
             }
         }
 
-        [[nodiscard]] FileSystemDriver::ActiveBackend GetActiveBackend() const noexcept override
+        [[nodiscard]] NGIN::IO::detail::FileSystemDriver::ActiveBackend GetActiveBackend() const noexcept override
         {
-            return m_initialized ? FileSystemDriver::ActiveBackend::NativeIocp : FileSystemDriver::ActiveBackend::None;
+            return m_initialized ? NGIN::IO::detail::FileSystemDriver::ActiveBackend::NativeIocp : NGIN::IO::detail::FileSystemDriver::ActiveBackend::None;
         }
 
         [[nodiscard]] bool Submit(NativeFileRequest request) noexcept override
@@ -283,10 +283,10 @@ namespace NGIN::IO::detail
         std::unordered_set<HANDLE> m_associatedHandles {};
     };
 
-    std::unique_ptr<NativeFileBackend> CreateNativeFileBackend(const FileSystemDriver::Options& options)
+    std::unique_ptr<NativeFileBackend> CreateNativeFileBackend(const NGIN::IO::detail::FileSystemDriver::Options& options)
     {
         auto backend = std::make_unique<IocpNativeFileBackend>(options);
-        if (backend->GetActiveBackend() != FileSystemDriver::ActiveBackend::None)
+        if (backend->GetActiveBackend() != NGIN::IO::detail::FileSystemDriver::ActiveBackend::None)
         {
             return backend;
         }

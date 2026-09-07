@@ -13,8 +13,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
         return NGIN::Serialization::JSON::EventAction::Continue();
     };
     auto result = NGIN::Serialization::JSON::EventParser::ParseContiguous(
-            NGIN::Serialization::BorrowedTextView {
-                    std::string_view {reinterpret_cast<const char*>(data), size}},
+            std::string_view {reinterpret_cast<const char*>(data), size},
             handler,
             scratch);
     (void)result;
