@@ -11,29 +11,29 @@
 #include <NGIN/Net/Types/SocketOptions.hpp>
 
 #if defined(NGIN_PLATFORM_WINDOWS)
-  #include <winsock2.h>
-  #include <ws2tcpip.h>
-  #include <mswsock.h>
+#include <mswsock.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #else
-  #include <arpa/inet.h>
-  #include <errno.h>
-  #include <fcntl.h>
-  #include <netinet/in.h>
-  #include <netinet/tcp.h>
-  #include <sys/select.h>
-  #include <sys/socket.h>
-  #include <unistd.h>
+#include <arpa/inet.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <sys/select.h>
+#include <sys/socket.h>
+#include <unistd.h>
 #endif
 
 namespace NGIN::Net::detail
 {
 #if defined(NGIN_PLATFORM_WINDOWS)
-    using NativeSocket = SOCKET;
+    using NativeSocket                         = SOCKET;
     constexpr NativeSocket InvalidNativeSocket = INVALID_SOCKET;
-    using AcceptExFn = BOOL (PASCAL *)(SOCKET, SOCKET, PVOID, DWORD, DWORD, DWORD, LPDWORD, LPOVERLAPPED);
-    using ConnectExFn = BOOL (PASCAL *)(SOCKET, const sockaddr*, int, PVOID, DWORD, LPDWORD, LPOVERLAPPED);
+    using AcceptExFn                           = BOOL(PASCAL*)(SOCKET, SOCKET, PVOID, DWORD, DWORD, DWORD, LPDWORD, LPOVERLAPPED);
+    using ConnectExFn                          = BOOL(PASCAL*)(SOCKET, const sockaddr*, int, PVOID, DWORD, LPDWORD, LPOVERLAPPED);
 #else
-    using NativeSocket = int;
+    using NativeSocket                         = int;
     constexpr NativeSocket InvalidNativeSocket = -1;
 #endif
 
@@ -41,17 +41,17 @@ namespace NGIN::Net::detail
 
     [[nodiscard]] NetError MapError(int native) noexcept;
     [[nodiscard]] NetError LastError() noexcept;
-    [[nodiscard]] bool IsWouldBlock(const NetError& error) noexcept;
-    [[nodiscard]] bool IsInProgress(const NetError& error) noexcept;
+    [[nodiscard]] bool     IsWouldBlock(const NetError& error) noexcept;
+    [[nodiscard]] bool     IsInProgress(const NetError& error) noexcept;
 
     [[nodiscard]] NativeSocket ToNative(const SocketHandle& handle) noexcept;
     [[nodiscard]] SocketHandle FromNative(NativeSocket socket) noexcept;
 
     [[nodiscard]] SocketHandle CreateSocket(AddressFamily family,
-                                            int type,
-                                            int protocol,
-                                            bool nonBlocking,
-                                            NetError& error) noexcept;
+                                            int           type,
+                                            int           protocol,
+                                            bool          nonBlocking,
+                                            NetError&     error) noexcept;
 
     [[nodiscard]] bool SetNonBlocking(SocketHandle& handle, bool value) noexcept;
     [[nodiscard]] bool SetReuseAddress(SocketHandle& handle, bool value) noexcept;
@@ -60,25 +60,23 @@ namespace NGIN::Net::detail
     [[nodiscard]] bool SetBroadcast(SocketHandle& handle, bool value) noexcept;
     [[nodiscard]] bool SetV6Only(SocketHandle& handle, bool value) noexcept;
 
-    [[nodiscard]] NetExpected<void> ApplySocketOptions(SocketHandle& handle,
-                                                       AddressFamily family,
+    [[nodiscard]] NetExpected<void> ApplySocketOptions(SocketHandle&        handle,
+                                                       AddressFamily        family,
                                                        const SocketOptions& options,
-                                                       bool isTcp,
-                                                       bool isUdp) noexcept;
+                                                       bool                 isTcp,
+                                                       bool                 isUdp) noexcept;
 
     [[nodiscard]] NetExpected<void> Shutdown(SocketHandle& handle, ShutdownMode mode) noexcept;
-    [[nodiscard]] bool CloseSocket(SocketHandle& handle) noexcept;
+    [[nodiscard]] bool              CloseSocket(SocketHandle& handle) noexcept;
 
-    [[nodiscard]] bool ToSockAddr(const Endpoint& endpoint, sockaddr_storage& storage, socklen_t& length) noexcept;
+    [[nodiscard]] bool     ToSockAddr(const Endpoint& endpoint, sockaddr_storage& storage, socklen_t& length) noexcept;
     [[nodiscard]] Endpoint FromSockAddr(const sockaddr_storage& storage, socklen_t length) noexcept;
 
     [[nodiscard]] NetExpected<void> CheckConnectResult(SocketHandle& handle) noexcept;
 
 #if defined(NGIN_PLATFORM_WINDOWS)
-    [[nodiscard]] AcceptExFn GetAcceptEx() noexcept;
-    [[nodiscard]] ConnectExFn GetConnectEx() noexcept;
-    [[nodiscard]] AddressFamily GetSocketFamily(SocketHandle& handle) noexcept;
-    [[nodiscard]] bool EnsureBoundForConnectEx(SocketHandle& handle, const Endpoint& remoteEndpoint) noexcept;
-    [[nodiscard]] bool IsV6Only(SocketHandle& handle) noexcept;
+    [[nodiscard]] AcceptExFn  GetAcceptEx(NativeSocket socket) noexcept;
+    [[nodiscard]] ConnectExFn GetConnectEx(NativeSocket socket) noexcept;
+    [[nodiscard]] bool        EnsureBoundForConnectEx(NativeSocket socket) noexcept;
 #endif
-}
+}// namespace NGIN::Net::detail

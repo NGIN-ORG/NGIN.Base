@@ -1,3 +1,4 @@
+#include <NGIN/Execution/detail/CompletionQueue.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <exception>
@@ -17,6 +18,10 @@ namespace
     class ManualTimerExecutor
     {
     public:
+        auto ReserveCompletion(NGIN::Execution::WorkItem item) noexcept
+        {
+            return m_completions.Reserve(std::move(item));
+        }
         ManualTimerExecutor()
         {
             m_ready.reserve(256);
@@ -37,6 +42,8 @@ namespace
 
         [[nodiscard]] bool RunOne() noexcept
         {
+            if (m_completions.RunOne())
+                return true;
             if (m_ready.empty())
             {
                 return false;
@@ -53,6 +60,7 @@ namespace
         }
 
     private:
+        NGIN::Execution::detail::CompletionQueue m_completions;
         std::vector<NGIN::Execution::WorkItem> m_ready;
         std::vector<NGIN::Execution::WorkItem> m_delayed;
     };

@@ -6,6 +6,11 @@
 #include <cstddef>
 #include <cstdint>
 
+namespace NGIN::Async
+{
+    class CancellationToken;
+}
+
 namespace NGIN::IO::detail
 {
     enum class NativeFileOperationKind : UInt8
@@ -49,11 +54,11 @@ namespace NGIN::IO::detail
     public:
         virtual ~NativeFileBackend() = default;
 
-        [[nodiscard]] virtual NGIN::IO::detail::FileSystemDriver::ActiveBackend GetActiveBackend() const noexcept          = 0;
-        [[nodiscard]] virtual bool                                              Submit(NativeFileRequest request) noexcept = 0;
+        [[nodiscard]] virtual NGIN::IO::detail::FileSystemDriver::ActiveBackend GetActiveBackend() const noexcept                                                              = 0;
+        [[nodiscard]] virtual bool                                              Submit(NativeFileRequest request, const NGIN::Async::CancellationToken& cancellation) noexcept = 0;
     };
 
-    [[nodiscard]] std::unique_ptr<NativeFileBackend> CreateNativeFileBackend(const NGIN::IO::detail::FileSystemDriver::Options& options);
+    [[nodiscard]] std::shared_ptr<NativeFileBackend> CreateNativeFileBackend(FileSystemDriver& driver);
     [[nodiscard]] NativeFileBackend*                 GetNativeFileBackend(NGIN::IO::detail::FileSystemDriver& driver) noexcept;
     [[nodiscard]] const NativeFileBackend*           GetNativeFileBackend(const NGIN::IO::detail::FileSystemDriver& driver) noexcept;
 }// namespace NGIN::IO::detail

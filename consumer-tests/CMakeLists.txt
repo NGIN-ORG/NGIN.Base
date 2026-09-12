@@ -4,7 +4,7 @@ project(NGINBaseConsumer LANGUAGES CXX)
 include(CTest)
 
 set(NGIN_BASE_CONSUMER_COMPONENTS
-  "Foundation;Execution;IO;Serialization;Crypto;Net;NetTLS"
+  "Foundation;Execution;IORuntime;IO;Serialization;Crypto;Net;NetTLS"
   CACHE STRING "NGIN.Base components exercised by the consumer matrix"
 )
 

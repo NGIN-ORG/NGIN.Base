@@ -1,4 +1,5 @@
 #include "SocketPlatform.hpp"
+#include "SocketState.hpp"
 
 #include <array>
 #include <atomic>
@@ -11,48 +12,6 @@ namespace NGIN::Net::detail
     {
         std::once_flag    s_wsaOnce;
         std::atomic<bool> s_wsaOk {false};
-        std::once_flag    s_extOnce;
-        AcceptExFn        s_acceptEx  = nullptr;
-        ConnectExFn       s_connectEx = nullptr;
-
-        void LoadExtensions() noexcept
-        {
-            if (!EnsureInitialized())
-            {
-                return;
-            }
-
-            const SOCKET probe = ::WSASocketW(AF_INET, SOCK_STREAM, IPPROTO_TCP, nullptr, 0, WSA_FLAG_OVERLAPPED);
-            if (probe == INVALID_SOCKET)
-            {
-                return;
-            }
-
-            DWORD bytes      = 0;
-            GUID  acceptGuid = WSAID_ACCEPTEX;
-            ::WSAIoctl(probe,
-                       SIO_GET_EXTENSION_FUNCTION_POINTER,
-                       &acceptGuid,
-                       sizeof(acceptGuid),
-                       &s_acceptEx,
-                       sizeof(s_acceptEx),
-                       &bytes,
-                       nullptr,
-                       nullptr);
-
-            GUID connectGuid = WSAID_CONNECTEX;
-            ::WSAIoctl(probe,
-                       SIO_GET_EXTENSION_FUNCTION_POINTER,
-                       &connectGuid,
-                       sizeof(connectGuid),
-                       &s_connectEx,
-                       sizeof(s_connectEx),
-                       &bytes,
-                       nullptr,
-                       nullptr);
-
-            ::closesocket(probe);
-        }
     }// namespace
 
     bool EnsureInitialized() noexcept
@@ -70,6 +29,16 @@ namespace NGIN::Net::detail
         NetErrorCode code = NetErrorCode::Unknown;
         switch (native)
         {
+            case WSAENOBUFS:
+            case ERROR_NOT_ENOUGH_MEMORY:
+                code = NetErrorCode::ResourceExhausted;
+                break;
+            case WSAEINVAL:
+                code = NetErrorCode::InvalidArgument;
+                break;
+            case WSAEAFNOSUPPORT:
+                code = NetErrorCode::AddressFamilyNotSupported;
+                break;
             case WSAEWOULDBLOCK:
                 code = NetErrorCode::WouldBlock;
                 break;
@@ -143,7 +112,13 @@ namespace NGIN::Net::detail
 
     SocketHandle FromNative(NativeSocket socket) noexcept
     {
-        return SocketHandle(static_cast<SocketHandle::NativeHandle>(socket));
+        try
+        {
+            return SocketHandle(static_cast<SocketHandle::NativeHandle>(socket));
+        } catch (const std::bad_alloc&)
+        {
+            return {};
+        }
     }
 
     SocketHandle CreateSocket(AddressFamily family,
@@ -172,6 +147,11 @@ namespace NGIN::Net::detail
         }
 
         SocketHandle handle = FromNative(sock);
+        if (!handle.IsOpen())
+        {
+            error = NetError {NetErrorCode::ResourceExhausted};
+            return {};
+        }
         if (!SetNonBlocking(handle, nonBlocking))
         {
             error = LastError();
@@ -187,7 +167,11 @@ namespace NGIN::Net::detail
     {
         const NativeSocket sock = ToNative(handle);
         u_long             mode = value ? 1UL : 0UL;
-        return ::ioctlsocket(sock, static_cast<long>(FIONBIO), &mode) == 0;
+        if (::ioctlsocket(sock, static_cast<long>(FIONBIO), &mode) != 0)
+            return false;
+        if (auto state = SocketHandleAccess::State(handle))
+            state->SetNonBlocking(value);
+        return true;
     }
 
     bool SetReuseAddress(SocketHandle& handle, bool value) noexcept
@@ -285,20 +269,6 @@ namespace NGIN::Net::detail
         return NGIN::Utilities::Unexpected(LastError());
     }
 
-    bool CloseSocket(SocketHandle& handle) noexcept
-    {
-        const NativeSocket sock = ToNative(handle);
-        if (sock == InvalidNativeSocket)
-        {
-            handle.Reset();
-            return true;
-        }
-
-        const int result = ::closesocket(sock);
-        handle.Reset();
-        return result == 0;
-    }
-
     bool ToSockAddr(const Endpoint& endpoint, sockaddr_storage& storage, socklen_t& length) noexcept
     {
         std::memset(&storage, 0, sizeof(storage));
@@ -369,40 +339,32 @@ namespace NGIN::Net::detail
         return NGIN::Utilities::Unexpected(MapError(error));
     }
 
-    AcceptExFn GetAcceptEx() noexcept
+    AcceptExFn GetAcceptEx(NativeSocket socket) noexcept
     {
-        std::call_once(s_extOnce, &LoadExtensions);
-        return s_acceptEx;
+        GUID       guid = WSAID_ACCEPTEX;
+        AcceptExFn function {};
+        DWORD      bytes {};
+        if (::WSAIoctl(socket, SIO_GET_EXTENSION_FUNCTION_POINTER, &guid, sizeof(guid),
+                       &function, sizeof(function), &bytes, nullptr, nullptr) != 0)
+            return nullptr;
+        return function;
     }
 
-    ConnectExFn GetConnectEx() noexcept
+    ConnectExFn GetConnectEx(NativeSocket socket) noexcept
     {
-        std::call_once(s_extOnce, &LoadExtensions);
-        return s_connectEx;
+        GUID        guid = WSAID_CONNECTEX;
+        ConnectExFn function {};
+        DWORD       bytes {};
+        if (::WSAIoctl(socket, SIO_GET_EXTENSION_FUNCTION_POINTER, &guid, sizeof(guid),
+                       &function, sizeof(function), &bytes, nullptr, nullptr) != 0)
+            return nullptr;
+        return function;
     }
 
-    AddressFamily GetSocketFamily(SocketHandle& handle) noexcept
+    bool EnsureBoundForConnectEx(NativeSocket sock) noexcept
     {
         sockaddr_storage storage {};
         int              length = static_cast<int>(sizeof(storage));
-        const auto       sock   = ToNative(handle);
-        if (::getsockname(sock, reinterpret_cast<sockaddr*>(&storage), &length) != 0)
-        {
-            return AddressFamily::V4;
-        }
-
-        if (storage.ss_family == AF_INET6)
-        {
-            return AddressFamily::V6;
-        }
-        return AddressFamily::V4;
-    }
-
-    bool EnsureBoundForConnectEx(SocketHandle& handle, const Endpoint& remoteEndpoint) noexcept
-    {
-        sockaddr_storage storage {};
-        int              length = static_cast<int>(sizeof(storage));
-        const auto       sock   = ToNative(handle);
         if (::getsockname(sock, reinterpret_cast<sockaddr*>(&storage), &length) != 0)
         {
             const int err = ::WSAGetLastError();
@@ -430,8 +392,12 @@ namespace NGIN::Net::detail
             }
         }
 
+        WSAPROTOCOL_INFOW protocol {};
+        int               protocolLength = sizeof(protocol);
+        if (::getsockopt(sock, SOL_SOCKET, SO_PROTOCOL_INFOW, reinterpret_cast<char*>(&protocol), &protocolLength) != 0)
+            return false;
         Endpoint local {};
-        if (remoteEndpoint.address.IsV6())
+        if (protocol.iAddressFamily == AF_INET6)
         {
             local.address = IpAddress::AnyV6();
         }
@@ -451,23 +417,4 @@ namespace NGIN::Net::detail
         return ::bind(sock, reinterpret_cast<sockaddr*>(&bindStorage), bindLength) == 0;
     }
 
-    bool IsV6Only(SocketHandle& handle) noexcept
-    {
-        const auto sock   = ToNative(handle);
-        int        value  = 0;
-        int        length = static_cast<int>(sizeof(value));
-        if (::getsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, reinterpret_cast<char*>(&value), &length) != 0)
-        {
-            return true;
-        }
-        return value != 0;
-    }
 }// namespace NGIN::Net::detail
-
-namespace NGIN::Net
-{
-    void SocketHandle::Close() noexcept
-    {
-        (void) detail::CloseSocket(*this);
-    }
-}// namespace NGIN::Net

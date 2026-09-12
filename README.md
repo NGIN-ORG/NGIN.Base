@@ -54,13 +54,13 @@ the async guide for completion, error, and cancellation handling.
 - `NGIN::Base::Shared`
 - `NGIN::Base`, the aggregate convenience target
 
-`<Component>` is one of `Foundation`, `Execution`, `IO`, `Serialization`,
+`<Component>` is one of `Foundation`, `Execution`, `IORuntime`, `IO`, `Serialization`,
 `Crypto`, `Net`, or `NetTLS`. Prefer the narrowest component that owns the APIs a target
 uses; the aggregate remains available for applications that need several areas.
 
 Source builds may select a component and its transitive dependencies with, for
 example, `-DNGIN_BASE_BUILD_COMPONENTS=Net`. The default value, `all`, builds
-all seven components. Tests, examples, benchmarks, and fuzzers intentionally
+all eight components. Tests, examples, benchmarks, and fuzzers intentionally
 enable the full graph.
 
 ## Build and test

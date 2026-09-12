@@ -1,0 +1,20 @@
+2026-09-11 initial mixed workload failure (before thread-pool fairness fix)
+
+The fixture uses four UDP tasks, a file read/write pair, two yielding tasks,
+and a runtime-owned timer root. The external-worker loaded native case ended
+with at least one UDP task making zero progress during the measurement. The
+process returned exit code 1. Its partial output is diagnostic only and excluded
+from accepted performance summaries:
+
+Mixed runtime workload: four 64-byte UDP exchanges, independent 64-KiB file read/write, two yield loops; runtime timer root
+mixed=0 continuations=runtime file_backend=1 samples=1000 delay_us=1000 timer_overshoot_p50_us=128.212 timer_overshoot_p95_us=166.213 timer_overshoot_p99_us=204.32 timer_overshoot_max_us=266.796 timer_overshoot_mean_us=127.967 cold_setup_open_us=893.217 elapsed_including_joins_us=1.12809e+06 join_drain_us=0.812 udp_exchanges=0 file_reads=0 file_writes=0 yield_callbacks=0 udp_exchanges_per_second=0 file_transfers_per_second=0
+mixed=1 continuations=runtime file_backend=1 samples=1000 delay_us=1000 timer_overshoot_p50_us=9.619 timer_overshoot_p95_us=29.937 timer_overshoot_p99_us=84.901 timer_overshoot_max_us=257.157 timer_overshoot_mean_us=13.2128 cold_setup_open_us=276.781 elapsed_including_joins_us=1.01334e+06 join_drain_us=29.56 udp_exchanges=75316 file_reads=11000 file_writes=10993 yield_callbacks=280630 udp_exchanges_per_second=74324.8 file_transfers_per_second=21703.6
+mixed=0 continuations=external_one_worker file_backend=1 samples=1000 delay_us=1000 timer_overshoot_p50_us=129.895 timer_overshoot_p95_us=174.945 timer_overshoot_p99_us=236.036 timer_overshoot_max_us=358.76 timer_overshoot_mean_us=132.494 cold_setup_open_us=271.521 elapsed_including_joins_us=1.13263e+06 join_drain_us=1.131 udp_exchanges=0 file_reads=0 file_writes=0 yield_callbacks=0 udp_exchanges_per_second=0 file_transfers_per_second=0
+mixed benchmark failed: a UDP worker made no progress
+
+Source inspection found that the pool always preferred completion delivery,
+then newest local work, before external injection. A self-rescheduling chain
+could starve other admitted work. The production fix rotates through completion,
+injected, oldest-local, and newest-local sources. Deterministic tests require
+all sources to progress within 512 callback invocations and verify RunOne can
+help the sole worker's local queue. The complete workload succeeds afterward.

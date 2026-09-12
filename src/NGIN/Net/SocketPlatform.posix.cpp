@@ -1,4 +1,5 @@
 #include "SocketPlatform.hpp"
+#include "SocketState.hpp"
 
 #include <array>
 #include <cstring>
@@ -35,6 +36,15 @@ namespace NGIN::Net::detail
             case EHOSTUNREACH:
 #endif
                 code = NetErrorCode::HostUnreachable;
+                break;
+            case ENOBUFS:
+            case ENOMEM:
+            case EMFILE:
+            case ENFILE:
+                code = NetErrorCode::ResourceExhausted;
+                break;
+            case EINVAL:
+                code = NetErrorCode::InvalidArgument;
                 break;
             case EMSGSIZE:
                 code = NetErrorCode::MessageTooLarge;
@@ -76,7 +86,13 @@ namespace NGIN::Net::detail
 
     SocketHandle FromNative(NativeSocket socket) noexcept
     {
-        return SocketHandle(static_cast<SocketHandle::NativeHandle>(socket));
+        try
+        {
+            return SocketHandle(static_cast<SocketHandle::NativeHandle>(socket));
+        } catch (const std::bad_alloc&)
+        {
+            return {};
+        }
     }
 
     SocketHandle CreateSocket(AddressFamily family,
@@ -99,6 +115,11 @@ namespace NGIN::Net::detail
         }
 
         SocketHandle handle = FromNative(sock);
+        if (!handle.IsOpen())
+        {
+            error = NetError {NetErrorCode::ResourceExhausted};
+            return {};
+        }
         if (!SetNonBlocking(handle, nonBlocking))
         {
             error = LastError();
@@ -119,7 +140,11 @@ namespace NGIN::Net::detail
             return false;
         }
         const int newFlags = value ? (flags | O_NONBLOCK) : (flags & ~O_NONBLOCK);
-        return ::fcntl(sock, F_SETFL, newFlags) == 0;
+        if (::fcntl(sock, F_SETFL, newFlags) != 0)
+            return false;
+        if (auto state = SocketHandleAccess::State(handle))
+            state->SetNonBlocking(value);
+        return true;
     }
 
     bool SetReuseAddress(SocketHandle& handle, bool value) noexcept
@@ -223,20 +248,6 @@ namespace NGIN::Net::detail
         return NGIN::Utilities::Unexpected(LastError());
     }
 
-    bool CloseSocket(SocketHandle& handle) noexcept
-    {
-        const NativeSocket sock = ToNative(handle);
-        if (sock == InvalidNativeSocket)
-        {
-            handle.Reset();
-            return true;
-        }
-
-        const int result = ::close(sock);
-        handle.Reset();
-        return result == 0;
-    }
-
     bool ToSockAddr(const Endpoint& endpoint, sockaddr_storage& storage, socklen_t& length) noexcept
     {
         std::memset(&storage, 0, sizeof(storage));
@@ -307,11 +318,3 @@ namespace NGIN::Net::detail
         return NGIN::Utilities::Unexpected(MapError(error));
     }
 }// namespace NGIN::Net::detail
-
-namespace NGIN::Net
-{
-    void SocketHandle::Close() noexcept
-    {
-        (void) detail::CloseSocket(*this);
-    }
-}// namespace NGIN::Net

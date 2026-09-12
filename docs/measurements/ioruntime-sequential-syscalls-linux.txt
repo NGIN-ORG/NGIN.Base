@@ -1,0 +1,27 @@
+2026-09-10, diagnostic counts only; strace overhead invalidates latency comparisons
+Command: strace -f -c -e trace=epoll_ctl,epoll_wait,eventfd2,write,read,futex IORuntimeBenchmarks
+One original process followed by one current process; both completed successfully.
+Same sequential workload as the five paired Release refresh runs.
+
+Original revision 203f704e97a704259ef2db1ee8c93bf92763a7e1:
+% time     seconds  usecs/call     calls    errors syscall
+------ ----------- ----------- --------- --------- ----------------
+ 99.60    4.382109          80     54324      1725 futex
+  0.40    0.017479          20       863           epoll_wait
+  0.00    0.000047          47         1           write
+  0.00    0.000041          10         4           read
+  0.00    0.000024          12         2           epoll_ctl
+------ ----------- ----------- --------- --------- ----------------
+100.00    4.399700          79     55194      1725 total
+
+Current after ownership and host integration:
+% time     seconds  usecs/call     calls    errors syscall
+------ ----------- ----------- --------- --------- ----------------
+ 85.25   12.287874          98    124457      4978 futex
+ 10.94    1.577503          78     20034           epoll_wait
+  1.70    0.244741          20     12021         1 read
+  1.21    0.174953          14     12017           write
+  0.89    0.128908          16      8011           epoll_ctl
+  0.00    0.000045          11         4           eventfd2
+------ ----------- ----------- --------- --------- ----------------
+100.00   14.414024          81    176544      4979 total

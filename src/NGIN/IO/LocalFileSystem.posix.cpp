@@ -24,6 +24,48 @@
 #include <unistd.h>
 #include <vector>
 
+namespace NGIN::IO::detail
+{
+    OpenedAsyncPosixFile::OpenedAsyncPosixFile(OpenedAsyncPosixFile&& other) noexcept
+        : path(std::move(other.path)), canRead(other.canRead), canWrite(other.canWrite), appendMode(other.appendMode)
+    {
+        fd = std::exchange(other.fd, -1);
+    }
+
+    OpenedAsyncPosixFile& OpenedAsyncPosixFile::operator=(OpenedAsyncPosixFile&& other) noexcept
+    {
+        if (this != &other)
+        {
+            path = std::move(other.path);
+            if (fd >= 0)
+                (void) ::close(fd);
+            fd         = std::exchange(other.fd, -1);
+            canRead    = other.canRead;
+            canWrite   = other.canWrite;
+            appendMode = other.appendMode;
+        }
+        return *this;
+    }
+
+    OpenedAsyncPosixFile::~OpenedAsyncPosixFile()
+    {
+        if (fd >= 0)
+            (void) ::close(fd);
+    }
+
+    LocalAsyncFileState::~LocalAsyncFileState()
+    {
+        if (fd >= 0)
+            (void) ::close(fd);
+    }
+
+    bool LocalAsyncFileState::NativeIsOpen() const noexcept
+    {
+        std::lock_guard lock(mutex);
+        return fd >= 0;
+    }
+}// namespace NGIN::IO::detail
+
 namespace NGIN::IO
 {
     namespace
@@ -1743,7 +1785,9 @@ namespace NGIN::IO
         AsyncTask<UIntSize> LocalAsyncFileRead(
                 const std::shared_ptr<void>& rawState, NGIN::Async::TaskContext& ctx, std::span<NGIN::Byte> destination)
         {
-            auto state      = std::static_pointer_cast<LocalAsyncFileState>(rawState);
+            auto state = std::static_pointer_cast<LocalAsyncFileState>(rawState);
+            if (auto valid = detail::ValidateFileTransfer(state->path, state->canRead, false, state->appendMode, destination.size()); !valid)
+                co_return NGIN::Utilities::Unexpected<IOError>(std::move(valid).error());
             auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [state, destination]() mutable noexcept {
                 return detail::LocalAsyncFileReadSync(*state, destination);
             });
@@ -1766,7 +1810,9 @@ namespace NGIN::IO
         AsyncTask<UIntSize> LocalAsyncFileWrite(
                 const std::shared_ptr<void>& rawState, NGIN::Async::TaskContext& ctx, std::span<const NGIN::Byte> source)
         {
-            auto state      = std::static_pointer_cast<LocalAsyncFileState>(rawState);
+            auto state = std::static_pointer_cast<LocalAsyncFileState>(rawState);
+            if (auto valid = detail::ValidateFileTransfer(state->path, state->canWrite, true, state->appendMode, source.size()); !valid)
+                co_return NGIN::Utilities::Unexpected<IOError>(std::move(valid).error());
             auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [state, source]() mutable noexcept {
                 return detail::LocalAsyncFileWriteSync(*state, source);
             });
@@ -1791,7 +1837,9 @@ namespace NGIN::IO
                                                  UInt64                       offset,
                                                  std::span<NGIN::Byte>        destination)
         {
-            auto state      = std::static_pointer_cast<LocalAsyncFileState>(rawState);
+            auto state = std::static_pointer_cast<LocalAsyncFileState>(rawState);
+            if (auto valid = detail::ValidateFileTransfer(state->path, state->canRead, false, state->appendMode, destination.size(), offset); !valid)
+                co_return NGIN::Utilities::Unexpected<IOError>(std::move(valid).error());
             auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [state, offset, destination]() mutable noexcept {
                 return detail::LocalAsyncFileReadAtSync(*state, offset, destination);
             });
@@ -1816,7 +1864,9 @@ namespace NGIN::IO
                                                   UInt64                       offset,
                                                   std::span<const NGIN::Byte>  source)
         {
-            auto state      = std::static_pointer_cast<LocalAsyncFileState>(rawState);
+            auto state = std::static_pointer_cast<LocalAsyncFileState>(rawState);
+            if (auto valid = detail::ValidateFileTransfer(state->path, state->canWrite, true, state->appendMode, source.size(), offset); !valid)
+                co_return NGIN::Utilities::Unexpected<IOError>(std::move(valid).error());
             auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [state, offset, source]() mutable noexcept {
                 return detail::LocalAsyncFileWriteAtSync(*state, offset, source);
             });
@@ -1887,17 +1937,22 @@ namespace NGIN::IO
             {
                 return false;
             }
-            std::lock_guard<std::mutex> guard(state->mutex);
-            return state->fd >= 0;
+            return !state->operations.IsClosing() && state->NativeIsOpen();
         }
 
         const AsyncFileHandle::Operations LocalAsyncFileOperations {
-                .read    = &LocalAsyncFileRead,
-                .write   = &LocalAsyncFileWrite,
-                .readAt  = &LocalAsyncFileReadAt,
-                .writeAt = &LocalAsyncFileWriteAt,
-                .flush   = &LocalAsyncFileFlush,
-                .close   = &LocalAsyncFileClose,
+                .read    = &detail::WithFileOperation<UIntSize, LocalAsyncFileState, detail::FileOperationGate::Kind::Position,
+                                                      &LocalAsyncFileRead, std::span<NGIN::Byte>>,
+                .write   = &detail::WithFileOperation<UIntSize, LocalAsyncFileState, detail::FileOperationGate::Kind::Position,
+                                                      &LocalAsyncFileWrite, std::span<const NGIN::Byte>>,
+                .readAt  = &detail::WithFileOperation<UIntSize, LocalAsyncFileState, detail::FileOperationGate::Kind::Independent,
+                                                      &LocalAsyncFileReadAt, UInt64, std::span<NGIN::Byte>>,
+                .writeAt = &detail::WithFileOperation<UIntSize, LocalAsyncFileState, detail::FileOperationGate::Kind::Independent,
+                                                      &LocalAsyncFileWriteAt, UInt64, std::span<const NGIN::Byte>>,
+                .flush   = &detail::WithFileOperation<void, LocalAsyncFileState, detail::FileOperationGate::Kind::Flush,
+                                                      &LocalAsyncFileFlush>,
+                .close   = &detail::WithFileOperation<void, LocalAsyncFileState, detail::FileOperationGate::Kind::Close,
+                                                      &LocalAsyncFileClose>,
                 .isOpen  = &LocalAsyncFileIsOpen,
         };
 #endif
@@ -2064,12 +2119,12 @@ namespace NGIN::IO
     [[nodiscard]] AsyncFileHandle detail::MakeAsyncPosixFileHandle(
             std::shared_ptr<NGIN::IO::detail::FileSystemDriver> driver, OpenedAsyncPosixFile opened)
     {
-        auto state      = std::make_shared<LocalAsyncFileState>();
-        state->driver   = std::move(driver);
-        state->path     = std::move(opened.path);
-        state->canRead  = opened.canRead;
-        state->canWrite = opened.canWrite;
-        state->fd       = opened.fd;
+        auto state        = std::make_shared<LocalAsyncFileState>(std::move(driver));
+        state->path       = std::move(opened.path);
+        state->canRead    = opened.canRead;
+        state->canWrite   = opened.canWrite;
+        state->appendMode = opened.appendMode;
+        state->fd         = std::exchange(opened.fd, -1);
         return AsyncFileHandle(std::move(state), &LocalAsyncFileOperations);
     }
 

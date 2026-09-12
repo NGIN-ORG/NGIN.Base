@@ -2,13 +2,16 @@
 /// @brief Lightweight type-erased reference to an executor/scheduler.
 #pragma once
 
+#include <cmath>
 #include <concepts>
 #include <coroutine>
 #include <limits>
 #include <new>
 #include <type_traits>
 
+#include <NGIN/Execution/CompletionReservation.hpp>
 #include <NGIN/Execution/ScheduleResult.hpp>
+#include <NGIN/Execution/TimerRegistration.hpp>
 #include <NGIN/Execution/WorkItem.hpp>
 #include <NGIN/Primitives.hpp>
 #include <NGIN/Time/MonotonicClock.hpp>
@@ -26,14 +29,23 @@ namespace NGIN::Execution
         /// @brief Type-erased immediate-execution callback.
         using ExecuteFn = ScheduleResult (*)(void*, WorkItem) noexcept;
         /// @brief Type-erased timed-execution callback.
-        using ExecuteAtFn = ScheduleResult (*)(void*, WorkItem, NGIN::Time::TimePoint) noexcept;
+        using ExecuteAtFn         = ScheduleResult (*)(void*, WorkItem, NGIN::Time::TimePoint) noexcept;
+        using ReserveCompletionFn = std::expected<CompletionReservation, ScheduleError> (*)(void*, WorkItem) noexcept;
+        using IsCurrentFn         = bool (*)(void*) noexcept;
+        using ScheduleTimerFn     = std::expected<TimerRegistration, ScheduleError> (*)(void*, WorkItem, NGIN::Time::TimePoint) noexcept;
 
         /// @brief Constructs an invalid executor reference.
         constexpr ExecutorRef() noexcept = default;
 
+        /// @brief Compares borrowed state and dispatch bindings, without comparing scheduler behavior.
+        friend constexpr bool operator==(const ExecutorRef&, const ExecutorRef&) noexcept = default;
+
         /// @brief Constructs a reference from borrowed state and dispatch callbacks.
-        constexpr ExecutorRef(void* self, ExecuteFn execute, ExecuteAtFn executeAt) noexcept
-            : m_self(self), m_execute(execute), m_executeAt(executeAt)
+        constexpr ExecutorRef(void* self, ExecuteFn execute, ExecuteAtFn executeAt,
+                              ReserveCompletionFn reserveCompletion = nullptr, IsCurrentFn isCurrent = nullptr,
+                              ScheduleTimerFn scheduleTimer = nullptr) noexcept
+            : m_self(self), m_execute(execute), m_executeAt(executeAt),
+              m_reserveCompletion(reserveCompletion), m_isCurrent(isCurrent), m_scheduleTimer(scheduleTimer)
         {
         }
 
@@ -55,13 +67,75 @@ namespace NGIN::Execution
                     +[](void* state, WorkItem item, NGIN::Time::TimePoint timePoint) noexcept -> ScheduleResult {
                         TScheduler* schedulerPointer = static_cast<TScheduler*>(state);
                         return schedulerPointer->ExecuteAt(std::move(item), timePoint);
-                    });
+                    },
+                    []() constexpr -> ReserveCompletionFn {
+                        if constexpr (requires(TScheduler& value, WorkItem work) { value.ReserveCompletion(std::move(work)); })
+                            return +[](void* state, WorkItem item) noexcept {
+                                return static_cast<TScheduler*>(state)->ReserveCompletion(std::move(item));
+                            };
+                        else
+                            return nullptr;
+                    }(),
+                    +[](void* state) noexcept -> bool {
+                        if constexpr (requires(TScheduler& value) { { value.IsCurrent() } -> std::convertible_to<bool>; })
+                            return static_cast<TScheduler*>(state)->IsCurrent();
+                        else
+                            return false;
+                    },
+                    []() constexpr -> ScheduleTimerFn {
+                        if constexpr (requires(TScheduler& value, WorkItem work, NGIN::Time::TimePoint time) {
+                                          { value.ScheduleTimer(std::move(work), time) } -> std::same_as<std::expected<TimerRegistration, ScheduleError>>;
+                                      })
+                            return +[](void* state, WorkItem work, NGIN::Time::TimePoint time) noexcept {
+                                return static_cast<TScheduler*>(state)->ScheduleTimer(std::move(work), time);
+                            };
+                        else
+                            return nullptr;
+                    }());
         }
 
         /// @brief Returns whether state and both dispatch callbacks are present.
         [[nodiscard]] constexpr bool IsValid() const noexcept
         {
             return m_self != nullptr && m_execute != nullptr && m_executeAt != nullptr;
+        }
+
+        /// @brief Identifies execution on this executor, rather than merely its owner thread.
+        /// @return False when the executor cannot identify the current dispatch context.
+        [[nodiscard]] bool IsCurrent() const noexcept
+        {
+            return IsValid() && m_isCurrent && m_isCurrent(m_self);
+        }
+
+        /// @brief Reports support for delivery storage retained through executor shutdown.
+        [[nodiscard]] bool SupportsCompletionReservations() const noexcept { return IsValid() && m_reserveCompletion; }
+
+        /// @brief Reports support for prompt removal of canceled timer storage.
+        [[nodiscard]] bool SupportsTimerRemoval() const noexcept { return IsValid() && m_scheduleTimer; }
+
+        /// @brief Queues timed work and returns cancellation ownership of its queue record.
+        /// @return Rejected when this executor does not support removable timers.
+        [[nodiscard]] std::expected<TimerRegistration, ScheduleError> ScheduleTimer(
+                WorkItem work, NGIN::Time::TimePoint deadline) const noexcept
+        {
+            if (!IsValid())
+                return std::unexpected(ScheduleError::InvalidExecutor);
+            if (!m_scheduleTimer)
+                return std::unexpected(ScheduleError::Rejected);
+            return m_scheduleTimer(m_self, std::move(work), deadline);
+        }
+
+        /// @brief Reserves storage and capacity for one terminal continuation before OS admission.
+        /// @details The ticket remains dispatchable during executor shutdown; delivery never
+        /// allocates, rejects, or invokes inline. The executor must outlive delivered work.
+        /// Executors without tracked delivery support report Rejected before work can start.
+        [[nodiscard]] std::expected<CompletionReservation, ScheduleError> ReserveCompletion(WorkItem item) const noexcept
+        {
+            if (!IsValid())
+                return std::unexpected(ScheduleError::InvalidExecutor);
+            if (!m_reserveCompletion)
+                return std::unexpected(ScheduleError::Rejected);
+            return m_reserveCompletion(m_self, std::move(item));
         }
 
         /// @brief Submits a work item for immediate execution.
@@ -123,20 +197,24 @@ namespace NGIN::Execution
         [[nodiscard]] ScheduleResult ExecuteAfter(WorkItem item, const TUnit& delay) const noexcept
         {
             const double nsDouble = NGIN::Units::UnitCast<NGIN::Units::Nanoseconds>(delay).GetValue();
+            if (!std::isfinite(nsDouble))
+                return std::unexpected(ScheduleError::Rejected);
             if (nsDouble <= 0.0)
             {
                 return Execute(std::move(item));
             }
 
-            const NGIN::UInt64 now = NGIN::Time::MonotonicClock::Now().ToNanoseconds();
-            NGIN::UInt64       add = static_cast<NGIN::UInt64>(nsDouble);
+            const NGIN::UInt64 now     = NGIN::Time::MonotonicClock::Now().ToNanoseconds();
+            const NGIN::UInt64 maximum = (std::numeric_limits<NGIN::UInt64>::max)();
+            if (nsDouble >= static_cast<double>(maximum))
+                return ExecuteAt(std::move(item), NGIN::Time::TimePoint::FromNanoseconds(maximum));
+            NGIN::UInt64 add = static_cast<NGIN::UInt64>(nsDouble);
             if (static_cast<double>(add) < nsDouble)
             {
                 ++add;
             }
 
-            const NGIN::UInt64 maximum = (std::numeric_limits<NGIN::UInt64>::max)();
-            const NGIN::UInt64 target  = add > maximum - now ? maximum : now + add;
+            const NGIN::UInt64 target = add > maximum - now ? maximum : now + add;
             return ExecuteAt(std::move(item), NGIN::Time::TimePoint::FromNanoseconds(target));
         }
 
@@ -249,8 +327,11 @@ namespace NGIN::Execution
         }
 
     private:
-        void*       m_self {nullptr};
-        ExecuteFn   m_execute {nullptr};
-        ExecuteAtFn m_executeAt {nullptr};
+        void*               m_self {nullptr};
+        ExecuteFn           m_execute {nullptr};
+        ExecuteAtFn         m_executeAt {nullptr};
+        ReserveCompletionFn m_reserveCompletion {nullptr};
+        IsCurrentFn         m_isCurrent {nullptr};
+        ScheduleTimerFn     m_scheduleTimer {nullptr};
     };
 }// namespace NGIN::Execution

@@ -113,436 +113,282 @@ namespace NGIN::Async
     class AsyncGenerator final
     {
     public:
-        struct promise_type final
+        /// @brief Producer promise using the shared task frame and continuation machinery.
+        struct promise_type final : detail::PromiseRuntimeCommon
         {
-            NGIN::Sync::SpinLock         lock {};
-            NGIN::Execution::ExecutorRef exec {};
-            std::coroutine_handle<>      consumer {};
-            std::optional<T>             current {};
-            std::optional<E>             domainError {};
-            std::optional<AsyncFault>    fault {};
-#if NGIN_ASYNC_CAPTURE_EXCEPTIONS
-            std::exception_ptr exception {};
-#endif
-            bool completed {false};
-            bool canceled {false};
+            NGIN::Sync::SpinLock          lock {};
+            std::coroutine_handle<>       consumer {};
+            detail::PromiseRuntimeCommon* consumerTarget {};
+            void (*resumeConsumer)(std::coroutine_handle<>) noexcept {};
+            std::optional<T>          current {};
+            std::optional<E>          domainError {};
+            std::optional<AsyncFault> fault {};
+            bool                      completed {false};
+            bool                      canceled {false};
+            bool                      consumerActive {false};
 
-            /// @brief Constructs a promise without a bound executor.
             promise_type() = default;
-
-            /// @brief Constructs a promise using a task context's executor.
-            explicit promise_type(TaskContext& ctx) noexcept
-                : exec(ctx.GetExecutor())
-            {
-            }
-
-            /// @brief Constructs a promise from a leading task context and ignores coroutine arguments.
+            explicit promise_type(TaskContext& ctx) noexcept : detail::PromiseRuntimeCommon(ctx) {}
             template<typename... Args>
                 requires(sizeof...(Args) > 0)
-            explicit promise_type(TaskContext& ctx, Args&&...) noexcept
-                : promise_type(ctx)
-            {
-            }
+            explicit promise_type(TaskContext& ctx, Args&&...) noexcept : promise_type(ctx)
+            {}
 
-            /// @brief Returns the async generator owning this coroutine frame.
             AsyncGenerator get_return_object() noexcept
             {
                 return AsyncGenerator(std::coroutine_handle<promise_type>::from_promise(*this));
             }
-
-            /// @brief Suspends before production so consumers control advancement.
-            std::suspend_always initial_suspend() noexcept
-            {
-                return {};
-            }
+            std::suspend_always initial_suspend() noexcept { return {}; }
 
             struct YieldAwaiter final
             {
-                promise_type* promise {nullptr};
-
-                /// @brief Always suspends after publishing a yielded item.
-                bool await_ready() noexcept
+                bool await_ready() const noexcept { return false; }
+                void await_suspend(std::coroutine_handle<promise_type> self) const noexcept
                 {
-                    return false;
+                    self.promise().EndAdvance(self, false);
                 }
-
-                /// @brief Wakes the waiting consumer and transfers control appropriately.
-                std::coroutine_handle<> await_suspend(std::coroutine_handle<promise_type>) noexcept
-                {
-                    return promise->WakeConsumer();
-                }
-
-                /// @brief Performs no producer resume-time work.
-                void await_resume() noexcept {}
+                void await_resume() const noexcept {}
             };
 
             struct FinalAwaiter final
             {
-                /// @brief Always enters final suspension so the generator owns frame destruction.
-                bool await_ready() noexcept
+                bool await_ready() const noexcept { return false; }
+                void await_suspend(std::coroutine_handle<promise_type> self) const noexcept
                 {
-                    return false;
+                    self.promise().EndAdvance(self, true);
                 }
-
-                /// @brief Marks completion and wakes the waiting consumer.
-                void await_suspend(std::coroutine_handle<promise_type> handle) noexcept
-                {
-                    promise_type& promise = handle.promise();
-                    {
-                        NGIN::Sync::LockGuard guard(promise.lock);
-                        promise.completed = true;
-                    }
-                    std::coroutine_handle<> consumer = promise.WakeConsumer();
-                    if (consumer)
-                    {
-                        consumer.resume();
-                    }
-                }
-
-                /// @brief Performs no final resume-time work.
-                void await_resume() noexcept {}
+                void await_resume() const noexcept {}
             };
 
-            /// @brief Publishes a yielded value and suspends until the next consumer advance.
             YieldAwaiter yield_value(T value) noexcept(NGIN::Meta::TypeTraits<T>::IsNothrowMoveConstructible())
             {
-                {
-                    NGIN::Sync::LockGuard guard(lock);
-                    current = std::move(value);
-                }
-                return YieldAwaiter {this};
+                NGIN::Sync::LockGuard guard(lock);
+                current = std::move(value);
+                return {};
             }
-
-            /// @brief Completes a generator that reaches `co_return`.
             void return_void() noexcept {}
-
-            /// @brief Converts an escaping exception to an async fault, or terminates when exceptions are disabled.
             void unhandled_exception() noexcept
             {
 #if NGIN_ASYNC_HAS_EXCEPTIONS
-                NGIN::Sync::LockGuard guard(lock);
-                fault = MakeAsyncFault(AsyncFaultCode::UnhandledException);
+                SetFault(MakeAsyncFault(AsyncFaultCode::UnhandledException));
 #if NGIN_ASYNC_CAPTURE_EXCEPTIONS
-                exception = std::current_exception();
+                m_exception = std::current_exception();
 #endif
 #else
                 std::terminate();
 #endif
             }
+            FinalAwaiter final_suspend() noexcept { return {}; }
 
-            /// @brief Returns the awaiter that marks completion and wakes a consumer.
-            FinalAwaiter final_suspend() noexcept
-            {
-                return {};
-            }
-
-            /// @brief Marks the generator outcome as canceled.
             void SetCanceled() noexcept
             {
                 NGIN::Sync::LockGuard guard(lock);
                 canceled = true;
             }
-
-            /// @brief Stores a recoverable domain error.
             void SetDomainError(E error) noexcept
             {
                 NGIN::Sync::LockGuard guard(lock);
                 domainError = std::move(error);
             }
-
-            /// @brief Stores an unexpected asynchronous fault.
             void SetFault(AsyncFault asyncFault) noexcept
             {
                 NGIN::Sync::LockGuard guard(lock);
                 fault = std::move(asyncFault);
             }
-
-            /// @brief Marks completion and wakes the registered consumer.
-            void MarkFinishedAndResume(std::coroutine_handle<promise_type>) noexcept
+            void MarkFinishedAndResume(std::coroutine_handle<promise_type> self) noexcept
             {
-                {
-                    NGIN::Sync::LockGuard guard(lock);
-                    completed = true;
-                }
-
-                std::coroutine_handle<> consumer = WakeConsumer();
-                if (consumer)
-                {
-                    consumer.resume();
-                }
+                EndAdvance(self, true);
             }
 
-            /// @brief Removes and schedules the registered consumer continuation.
-            /// @return Direct continuation, or `std::noop_coroutine()` when scheduled through an executor.
-            std::coroutine_handle<> WakeConsumer() noexcept
+            // A consumer can leave only at a producer yield or terminal boundary.
+            // End all producer-frame access before publishing that boundary.
+            void EndAdvance(std::coroutine_handle<promise_type> self, bool terminal) noexcept
             {
-                std::coroutine_handle<>      toResume {};
-                NGIN::Execution::ExecutorRef executor {};
+                std::coroutine_handle<>       awaiting;
+                detail::PromiseRuntimeCommon* target;
+                void (*resume)(std::coroutine_handle<>) noexcept;
                 {
                     NGIN::Sync::LockGuard guard(lock);
-                    toResume = consumer;
-                    consumer = {};
-                    executor = exec;
+                    completed = terminal;
+                    m_finished.store(terminal, std::memory_order_release);
+                    awaiting = std::exchange(consumer, {});
+                    target   = std::exchange(consumerTarget, nullptr);
+                    resume   = std::exchange(resumeConsumer, nullptr);
                 }
-
-                if (toResume && executor.IsValid())
-                {
-                    const NGIN::Execution::ScheduleResult result = executor.Execute(toResume);
-                    if (result)
-                        return std::noop_coroutine();
-                }
-
-                return toResume;
+                assert(awaiting && target && resume);
+                m_taskContinuation.Reset();
+                const bool active = m_executionReferenceActive.exchange(false, std::memory_order_acq_rel);
+                assert(active);
+                (void) active;
+                ReleaseFrameReference(self);
+                target->QueueContinuation(NGIN::Execution::WorkItem([awaiting, resume] { resume(awaiting); }));
             }
         };
 
-        /// @brief Coroutine handle type owned by the generator.
+        /// @brief Native producer coroutine handle.
         using handle_type = std::coroutine_handle<promise_type>;
 
         /// @brief Constructs an empty generator.
         AsyncGenerator() noexcept = default;
-
-        /// @brief Takes ownership of an async-generator coroutine handle.
-        explicit AsyncGenerator(handle_type handle) noexcept
-            : m_handle(handle)
-        {
-        }
-
-        /// @brief Transfers ownership of a coroutine frame.
-        AsyncGenerator(AsyncGenerator&& other) noexcept
-            : m_handle(other.m_handle)
-        {
-            other.m_handle = {};
-        }
-
-        /// @brief Destroys the current frame and transfers ownership of another frame.
+        /// @brief Takes ownership of a newly created producer frame.
+        explicit AsyncGenerator(handle_type handle) noexcept : m_handle(handle) {}
+        /// @brief Transfers the generator's ownership without invalidating existing advances.
+        AsyncGenerator(AsyncGenerator&& other) noexcept : m_handle(std::exchange(other.m_handle, {})) {}
         AsyncGenerator& operator=(AsyncGenerator&& other) noexcept
         {
             if (this != &other)
             {
                 Reset();
-                m_handle       = other.m_handle;
-                other.m_handle = {};
+                m_handle = std::exchange(other.m_handle, {});
             }
             return *this;
         }
-
-        /// @brief Async generators are non-copyable because they uniquely own a coroutine frame.
-        AsyncGenerator(const AsyncGenerator&) = delete;
-        /// @brief Async generators are non-copy-assignable because they uniquely own a coroutine frame.
+        AsyncGenerator(const AsyncGenerator&)            = delete;
         AsyncGenerator& operator=(const AsyncGenerator&) = delete;
+        /// @brief Releases ownership; an existing Next keeps its producer alive through completion.
+        ~AsyncGenerator() { Reset(); }
 
-        /// @brief Destroys the owned coroutine frame.
-        ~AsyncGenerator()
+        /// @brief Advances the generator on its executor and returns the next item or end marker.
+        /// @details Snapshots frame ownership before returning the cold task. Only one Next may
+        /// advance or consume a result at a time. Cancellation waits for producer quiescence at
+        /// its next yield or terminal boundary; uncancelable producer work must finish naturally.
+        [[nodiscard]] Task<GeneratorNext<T>, E> Next(TaskContext& ctx)
         {
-            Reset();
+            return NextImpl(ctx, FrameOwner(m_handle));
         }
 
-        /// @brief Awaiter that coordinates one producer advance with one consumer continuation.
+    private:
+        class FrameOwner final
+        {
+        public:
+            explicit FrameOwner(handle_type handle) noexcept : m_handle(handle)
+            {
+                if (m_handle)
+                    m_handle.promise().RetainFrameReference();
+            }
+            FrameOwner(FrameOwner&& other) noexcept : m_handle(std::exchange(other.m_handle, {})) {}
+            FrameOwner(const FrameOwner&)            = delete;
+            FrameOwner& operator=(const FrameOwner&) = delete;
+            ~FrameOwner()
+            {
+                if (m_handle)
+                    m_handle.promise().ReleaseFrameReference(m_handle);
+            }
+            handle_type Get() const noexcept { return m_handle; }
+
+        private:
+            handle_type m_handle;
+        };
+
         struct AdvanceAwaiter final
         {
-            AsyncGenerator&          generator;
-            TaskContext&             context;
-            CancellationRegistration cancellationRegistration {};
+            handle_type               producer;
+            TaskContext&              context;
+            std::optional<AsyncFault> fault;
+            bool                      claimed {false};
 
-            /// @brief Returns whether an outcome is already available without resuming the producer.
-            bool await_ready() const noexcept
+            ~AdvanceAwaiter()
             {
-                if (context.IsCancellationRequested())
+                if (claimed)
                 {
-                    return true;
+                    NGIN::Sync::LockGuard guard(producer.promise().lock);
+                    producer.promise().consumerActive = false;
                 }
-
-                if (!generator.m_handle)
-                {
-                    return true;
-                }
-
-                promise_type&         promise = generator.m_handle.promise();
-                NGIN::Sync::LockGuard guard(promise.lock);
-                return promise.current.has_value() || promise.domainError.has_value() || promise.fault.has_value() ||
-                       promise.canceled || promise.completed;
             }
+            bool await_ready() const noexcept { return false; }
 
-            /// @brief Registers the consumer and transfers execution to the producer coroutine.
-            /// @details Concurrent consumers fault the generator with `InvalidContinuationState`.
-            std::coroutine_handle<> await_suspend(std::coroutine_handle<> awaiting) noexcept
+            template<typename ParentPromise>
+            std::coroutine_handle<> await_suspend(std::coroutine_handle<ParentPromise> awaiting) noexcept
             {
-                if (context.IsCancellationRequested())
-                {
+                static_assert(std::derived_from<ParentPromise, detail::PromiseRuntimeCommon>);
+                if (context.IsCancellationRequested() || !producer)
                     return awaiting;
-                }
-
-                if (!generator.m_handle)
-                {
-                    return awaiting;
-                }
-
-                promise_type& promise = generator.m_handle.promise();
-
-                std::coroutine_handle<>      concurrentConsumer {};
-                NGIN::Execution::ExecutorRef concurrentExecutor {};
+                promise_type& promise = producer.promise();
                 {
                     NGIN::Sync::LockGuard guard(promise.lock);
-                    if (promise.current.has_value() || promise.domainError.has_value() || promise.fault.has_value() ||
-                        promise.canceled || promise.completed)
+                    if (promise.consumerActive)
                     {
+                        fault = MakeAsyncFault(AsyncFaultCode::InvalidContinuationState);
                         return awaiting;
                     }
-
-                    if (promise.consumer)
-                    {
-                        promise.fault      = MakeAsyncFault(AsyncFaultCode::InvalidContinuationState);
-                        promise.completed  = true;
-                        concurrentConsumer = promise.consumer;
-                        concurrentExecutor = promise.exec;
-                        promise.consumer   = {};
-                    }
-                    else
-                    {
-                        promise.consumer = awaiting;
-                    }
-
-                    if (!promise.exec.IsValid())
-                    {
-                        promise.exec = context.GetExecutor();
-                    }
-
-                    if (!promise.exec.IsValid())
-                    {
-                        promise.fault     = MakeAsyncFault(AsyncFaultCode::InvalidTaskUsage);
-                        promise.completed = true;
-                        promise.consumer  = {};
+                    promise.consumerActive = true;
+                    claimed                = true;
+                    if (promise.current || promise.domainError || promise.fault || promise.canceled || promise.completed)
                         return awaiting;
-                    }
                 }
-
-                if (concurrentConsumer)
+                if (!awaiting.promise().m_taskContinuation.IsValid())
                 {
-                    if (concurrentExecutor.IsValid())
-                    {
-                        const NGIN::Execution::ScheduleResult result = concurrentExecutor.Execute(concurrentConsumer);
-                        if (!result)
-                            concurrentConsumer.resume();
-                    }
-                    else
-                    {
-                        concurrentConsumer.resume();
-                    }
+                    fault = detail::MakeSchedulingFault(AsyncFaultCode::SchedulerDispatchFailed,
+                                                        NGIN::Execution::ScheduleError::Rejected);
                     return awaiting;
                 }
-
-                const CancellationRegistrationResult registrationResult = context.GetCancellationToken().Register(
-                        cancellationRegistration,
-                        {},
-                        {},
-                        +[](void* rawPromise) noexcept -> bool {
-                            auto* promise = static_cast<promise_type*>(rawPromise);
-                            if (!promise)
-                            {
-                                return false;
-                            }
-
-                            std::coroutine_handle<>      toResume {};
-                            NGIN::Execution::ExecutorRef executor {};
-                            {
-                                NGIN::Sync::LockGuard guard(promise->lock);
-                                toResume          = promise->consumer;
-                                promise->consumer = {};
-                                executor          = promise->exec;
-                            }
-
-                            if (toResume)
-                            {
-                                if (executor.IsValid())
-                                {
-                                    const NGIN::Execution::ScheduleResult result = executor.Execute(toResume);
-                                    if (!result)
-                                        toResume.resume();
-                                }
-                                else
-                                {
-                                    toResume.resume();
-                                }
-                            }
-                            return false;
-                        },
-                        &promise);
-                if (!registrationResult)
+                if (!promise.m_executor.IsValid())
+                    promise.m_executor = context.GetExecutor();
+                if (!promise.m_executor.IsValid())
+                {
+                    fault = MakeAsyncFault(AsyncFaultCode::InvalidTaskUsage);
+                    return awaiting;
+                }
+                auto admission = promise.ReserveExecution();
+                if (!admission || !promise.m_taskContinuation.IsValid())
+                {
+                    fault = detail::MakeSchedulingFault(AsyncFaultCode::SchedulerDispatchFailed,
+                                                        admission ? NGIN::Execution::ScheduleError::Rejected : admission.error());
+                    return awaiting;
+                }
+                promise.AcquireExecutionReference();
+                awaiting.promise().RetainFrameReference();
                 {
                     NGIN::Sync::LockGuard guard(promise.lock);
-                    AsyncFault            registrationFault;
-                    registrationFault.code   = AsyncFaultCode::CancellationRegistrationFailed;
-                    registrationFault.native = static_cast<int>(registrationResult.error());
-                    promise.fault            = std::move(registrationFault);
-                    promise.completed        = true;
-                    promise.consumer         = {};
-                    return awaiting;
+                    promise.consumer       = awaiting;
+                    promise.consumerTarget = &awaiting.promise();
+                    promise.resumeConsumer = +[](std::coroutine_handle<> raw) noexcept {
+                        detail::PromiseRuntimeCommon::ResumeRetained(
+                                std::coroutine_handle<ParentPromise>::from_address(raw.address()));
+                    };
                 }
-
-                return generator.m_handle;
+                // Submission may run concurrently and retire this awaiter.
+                // The shared submission protocol owns rejection and discard delivery.
+                (void) promise.SubmitTracked(producer);
+                return std::noop_coroutine();
             }
-
-            /// @brief Performs no consumer resume-time work.
             void await_resume() const noexcept {}
         };
 
-        /// @brief Advances the generator and asynchronously returns its next item or end marker.
-        /// @details Domain errors, cancellation, and faults are propagated through the returned task.
-        [[nodiscard]] Task<GeneratorNext<T>, E> Next(TaskContext& ctx)
+        static Task<GeneratorNext<T>, E> NextImpl(TaskContext& ctx, FrameOwner owner)
         {
             using NextCompletion = Completion<GeneratorNext<T>, E>;
-
-            co_await AdvanceAwaiter {*this, ctx};
-
+            AdvanceAwaiter advance {owner.Get(), ctx, {}};
+            co_await advance;
+            if (advance.fault)
+                co_return NextCompletion::Faulted(*advance.fault);
             if (ctx.IsCancellationRequested())
-            {
                 co_return NextCompletion::Canceled();
-            }
-
-            if (!m_handle)
-            {
+            if (!owner.Get())
                 co_return GeneratorNext<T>::End();
-            }
 
-            promise_type&         promise = m_handle.promise();
+            promise_type&         promise = owner.Get().promise();
             NGIN::Sync::LockGuard guard(promise.lock);
-
-            if (promise.fault.has_value())
-            {
+            if (promise.fault)
                 co_return NextCompletion::Faulted(*promise.fault);
-            }
-
             if (promise.canceled)
-            {
                 co_return NextCompletion::Canceled();
-            }
-
-            if (promise.domainError.has_value())
-            {
+            if (promise.domainError)
                 co_return NextCompletion::DomainFailure(*promise.domainError);
-            }
-
-            if (promise.current.has_value())
+            if (promise.current)
             {
                 T value = std::move(*promise.current);
                 promise.current.reset();
                 co_return GeneratorNext<T>::Item(std::move(value));
             }
-
             co_return GeneratorNext<T>::End();
         }
 
-    private:
         void Reset() noexcept
         {
-            if (m_handle)
-            {
-                m_handle.destroy();
-                m_handle = {};
-            }
+            if (handle_type handle = std::exchange(m_handle, {}))
+                handle.promise().ReleaseFrameReference(handle);
         }
-
         handle_type m_handle {};
     };
 }// namespace NGIN::Async

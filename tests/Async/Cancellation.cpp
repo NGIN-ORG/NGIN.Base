@@ -1,4 +1,7 @@
+#include <NGIN/Execution/detail/CompletionQueue.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
+#include <memory>
 
 #include <atomic>
 #include <latch>
@@ -8,6 +11,8 @@
 #include "../Support/FailureInjection.hpp"
 #include <NGIN/Async/Cancellation.hpp>
 #include <NGIN/Async/Task.hpp>
+#include <NGIN/Execution/InlineScheduler.hpp>
+#include <NGIN/Execution/ThreadPoolScheduler.hpp>
 #include <NGIN/Execution/WorkItem.hpp>
 #include <NGIN/Units.hpp>
 
@@ -16,6 +21,10 @@ namespace
     class ManualTimerExecutor
     {
     public:
+        auto ReserveCompletion(NGIN::Execution::WorkItem item) noexcept
+        {
+            return m_completions.Reserve(std::move(item));
+        }
         NGIN::Execution::ScheduleResult Execute(NGIN::Execution::WorkItem item) noexcept
         {
             m_ready.push_back(std::move(item));
@@ -30,6 +39,8 @@ namespace
 
         [[nodiscard]] bool RunOne() noexcept
         {
+            if (m_completions.RunOne())
+                return true;
             if (m_ready.empty())
             {
                 return false;
@@ -55,8 +66,9 @@ namespace
         }
 
     private:
-        std::vector<NGIN::Execution::WorkItem> m_ready;
-        std::vector<NGIN::Execution::WorkItem> m_delayed;
+        NGIN::Execution::detail::CompletionQueue m_completions;
+        std::vector<NGIN::Execution::WorkItem>   m_ready;
+        std::vector<NGIN::Execution::WorkItem>   m_delayed;
     };
 
     NGIN::Async::Task<void> DelayForever(NGIN::Async::TaskContext& ctx)
@@ -101,6 +113,65 @@ namespace
         context->release->wait();
         return false;
     }
+
+    // A non-owning registered continuation needs a separately owned frame.
+    struct ResumeProbe final
+    {
+        struct promise_type final
+        {
+            ResumeProbe get_return_object() noexcept
+            {
+                return ResumeProbe(std::coroutine_handle<promise_type>::from_promise(*this));
+            }
+            std::suspend_always initial_suspend() noexcept { return {}; }
+            std::suspend_always final_suspend() noexcept { return {}; }
+            void                return_void() noexcept {}
+            void                unhandled_exception() noexcept { std::terminate(); }
+        };
+
+        explicit ResumeProbe(std::coroutine_handle<promise_type> coroutine) noexcept : handle(coroutine) {}
+        ResumeProbe(const ResumeProbe&)            = delete;
+        ResumeProbe& operator=(const ResumeProbe&) = delete;
+        ~ResumeProbe() { handle.destroy(); }
+
+        std::coroutine_handle<promise_type> handle;
+    };
+
+    ResumeProbe RecordResume(int& calls, std::thread::id& thread,
+                             NGIN::Async::CancellationRegistration* registration = nullptr)
+    {
+        if (registration)
+            registration->Reset();
+        ++calls;
+        thread = std::this_thread::get_id();
+        co_return;
+    }
+
+    class CompletionOnlyExecutor final
+    {
+    public:
+        explicit CompletionOnlyExecutor(std::pmr::memory_resource* resource = std::pmr::get_default_resource())
+            : completions(1, nullptr, nullptr, resource)
+        {
+        }
+
+        auto ReserveCompletion(NGIN::Execution::WorkItem item) noexcept
+        {
+            return completions.Reserve(std::move(item));
+        }
+        NGIN::Execution::ScheduleResult Execute(NGIN::Execution::WorkItem) noexcept
+        {
+            ++ordinarySubmissions;
+            return std::unexpected(NGIN::Execution::ScheduleError::Stopped);
+        }
+        NGIN::Execution::ScheduleResult ExecuteAt(NGIN::Execution::WorkItem item, NGIN::Time::TimePoint) noexcept
+        {
+            return Execute(std::move(item));
+        }
+
+        NGIN::Execution::detail::CompletionQueue completions;
+        std::atomic<int>                         ordinarySubmissions {0};
+    };
 }// namespace
 
 TEST_CASE("CreateLinkedCancellationSource cancels when any input cancels")
@@ -246,4 +317,218 @@ TEST_CASE("Cancellation registration reports node allocation failure")
     CHECK_FALSE(registration.IsValid());
     source.Cancel();
     CHECK(callbacks.load(std::memory_order_relaxed) == 0);
+}
+TEST_CASE("Cancellation can destroy a registration owner while registration returns", "[Async][Lifetime]")
+{
+    for (int iteration = 0; iteration < 512; ++iteration)
+    {
+        NGIN::Async::CancellationSource source;
+        auto                            registration = std::make_unique<NGIN::Async::CancellationRegistration>();
+        std::thread                     canceler([&] { source.Cancel(); });
+        const auto                      result = source.GetToken().Register(*registration, {}, {}, +[](void* owner) noexcept {
+            static_cast<std::unique_ptr<NGIN::Async::CancellationRegistration>*>(owner)->reset();
+            return false; }, &registration);
+        canceler.join();
+        REQUIRE(result);
+        REQUIRE_FALSE(registration);
+    }
+}
+
+TEST_CASE("Cancellation reserves continuation delivery before firing", "[Async][Affinity][Reservation]")
+{
+    NGIN::Tests::FailureMemoryResource    completionResource;
+    NGIN::Tests::FailureMemoryResource    registrationResource;
+    CompletionOnlyExecutor                scheduler(&completionResource);
+    NGIN::Async::CancellationSource       source(&registrationResource);
+    NGIN::Async::CancellationRegistration registration;
+    int                                   resumes = 0;
+    std::thread::id                       resumeThread;
+    auto                                  probe = RecordResume(resumes, resumeThread);
+    SECTION("cancellation follows registration") {}
+    SECTION("cancellation precedes registration")
+    {
+        source.Cancel();
+    }
+
+    REQUIRE(source.GetToken().Register(registration, NGIN::Execution::ExecutorRef::From(scheduler), probe.handle));
+    REQUIRE(scheduler.completions.Outstanding() == 1);
+    scheduler.completions.Close();
+    completionResource.FailNextAllocation();
+    registrationResource.FailNextAllocation();
+    std::thread canceler([&] { source.Cancel(); });
+    canceler.join();
+    registration.Reset();
+    REQUIRE(resumes == 0);
+    REQUIRE(scheduler.ordinarySubmissions == 0);
+    REQUIRE(scheduler.completions.RunOne());
+    REQUIRE(resumes == 1);
+    REQUIRE(resumeThread == std::this_thread::get_id());
+    REQUIRE_FALSE(scheduler.completions.RunOne());
+    REQUIRE(scheduler.completions.Outstanding() == 0);
+}
+
+TEST_CASE("Cancellation releases unused continuation reservations", "[Async][Reservation]")
+{
+    CompletionOnlyExecutor                scheduler;
+    NGIN::Async::CancellationSource       source;
+    NGIN::Async::CancellationRegistration registration;
+    std::atomic<int>                      callbacks {0};
+    SelfResetContext                      selfReset {&registration, &callbacks};
+    int                                   resumes = 0;
+    std::thread::id                       resumeThread;
+    auto                                  probe           = RecordResume(resumes, resumeThread);
+    NGIN::Async::CancellationCallback     callback        = &IncrementCallback;
+    void*                                 callbackContext = &callbacks;
+    bool                                  unregister      = false;
+    bool                                  shouldResume    = false;
+    SECTION("unregister before cancellation")
+    {
+        unregister = true;
+    }
+    SECTION("callback declines continuation") {}
+    SECTION("callback resets registration and declines continuation")
+    {
+        callback        = &SelfResetCallback;
+        callbackContext = &selfReset;
+    }
+    SECTION("callback resets registration and requests continuation")
+    {
+        callback = +[](void* context) noexcept {
+            (void) SelfResetCallback(context);
+            return true;
+        };
+        callbackContext = &selfReset;
+        shouldResume    = true;
+    }
+    REQUIRE(source.GetToken().Register(registration, NGIN::Execution::ExecutorRef::From(scheduler),
+                                       probe.handle, callback, callbackContext));
+    REQUIRE(scheduler.completions.Outstanding() == 1);
+    if (unregister)
+        registration.Reset();
+    source.Cancel();
+    source.Cancel();
+    REQUIRE(callbacks == (unregister ? 0 : 1));
+    REQUIRE(resumes == 0);
+    REQUIRE(scheduler.completions.RunOne() == shouldResume);
+    REQUIRE(resumes == (shouldResume ? 1 : 0));
+    REQUIRE(scheduler.completions.Outstanding() == 0);
+    REQUIRE(scheduler.ordinarySubmissions == 0);
+    auto recovered = scheduler.ReserveCompletion(NGIN::Execution::WorkItem([] {}));
+    REQUIRE(recovered);
+}
+
+TEST_CASE("Cancellation rejects unavailable continuation storage before publishing callbacks", "[Async][Reservation]")
+{
+    const bool alreadyCanceled = GENERATE(false, true);
+    {
+        NGIN::Tests::FailureMemoryResource     resource;
+        CompletionOnlyExecutor                 scheduler(&resource);
+        NGIN::Execution::InlineScheduler       inlineScheduler;
+        NGIN::Async::CancellationSource        source;
+        NGIN::Async::CancellationRegistration  registration;
+        NGIN::Execution::CompletionReservation occupied;
+        NGIN::Execution::ExecutorRef           executor = NGIN::Execution::ExecutorRef::From(scheduler);
+        auto                                   error    = NGIN::Async::CancellationRegistrationError::CompletionUnavailable;
+        std::atomic<int>                       callbacks {0};
+        int                                    resumes = 0;
+        std::thread::id                        resumeThread;
+        auto                                   probe = RecordResume(resumes, resumeThread);
+        if (alreadyCanceled)
+            source.Cancel();
+        SECTION("stopped executor")
+        {
+            scheduler.completions.Close();
+        }
+        SECTION("unsupported executor")
+        {
+            executor = NGIN::Execution::ExecutorRef::From(inlineScheduler);
+        }
+        SECTION("invalid executor")
+        {
+            executor = {};
+            error    = NGIN::Async::CancellationRegistrationError::InvalidTarget;
+        }
+        SECTION("completion capacity exhausted")
+        {
+            auto reservation = scheduler.ReserveCompletion(NGIN::Execution::WorkItem([] {}));
+            REQUIRE(reservation);
+            occupied = std::move(*reservation);
+            error    = NGIN::Async::CancellationRegistrationError::ResourceExhausted;
+        }
+        SECTION("completion allocation fails")
+        {
+            resource.FailNextAllocation();
+            error = NGIN::Async::CancellationRegistrationError::ResourceExhausted;
+        }
+        auto result = source.GetToken().Register(registration, executor, probe.handle, &IncrementCallback, &callbacks);
+        REQUIRE_FALSE(result);
+        REQUIRE(result.error() == error);
+        REQUIRE_FALSE(registration.IsValid());
+        source.Cancel();
+        REQUIRE(callbacks == 0);
+        REQUIRE(resumes == 0);
+        REQUIRE_FALSE(scheduler.completions.RunOne());
+        REQUIRE(scheduler.ordinarySubmissions == 0);
+        occupied.Reset();
+        REQUIRE(scheduler.completions.Outstanding() == 0);
+    }
+}
+
+TEST_CASE("Cancellation continuation admission is inert for an empty token", "[Async][Reservation]")
+{
+    CompletionOnlyExecutor                scheduler;
+    NGIN::Async::CancellationRegistration registration;
+    int                                   resumes = 0;
+    std::thread::id                       resumeThread;
+    auto                                  probe = RecordResume(resumes, resumeThread);
+    scheduler.completions.Close();
+    REQUIRE(NGIN::Async::CancellationToken {}.Register(
+            registration, NGIN::Execution::ExecutorRef::From(scheduler), probe.handle));
+    REQUIRE_FALSE(registration.IsValid());
+    REQUIRE(scheduler.completions.Outstanding() == 0);
+    REQUIRE(resumes == 0);
+}
+
+TEST_CASE("Concurrent cancellation and reset retire continuation storage exactly once", "[Async][Reservation][Lifetime]")
+{
+    for (int iteration = 0; iteration < 512; ++iteration)
+    {
+        CompletionOnlyExecutor                scheduler;
+        NGIN::Async::CancellationSource       source;
+        NGIN::Async::CancellationRegistration registration;
+        int                                   resumes = 0;
+        std::thread::id                       resumeThread;
+        auto                                  probe = RecordResume(resumes, resumeThread);
+        REQUIRE(source.GetToken().Register(registration, NGIN::Execution::ExecutorRef::From(scheduler), probe.handle));
+        std::thread canceler([&] { source.Cancel(); });
+        registration.Reset();
+        canceler.join();
+        REQUIRE(resumes == 0);
+        const bool delivered = scheduler.completions.RunOne();
+        REQUIRE(resumes == (delivered ? 1 : 0));
+        REQUIRE_FALSE(scheduler.completions.RunOne());
+        REQUIRE(scheduler.completions.Outstanding() == 0);
+        REQUIRE(scheduler.ordinarySubmissions == 0);
+    }
+}
+
+TEST_CASE("Cancellation delivers an admitted continuation while its thread pool drains", "[Async][Affinity][Reservation]")
+{
+    auto                                  scheduler = std::make_unique<NGIN::Execution::ThreadPoolScheduler>(1);
+    auto                                  executor  = NGIN::Execution::ExecutorRef::From(*scheduler);
+    NGIN::Async::CancellationSource       source;
+    NGIN::Async::CancellationRegistration registration;
+    int                                   resumes = 0;
+    std::thread::id                       resumeThread;
+    auto                                  probe = RecordResume(resumes, resumeThread, &registration);
+    REQUIRE(source.GetToken().Register(registration, executor, probe.handle));
+    std::thread shutdown([owner = std::move(scheduler)]() mutable { owner.reset(); });
+    const auto  shutdownThread = shutdown.get_id();
+    while (executor.Execute(NGIN::Execution::WorkItem([] {})))
+        std::this_thread::yield();
+    source.Cancel();
+    shutdown.join();
+    REQUIRE(resumes == 1);
+    REQUIRE(resumeThread != std::this_thread::get_id());
+    REQUIRE(resumeThread != shutdownThread);
 }

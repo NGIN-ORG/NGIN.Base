@@ -1,6 +1,7 @@
+#include "PerformanceCounter.hpp"
 #include <NGIN/Time/MonotonicClock.hpp>
 
-#include <Windows.h>
+#include <windows.h>
 
 namespace NGIN::Time
 {
@@ -17,7 +18,7 @@ namespace NGIN::Time
 
         const auto ticks     = static_cast<UInt64>(counter.QuadPart);
         const auto freqTicks = static_cast<UInt64>(frequency.QuadPart);
-        const auto nanos     = (ticks * 1'000'000'000ull) / freqTicks;
+        const auto nanos     = detail::PerformanceCounterNanoseconds(ticks, freqTicks);
         return TimePoint::FromNanoseconds(nanos);
     }
 }// namespace NGIN::Time

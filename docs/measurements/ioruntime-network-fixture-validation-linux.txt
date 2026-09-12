@@ -1,0 +1,22 @@
+2026-09-10, Linux/WSL2, 1024 loopback UDP sockets
+
+The initial scaling fixture used SocketOptions::reuseAddress=true. Both the
+original and current implementation completed one process but stalled in the
+1024-socket phase of a subsequent process; each process was terminated by the
+measurement harness after 60 seconds. Those partial measurements are invalid
+and are not part of the final five-process scaling series.
+
+A 30-second strace diagnostic of the original implementation showed the last
+packet received on a socket outside the selected eight receivers, followed by
+continued native polling and an unfinished task join. The diagnostic also
+reached its timeout; its timings are not performance data.
+
+Independent socket reproduction on the same host:
+  SO_REUSEADDR=true: 1024 receivers, 1003 distinct ports, 19 duplicated ports.
+  SO_REUSEADDR=false: 1024 receivers, 1024 distinct ports, 0 duplicated ports.
+
+The fixture now disables address reuse and verifies endpoint uniqueness before
+starting any receive. Five paired processes then completed for both original
+and current implementations. Each process used 8 and 1024 receivers, 8 active
+receivers, and 2000 send-to-joined-receive samples per population. The public
+socket defaults and production runtime were not changed by this fixture fix.

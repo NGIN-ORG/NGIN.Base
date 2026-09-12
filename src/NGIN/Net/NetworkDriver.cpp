@@ -1,2002 +1,591 @@
 #include "NetworkDriver.hpp"
-
+#include "../IO/RuntimeLoop.hpp"
 #include "SocketPlatform.hpp"
+#include "SocketState.hpp"
 
-#include <NGIN/Async/Cancellation.hpp>
 #include <NGIN/Async/Task.hpp>
-#include <NGIN/Async/TaskContext.hpp>
-#include <NGIN/Execution/ExecutorRef.hpp>
-#include <NGIN/Execution/ThisThread.hpp>
-
-#if defined(NGIN_PLATFORM_WINDOWS)
+#include <NGIN/Net/Sockets/TcpSocket.hpp>
 #include <NGIN/Net/Sockets/UdpSocket.hpp>
-#include <Windows.h>
-#include <ioapiset.h>
-#endif
 
-#include <algorithm>
-#include <array>
 #include <atomic>
-#include <cstdint>
-#include <cstring>
 #include <limits>
 #include <mutex>
-#include <new>
-#include <string>
-#include <string_view>
 #include <unordered_map>
-#include <utility>
-#include <vector>
 
-#if defined(__linux__)
-#include <sys/epoll.h>
-#include <unistd.h>
-#endif
-
-#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
-#include <sys/event.h>
-#include <sys/time.h>
-#include <unistd.h>
-#endif
-
+#if !defined(NGIN_PLATFORM_WINDOWS)
 namespace NGIN::Net
 {
     struct NetworkDriver::Impl final
     {
-        struct Waiter final
+        using Loop   = NGIN::IO::detail::RuntimeLoop;
+        using Poller = NGIN::IO::detail::RuntimePoller;
+        enum class Kind
         {
-            Impl*                                 owner {nullptr};
-            SocketHandle*                         handle {nullptr};
-            bool                                  wantRead {false};
-            bool                                  wantWrite {false};
-            NGIN::Execution::ExecutorRef          exec {};
-            std::coroutine_handle<>               continuation {};
-            NGIN::Async::CancellationRegistration cancellation {};
-            std::atomic<bool>                     done {false};
-            NetError                              error {};
+            Send,
+            Receive,
+            SendTo,
+            ReceiveFrom,
+            Connect,
+            Accept
         };
 
-#if defined(NGIN_PLATFORM_WINDOWS)
-        struct IocpOperation final
+        struct Operation final
         {
-            WSAOVERLAPPED                         overlapped {};
-            WSABUF                                buffer {};
-            SocketHandle*                         handle {nullptr};
-            NGIN::Execution::ExecutorRef          exec {};
-            std::coroutine_handle<>               continuation {};
-            NGIN::Async::CancellationRegistration cancellation {};
-            std::atomic<bool>                     done {false};
-            NetError                              error {};
-            DWORD                                 bytes {0};
-            DWORD                                 flags {0};
-            sockaddr_storage                      address {};
-            int                                   addressLength {0};
-            bool                                  skipCompletionOnSuccess {false};
+            Impl*                                  owner {};
+            Kind                                   kind {};
+            int                                    descriptor {-1};
+            bool                                   read {false};
+            bool                                   done {false};
+            bool                                   canceled {false};
+            bool                                   connectStarted {false};
+            bool                                   monitoringFailed {false};
+            std::uint64_t                          identifier {};
+            ConstByteSpan                          source;
+            ByteSpan                               destination;
+            Endpoint                               endpoint;
+            sockaddr_storage                       address {};
+            socklen_t                              addressLength {};
+            NGIN::UInt32                           bytes {};
+            std::shared_ptr<detail::SocketState>   accepted;
+            std::atomic<bool>                      cancellationRequested {false};
+            NGIN::Async::CancellationRegistration  cancellation;
+            NGIN::Async::CancellationRegistration  closeCancellation;
+            detail::SocketLease                    lease;
+            NGIN::Execution::CompletionReservation delivery;
+            NGIN::Execution::CompletionReservation control;
+            NGIN::Async::AsyncFault                fault;
+            NetError                               error;
         };
-#endif
 
-        explicit Impl(NGIN::IO::Runtime::NetworkOptions options)
-            : m_options(options)
+        struct SocketRegistration final : Loop::Handler
         {
-#if defined(NGIN_PLATFORM_WINDOWS)
-            m_iocp = ::CreateIoCompletionPort(INVALID_HANDLE_VALUE, nullptr, 0, 0);
-#endif
-#if defined(__linux__)
-            m_epollFd = ::epoll_create1(EPOLL_CLOEXEC);
-#endif
-#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
-            m_kqueueFd = ::kqueue();
-#endif
-        }
+            explicit SocketRegistration(Impl& backend) : owner(backend) {}
+            void Ready(const Poller::Event& event) noexcept override
+            {
+                std::shared_ptr<Operation> reading;
+                std::shared_ptr<Operation> writing;
+                {
+                    std::lock_guard lock(owner.m_mutex);
+                    if (event.ready & (Poller::Read | Poller::Error))
+                        reading = reader;
+                    if (event.ready & (Poller::Write | Poller::Error))
+                        writing = writer;
+                }
+                if (reading)
+                    owner.Advance(reading, false);
+                if (writing)
+                    owner.Advance(writing, false);
+            }
+            void Stop() noexcept override
+            {
+                std::shared_ptr<Operation> reading;
+                std::shared_ptr<Operation> writing;
+                {
+                    std::lock_guard lock(owner.m_mutex);
+                    reading = reader;
+                    writing = writer;
+                }
+                if (reading)
+                    owner.Advance(reading, true);
+                if (writing)
+                    owner.Advance(writing, true);
+            }
+            Impl&                      owner;
+            std::uint64_t              identifier {};
+            unsigned                   interests {};
+            std::shared_ptr<Operation> reader;
+            std::shared_ptr<Operation> writer;
+        };
 
+        explicit Impl(NGIN::IO::Runtime& runtime) : m_loop(NGIN::IO::detail::RuntimeAccess::Loop(runtime)) {}
         ~Impl()
         {
-#if defined(NGIN_PLATFORM_WINDOWS)
-            if (m_iocp)
-            {
-                ::CloseHandle(m_iocp);
-                m_iocp = nullptr;
-            }
-#endif
-#if defined(__linux__)
-            if (m_epollFd >= 0)
-            {
-                ::close(m_epollFd);
-                m_epollFd = -1;
-            }
-#endif
-#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
-            if (m_kqueueFd >= 0)
-            {
-                ::close(m_kqueueFd);
-                m_kqueueFd = -1;
-            }
-#endif
+            if (!m_sockets.empty())
+                std::terminate();
         }
+        void Stop() noexcept { m_stop.store(true, std::memory_order_release); }
 
-        /// Resumes inline when a live executor rejects the continuation so a
-        /// terminal network event can never strand its awaiting coroutine.
-        static void ResumeContinuation(
-                const NGIN::Execution::ExecutorRef executor,
-                const std::coroutine_handle<>      continuation) noexcept
+        // Caller owns m_mutex. All native calls use the admitted handle, never
+        // the public wrapper, which may have moved or requested close meanwhile.
+        bool Try(Operation& operation, bool cancel) noexcept
         {
-            if (!continuation)
+            operation.canceled = cancel || m_stop.load(std::memory_order_acquire) ||
+                                 operation.cancellationRequested.load(std::memory_order_acquire) ||
+                                 operation.lease.IsClosing();
+            if (operation.canceled || !operation.error.IsOk())
+                return true;
+            ssize_t result    = -1;
+            int     sendFlags = 0;
+#if defined(MSG_NOSIGNAL)
+            sendFlags |= MSG_NOSIGNAL;
+#endif
+            switch (operation.kind)
             {
-                return;
-            }
-            if (executor.IsValid())
-            {
-                const NGIN::Execution::ScheduleResult result = executor.Execute(continuation);
-                if (result)
-                {
-                    return;
+                case Kind::Send:
+                    result = ::send(operation.descriptor, operation.source.data(), operation.source.size(), sendFlags);
+                    break;
+                case Kind::Receive:
+                    result = ::recv(operation.descriptor, operation.destination.data(), operation.destination.size(), 0);
+                    break;
+                case Kind::SendTo:
+                    result = ::sendto(operation.descriptor, operation.source.data(), operation.source.size(), sendFlags,
+                                      reinterpret_cast<const sockaddr*>(&operation.address), operation.addressLength);
+                    break;
+                case Kind::ReceiveFrom:
+                    operation.addressLength = sizeof(operation.address);
+                    result                  = ::recvfrom(operation.descriptor, operation.destination.data(), operation.destination.size(), 0,
+                                                         reinterpret_cast<sockaddr*>(&operation.address), &operation.addressLength);
+                    if (result >= 0)
+                        operation.endpoint = detail::FromSockAddr(operation.address, operation.addressLength);
+                    break;
+                case Kind::Connect: {
+                    if (!operation.connectStarted)
+                    {
+                        result                   = ::connect(operation.descriptor, reinterpret_cast<const sockaddr*>(&operation.address),
+                                                             operation.addressLength);
+                        operation.connectStarted = true;
+                    }
+                    else
+                    {
+                        int       error  = 0;
+                        socklen_t length = sizeof(error);
+                        if (::getsockopt(operation.descriptor, SOL_SOCKET, SO_ERROR, &error, &length) != 0)
+                        {
+                            operation.error = detail::LastError();
+                            return true;
+                        }
+                        if (error == 0)
+                        {
+                            // Registration can observe an unconnected socket
+                            // before connect starts. Do not mistake that stale
+                            // readiness for an established connection.
+                            sockaddr_storage peer {};
+                            socklen_t        peerLength = sizeof(peer);
+                            if (::getpeername(operation.descriptor, reinterpret_cast<sockaddr*>(&peer), &peerLength) == 0)
+                                return true;
+                            if (errno == ENOTCONN)
+                                return false;
+                            operation.error = detail::LastError();
+                            return true;
+                        }
+                        operation.error = detail::MapError(error);
+                        if (detail::IsWouldBlock(operation.error) || detail::IsInProgress(operation.error))
+                        {
+                            operation.error = {};
+                            return false;
+                        }
+                        return true;
+                    }
+                    break;
+                }
+                case Kind::Accept: {
+#if defined(__linux__)
+                    const int accepted = ::accept4(operation.descriptor, nullptr, nullptr, SOCK_NONBLOCK | SOCK_CLOEXEC);
+#else
+                    const int accepted = ::accept(operation.descriptor, nullptr, nullptr);
+#endif
+                    if (accepted < 0)
+                        break;
+                    // The state was allocated before accept, so ownership cannot
+                    // be lost to allocation failure after accepting a connection.
+                    operation.accepted->Adopt(accepted);
+#if !defined(__linux__)
+                    const int flags = ::fcntl(accepted, F_GETFL, 0);
+                    if (flags < 0 || ::fcntl(accepted, F_SETFL, flags | O_NONBLOCK) < 0 ||
+                        ::fcntl(accepted, F_SETFD, FD_CLOEXEC) < 0)
+                    {
+                        operation.error = detail::LastError();
+                        (void) operation.accepted->RequestClose();
+                        return true;
+                    }
+#endif
+#if defined(SO_NOSIGPIPE)
+                    const int enabled = 1;
+                    if (::setsockopt(accepted, SOL_SOCKET, SO_NOSIGPIPE, &enabled, sizeof(enabled)) != 0)
+                    {
+                        operation.error = detail::LastError();
+                        (void) operation.accepted->RequestClose();
+                    }
+#endif
+                    return true;
                 }
             }
-            continuation.resume();
-        }
-
-        [[nodiscard]] bool RegisterWaiter(Waiter* waiter) noexcept
-        {
-            std::lock_guard guard(m_mutex);
-            try
+            if (result >= 0)
             {
-                m_waiters.push_back(waiter);
-#if defined(__linux__)
-                UpdateEpollOnRegisterLocked(waiter);
-#endif
-#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
-                UpdateKqueueOnRegisterLocked(waiter);
-#endif
-            } catch (const std::bad_alloc&)
+                operation.bytes = static_cast<NGIN::UInt32>(result);
+                return true;
+            }
+            const int nativeError = errno;
+            operation.error       = detail::MapError(nativeError);
+            if (nativeError == EINTR || detail::IsWouldBlock(operation.error) ||
+                (operation.kind == Kind::Connect && detail::IsInProgress(operation.error)))
             {
-                const std::vector<Waiter*>::iterator iterator =
-                        std::find(m_waiters.begin(), m_waiters.end(), waiter);
-                if (iterator != m_waiters.end())
-                {
-                    *iterator = m_waiters.back();
-                    m_waiters.pop_back();
-                }
+                operation.error = {};
                 return false;
             }
             return true;
         }
 
-        void UnregisterWaiter(Waiter* waiter)
+        // Retire the readiness registration before releasing its pinned handle.
+        // A failed interest update also terminates the other direction rather
+        // than leaving it stranded on an invalid registration.
+        std::shared_ptr<Operation> DetachLocked(const std::shared_ptr<Operation>& operation) noexcept
         {
-            std::lock_guard guard(m_mutex);
-            auto            it = std::find(m_waiters.begin(), m_waiters.end(), waiter);
-            if (it != m_waiters.end())
-            {
-                *it = m_waiters.back();
-                m_waiters.pop_back();
-            }
-#if defined(__linux__)
-            UpdateEpollOnUnregisterLocked(waiter);
-#endif
-#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
-            UpdateKqueueOnUnregisterLocked(waiter);
-#endif
-        }
-
-#if defined(NGIN_PLATFORM_WINDOWS)
-        static bool CancelIocp(void* ctx) noexcept
-        {
-            auto* op = static_cast<IocpOperation*>(ctx);
-            if (!op || !op->handle)
-            {
-                return false;
-            }
-
-            if (op->done.load(std::memory_order_acquire))
-            {
-                return false;
-            }
-
-            const auto sock = detail::ToNative(*op->handle);
-            if (sock == detail::InvalidNativeSocket)
-            {
-                return false;
-            }
-
-            ::CancelIoEx(reinterpret_cast<HANDLE>(sock), reinterpret_cast<LPOVERLAPPED>(&op->overlapped));
-            return false;
-        }
-
-        [[nodiscard]] static bool RegisterIocpCancellation(
-                const NGIN::Async::CancellationToken& token,
-                IocpOperation&                        operation) noexcept
-        {
-            const NGIN::Async::CancellationRegistrationResult result = token.Register(
-                    operation.cancellation,
-                    operation.exec,
-                    operation.continuation,
-                    &CancelIocp,
-                    &operation);
-            if (result)
-            {
-                return true;
-            }
-            operation.error = NetError {
-                    NetErrorCode::ResourceExhausted,
-                    static_cast<int>(result.error()),
-            };
-            return false;
-        }
-
-        bool EnsureAssociated(SocketHandle& handle) noexcept
-        {
-            if (!m_iocp)
-            {
-                return false;
-            }
-
-            const auto sock = detail::ToNative(handle);
-            if (sock == detail::InvalidNativeSocket)
-            {
-                return false;
-            }
-
-            const auto result = ::CreateIoCompletionPort(reinterpret_cast<HANDLE>(sock), m_iocp, 0, 0);
-            if (result != nullptr)
-            {
-                return true;
-            }
-
-            const DWORD err = ::GetLastError();
-            return err == ERROR_INVALID_PARAMETER;
-        }
-
-        bool TrySkipCompletionOnSuccess(SocketHandle& handle) noexcept
-        {
-            const auto sock = detail::ToNative(handle);
-            if (sock == detail::InvalidNativeSocket)
-            {
-                return false;
-            }
-
-            const UCHAR flags = FILE_SKIP_COMPLETION_PORT_ON_SUCCESS | FILE_SKIP_SET_EVENT_ON_HANDLE;
-            const BOOL  ok    = ::SetFileCompletionNotificationModes(reinterpret_cast<HANDLE>(sock), flags);
-            return ok != FALSE;
-        }
-
-        void CompleteOperation(IocpOperation& op, DWORD bytes, DWORD error) noexcept
-        {
-            bool expected = false;
-            if (!op.done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
-            {
-                return;
-            }
-
-            op.bytes = bytes;
-            if (error == 0)
-            {
-                op.error = NetError {NetErrorCode::Ok, 0};
-            }
-            else
-            {
-                op.error = detail::MapError(static_cast<int>(error));
-            }
-            op.cancellation.Reset();
-
-            ResumeContinuation(op.exec, op.continuation);
-        }
-
-        void CompleteOperationWithError(IocpOperation& op, DWORD bytes, NetError error) noexcept
-        {
-            bool expected = false;
-            if (!op.done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
-            {
-                return;
-            }
-
-            op.bytes = bytes;
-            op.error = error;
-            op.cancellation.Reset();
-
-            ResumeContinuation(op.exec, op.continuation);
-        }
-
-        void PumpIocp(DWORD timeoutMs) noexcept
-        {
-            if (!m_iocp)
-            {
-                return;
-            }
-
-            DWORD        bytes      = 0;
-            ULONG_PTR    key        = 0;
-            LPOVERLAPPED overlapped = nullptr;
-            const BOOL   ok         = ::GetQueuedCompletionStatus(m_iocp, &bytes, &key, &overlapped, timeoutMs);
-            if (!overlapped)
-            {
-                return;
-            }
-
-            DWORD error = ok ? 0 : ::GetLastError();
-            if (auto* op = reinterpret_cast<IocpOperation*>(overlapped))
-            {
-                CompleteOperation(*op, bytes, error);
-            }
-
-            for (int i = 0; i < 63; ++i)
-            {
-                bytes              = 0;
-                key                = 0;
-                overlapped         = nullptr;
-                const BOOL drainOk = ::GetQueuedCompletionStatus(m_iocp, &bytes, &key, &overlapped, 0);
-                if (!overlapped)
-                {
-                    break;
-                }
-                error = drainOk ? 0 : ::GetLastError();
-                if (auto* op = reinterpret_cast<IocpOperation*>(overlapped))
-                {
-                    CompleteOperation(*op, bytes, error);
-                }
-            }
-        }
-#endif
-
-        void CompleteWaiter(Waiter* waiter) noexcept
-        {
-            if (!waiter)
-            {
-                return;
-            }
-
-            bool expected = false;
-            if (!waiter->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
-            {
-                return;
-            }
-
-            UnregisterWaiter(waiter);
-            waiter->cancellation.Reset();
-
-            ResumeContinuation(waiter->exec, waiter->continuation);
-        }
-
-        void PollOnce(int timeoutMs)
-        {
-            thread_local int s_pollDepth = 0;
-            struct DepthGuard final
-            {
-                int& depth;
-                ~DepthGuard() { --depth; }
-            };
-
-            const bool useThreadLocal = (s_pollDepth == 0);
-            ++s_pollDepth;
-            DepthGuard depthGuard {s_pollDepth};
-
-#if defined(NGIN_PLATFORM_WINDOWS)
-            const DWORD waitMs = timeoutMs > 0 ? static_cast<DWORD>(timeoutMs) : 0;
-#endif
-            thread_local std::vector<Waiter*> tlsWaiters {};
-            std::vector<Waiter*>              localWaiters {};
-            auto&                             waiters = useThreadLocal ? tlsWaiters : localWaiters;
-            {
-                std::lock_guard guard(m_mutex);
-                if (!m_waiters.empty())
-                {
-                    waiters.clear();
-                    waiters.reserve(m_waiters.size());
-                    waiters.insert(waiters.end(), m_waiters.begin(), m_waiters.end());
-                }
-                else
-                {
-                    waiters.clear();
-                }
-            }
-
-            std::size_t validCount = 0;
-            for (auto* waiter: waiters)
-            {
-                if (!waiter || !waiter->handle)
-                {
-                    CompleteWaiter(waiter);
-                    continue;
-                }
-
-                const auto sock = detail::ToNative(*waiter->handle);
-                if (sock == detail::InvalidNativeSocket)
-                {
-                    CompleteWaiter(waiter);
-                    continue;
-                }
-
-                waiters[validCount++] = waiter;
-            }
-            waiters.resize(validCount);
-
-#if defined(NGIN_PLATFORM_WINDOWS)
-            if (waiters.empty())
-            {
-                PumpIocp(waitMs);
-                return;
-            }
-
-            PumpIocp(0);
-#else
-            if (waiters.empty())
-            {
-                if (timeoutMs > 0)
-                {
-                    NGIN::Execution::ThisThread::SleepFor(
-                            NGIN::Units::Milliseconds(static_cast<double>(timeoutMs)));
-                }
-                return;
-            }
-#endif
-
-#if defined(__linux__)
-            if (m_epollFd >= 0)
-            {
-                std::array<epoll_event, 64> events {};
-                const int                   timeout = timeoutMs > 0 ? timeoutMs : 0;
-                const int                   ready   = ::epoll_wait(m_epollFd,
-                                                                   events.data(),
-                                                                   static_cast<int>(events.size()),
-                                                                   timeout);
-                if (ready <= 0)
-                {
-                    return;
-                }
-
-                thread_local std::unordered_map<int, std::uint32_t> tlsReadyEvents {};
-                std::unordered_map<int, std::uint32_t>              localReadyEvents {};
-                auto&                                               readyEvents = useThreadLocal ? tlsReadyEvents : localReadyEvents;
-                readyEvents.clear();
-                readyEvents.reserve(static_cast<std::size_t>(ready));
-                for (int i = 0; i < ready; ++i)
-                {
-                    const auto& ev = events[static_cast<std::size_t>(i)];
-                    readyEvents[ev.data.fd] |= static_cast<std::uint32_t>(ev.events);
-                }
-
-                for (auto* waiter: waiters)
-                {
-                    if (!waiter || !waiter->handle)
-                    {
-                        CompleteWaiter(waiter);
-                        continue;
-                    }
-                    const auto sock = detail::ToNative(*waiter->handle);
-                    if (sock == detail::InvalidNativeSocket)
-                    {
-                        CompleteWaiter(waiter);
-                        continue;
-                    }
-
-                    const auto it = readyEvents.find(sock);
-                    if (it == readyEvents.end())
-                    {
-                        continue;
-                    }
-
-                    const auto eventsMask = it->second;
-                    const bool readyRead  = waiter->wantRead &&
-                                           (eventsMask & (EPOLLIN | EPOLLHUP | EPOLLERR | EPOLLRDHUP));
-                    const bool readyWrite = waiter->wantWrite && (eventsMask & (EPOLLOUT | EPOLLERR));
-                    if (!readyRead && !readyWrite)
-                    {
-                        continue;
-                    }
-
-                    CompleteWaiter(waiter);
-                }
-                return;
-            }
-#endif
-
-#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
-            if (m_kqueueFd >= 0)
-            {
-                std::array<kevent, 64> events {};
-                timespec               timeout {};
-                if (timeoutMs > 0)
-                {
-                    timeout.tv_sec  = timeoutMs / 1000;
-                    timeout.tv_nsec = (timeoutMs % 1000) * 1000000L;
-                }
-                const int ready = ::kevent(m_kqueueFd,
-                                           nullptr,
-                                           0,
-                                           events.data(),
-                                           static_cast<int>(events.size()),
-                                           &timeout);
-                if (ready <= 0)
-                {
-                    return;
-                }
-
-                struct KqueueReady final
-                {
-                    bool read {false};
-                    bool write {false};
-                };
-
-                thread_local std::unordered_map<int, KqueueReady> tlsReadyEvents {};
-                std::unordered_map<int, KqueueReady>              localReadyEvents {};
-                auto&                                             readyEvents = useThreadLocal ? tlsReadyEvents : localReadyEvents;
-                readyEvents.clear();
-                readyEvents.reserve(static_cast<std::size_t>(ready));
-                for (int i = 0; i < ready; ++i)
-                {
-                    const auto fd    = static_cast<int>(events[i].ident);
-                    auto&      entry = readyEvents[fd];
-                    if (events[i].filter == EVFILT_READ)
-                    {
-                        entry.read = true;
-                    }
-                    if (events[i].filter == EVFILT_WRITE)
-                    {
-                        entry.write = true;
-                    }
-                    if (events[i].flags & (EV_EOF | EV_ERROR))
-                    {
-                        entry.read  = true;
-                        entry.write = true;
-                    }
-                }
-
-                for (auto* waiter: waiters)
-                {
-                    if (!waiter || !waiter->handle)
-                    {
-                        CompleteWaiter(waiter);
-                        continue;
-                    }
-                    const auto sock = detail::ToNative(*waiter->handle);
-                    if (sock == detail::InvalidNativeSocket)
-                    {
-                        CompleteWaiter(waiter);
-                        continue;
-                    }
-
-                    const auto it = readyEvents.find(sock);
-                    if (it == readyEvents.end())
-                    {
-                        continue;
-                    }
-
-                    const bool readyRead  = waiter->wantRead && it->second.read;
-                    const bool readyWrite = waiter->wantWrite && it->second.write;
-                    if (!readyRead && !readyWrite)
-                    {
-                        continue;
-                    }
-
-                    CompleteWaiter(waiter);
-                }
-                return;
-            }
-#endif
-
-            fd_set readSet {};
-            fd_set writeSet {};
-            FD_ZERO(&readSet);
-            FD_ZERO(&writeSet);
-
-#if !defined(NGIN_PLATFORM_WINDOWS)
-            int maxFd = -1;
-#endif
-            for (auto* waiter: waiters)
-            {
-                if (!waiter || !waiter->handle)
-                {
-                    continue;
-                }
-                const auto sock = detail::ToNative(*waiter->handle);
-                if (sock == detail::InvalidNativeSocket)
-                {
-                    continue;
-                }
-                if (waiter->wantRead)
-                {
-                    FD_SET(sock, &readSet);
-                }
-                if (waiter->wantWrite)
-                {
-                    FD_SET(sock, &writeSet);
-                }
-#if !defined(NGIN_PLATFORM_WINDOWS)
-                if (sock > maxFd)
-                {
-                    maxFd = sock;
-                }
-#endif
-            }
-
-            timeval timeout {};
-            if (timeoutMs > 0)
-            {
-                timeout.tv_sec  = timeoutMs / 1000;
-                timeout.tv_usec = (timeoutMs % 1000) * 1000;
-            }
-
-#if defined(NGIN_PLATFORM_WINDOWS)
-            const int ready = ::select(0, &readSet, &writeSet, nullptr, &timeout);
-#else
-            const int ready = (maxFd >= 0) ? ::select(maxFd + 1, &readSet, &writeSet, nullptr, &timeout) : 0;
-#endif
-            if (ready <= 0)
-            {
-                return;
-            }
-
-            for (auto* waiter: waiters)
-            {
-                if (!waiter || !waiter->handle)
-                {
-                    CompleteWaiter(waiter);
-                    continue;
-                }
-                const auto sock = detail::ToNative(*waiter->handle);
-                if (sock == detail::InvalidNativeSocket)
-                {
-                    CompleteWaiter(waiter);
-                    continue;
-                }
-
-                const bool readyRead  = waiter->wantRead && FD_ISSET(sock, &readSet);
-                const bool readyWrite = waiter->wantWrite && FD_ISSET(sock, &writeSet);
-                if (!readyRead && !readyWrite)
-                {
-                    continue;
-                }
-
-                CompleteWaiter(waiter);
-            }
-        }
-
-        void Run()
-        {
-            const int timeoutMs = GetPollTimeoutMs();
-            while (!m_stop.load(std::memory_order_acquire))
-                PollOnce(timeoutMs);
-        }
-
-        void Stop() noexcept
-        {
-            m_stop.store(true, std::memory_order_release);
-        }
-
-        void Shutdown() noexcept
-        {
-            Stop();
-        }
-
-        NGIN::IO::Runtime::NetworkOptions m_options {};
-        std::mutex                        m_mutex {};
-        std::vector<Waiter*>              m_waiters {};
-        std::atomic<bool>                 m_stop {false};
-#if defined(NGIN_PLATFORM_WINDOWS)
-        HANDLE m_iocp {nullptr};
-#endif
-#if defined(__linux__)
-        struct EpollWatch final
-        {
-            std::uint32_t events {0};
-            int           readers {0};
-            int           writers {0};
-        };
-
-        int                                 m_epollFd {-1};
-        std::unordered_map<int, EpollWatch> m_epollWatches {};
-#endif
-#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
-        struct KqueueWatch final
-        {
-            int readers {0};
-            int writers {0};
-        };
-
-        int                                  m_kqueueFd {-1};
-        std::unordered_map<int, KqueueWatch> m_kqueueWatches {};
-#endif
-
-    private:
-#if defined(__linux__)
-        void UpdateEpollOnRegisterLocked(Waiter* waiter)
-        {
-            if (m_epollFd < 0 || !waiter || !waiter->handle)
-            {
-                return;
-            }
-
-            const int fd = detail::ToNative(*waiter->handle);
-            if (fd == detail::InvalidNativeSocket)
-            {
-                return;
-            }
-
-            auto&               watch      = m_epollWatches[fd];
-            const std::uint32_t prevEvents = watch.events;
-
-            if (waiter->wantRead)
-            {
-                ++watch.readers;
-            }
-            if (waiter->wantWrite)
-            {
-                ++watch.writers;
-            }
-
-            std::uint32_t events = 0;
-            if (watch.readers > 0)
-            {
-                events |= EPOLLIN | EPOLLRDHUP | EPOLLHUP | EPOLLERR;
-            }
-            if (watch.writers > 0)
-            {
-                events |= EPOLLOUT | EPOLLERR;
-            }
-
-            if (events == 0)
-            {
-                m_epollWatches.erase(fd);
-                return;
-            }
-
-            watch.events = events;
-            epoll_event ev {};
-            ev.events  = events;
-            ev.data.fd = fd;
-
-            const int op = (prevEvents == 0) ? EPOLL_CTL_ADD : EPOLL_CTL_MOD;
-            if (::epoll_ctl(m_epollFd, op, fd, &ev) != 0 && op == EPOLL_CTL_ADD)
-            {
-                m_epollWatches.erase(fd);
-            }
-        }
-
-        void UpdateEpollOnUnregisterLocked(Waiter* waiter) noexcept
-        {
-            if (m_epollFd < 0 || !waiter || !waiter->handle)
-            {
-                return;
-            }
-
-            const int fd = detail::ToNative(*waiter->handle);
-            if (fd == detail::InvalidNativeSocket)
-            {
-                return;
-            }
-
-            auto it = m_epollWatches.find(fd);
-            if (it == m_epollWatches.end())
-            {
-                return;
-            }
-
-            auto& watch = it->second;
-            if (waiter->wantRead && watch.readers > 0)
-            {
-                --watch.readers;
-            }
-            if (waiter->wantWrite && watch.writers > 0)
-            {
-                --watch.writers;
-            }
-
-            std::uint32_t events = 0;
-            if (watch.readers > 0)
-            {
-                events |= EPOLLIN | EPOLLRDHUP | EPOLLHUP | EPOLLERR;
-            }
-            if (watch.writers > 0)
-            {
-                events |= EPOLLOUT | EPOLLERR;
-            }
-
-            if (events == 0)
-            {
-                ::epoll_ctl(m_epollFd, EPOLL_CTL_DEL, fd, nullptr);
-                m_epollWatches.erase(it);
-                return;
-            }
-
-            watch.events = events;
-            epoll_event ev {};
-            ev.events  = events;
-            ev.data.fd = fd;
-            ::epoll_ctl(m_epollFd, EPOLL_CTL_MOD, fd, &ev);
-        }
-#endif
-#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
-        void UpdateKqueueOnRegisterLocked(Waiter* waiter)
-        {
-            if (m_kqueueFd < 0 || !waiter || !waiter->handle)
-            {
-                return;
-            }
-
-            const int fd = detail::ToNative(*waiter->handle);
-            if (fd == detail::InvalidNativeSocket)
-            {
-                return;
-            }
-
-            auto&     watch     = m_kqueueWatches[fd];
-            const int prevRead  = watch.readers;
-            const int prevWrite = watch.writers;
-
-            if (waiter->wantRead)
-            {
-                ++watch.readers;
-            }
-            if (waiter->wantWrite)
-            {
-                ++watch.writers;
-            }
-
-            if (prevRead == 0 && watch.readers > 0)
-            {
-                kevent ev {};
-                EV_SET(&ev,
-                       static_cast<uintptr_t>(fd),
-                       EVFILT_READ,
-                       EV_ADD | EV_ENABLE,
-                       0,
-                       0,
-                       nullptr);
-                ::kevent(m_kqueueFd, &ev, 1, nullptr, 0, nullptr);
-            }
-
-            if (prevWrite == 0 && watch.writers > 0)
-            {
-                kevent ev {};
-                EV_SET(&ev,
-                       static_cast<uintptr_t>(fd),
-                       EVFILT_WRITE,
-                       EV_ADD | EV_ENABLE,
-                       0,
-                       0,
-                       nullptr);
-                ::kevent(m_kqueueFd, &ev, 1, nullptr, 0, nullptr);
-            }
-        }
-
-        void UpdateKqueueOnUnregisterLocked(Waiter* waiter) noexcept
-        {
-            if (m_kqueueFd < 0 || !waiter || !waiter->handle)
-            {
-                return;
-            }
-
-            const int fd = detail::ToNative(*waiter->handle);
-            if (fd == detail::InvalidNativeSocket)
-            {
-                return;
-            }
-
-            auto it = m_kqueueWatches.find(fd);
-            if (it == m_kqueueWatches.end())
-            {
-                return;
-            }
-
-            auto&     watch     = it->second;
-            const int prevRead  = watch.readers;
-            const int prevWrite = watch.writers;
-
-            if (waiter->wantRead && watch.readers > 0)
-            {
-                --watch.readers;
-            }
-            if (waiter->wantWrite && watch.writers > 0)
-            {
-                --watch.writers;
-            }
-
-            if (prevRead > 0 && watch.readers == 0)
-            {
-                kevent ev {};
-                EV_SET(&ev,
-                       static_cast<uintptr_t>(fd),
-                       EVFILT_READ,
-                       EV_DELETE,
-                       0,
-                       0,
-                       nullptr);
-                ::kevent(m_kqueueFd, &ev, 1, nullptr, 0, nullptr);
-            }
-
-            if (prevWrite > 0 && watch.writers == 0)
-            {
-                kevent ev {};
-                EV_SET(&ev,
-                       static_cast<uintptr_t>(fd),
-                       EVFILT_WRITE,
-                       EV_DELETE,
-                       0,
-                       0,
-                       nullptr);
-                ::kevent(m_kqueueFd, &ev, 1, nullptr, 0, nullptr);
-            }
-
-            if (watch.readers == 0 && watch.writers == 0)
-            {
-                m_kqueueWatches.erase(it);
-            }
-        }
-#endif
-        struct WaiterAwaiter final
-        {
-            Impl*                          owner {nullptr};
-            SocketHandle*                  handle {nullptr};
-            bool                           wantRead {false};
-            bool                           wantWrite {false};
-            NGIN::Execution::ExecutorRef   exec {};
-            NGIN::Async::CancellationToken token {};
-            Waiter                         waiter {};
-
-            bool await_ready() const noexcept
-            {
-                if (owner == nullptr || token.IsCancellationRequested())
-                {
-                    return true;
-                }
-                if (!handle)
-                {
-                    return true;
-                }
-                return detail::ToNative(*handle) == detail::InvalidNativeSocket;
-            }
-
-            void await_suspend(std::coroutine_handle<> continuation) noexcept
-            {
-                if (!owner)
-                {
-                    ResumeContinuation(exec, continuation);
-                    return;
-                }
-
-                waiter.owner        = owner;
-                waiter.handle       = handle;
-                waiter.wantRead     = wantRead;
-                waiter.wantWrite    = wantWrite;
-                waiter.exec         = exec;
-                waiter.continuation = continuation;
-                waiter.error        = {};
-
-                if (!owner->RegisterWaiter(&waiter))
-                {
-                    waiter.done.store(true, std::memory_order_release);
-                    waiter.error = NetError {NetErrorCode::ResourceExhausted};
-                    ResumeContinuation(exec, continuation);
-                    return;
-                }
-
-                const NGIN::Async::CancellationRegistrationResult registrationResult = token.Register(
-                        waiter.cancellation,
-                        exec,
-                        continuation,
-                        +[](void* context) noexcept -> bool {
-                            Waiter* networkWaiter = static_cast<Waiter*>(context);
-                            bool    expected      = false;
-                            if (!networkWaiter->done.compare_exchange_strong(
-                                        expected,
-                                        true,
-                                        std::memory_order_acq_rel))
-                            {
-                                return false;
-                            }
-                            if (networkWaiter->owner)
-                            {
-                                networkWaiter->owner->UnregisterWaiter(networkWaiter);
-                            }
-                            return true;
-                        },
-                        &waiter);
-                if (!registrationResult)
-                {
-                    bool expected = false;
-                    if (waiter.done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
-                    {
-                        owner->UnregisterWaiter(&waiter);
-                        waiter.error = NetError {
-                                NetErrorCode::ResourceExhausted,
-                                static_cast<int>(registrationResult.error()),
-                        };
-                        ResumeContinuation(exec, continuation);
-                    }
-                }
-            }
-
-            [[nodiscard]] NetError await_resume() const noexcept
-            {
-                return waiter.error;
-            }
-        };
-
-#if defined(NGIN_PLATFORM_WINDOWS)
-        struct SendAwaiter final
-        {
-            Impl*                          owner {nullptr};
-            SocketHandle*                  handle {nullptr};
-            ConstByteSpan                  data {};
-            NGIN::Execution::ExecutorRef   exec {};
-            NGIN::Async::CancellationToken token {};
-            IocpOperation                  op {};
-
-            bool await_ready() const noexcept
-            {
-                return owner == nullptr || token.IsCancellationRequested();
-            }
-
-            void await_suspend(std::coroutine_handle<> continuation) noexcept
-            {
-                if (!owner || !handle)
-                {
-                    ResumeContinuation(exec, continuation);
-                    return;
-                }
-
-                op.cancellation.Reset();
-                op.handle       = handle;
-                op.exec         = exec;
-                op.continuation = continuation;
-                op.done.store(false, std::memory_order_release);
-                op.error         = NetError {NetErrorCode::Ok, 0};
-                op.bytes         = 0;
-                op.flags         = 0;
-                op.addressLength = 0;
-                std::memset(&op.overlapped, 0, sizeof(op.overlapped));
-
-                if (!owner->EnsureAssociated(*handle))
-                {
-                    owner->CompleteOperationWithError(op, 0, NetError {NetErrorCode::Unknown, static_cast<int>(::GetLastError())});
-                    return;
-                }
-
-                op.skipCompletionOnSuccess = owner->TrySkipCompletionOnSuccess(*handle);
-
-                if (data.size() > std::numeric_limits<ULONG>::max())
-                {
-                    owner->CompleteOperationWithError(op, 0, NetError {NetErrorCode::MessageTooLarge, 0});
-                    return;
-                }
-
-                op.buffer.buf = reinterpret_cast<char*>(const_cast<NGIN::Byte*>(data.data()));
-                op.buffer.len = static_cast<ULONG>(data.size());
-
-                if (!RegisterIocpCancellation(token, op))
-                {
-                    owner->CompleteOperationWithError(op, 0, op.error);
-                    return;
-                }
-
-                DWORD      bytes  = 0;
-                const auto sock   = detail::ToNative(*handle);
-                const int  result = ::WSASend(sock,
-                                              &op.buffer,
-                                              1,
-                                              &bytes,
-                                              op.flags,
-                                              reinterpret_cast<LPWSAOVERLAPPED>(&op.overlapped),
-                                              nullptr);
-                if (result == 0)
-                {
-                    if (op.skipCompletionOnSuccess)
-                    {
-                        owner->CompleteOperation(op, bytes, 0);
-                    }
-                    return;
-                }
-
-                const int err = ::WSAGetLastError();
-                if (err != WSA_IO_PENDING)
-                {
-                    owner->CompleteOperation(op, 0, static_cast<DWORD>(err));
-                }
-            }
-
-            NGIN::Utilities::Expected<NGIN::UInt32, NetError> await_resume() noexcept
-            {
-                if (token.IsCancellationRequested() || op.error.native == ERROR_OPERATION_ABORTED)
-                {
-                    return static_cast<NGIN::UInt32>(0);
-                }
-                if (op.error.code != NetErrorCode::Ok)
-                {
-                    return NGIN::Utilities::Unexpected(op.error);
-                }
-                return static_cast<NGIN::UInt32>(op.bytes);
-            }
-        };
-
-        struct ReceiveAwaiter final
-        {
-            Impl*                          owner {nullptr};
-            SocketHandle*                  handle {nullptr};
-            ByteSpan                       destination {};
-            NGIN::Execution::ExecutorRef   exec {};
-            NGIN::Async::CancellationToken token {};
-            IocpOperation                  op {};
-
-            bool await_ready() const noexcept
-            {
-                return owner == nullptr || token.IsCancellationRequested();
-            }
-
-            void await_suspend(std::coroutine_handle<> continuation) noexcept
-            {
-                if (!owner || !handle)
-                {
-                    ResumeContinuation(exec, continuation);
-                    return;
-                }
-
-                op.cancellation.Reset();
-                op.handle       = handle;
-                op.exec         = exec;
-                op.continuation = continuation;
-                op.done.store(false, std::memory_order_release);
-                op.error         = NetError {NetErrorCode::Ok, 0};
-                op.bytes         = 0;
-                op.flags         = 0;
-                op.addressLength = 0;
-                std::memset(&op.overlapped, 0, sizeof(op.overlapped));
-
-                if (!owner->EnsureAssociated(*handle))
-                {
-                    owner->CompleteOperationWithError(op, 0, NetError {NetErrorCode::Unknown, static_cast<int>(::GetLastError())});
-                    return;
-                }
-
-                op.skipCompletionOnSuccess = owner->TrySkipCompletionOnSuccess(*handle);
-
-                if (destination.size() > std::numeric_limits<ULONG>::max())
-                {
-                    owner->CompleteOperationWithError(op, 0, NetError {NetErrorCode::MessageTooLarge, 0});
-                    return;
-                }
-
-                op.buffer.buf = reinterpret_cast<char*>(destination.data());
-                op.buffer.len = static_cast<ULONG>(destination.size());
-
-                if (!RegisterIocpCancellation(token, op))
-                {
-                    owner->CompleteOperationWithError(op, 0, op.error);
-                    return;
-                }
-
-                DWORD      bytes  = 0;
-                DWORD      flags  = 0;
-                const auto sock   = detail::ToNative(*handle);
-                const int  result = ::WSARecv(sock,
-                                              &op.buffer,
-                                              1,
-                                              &bytes,
-                                              &flags,
-                                              reinterpret_cast<LPWSAOVERLAPPED>(&op.overlapped),
-                                              nullptr);
-                op.flags          = flags;
-                if (result == 0)
-                {
-                    if (op.skipCompletionOnSuccess)
-                    {
-                        owner->CompleteOperation(op, bytes, 0);
-                    }
-                    return;
-                }
-
-                const int err = ::WSAGetLastError();
-                if (err != WSA_IO_PENDING)
-                {
-                    owner->CompleteOperation(op, 0, static_cast<DWORD>(err));
-                }
-            }
-
-            NGIN::Utilities::Expected<NGIN::UInt32, NetError> await_resume() noexcept
-            {
-                if (token.IsCancellationRequested() || op.error.native == ERROR_OPERATION_ABORTED)
-                {
-                    return static_cast<NGIN::UInt32>(0);
-                }
-                if (op.error.code != NetErrorCode::Ok)
-                {
-                    return NGIN::Utilities::Unexpected(op.error);
-                }
-                return static_cast<NGIN::UInt32>(op.bytes);
-            }
-        };
-
-        struct SendToAwaiter final
-        {
-            Impl*                          owner {nullptr};
-            SocketHandle*                  handle {nullptr};
-            Endpoint                       remoteEndpoint {};
-            ConstByteSpan                  data {};
-            NGIN::Execution::ExecutorRef   exec {};
-            NGIN::Async::CancellationToken token {};
-            IocpOperation                  op {};
-
-            bool await_ready() const noexcept
-            {
-                return owner == nullptr || token.IsCancellationRequested();
-            }
-
-            void await_suspend(std::coroutine_handle<> continuation) noexcept
-            {
-                if (!owner || !handle)
-                {
-                    ResumeContinuation(exec, continuation);
-                    return;
-                }
-
-                op.cancellation.Reset();
-                op.handle       = handle;
-                op.exec         = exec;
-                op.continuation = continuation;
-                op.done.store(false, std::memory_order_release);
-                op.error         = NetError {NetErrorCode::Ok, 0};
-                op.bytes         = 0;
-                op.flags         = 0;
-                op.addressLength = 0;
-                std::memset(&op.overlapped, 0, sizeof(op.overlapped));
-                std::memset(&op.address, 0, sizeof(op.address));
-
-                if (!owner->EnsureAssociated(*handle))
-                {
-                    owner->CompleteOperationWithError(op, 0, NetError {NetErrorCode::Unknown, static_cast<int>(::GetLastError())});
-                    return;
-                }
-
-                op.skipCompletionOnSuccess = owner->TrySkipCompletionOnSuccess(*handle);
-
-                if (data.size() > std::numeric_limits<ULONG>::max())
-                {
-                    owner->CompleteOperationWithError(op, 0, NetError {NetErrorCode::MessageTooLarge, 0});
-                    return;
-                }
-
-                socklen_t length = 0;
-                if (!detail::ToSockAddr(remoteEndpoint, op.address, length))
-                {
-                    owner->CompleteOperationWithError(op, 0, NetError {NetErrorCode::Unknown, 0});
-                    return;
-                }
-                op.addressLength = static_cast<int>(length);
-
-                op.buffer.buf = reinterpret_cast<char*>(const_cast<NGIN::Byte*>(data.data()));
-                op.buffer.len = static_cast<ULONG>(data.size());
-
-                if (!RegisterIocpCancellation(token, op))
-                {
-                    owner->CompleteOperationWithError(op, 0, op.error);
-                    return;
-                }
-
-                DWORD      bytes  = 0;
-                const auto sock   = detail::ToNative(*handle);
-                const int  result = ::WSASendTo(sock,
-                                                &op.buffer,
-                                                1,
-                                                &bytes,
-                                                op.flags,
-                                                reinterpret_cast<const sockaddr*>(&op.address),
-                                                op.addressLength,
-                                                reinterpret_cast<LPWSAOVERLAPPED>(&op.overlapped),
-                                                nullptr);
-                if (result == 0)
-                {
-                    if (op.skipCompletionOnSuccess)
-                    {
-                        owner->CompleteOperation(op, bytes, 0);
-                    }
-                    return;
-                }
-
-                const int err = ::WSAGetLastError();
-                if (err != WSA_IO_PENDING)
-                {
-                    owner->CompleteOperation(op, 0, static_cast<DWORD>(err));
-                }
-            }
-
-            NGIN::Utilities::Expected<NGIN::UInt32, NetError> await_resume() noexcept
-            {
-                if (token.IsCancellationRequested() || op.error.native == ERROR_OPERATION_ABORTED)
-                {
-                    return static_cast<NGIN::UInt32>(0);
-                }
-                if (op.error.code != NetErrorCode::Ok)
-                {
-                    return NGIN::Utilities::Unexpected(op.error);
-                }
-                if (op.bytes == 0 && op.buffer.len > 0)
-                {
-                    return static_cast<NGIN::UInt32>(op.buffer.len);
-                }
-                return static_cast<NGIN::UInt32>(op.bytes);
-            }
-        };
-
-        struct ReceiveFromAwaiter final
-        {
-            Impl*                          owner {nullptr};
-            SocketHandle*                  handle {nullptr};
-            ByteSpan                       destination {};
-            NGIN::Execution::ExecutorRef   exec {};
-            NGIN::Async::CancellationToken token {};
-            IocpOperation                  op {};
-
-            bool await_ready() const noexcept
-            {
-                return owner == nullptr || token.IsCancellationRequested();
-            }
-
-            void await_suspend(std::coroutine_handle<> continuation) noexcept
-            {
-                if (!owner || !handle)
-                {
-                    ResumeContinuation(exec, continuation);
-                    return;
-                }
-
-                op.cancellation.Reset();
-                op.handle       = handle;
-                op.exec         = exec;
-                op.continuation = continuation;
-                op.done.store(false, std::memory_order_release);
-                op.error         = NetError {NetErrorCode::Ok, 0};
-                op.bytes         = 0;
-                op.flags         = 0;
-                op.addressLength = static_cast<int>(sizeof(op.address));
-                std::memset(&op.overlapped, 0, sizeof(op.overlapped));
-                std::memset(&op.address, 0, sizeof(op.address));
-
-                if (!owner->EnsureAssociated(*handle))
-                {
-                    owner->CompleteOperationWithError(op, 0, NetError {NetErrorCode::Unknown, static_cast<int>(::GetLastError())});
-                    return;
-                }
-
-                op.skipCompletionOnSuccess = owner->TrySkipCompletionOnSuccess(*handle);
-
-                if (destination.size() > std::numeric_limits<ULONG>::max())
-                {
-                    owner->CompleteOperationWithError(op, 0, NetError {NetErrorCode::MessageTooLarge, 0});
-                    return;
-                }
-
-                op.buffer.buf = reinterpret_cast<char*>(destination.data());
-                op.buffer.len = static_cast<ULONG>(destination.size());
-
-                if (!RegisterIocpCancellation(token, op))
-                {
-                    owner->CompleteOperationWithError(op, 0, op.error);
-                    return;
-                }
-
-                DWORD      bytes  = 0;
-                DWORD      flags  = 0;
-                const auto sock   = detail::ToNative(*handle);
-                const int  result = ::WSARecvFrom(sock,
-                                                  &op.buffer,
-                                                  1,
-                                                  &bytes,
-                                                  &flags,
-                                                  reinterpret_cast<sockaddr*>(&op.address),
-                                                  &op.addressLength,
-                                                  reinterpret_cast<LPWSAOVERLAPPED>(&op.overlapped),
-                                                  nullptr);
-                op.flags          = flags;
-                if (result == 0)
-                {
-                    if (op.skipCompletionOnSuccess)
-                    {
-                        owner->CompleteOperation(op, bytes, 0);
-                    }
-                    return;
-                }
-
-                const int err = ::WSAGetLastError();
-                if (err != WSA_IO_PENDING)
-                {
-                    owner->CompleteOperation(op, 0, static_cast<DWORD>(err));
-                }
-            }
-
-            NGIN::Utilities::Expected<DatagramReceiveResult, NetError> await_resume() noexcept
-            {
-                if (token.IsCancellationRequested() || op.error.native == ERROR_OPERATION_ABORTED)
-                {
-                    return DatagramReceiveResult {};
-                }
-                if (op.error.code != NetErrorCode::Ok)
-                {
-                    return NGIN::Utilities::Unexpected(op.error);
-                }
-
-                DatagramReceiveResult result {};
-                result.bytesReceived  = static_cast<NGIN::UInt32>(op.bytes);
-                result.remoteEndpoint = detail::FromSockAddr(op.address, static_cast<socklen_t>(op.addressLength));
-                return result;
-            }
-        };
-
-        struct ConnectAwaiter final
-        {
-            Impl*                          owner {nullptr};
-            SocketHandle*                  handle {nullptr};
-            Endpoint                       remoteEndpoint {};
-            NGIN::Execution::ExecutorRef   exec {};
-            NGIN::Async::CancellationToken token {};
-            IocpOperation                  op {};
-
-            bool await_ready() const noexcept
-            {
-                return owner == nullptr || token.IsCancellationRequested();
-            }
-
-            void await_suspend(std::coroutine_handle<> continuation) noexcept
-            {
-                if (!owner || !handle)
-                {
-                    ResumeContinuation(exec, continuation);
-                    return;
-                }
-
-                op.cancellation.Reset();
-                op.handle       = handle;
-                op.exec         = exec;
-                op.continuation = continuation;
-                op.done.store(false, std::memory_order_release);
-                op.error         = NetError {NetErrorCode::Ok, 0};
-                op.bytes         = 0;
-                op.flags         = 0;
-                op.addressLength = 0;
-                std::memset(&op.overlapped, 0, sizeof(op.overlapped));
-                std::memset(&op.address, 0, sizeof(op.address));
-
-                auto connectEx = detail::GetConnectEx();
-                if (!connectEx)
-                {
-                    owner->CompleteOperationWithError(op, 0, NetError {NetErrorCode::Unknown, 0});
-                    return;
-                }
-
-                if (!owner->EnsureAssociated(*handle))
-                {
-                    owner->CompleteOperationWithError(op, 0, NetError {NetErrorCode::Unknown, static_cast<int>(::GetLastError())});
-                    return;
-                }
-
-                op.skipCompletionOnSuccess = owner->TrySkipCompletionOnSuccess(*handle);
-
-                socklen_t length = 0;
-                if (!detail::ToSockAddr(remoteEndpoint, op.address, length))
-                {
-                    owner->CompleteOperationWithError(op, 0, NetError {NetErrorCode::Unknown, 0});
-                    return;
-                }
-                op.addressLength = static_cast<int>(length);
-
-                if (!RegisterIocpCancellation(token, op))
-                {
-                    owner->CompleteOperationWithError(op, 0, op.error);
-                    return;
-                }
-
-                const auto sock   = detail::ToNative(*handle);
-                const BOOL result = connectEx(sock,
-                                              reinterpret_cast<sockaddr*>(&op.address),
-                                              op.addressLength,
-                                              nullptr,
-                                              0,
-                                              nullptr,
-                                              reinterpret_cast<LPWSAOVERLAPPED>(&op.overlapped));
-                if (result != FALSE)
-                {
-                    if (op.skipCompletionOnSuccess)
-                    {
-                        owner->CompleteOperation(op, 0, 0);
-                    }
-                    return;
-                }
-
-                const int err = ::WSAGetLastError();
-                if (err != WSA_IO_PENDING)
-                {
-                    owner->CompleteOperation(op, 0, static_cast<DWORD>(err));
-                }
-            }
-
-            NGIN::Utilities::Expected<void, NetError> await_resume() noexcept
-            {
-                if (token.IsCancellationRequested() || op.error.native == ERROR_OPERATION_ABORTED)
-                {
+            operation->done  = true;
+            const auto found = m_sockets.find(operation->descriptor);
+            if (found == m_sockets.end() || found->second->identifier != operation->identifier)
+                return {};
+            auto& registration = *found->second;
+            (operation->read ? registration.reader : registration.writer).reset();
+            const unsigned interests = (registration.reader ? Poller::Read : 0U) |
+                                       (registration.writer ? Poller::Write : 0U);
+            if (interests == 0)
+            {
+                m_loop.Unwatch(registration.identifier);
+                m_sockets.erase(found);
+            }
+            else if (interests != registration.interests)
+            {
+                const std::error_code error = m_loop.Modify(registration.identifier, interests);
+                if (!error)
+                {
+                    registration.interests = interests;
                     return {};
                 }
-                if (op.error.code != NetErrorCode::Ok)
-                {
-                    return NGIN::Utilities::Unexpected(op.error);
-                }
-
-                const auto sock   = detail::ToNative(*handle);
-                const int  result = ::setsockopt(sock, SOL_SOCKET, SO_UPDATE_CONNECT_CONTEXT, nullptr, 0);
-                if (result != 0)
-                {
-                    op.error = detail::LastError();
-                    return NGIN::Utilities::Unexpected(op.error);
-                }
-                return {};
+                auto peer   = registration.reader ? registration.reader : registration.writer;
+                peer->error = detail::MapError(error.value());
+                return peer;
             }
+            return {};
+        }
+
+        static void Retire(const std::shared_ptr<Operation>& operation) noexcept
+        {
+            // Reset joins concurrent publication of the cancellation ticket.
+            // No callback can mutate that ticket after these registrations end.
+            operation->cancellation.Reset();
+            operation->closeCancellation.Reset();
+            // POSIX has no cancellation primitive for a pending connect. Close
+            // it on cancellation or monitoring failure so later operations cannot
+            // inherit an unobserved connection.
+            if ((operation->canceled || operation->monitoringFailed) &&
+                operation->kind == Kind::Connect && operation->connectStarted)
+                operation->lease.RequestClose();
+            operation->lease.Reset();
+            if (operation->canceled || !operation->error.IsOk() || !operation->fault.IsOk())
+                operation->accepted.reset();
+        }
+
+        void Advance(const std::shared_ptr<Operation>& operation, bool cancel) noexcept
+        {
+            std::shared_ptr<Operation> failedPeer;
+            {
+                std::lock_guard lock(m_mutex);
+                if (operation->done || !Try(*operation, cancel))
+                    return;
+                failedPeer = DetachLocked(operation);
+            }
+            Retire(operation);
+            if (failedPeer)
+                Advance(failedPeer, false);
+            operation->delivery.Dispatch();
+            operation->control.Reset();
+        }
+
+        bool Watch(const std::shared_ptr<Operation>& operation)
+        {
+            const auto existing = m_sockets.find(operation->descriptor);
+            if (existing != m_sockets.end())
+            {
+                auto& slot      = *existing->second;
+                auto& direction = operation->read ? slot.reader : slot.writer;
+                if (direction)
+                {
+                    operation->error = NetError {NetErrorCode::OperationInProgress};
+                    return false;
+                }
+                operation->identifier = slot.identifier;
+                direction             = operation;
+                return true;
+            }
+            auto slot                                       = std::make_shared<SocketRegistration>(*this);
+            (operation->read ? slot->reader : slot->writer) = operation;
+            m_sockets.emplace(operation->descriptor, slot);
+            auto watched = m_loop.ReserveWatch(static_cast<std::uintptr_t>(operation->descriptor), slot);
+            if (!watched)
+            {
+                m_sockets.erase(operation->descriptor);
+                if (watched.error() == std::errc::operation_canceled)
+                    operation->canceled = true;
+                else
+                    operation->error = detail::MapError(watched.error().value());
+                return false;
+            }
+            slot->identifier = operation->identifier = *watched;
+            return true;
+        }
+
+        bool Arm(const std::shared_ptr<Operation>& operation) noexcept
+        {
+            auto&          slot      = *m_sockets.find(operation->descriptor)->second;
+            const unsigned interests = (slot.reader ? Poller::Read : 0U) | (slot.writer ? Poller::Write : 0U);
+            // Detach must restore the peer even if a platform update fails partially.
+            slot.interests = interests;
+            if (const std::error_code error = m_loop.Modify(slot.identifier, interests))
+            {
+                operation->monitoringFailed = true;
+                operation->error            = detail::MapError(error.value());
+                return false;
+            }
+            return true;
+        }
+
+        struct OperationAwaiter final
+        {
+            Impl&                                owner;
+            std::shared_ptr<detail::SocketState> socket;
+            NGIN::Execution::ExecutorRef         executor;
+            NGIN::Async::CancellationToken       token;
+            std::shared_ptr<Operation>           state;
+
+            bool await_ready() const noexcept { return false; }
+            bool Setup(const std::shared_ptr<Operation>& operation, std::coroutine_handle<> continuation) noexcept
+            {
+                operation->owner = &owner;
+                operation->read  = operation->kind == Kind::Receive || operation->kind == Kind::ReceiveFrom ||
+                                  operation->kind == Kind::Accept;
+                if (owner.m_stop.load(std::memory_order_acquire) ||
+                    owner.m_loop.GetState() != Loop::State::Running || token.IsCancellationRequested())
+                {
+                    operation->canceled = true;
+                    return false;
+                }
+                auto delivery = executor.ReserveCompletion(NGIN::Execution::WorkItem(continuation));
+                if (!delivery)
+                {
+                    operation->fault = NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::SchedulerDispatchFailed,
+                                                                   static_cast<int>(delivery.error()));
+                    return false;
+                }
+                operation->delivery = std::move(*delivery);
+                auto control        = owner.m_loop.ReserveOperation(NGIN::Execution::WorkItem([operation] {
+                    operation->owner->Advance(operation, true);
+                }));
+                if (!control)
+                {
+                    operation->fault = NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::SchedulerDispatchFailed,
+                                                                   static_cast<int>(control.error()));
+                    return false;
+                }
+                operation->control        = std::move(*control);
+                const unsigned directions = operation->kind == Kind::Connect ? detail::SocketState::Exclusive : (operation->read ? detail::SocketState::Read : detail::SocketState::Write);
+                auto           lease      = detail::SocketLease::Acquire(socket, directions);
+                if (!lease)
+                {
+                    operation->error = lease.error();
+                    return false;
+                }
+                operation->lease      = std::move(*lease);
+                operation->descriptor = static_cast<int>(operation->lease.Native());
+                if (operation->source.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
+                    operation->destination.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
+                {
+                    operation->error = NetError {NetErrorCode::MessageTooLarge};
+                    return false;
+                }
+                if ((operation->kind == Kind::Connect || operation->kind == Kind::SendTo) &&
+                    !detail::ToSockAddr(operation->endpoint, operation->address, operation->addressLength))
+                {
+                    operation->error = NetError {NetErrorCode::InvalidArgument};
+                    return false;
+                }
+                // Never let a readiness operation block the owner thread. The
+                // default Open options already create nonblocking sockets.
+                const int flags = ::fcntl(operation->descriptor, F_GETFL, 0);
+                if (flags < 0 || (flags & O_NONBLOCK) == 0)
+                {
+                    operation->error = flags < 0 ? detail::LastError() : NetError {NetErrorCode::InvalidArgument};
+                    return false;
+                }
+                const auto cancel = +[](void* raw) noexcept {
+                    auto& pending = *static_cast<Operation*>(raw);
+                    if (!pending.cancellationRequested.exchange(true, std::memory_order_acq_rel))
+                        pending.control.Dispatch();
+                    return false;
+                };
+                const auto registered = token.Register(operation->cancellation, {}, {}, cancel, operation.get());
+                if (!registered)
+                {
+                    operation->fault = NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::CancellationRegistrationFailed,
+                                                                   static_cast<int>(registered.error()));
+                    return false;
+                }
+                const auto closeRegistered = operation->lease.CloseToken().Register(
+                        operation->closeCancellation, {}, {}, cancel, operation.get());
+                if (!closeRegistered)
+                {
+                    operation->fault = NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::CancellationRegistrationFailed,
+                                                                   static_cast<int>(closeRegistered.error()));
+                    return false;
+                }
+                try
+                {
+                    if (operation->kind == Kind::Accept)
+                        operation->accepted = std::make_shared<detail::SocketState>();
+                    // Admission, cancellation, and registration storage are all
+                    // secured before the first OS operation, including connect.
+                    return owner.Watch(operation);
+                } catch (const std::bad_alloc&)
+                {
+                    operation->error = NetError {NetErrorCode::ResourceExhausted};
+                    return false;
+                }
+            }
+            bool await_suspend(std::coroutine_handle<> continuation) noexcept
+            {
+                const auto                 operation     = state;
+                const bool                 inlineAllowed = executor.IsCurrent();
+                std::shared_ptr<Operation> failedPeer;
+                {
+                    std::lock_guard lock(owner.m_mutex);
+                    if (Setup(operation, continuation) && !owner.Try(*operation, false) && owner.Arm(operation))
+                        return true;
+                    failedPeer = owner.DetachLocked(operation);
+                }
+                Retire(operation);
+                if (failedPeer)
+                    owner.Advance(failedPeer, false);
+                if (!inlineAllowed && operation->delivery.IsValid())
+                {
+                    operation->delivery.Dispatch();
+                    operation->control.Reset();
+                    return true;
+                }
+                operation->delivery.Reset();
+                operation->control.Reset();
+                return false;
+            }
+            void await_resume() const noexcept {}
         };
 
-        struct AcceptAwaiter final
+        template<typename Result>
+        static NGIN::Async::Task<Result, NetError> Submit(
+                NGIN::Async::TaskContext& ctx, NGIN::IO::Runtime* runtime,
+                std::shared_ptr<detail::SocketState> socket, Kind kind, ConstByteSpan source,
+                ByteSpan destination, Endpoint endpoint, NGIN::Async::CancellationToken token)
         {
-            static constexpr std::size_t AddressBytes = sizeof(sockaddr_storage) + 16;
-            static constexpr std::size_t BufferBytes  = AddressBytes * 2;
-
-            Impl*                               owner {nullptr};
-            SocketHandle*                       listenHandle {nullptr};
-            NGIN::Execution::ExecutorRef        exec {};
-            NGIN::Async::CancellationToken      token {};
-            IocpOperation                       op {};
-            SocketHandle                        accepted {};
-            std::array<NGIN::Byte, BufferBytes> buffer {};
-
-            bool await_ready() const noexcept
+            auto backend = runtime ? AcquireNetworkDriver(*runtime) : nullptr;
+            if (!backend)
             {
-                return owner == nullptr || token.IsCancellationRequested();
+                auto fault = NGIN::Async::MakeAsyncFault(
+                        NGIN::Async::AsyncFaultCode::InvalidTaskUsage, 0,
+                        "Async socket operations require a bound, running IO::Runtime");
+                if constexpr (std::is_void_v<Result>)
+                {
+                    co_await NGIN::Async::Faulted(std::move(fault));
+                    co_return;
+                }
+                else
+                    co_return NGIN::Async::Completion<Result, NetError>::Faulted(std::move(fault));
             }
-
-            void await_suspend(std::coroutine_handle<> continuation) noexcept
+            auto operationContext  = ctx.WithLinkedCancellationToken(token);
+            auto operation         = std::make_shared<Operation>();
+            operation->kind        = kind;
+            operation->source      = source;
+            operation->destination = destination;
+            operation->endpoint    = endpoint;
+            OperationAwaiter awaiter {*backend->m_impl, std::move(socket), ctx.GetExecutor(),
+                                      operationContext.GetCancellationToken(), operation};
+            co_await awaiter;
+            using Completion = NGIN::Async::Completion<Result, NetError>;
+            auto completion  = [&]() -> Completion {
+                if (!operation->fault.IsOk())
+                    return Completion::Faulted(std::move(operation->fault));
+                if (operation->canceled)
+                    return Completion::Canceled();
+                if (!operation->error.IsOk())
+                    return Completion::DomainFailure(operation->error);
+                if constexpr (std::is_void_v<Result>)
+                    return Completion::Success();
+                else if constexpr (std::is_same_v<Result, TcpSocket>)
+                    return Completion::Success(TcpSocket(
+                            detail::SocketHandleAccess::FromState(std::move(operation->accepted)), true, runtime));
+                else if constexpr (std::is_same_v<Result, DatagramReceiveResult>)
+                    return Completion::Success(DatagramReceiveResult {operation->endpoint, operation->bytes});
+                else
+                    return Completion::Success(operation->bytes);
+            }();
+            if constexpr (std::is_void_v<Result>)
             {
-                if (!owner || !listenHandle)
-                {
-                    ResumeContinuation(exec, continuation);
-                    return;
-                }
-
-                op.cancellation.Reset();
-                op.handle       = listenHandle;
-                op.exec         = exec;
-                op.continuation = continuation;
-                op.done.store(false, std::memory_order_release);
-                op.error         = NetError {NetErrorCode::Ok, 0};
-                op.bytes         = 0;
-                op.flags         = 0;
-                op.addressLength = 0;
-                std::memset(&op.overlapped, 0, sizeof(op.overlapped));
-
-                auto acceptEx = detail::GetAcceptEx();
-                if (!acceptEx)
-                {
-                    owner->CompleteOperationWithError(op, 0, NetError {NetErrorCode::Unknown, 0});
-                    return;
-                }
-
-                const AddressFamily family = detail::GetSocketFamily(*listenHandle);
-                NetError            createError {};
-                accepted = detail::CreateSocket(family, SOCK_STREAM, IPPROTO_TCP, true, createError);
-                if (createError.code != NetErrorCode::Ok)
-                {
-                    owner->CompleteOperationWithError(op, 0, createError);
-                    return;
-                }
-
-                if (!owner->EnsureAssociated(*listenHandle))
-                {
-                    accepted.Close();
-                    owner->CompleteOperationWithError(op, 0, NetError {NetErrorCode::Unknown, static_cast<int>(::GetLastError())});
-                    return;
-                }
-
-                op.skipCompletionOnSuccess = owner->TrySkipCompletionOnSuccess(*listenHandle);
-
-                if (!RegisterIocpCancellation(token, op))
-                {
-                    accepted.Close();
-                    owner->CompleteOperationWithError(op, 0, op.error);
-                    return;
-                }
-
-                DWORD       bytes        = 0;
-                const auto  listenSock   = detail::ToNative(*listenHandle);
-                const auto  acceptSock   = detail::ToNative(accepted);
-                const DWORD addressBytes = static_cast<DWORD>(AddressBytes);
-                const BOOL  result       = acceptEx(listenSock,
-                                                    acceptSock,
-                                                    buffer.data(),
-                                                    0,
-                                                    addressBytes,
-                                                    addressBytes,
-                                                    &bytes,
-                                                    reinterpret_cast<LPWSAOVERLAPPED>(&op.overlapped));
-                if (result != FALSE)
-                {
-                    if (op.skipCompletionOnSuccess)
-                    {
-                        owner->CompleteOperation(op, bytes, 0);
-                    }
-                    return;
-                }
-
-                const int err = ::WSAGetLastError();
-                if (err != WSA_IO_PENDING)
-                {
-                    accepted.Close();
-                    owner->CompleteOperation(op, 0, static_cast<DWORD>(err));
-                }
-            }
-
-            NGIN::Utilities::Expected<SocketHandle, NetError> await_resume() noexcept
-            {
-                if (token.IsCancellationRequested() || op.error.native == ERROR_OPERATION_ABORTED)
-                {
-                    accepted.Close();
-                    return SocketHandle {};
-                }
-                if (op.error.code != NetErrorCode::Ok)
-                {
-                    accepted.Close();
-                    return NGIN::Utilities::Unexpected(op.error);
-                }
-
-                const auto listenSock = detail::ToNative(*listenHandle);
-                const auto acceptSock = detail::ToNative(accepted);
-                const int  update     = ::setsockopt(acceptSock,
-                                                     SOL_SOCKET,
-                                                     SO_UPDATE_ACCEPT_CONTEXT,
-                                                     reinterpret_cast<const char*>(&listenSock),
-                                                     sizeof(listenSock));
-                if (update != 0)
-                {
-                    accepted.Close();
-                    return NGIN::Utilities::Unexpected(detail::LastError());
-                }
-
-                if (!owner->EnsureAssociated(accepted))
-                {
-                    accepted.Close();
-                    return NGIN::Utilities::Unexpected(detail::LastError());
-                }
-
-                return std::move(accepted);
-            }
-        };
-#endif
-
-        int GetPollTimeoutMs() const noexcept
-        {
-            const auto value = m_options.pollInterval.GetValue();
-            if (value <= 0.0)
-            {
-                return 0;
-            }
-
-            const auto maxMs = static_cast<double>(std::numeric_limits<int>::max());
-            if (value > maxMs)
-            {
-                return std::numeric_limits<int>::max();
-            }
-
-            return static_cast<int>(value);
-        }
-
-    public:
-        static NGIN::Async::Task<void, NetError> WaitUntilReadable(NGIN::Async::TaskContext&      ctx,
-                                                                   Impl&                          owner,
-                                                                   SocketHandle&                  handle,
-                                                                   NGIN::Async::CancellationToken token)
-        {
-            WaiterAwaiter awaiter {};
-            awaiter.owner            = &owner;
-            awaiter.handle           = &handle;
-            awaiter.wantRead         = true;
-            awaiter.exec             = ctx.GetExecutor();
-            awaiter.token            = token;
-            const NetError waitError = co_await awaiter;
-            if (token.IsCancellationRequested())
-            {
-                co_await NGIN::Async::Canceled();
+                if (completion.IsFault())
+                    co_await NGIN::Async::Faulted(std::move(completion).Fault());
+                else if (completion.IsCanceled())
+                    co_await NGIN::Async::Canceled();
+                else if (completion.IsDomainError())
+                    co_await NGIN::Async::DomainFailure(completion.DomainError());
                 co_return;
             }
-            if (!waitError.IsOk())
-            {
-                co_await NGIN::Async::DomainFailure(waitError);
-                co_return;
-            }
-            co_return;
+            else
+                co_return completion;
         }
 
-        static NGIN::Async::Task<void, NetError> WaitUntilWritable(NGIN::Async::TaskContext&      ctx,
-                                                                   Impl&                          owner,
-                                                                   SocketHandle&                  handle,
-                                                                   NGIN::Async::CancellationToken token)
-        {
-            WaiterAwaiter awaiter {};
-            awaiter.owner            = &owner;
-            awaiter.handle           = &handle;
-            awaiter.wantWrite        = true;
-            awaiter.exec             = ctx.GetExecutor();
-            awaiter.token            = token;
-            const NetError waitError = co_await awaiter;
-            if (token.IsCancellationRequested())
-            {
-                co_await NGIN::Async::Canceled();
-                co_return;
-            }
-            if (!waitError.IsOk())
-            {
-                co_await NGIN::Async::DomainFailure(waitError);
-                co_return;
-            }
-            co_return;
-        }
-
-#if defined(NGIN_PLATFORM_WINDOWS)
-        static NGIN::Async::Task<NGIN::UInt32, NetError> SubmitSend(NGIN::Async::TaskContext&      ctx,
-                                                                    Impl&                          owner,
-                                                                    SocketHandle&                  handle,
-                                                                    ConstByteSpan                  data,
-                                                                    NGIN::Async::CancellationToken token)
-        {
-            SendAwaiter awaiter {};
-            awaiter.owner  = &owner;
-            awaiter.handle = &handle;
-            awaiter.data   = data;
-            awaiter.exec   = ctx.GetExecutor();
-            awaiter.token  = token;
-            auto result    = co_await awaiter;
-            if (token.IsCancellationRequested() || awaiter.op.error.native == ERROR_OPERATION_ABORTED)
-            {
-                co_await NGIN::Async::Canceled();
-                co_return 0;
-            }
-            if (!result)
-            {
-                co_await NGIN::Async::DomainFailure(result.error());
-                co_return 0;
-            }
-            co_return std::move(result).value();
-        }
-
-        static NGIN::Async::Task<NGIN::UInt32, NetError> SubmitReceive(NGIN::Async::TaskContext&      ctx,
-                                                                       Impl&                          owner,
-                                                                       SocketHandle&                  handle,
-                                                                       ByteSpan                       destination,
-                                                                       NGIN::Async::CancellationToken token)
-        {
-            ReceiveAwaiter awaiter {};
-            awaiter.owner       = &owner;
-            awaiter.handle      = &handle;
-            awaiter.destination = destination;
-            awaiter.exec        = ctx.GetExecutor();
-            awaiter.token       = token;
-            auto result         = co_await awaiter;
-            if (token.IsCancellationRequested() || awaiter.op.error.native == ERROR_OPERATION_ABORTED)
-            {
-                co_await NGIN::Async::Canceled();
-                co_return 0;
-            }
-            if (!result)
-            {
-                co_await NGIN::Async::DomainFailure(result.error());
-                co_return 0;
-            }
-            co_return std::move(result).value();
-        }
-
-        static NGIN::Async::Task<NGIN::UInt32, NetError> SubmitSendTo(NGIN::Async::TaskContext&      ctx,
-                                                                      Impl&                          owner,
-                                                                      SocketHandle&                  handle,
-                                                                      Endpoint                       remoteEndpoint,
-                                                                      ConstByteSpan                  data,
-                                                                      NGIN::Async::CancellationToken token)
-        {
-            SendToAwaiter awaiter {};
-            awaiter.owner          = &owner;
-            awaiter.handle         = &handle;
-            awaiter.remoteEndpoint = remoteEndpoint;
-            awaiter.data           = data;
-            awaiter.exec           = ctx.GetExecutor();
-            awaiter.token          = token;
-            auto result            = co_await awaiter;
-            if (token.IsCancellationRequested() || awaiter.op.error.native == ERROR_OPERATION_ABORTED)
-            {
-                co_await NGIN::Async::Canceled();
-                co_return 0;
-            }
-            if (!result)
-            {
-                co_await NGIN::Async::DomainFailure(result.error());
-                co_return 0;
-            }
-            co_return std::move(result).value();
-        }
-
-        static NGIN::Async::Task<DatagramReceiveResult, NetError> SubmitReceiveFrom(NGIN::Async::TaskContext&      ctx,
-                                                                                    Impl&                          owner,
-                                                                                    SocketHandle&                  handle,
-                                                                                    ByteSpan                       destination,
-                                                                                    NGIN::Async::CancellationToken token)
-        {
-            ReceiveFromAwaiter awaiter {};
-            awaiter.owner       = &owner;
-            awaiter.handle      = &handle;
-            awaiter.destination = destination;
-            awaiter.exec        = ctx.GetExecutor();
-            awaiter.token       = token;
-            auto result         = co_await awaiter;
-            if (token.IsCancellationRequested() || awaiter.op.error.native == ERROR_OPERATION_ABORTED)
-            {
-                co_await NGIN::Async::Canceled();
-                co_return DatagramReceiveResult {};
-            }
-            if (!result)
-            {
-                co_await NGIN::Async::DomainFailure(result.error());
-                co_return DatagramReceiveResult {};
-            }
-            co_return std::move(result).value();
-        }
-
-        static NGIN::Async::Task<void, NetError> SubmitConnect(NGIN::Async::TaskContext&      ctx,
-                                                               Impl&                          owner,
-                                                               SocketHandle&                  handle,
-                                                               Endpoint                       remoteEndpoint,
-                                                               NGIN::Async::CancellationToken token)
-        {
-            ConnectAwaiter awaiter {};
-            awaiter.owner          = &owner;
-            awaiter.handle         = &handle;
-            awaiter.remoteEndpoint = remoteEndpoint;
-            awaiter.exec           = ctx.GetExecutor();
-            awaiter.token          = token;
-            auto result            = co_await awaiter;
-            if (token.IsCancellationRequested() || awaiter.op.error.native == ERROR_OPERATION_ABORTED)
-            {
-                co_await NGIN::Async::Canceled();
-                co_return;
-            }
-            if (!result)
-            {
-                co_await NGIN::Async::DomainFailure(result.error());
-                co_return;
-            }
-            co_return;
-        }
-
-        static NGIN::Async::Task<SocketHandle, NetError> SubmitAccept(NGIN::Async::TaskContext&      ctx,
-                                                                      Impl&                          owner,
-                                                                      SocketHandle&                  handle,
-                                                                      NGIN::Async::CancellationToken token)
-        {
-            AcceptAwaiter awaiter {};
-            awaiter.owner        = &owner;
-            awaiter.listenHandle = &handle;
-            awaiter.exec         = ctx.GetExecutor();
-            awaiter.token        = token;
-            auto result          = co_await awaiter;
-            if (token.IsCancellationRequested() || awaiter.op.error.native == ERROR_OPERATION_ABORTED)
-            {
-                co_await NGIN::Async::Canceled();
-                co_return SocketHandle {};
-            }
-            if (!result)
-            {
-                co_await NGIN::Async::DomainFailure(result.error());
-                co_return SocketHandle {};
-            }
-            co_return std::move(result).value();
-        }
-#endif
+        Loop&                                                        m_loop;
+        std::mutex                                                   m_mutex;
+        std::unordered_map<int, std::shared_ptr<SocketRegistration>> m_sockets;
+        std::atomic<bool>                                            m_stop {false};
     };
 
-    NetworkDriver::NetworkDriver(NGIN::IO::Runtime::NetworkOptions options)
-        : m_impl(std::make_unique<Impl>(options))
+    NetworkDriver::NetworkDriver(NGIN::IO::Runtime& runtime) : m_impl(std::make_unique<Impl>(runtime)) {}
+    NetworkDriver::~NetworkDriver() = default;
+    void NetworkDriver::Stop() noexcept
     {
+        m_impl->Stop();
     }
 
-    NetworkDriver::~NetworkDriver()
+    NGIN::Async::Task<NGIN::UInt32, NetError> NetworkDriver::SubmitSend(
+            NGIN::Async::TaskContext& ctx, NGIN::IO::Runtime* runtime, std::shared_ptr<detail::SocketState> socket,
+            ConstByteSpan data, NGIN::Async::CancellationToken token)
     {
-        if (m_impl)
-        {
-            m_impl->Shutdown();
-        }
+        return Impl::Submit<NGIN::UInt32>(ctx, runtime, std::move(socket), Impl::Kind::Send, data, {}, {}, std::move(token));
     }
-
-    void NetworkDriver::Run()
+    NGIN::Async::Task<NGIN::UInt32, NetError> NetworkDriver::SubmitReceive(
+            NGIN::Async::TaskContext& ctx, NGIN::IO::Runtime* runtime, std::shared_ptr<detail::SocketState> socket,
+            ByteSpan destination, NGIN::Async::CancellationToken token)
     {
-        if (m_impl)
-        {
-            m_impl->Run();
-        }
+        return Impl::Submit<NGIN::UInt32>(ctx, runtime, std::move(socket), Impl::Kind::Receive, {}, destination, {}, std::move(token));
     }
-
-    void NetworkDriver::PollOnce()
+    NGIN::Async::Task<NGIN::UInt32, NetError> NetworkDriver::SubmitSendTo(
+            NGIN::Async::TaskContext& ctx, NGIN::IO::Runtime* runtime, std::shared_ptr<detail::SocketState> socket,
+            Endpoint endpoint, ConstByteSpan data, NGIN::Async::CancellationToken token)
     {
-        if (m_impl)
-        {
-            m_impl->PollOnce(0);
-        }
+        return Impl::Submit<NGIN::UInt32>(ctx, runtime, std::move(socket), Impl::Kind::SendTo, data, {}, endpoint, std::move(token));
     }
-
-    void NetworkDriver::Stop()
+    NGIN::Async::Task<DatagramReceiveResult, NetError> NetworkDriver::SubmitReceiveFrom(
+            NGIN::Async::TaskContext& ctx, NGIN::IO::Runtime* runtime, std::shared_ptr<detail::SocketState> socket,
+            ByteSpan destination, NGIN::Async::CancellationToken token)
     {
-        if (m_impl)
-        {
-            m_impl->Stop();
-        }
+        return Impl::Submit<DatagramReceiveResult>(ctx, runtime, std::move(socket), Impl::Kind::ReceiveFrom, {}, destination, {}, std::move(token));
     }
-
-    NGIN::Async::Task<void, NetError> NetworkDriver::WaitUntilReadable(NGIN::Async::TaskContext&      ctx,
-                                                                       SocketHandle&                  handle,
-                                                                       NGIN::Async::CancellationToken token)
+    NGIN::Async::Task<void, NetError> NetworkDriver::SubmitConnect(
+            NGIN::Async::TaskContext& ctx, NGIN::IO::Runtime* runtime, std::shared_ptr<detail::SocketState> socket,
+            Endpoint endpoint, NGIN::Async::CancellationToken token)
     {
-        return Impl::WaitUntilReadable(ctx, *m_impl, handle, token);
+        return Impl::Submit<void>(ctx, runtime, std::move(socket), Impl::Kind::Connect, {}, {}, endpoint, std::move(token));
     }
-
-    NGIN::Async::Task<void, NetError> NetworkDriver::WaitUntilWritable(NGIN::Async::TaskContext&      ctx,
-                                                                       SocketHandle&                  handle,
-                                                                       NGIN::Async::CancellationToken token)
+    NGIN::Async::Task<TcpSocket, NetError> NetworkDriver::SubmitAccept(
+            NGIN::Async::TaskContext& ctx, NGIN::IO::Runtime* runtime, std::shared_ptr<detail::SocketState> socket,
+            NGIN::Async::CancellationToken token)
     {
-        return Impl::WaitUntilWritable(ctx, *m_impl, handle, token);
+        return Impl::Submit<TcpSocket>(ctx, runtime, std::move(socket), Impl::Kind::Accept, {}, {}, {}, std::move(token));
     }
-
-#if defined(NGIN_PLATFORM_WINDOWS)
-    NGIN::Async::Task<NGIN::UInt32, NetError> NetworkDriver::SubmitSend(NGIN::Async::TaskContext&      ctx,
-                                                                        SocketHandle&                  handle,
-                                                                        ConstByteSpan                  data,
-                                                                        NGIN::Async::CancellationToken token)
-    {
-        return Impl::SubmitSend(ctx, *m_impl, handle, data, token);
-    }
-
-    NGIN::Async::Task<NGIN::UInt32, NetError> NetworkDriver::SubmitReceive(NGIN::Async::TaskContext&      ctx,
-                                                                           SocketHandle&                  handle,
-                                                                           ByteSpan                       destination,
-                                                                           NGIN::Async::CancellationToken token)
-    {
-        return Impl::SubmitReceive(ctx, *m_impl, handle, destination, token);
-    }
-
-    NGIN::Async::Task<NGIN::UInt32, NetError> NetworkDriver::SubmitSendTo(NGIN::Async::TaskContext&      ctx,
-                                                                          SocketHandle&                  handle,
-                                                                          Endpoint                       remoteEndpoint,
-                                                                          ConstByteSpan                  data,
-                                                                          NGIN::Async::CancellationToken token)
-    {
-        return Impl::SubmitSendTo(ctx, *m_impl, handle, remoteEndpoint, data, token);
-    }
-
-    NGIN::Async::Task<DatagramReceiveResult, NetError> NetworkDriver::SubmitReceiveFrom(NGIN::Async::TaskContext&      ctx,
-                                                                                        SocketHandle&                  handle,
-                                                                                        ByteSpan                       destination,
-                                                                                        NGIN::Async::CancellationToken token)
-    {
-        return Impl::SubmitReceiveFrom(ctx, *m_impl, handle, destination, token);
-    }
-
-    NGIN::Async::Task<void, NetError> NetworkDriver::SubmitConnect(NGIN::Async::TaskContext&      ctx,
-                                                                   SocketHandle&                  handle,
-                                                                   Endpoint                       remoteEndpoint,
-                                                                   NGIN::Async::CancellationToken token)
-    {
-        return Impl::SubmitConnect(ctx, *m_impl, handle, remoteEndpoint, token);
-    }
-
-    NGIN::Async::Task<SocketHandle, NetError> NetworkDriver::SubmitAccept(NGIN::Async::TaskContext&      ctx,
-                                                                          SocketHandle&                  handle,
-                                                                          NGIN::Async::CancellationToken token)
-    {
-        return Impl::SubmitAccept(ctx, *m_impl, handle, token);
-    }
-#endif
 }// namespace NGIN::Net
+#endif
 
 namespace NGIN::Net
 {
     std::shared_ptr<NetworkDriver> AcquireNetworkDriver(NGIN::IO::Runtime& runtime)
     {
-        auto backend = NGIN::IO::detail::RuntimeAccess::Network(runtime, +[](const NGIN::IO::Runtime::NetworkOptions& options) -> std::shared_ptr<NGIN::IO::detail::NetworkBackend> { return std::make_shared<NetworkDriver>(options); });
+        auto backend = NGIN::IO::detail::RuntimeAccess::Acquire(runtime, NGIN::IO::detail::RuntimeServiceKind::Network, +[](NGIN::IO::Runtime& owner) -> std::shared_ptr<NGIN::IO::detail::RuntimeService> { return std::make_shared<NetworkDriver>(owner); });
         return std::static_pointer_cast<NetworkDriver>(backend);
     }
 }// namespace NGIN::Net

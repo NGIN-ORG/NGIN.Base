@@ -1,6 +1,6 @@
 #include <NGIN/Sync/AtomicCondition.hpp>
 
-#include <Windows.h>
+#include <windows.h>
 #include <synchapi.h>
 
 namespace NGIN::Sync::detail

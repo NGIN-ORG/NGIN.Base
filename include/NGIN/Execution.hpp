@@ -3,6 +3,7 @@
 /// @file Execution.hpp
 /// @brief Umbrella include for executors, schedulers, threads, and fibers.
 
+#include <NGIN/Execution/CompletionReservation.hpp>
 #include <NGIN/Execution/Concepts.hpp>
 #include <NGIN/Execution/Config.hpp>
 #include <NGIN/Execution/CooperativeScheduler.hpp>
@@ -16,4 +17,5 @@
 #include <NGIN/Execution/Thread.hpp>
 #include <NGIN/Execution/ThreadName.hpp>
 #include <NGIN/Execution/ThreadPoolScheduler.hpp>
+#include <NGIN/Execution/TimerRegistration.hpp>
 #include <NGIN/Execution/WorkItem.hpp>

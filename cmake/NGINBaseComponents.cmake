@@ -4,6 +4,7 @@
 set(NGIN_BASE_COMPONENTS
   Foundation
   Execution
+  IORuntime
   IO
   Serialization
   Crypto
@@ -13,10 +14,11 @@ set(NGIN_BASE_COMPONENTS
 
 set(NGIN_BASE_FOUNDATION_DEPENDENCIES)
 set(NGIN_BASE_EXECUTION_DEPENDENCIES Foundation)
-set(NGIN_BASE_IO_DEPENDENCIES Foundation Execution)
+set(NGIN_BASE_IORUNTIME_DEPENDENCIES Foundation Execution)
+set(NGIN_BASE_IO_DEPENDENCIES Foundation Execution IORuntime)
 set(NGIN_BASE_SERIALIZATION_DEPENDENCIES Foundation IO)
 set(NGIN_BASE_CRYPTO_DEPENDENCIES Foundation IO Serialization)
-set(NGIN_BASE_NET_DEPENDENCIES Foundation Execution IO)
+set(NGIN_BASE_NET_DEPENDENCIES Foundation Execution IORuntime)
 set(NGIN_BASE_NETTLS_DEPENDENCIES Net Crypto)
 
 set(_ngin_base_requested_components ${NGIN_BASE_BUILD_COMPONENTS})

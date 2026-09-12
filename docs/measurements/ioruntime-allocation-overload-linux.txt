@@ -1,0 +1,96 @@
+{
+  "date": "2026-09-11",
+  "configuration": "GCC 15.2, static Release, standard C++ replacement-new instrumentation; single runtime owner; four producer threads only in instrumentation self-check",
+  "platform": "Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+  "binary_sha256": "cc7b238f21af806bceaecab4d47636a2eb4aaf5fc59daf5a7e988c3ccf0db814",
+  "sources": {
+    "benchmarks/IORuntimeAllocationBenchmarks.cpp": "89ad9eb46e9cc1f39bca6232d578a89bbff1b07fdc80d9f8ee92bf596059d5f7",
+    "benchmarks/AllocationInstrumentation.hpp": "ace9713b28498b17bde0a7add10b9ac3ce959651aa9dd2765315b48250f4c261",
+    "benchmarks/AllocationInstrumentation.cpp": "8abd35d9a26f004a28c4d04ffb58394fb0e39335a9332d95eb1cacbcf0e3079f",
+    "benchmarks/CMakeLists.txt": "dff6a4a6edbf69e9ffdb2157af585ece3d8f52bdfba75d7e2a36c51a9aac5075"
+  }
+}
+
+Counters measure requested C++ new bytes, not timing, RSS, C/custom-allocator allocations, or OS buffers. Current runtime-executor workload; no original-baseline comparison.
+
+Run 1
+Runtime allocation workload: requested C++ bytes; instrumented process; no latency acceptance data
+overload_capacity=64 rounds=128 rejected_per_round=1024 timer_deadline_seconds=3600 timer_payload_bytes=1024
+instrumentation_check=passed ordinary/array/aligned/zero/pmr/overflow/concurrent/free
+submission_overload operations=139264 allocations=8192 requested_bytes=917504 peak_live_bytes_above_floor=7168 first_rejection_retained_bytes_max=0 retained_bytes_above_floor=0
+completion_overload operations=139264 allocations=8192 requested_bytes=917504 peak_live_bytes_above_floor=7168 first_rejection_retained_bytes_max=0 retained_bytes_above_floor=0
+long_timer_overload operations=139264 allocations=16384 requested_bytes=9502720 peak_live_bytes_above_floor=74240 first_rejection_retained_bytes_max=0 retained_bytes_above_floor=0
+long_delay_task_overload operations=5120 allocations=31840 requested_bytes=6691840 peak_live_bytes_above_floor=89896 first_rejection_retained_bytes_max=1024 retained_bytes_above_floor=0
+socket_operation_overload operations=5120 allocations=32848 requested_bytes=9575424 peak_live_bytes_above_floor=153840 first_rejection_retained_bytes_max=0 retained_bytes_above_floor=0
+socket_registration_overload operations=5120 allocations=53344 requested_bytes=11967488 peak_live_bytes_above_floor=156176 first_rejection_retained_bytes_max=1024 retained_bytes_above_floor=0
+runtime_ready_receive operations=2000 allocations=22000 requested_bytes=4464000 peak_live_bytes_above_floor=2232 first_rejection_retained_bytes_max=0 retained_bytes_above_floor=0
+runtime_suspended_receive operations=2000 allocations=22000 requested_bytes=4464000 peak_live_bytes_above_floor=2232 first_rejection_retained_bytes_max=0 retained_bytes_above_floor=0
+runtime_ready_receive_callbacks operations=2000 submissions=2000 submission_callbacks=2000 reservations=4000 completion_callbacks=0
+runtime_suspended_receive_callbacks operations=2000 submissions=2000 submission_callbacks=2000 reservations=4000 completion_callbacks=2000
+exit_code=0
+
+Run 2
+Runtime allocation workload: requested C++ bytes; instrumented process; no latency acceptance data
+overload_capacity=64 rounds=128 rejected_per_round=1024 timer_deadline_seconds=3600 timer_payload_bytes=1024
+instrumentation_check=passed ordinary/array/aligned/zero/pmr/overflow/concurrent/free
+submission_overload operations=139264 allocations=8192 requested_bytes=917504 peak_live_bytes_above_floor=7168 first_rejection_retained_bytes_max=0 retained_bytes_above_floor=0
+completion_overload operations=139264 allocations=8192 requested_bytes=917504 peak_live_bytes_above_floor=7168 first_rejection_retained_bytes_max=0 retained_bytes_above_floor=0
+long_timer_overload operations=139264 allocations=16384 requested_bytes=9502720 peak_live_bytes_above_floor=74240 first_rejection_retained_bytes_max=0 retained_bytes_above_floor=0
+long_delay_task_overload operations=5120 allocations=31840 requested_bytes=6691840 peak_live_bytes_above_floor=89896 first_rejection_retained_bytes_max=1024 retained_bytes_above_floor=0
+socket_operation_overload operations=5120 allocations=32848 requested_bytes=9575424 peak_live_bytes_above_floor=153840 first_rejection_retained_bytes_max=0 retained_bytes_above_floor=0
+socket_registration_overload operations=5120 allocations=53344 requested_bytes=11967488 peak_live_bytes_above_floor=156176 first_rejection_retained_bytes_max=1024 retained_bytes_above_floor=0
+runtime_ready_receive operations=2000 allocations=22000 requested_bytes=4464000 peak_live_bytes_above_floor=2232 first_rejection_retained_bytes_max=0 retained_bytes_above_floor=0
+runtime_suspended_receive operations=2000 allocations=22000 requested_bytes=4464000 peak_live_bytes_above_floor=2232 first_rejection_retained_bytes_max=0 retained_bytes_above_floor=0
+runtime_ready_receive_callbacks operations=2000 submissions=2000 submission_callbacks=2000 reservations=4000 completion_callbacks=0
+runtime_suspended_receive_callbacks operations=2000 submissions=2000 submission_callbacks=2000 reservations=4000 completion_callbacks=2000
+exit_code=0
+
+Run 3
+Runtime allocation workload: requested C++ bytes; instrumented process; no latency acceptance data
+overload_capacity=64 rounds=128 rejected_per_round=1024 timer_deadline_seconds=3600 timer_payload_bytes=1024
+instrumentation_check=passed ordinary/array/aligned/zero/pmr/overflow/concurrent/free
+submission_overload operations=139264 allocations=8192 requested_bytes=917504 peak_live_bytes_above_floor=7168 first_rejection_retained_bytes_max=0 retained_bytes_above_floor=0
+completion_overload operations=139264 allocations=8192 requested_bytes=917504 peak_live_bytes_above_floor=7168 first_rejection_retained_bytes_max=0 retained_bytes_above_floor=0
+long_timer_overload operations=139264 allocations=16384 requested_bytes=9502720 peak_live_bytes_above_floor=74240 first_rejection_retained_bytes_max=0 retained_bytes_above_floor=0
+long_delay_task_overload operations=5120 allocations=31840 requested_bytes=6691840 peak_live_bytes_above_floor=89896 first_rejection_retained_bytes_max=1024 retained_bytes_above_floor=0
+socket_operation_overload operations=5120 allocations=32848 requested_bytes=9575424 peak_live_bytes_above_floor=153840 first_rejection_retained_bytes_max=0 retained_bytes_above_floor=0
+socket_registration_overload operations=5120 allocations=53344 requested_bytes=11967488 peak_live_bytes_above_floor=156176 first_rejection_retained_bytes_max=1024 retained_bytes_above_floor=0
+runtime_ready_receive operations=2000 allocations=22000 requested_bytes=4464000 peak_live_bytes_above_floor=2232 first_rejection_retained_bytes_max=0 retained_bytes_above_floor=0
+runtime_suspended_receive operations=2000 allocations=22000 requested_bytes=4464000 peak_live_bytes_above_floor=2232 first_rejection_retained_bytes_max=0 retained_bytes_above_floor=0
+runtime_ready_receive_callbacks operations=2000 submissions=2000 submission_callbacks=2000 reservations=4000 completion_callbacks=0
+runtime_suspended_receive_callbacks operations=2000 submissions=2000 submission_callbacks=2000 reservations=4000 completion_callbacks=2000
+exit_code=0
+
+Run 4
+Runtime allocation workload: requested C++ bytes; instrumented process; no latency acceptance data
+overload_capacity=64 rounds=128 rejected_per_round=1024 timer_deadline_seconds=3600 timer_payload_bytes=1024
+instrumentation_check=passed ordinary/array/aligned/zero/pmr/overflow/concurrent/free
+submission_overload operations=139264 allocations=8192 requested_bytes=917504 peak_live_bytes_above_floor=7168 first_rejection_retained_bytes_max=0 retained_bytes_above_floor=0
+completion_overload operations=139264 allocations=8192 requested_bytes=917504 peak_live_bytes_above_floor=7168 first_rejection_retained_bytes_max=0 retained_bytes_above_floor=0
+long_timer_overload operations=139264 allocations=16384 requested_bytes=9502720 peak_live_bytes_above_floor=74240 first_rejection_retained_bytes_max=0 retained_bytes_above_floor=0
+long_delay_task_overload operations=5120 allocations=31840 requested_bytes=6691840 peak_live_bytes_above_floor=89896 first_rejection_retained_bytes_max=1024 retained_bytes_above_floor=0
+socket_operation_overload operations=5120 allocations=32848 requested_bytes=9575424 peak_live_bytes_above_floor=153840 first_rejection_retained_bytes_max=0 retained_bytes_above_floor=0
+socket_registration_overload operations=5120 allocations=53344 requested_bytes=11967488 peak_live_bytes_above_floor=156176 first_rejection_retained_bytes_max=1024 retained_bytes_above_floor=0
+runtime_ready_receive operations=2000 allocations=22000 requested_bytes=4464000 peak_live_bytes_above_floor=2232 first_rejection_retained_bytes_max=0 retained_bytes_above_floor=0
+runtime_suspended_receive operations=2000 allocations=22000 requested_bytes=4464000 peak_live_bytes_above_floor=2232 first_rejection_retained_bytes_max=0 retained_bytes_above_floor=0
+runtime_ready_receive_callbacks operations=2000 submissions=2000 submission_callbacks=2000 reservations=4000 completion_callbacks=0
+runtime_suspended_receive_callbacks operations=2000 submissions=2000 submission_callbacks=2000 reservations=4000 completion_callbacks=2000
+exit_code=0
+
+Run 5
+Runtime allocation workload: requested C++ bytes; instrumented process; no latency acceptance data
+overload_capacity=64 rounds=128 rejected_per_round=1024 timer_deadline_seconds=3600 timer_payload_bytes=1024
+instrumentation_check=passed ordinary/array/aligned/zero/pmr/overflow/concurrent/free
+submission_overload operations=139264 allocations=8192 requested_bytes=917504 peak_live_bytes_above_floor=7168 first_rejection_retained_bytes_max=0 retained_bytes_above_floor=0
+completion_overload operations=139264 allocations=8192 requested_bytes=917504 peak_live_bytes_above_floor=7168 first_rejection_retained_bytes_max=0 retained_bytes_above_floor=0
+long_timer_overload operations=139264 allocations=16384 requested_bytes=9502720 peak_live_bytes_above_floor=74240 first_rejection_retained_bytes_max=0 retained_bytes_above_floor=0
+long_delay_task_overload operations=5120 allocations=31840 requested_bytes=6691840 peak_live_bytes_above_floor=89896 first_rejection_retained_bytes_max=1024 retained_bytes_above_floor=0
+socket_operation_overload operations=5120 allocations=32848 requested_bytes=9575424 peak_live_bytes_above_floor=153840 first_rejection_retained_bytes_max=0 retained_bytes_above_floor=0
+socket_registration_overload operations=5120 allocations=53344 requested_bytes=11967488 peak_live_bytes_above_floor=156176 first_rejection_retained_bytes_max=1024 retained_bytes_above_floor=0
+runtime_ready_receive operations=2000 allocations=22000 requested_bytes=4464000 peak_live_bytes_above_floor=2232 first_rejection_retained_bytes_max=0 retained_bytes_above_floor=0
+runtime_suspended_receive operations=2000 allocations=22000 requested_bytes=4464000 peak_live_bytes_above_floor=2232 first_rejection_retained_bytes_max=0 retained_bytes_above_floor=0
+runtime_ready_receive_callbacks operations=2000 submissions=2000 submission_callbacks=2000 reservations=4000 completion_callbacks=0
+runtime_suspended_receive_callbacks operations=2000 submissions=2000 submission_callbacks=2000 reservations=4000 completion_callbacks=2000
+exit_code=0
+
+All five runs produced identical workload counts and completed fixture teardown checks.

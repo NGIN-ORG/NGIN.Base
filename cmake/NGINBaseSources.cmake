@@ -3,7 +3,7 @@
 #-------------------------------------------------------------------------------
 include(CheckCXXCompilerFlag)
 
-foreach(_ngin_component IN ITEMS FOUNDATION EXECUTION IO SERIALIZATION CRYPTO NET NETTLS)
+foreach(_ngin_component IN ITEMS FOUNDATION EXECUTION IORUNTIME IO SERIALIZATION CRYPTO NET NETTLS)
   set(NGIN_BASE_${_ngin_component}_PRIVATE_DEFINITIONS)
   set(NGIN_BASE_${_ngin_component}_PRIVATE_INCLUDE_DIRECTORIES)
   set(NGIN_BASE_${_ngin_component}_PRIVATE_LIBRARIES)
@@ -84,11 +84,19 @@ set(NGIN_BASE_EXECUTION_SOURCES
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/Execution/Fiber/FiberCommon.cpp
 )
 
+set(NGIN_BASE_IORUNTIME_SOURCES
+  ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/Runtime.cpp
+  ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/RuntimeRunner.cpp
+  ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/RuntimePoller.cpp
+  ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/RuntimeLoop.cpp
+)
+
 set(NGIN_BASE_IO_SOURCES
+  ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/AsyncFileHandle.cpp
+  ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/FileOperationGate.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/Path.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/Process.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/VirtualFileSystem.cpp
-  ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/Runtime.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/FileSystemDriver.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/FileSystemUtilities.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/IO/LocalFileSystem.cpp
@@ -127,6 +135,7 @@ set(NGIN_BASE_NET_SOURCES
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/Endpoint.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/IpAddress.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/NetworkDriver.cpp
+  ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/SocketState.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/Resolve.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/TcpListener.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/TcpSocket.cpp
@@ -503,6 +512,7 @@ if(WIN32)
   )
   list(APPEND NGIN_BASE_NET_SOURCES
     ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/SocketPlatform.win32.cpp
+    ${NGIN_BASE_ROOT_DIR}/src/NGIN/Net/NetworkDriver.win32.cpp
   )
   list(APPEND NGIN_BASE_CRYPTO_SOURCES
     ${NGIN_BASE_ROOT_DIR}/src/NGIN/Crypto/Random/SecureRandom.win32.cpp

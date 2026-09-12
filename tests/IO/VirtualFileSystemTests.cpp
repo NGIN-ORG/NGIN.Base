@@ -5,6 +5,7 @@
 #include <NGIN/IO/FileSystemUtilities.hpp>
 #include <NGIN/IO/LocalFileSystem.hpp>
 #include <NGIN/IO/Runtime.hpp>
+#include <NGIN/IO/RuntimeRunner.hpp>
 #include <NGIN/IO/VirtualFileSystem.hpp>
 
 #include <array>
@@ -215,6 +216,7 @@ TEST_CASE("IO.VirtualFileSystem async file operations use value handles", "[IO][
 {
     NGIN::Execution::ThreadPoolScheduler scheduler {1};
     NGIN::IO::Runtime                    runtime;
+    NGIN::IO::RuntimeRunner runner(runtime);
     NGIN::IO::LocalFileSystem            backingFs(runtime);
     const auto                           realRoot = MakeTempDir(backingFs);
 
@@ -272,6 +274,7 @@ TEST_CASE("IO.VirtualFileSystem async directory handles stay mount scoped", "[IO
 {
     NGIN::Execution::ThreadPoolScheduler scheduler {1};
     NGIN::IO::Runtime                    runtime;
+    NGIN::IO::RuntimeRunner runner(runtime);
     NGIN::IO::LocalFileSystem            backingFs(runtime);
     const auto                           realRoot = MakeTempDir(backingFs);
 
@@ -319,6 +322,7 @@ TEST_CASE("IO.VirtualFileSystem async copy crosses mounts and cleans canceled de
 {
     NGIN::Execution::ThreadPoolScheduler scheduler {1};
     NGIN::IO::Runtime                    runtime;
+    NGIN::IO::RuntimeRunner runner(runtime);
     NGIN::IO::LocalFileSystem            backingFs(runtime);
     const auto                           root       = MakeTempDir(backingFs);
     const auto                           sourceRoot = root.Join("async-source");

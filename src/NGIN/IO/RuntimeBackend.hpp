@@ -3,27 +3,33 @@
 #include <NGIN/IO/Runtime.hpp>
 #include <memory>
 
-namespace NGIN::IO
+namespace NGIN::IO::detail
 {
-    namespace detail
+    class RuntimeLoop;
+    // Private attachment boundary. Backends are constructed by their owning
+    // component; the runtime never links a filesystem or network factory.
+    enum class RuntimeServiceKind
     {
-        class FileSystemDriver;
-        // The IO component owns lifecycle without linking against the Net component.
-        // Net supplies this private implementation when a bound socket first awaits I/O.
-        class NetworkBackend
-        {
-        public:
-            virtual ~NetworkBackend() = default;
-            virtual void Run()        = 0;
-            virtual void PollOnce()   = 0;
-            virtual void Stop()       = 0;
-        };
+        Files,
+        Network
+    };
 
-        struct RuntimeAccess
-        {
-            using NetworkFactory = std::shared_ptr<NetworkBackend> (*)(const Runtime::NetworkOptions&);
-            static NGIN_IO_API std::shared_ptr<FileSystemDriver> Files(Runtime& runtime);
-            static NGIN_IO_API std::shared_ptr<NetworkBackend> Network(Runtime& runtime, NetworkFactory factory);
-        };
-    }// namespace detail
-}// namespace NGIN::IO
+    class RuntimeService
+    {
+    public:
+        virtual ~RuntimeService() = default;
+        virtual void                 Stop() noexcept = 0;
+        virtual Runtime::FileBackend GetFileBackend() const noexcept { return Runtime::FileBackend::None; }
+    };
+
+    struct RuntimeAccess
+    {
+        using Factory = std::shared_ptr<RuntimeService> (*)(Runtime&);
+        static NGIN_IORUNTIME_API std::shared_ptr<RuntimeService> Acquire(
+                Runtime& runtime, RuntimeServiceKind kind, Factory factory);
+        static NGIN_IORUNTIME_API RuntimeLoop& Loop(Runtime& runtime) noexcept;
+        static NGIN_IORUNTIME_API std::expected<NGIN::Execution::CompletionReservation, NGIN::Execution::ScheduleError>
+        ReserveOperation(Runtime& runtime, NGIN::Execution::WorkItem completion) noexcept;
+        static NGIN_IORUNTIME_API void Run(Runtime& runtime, NGIN::Execution::WorkItem entered);
+    };
+}// namespace NGIN::IO::detail

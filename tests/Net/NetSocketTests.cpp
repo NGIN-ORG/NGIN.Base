@@ -243,7 +243,7 @@ namespace NGIN::Net
     {
         NGIN::Execution::CooperativeScheduler scheduler;
         NGIN::Async::TaskContext              ctx(scheduler);
-        NGIN::IO::Runtime                     runtime({.network = {.mode = NGIN::IO::Runtime::NetworkMode::Manual}});
+        NGIN::IO::Runtime                     runtime;
 
         UdpSocket receiver(runtime);
         REQUIRE(receiver.Open(AddressFamily::V4));
@@ -288,7 +288,7 @@ namespace NGIN::Net
     {
         NGIN::Execution::CooperativeScheduler scheduler;
         NGIN::Async::TaskContext              ctx(scheduler);
-        NGIN::IO::Runtime                     runtime({.network = {.mode = NGIN::IO::Runtime::NetworkMode::Manual}});
+        NGIN::IO::Runtime                     runtime;
 
         TcpListener listener(runtime);
         REQUIRE(listener.Open(AddressFamily::V4));
@@ -454,7 +454,7 @@ namespace NGIN::Net
     {
         NGIN::Execution::CooperativeScheduler scheduler;
         NGIN::Async::TaskContext              ctx(scheduler);
-        NGIN::IO::Runtime                     runtime({.network = {.mode = NGIN::IO::Runtime::NetworkMode::Manual}});
+        NGIN::IO::Runtime                     runtime;
 
         TcpListener listener(runtime);
         REQUIRE(listener.Open(AddressFamily::V4));
@@ -528,7 +528,7 @@ namespace NGIN::Net
     {
         NGIN::Execution::CooperativeScheduler scheduler;
         NGIN::Async::TaskContext              ctx(scheduler);
-        NGIN::IO::Runtime                     runtime({.network = {.mode = NGIN::IO::Runtime::NetworkMode::Manual}});
+        NGIN::IO::Runtime                     runtime;
 
         TcpListener listener(runtime);
         REQUIRE(listener.Open(AddressFamily::V4));
@@ -668,7 +668,7 @@ namespace NGIN::Net
     {
         NGIN::Execution::CooperativeScheduler scheduler;
         NGIN::Async::TaskContext              ctx(scheduler);
-        NGIN::IO::Runtime                     runtime({.network = {.mode = NGIN::IO::Runtime::NetworkMode::Manual}});
+        NGIN::IO::Runtime                     runtime;
 
         UdpSocket receiver(runtime);
         REQUIRE(receiver.Open(AddressFamily::V4));
@@ -727,7 +727,7 @@ namespace NGIN::Net
     {
         NGIN::Execution::CooperativeScheduler scheduler;
         NGIN::Async::TaskContext              ctx(scheduler);
-        NGIN::IO::Runtime                     runtime({.network = {.mode = NGIN::IO::Runtime::NetworkMode::Manual}});
+        NGIN::IO::Runtime                     runtime;
 
         UdpSocket socket(runtime);
         REQUIRE(socket.Open(AddressFamily::V4));
@@ -758,7 +758,7 @@ namespace NGIN::Net
     {
         NGIN::Execution::CooperativeScheduler scheduler;
         NGIN::Async::TaskContext              ctx(scheduler);
-        NGIN::IO::Runtime                     runtime({.network = {.mode = NGIN::IO::Runtime::NetworkMode::Manual}});
+        NGIN::IO::Runtime                     runtime;
 
         TcpListener listener(runtime);
         REQUIRE(listener.Open(AddressFamily::V4));
@@ -786,7 +786,7 @@ namespace NGIN::Net
     {
         NGIN::Execution::CooperativeScheduler scheduler;
         NGIN::Async::TaskContext              ctx(scheduler);
-        NGIN::IO::Runtime                     runtime({.network = {.mode = NGIN::IO::Runtime::NetworkMode::Manual}});
+        NGIN::IO::Runtime                     runtime;
 
         TcpListener listener(runtime);
         REQUIRE(listener.Open(AddressFamily::V4));
@@ -843,7 +843,7 @@ namespace NGIN::Net
     {
         NGIN::Execution::CooperativeScheduler scheduler;
         NGIN::Async::TaskContext              ctx(scheduler);
-        NGIN::IO::Runtime                     runtime({.network = {.mode = NGIN::IO::Runtime::NetworkMode::Manual}});
+        NGIN::IO::Runtime                     runtime;
 
         TcpListener listener(runtime);
         REQUIRE(listener.Open(AddressFamily::V4));
@@ -897,7 +897,7 @@ namespace NGIN::Net
     {
         NGIN::Execution::CooperativeScheduler scheduler;
         NGIN::Async::TaskContext              ctx(scheduler);
-        NGIN::IO::Runtime                     runtime({.network = {.mode = NGIN::IO::Runtime::NetworkMode::Manual}});
+        NGIN::IO::Runtime                     runtime;
 
         TcpListener listener(runtime);
         REQUIRE(listener.Open(AddressFamily::V4));
@@ -992,7 +992,7 @@ namespace NGIN::Net
     {
         NGIN::Execution::CooperativeScheduler scheduler;
         NGIN::Async::TaskContext              ctx(scheduler);
-        NGIN::IO::Runtime                     runtime({.network = {.mode = NGIN::IO::Runtime::NetworkMode::Manual}});
+        NGIN::IO::Runtime                     runtime;
 
         TcpListener listener(runtime);
         REQUIRE(listener.Open(AddressFamily::V4));
@@ -1018,7 +1018,7 @@ namespace NGIN::Net
     {
         NGIN::Execution::CooperativeScheduler scheduler;
         NGIN::Async::TaskContext              ctx(scheduler);
-        NGIN::IO::Runtime                     runtime({.network = {.mode = NGIN::IO::Runtime::NetworkMode::Manual}});
+        NGIN::IO::Runtime                     runtime;
 
         TcpListener listener(runtime);
         REQUIRE(listener.Open(AddressFamily::V4));
@@ -1140,7 +1140,7 @@ namespace NGIN::Net
     {
         NGIN::Execution::CooperativeScheduler scheduler;
         NGIN::Async::TaskContext              ctx(scheduler);
-        NGIN::IO::Runtime                     runtime({.network = {.mode = NGIN::IO::Runtime::NetworkMode::Manual}});
+        NGIN::IO::Runtime                     runtime;
 
         TcpListener listener(runtime);
         REQUIRE(listener.Open(AddressFamily::V4));

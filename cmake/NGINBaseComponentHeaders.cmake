@@ -5,6 +5,7 @@
 set(NGIN_BASE_COMPONENT_NAMES
   Foundation
   Execution
+  IORuntime
   IO
   Serialization
   Crypto
@@ -48,6 +49,7 @@ set(NGIN_BASE_FOUNDATION_PUBLIC_HEADER_FILES
 
 set(NGIN_BASE_EXECUTION_PUBLIC_HEADER_ROOTS Async Execution)
 set(NGIN_BASE_EXECUTION_PUBLIC_HEADER_FILES Async.hpp Execution.hpp)
+set(NGIN_BASE_IORUNTIME_PUBLIC_HEADER_FILES IO/NativeWaitSource.hpp IO/Runtime.hpp IO/RuntimeRunner.hpp IO/RunTask.hpp)
 set(NGIN_BASE_IO_PUBLIC_HEADER_ROOTS IO)
 set(NGIN_BASE_IO_PUBLIC_HEADER_FILES IO.hpp)
 set(NGIN_BASE_SERIALIZATION_PUBLIC_HEADER_ROOTS Serialization)
@@ -132,7 +134,7 @@ foreach(public_header IN LISTS NGIN_BASE_PUBLIC_HEADERS)
 
     foreach(header_root IN LISTS ${root_variable})
       string(FIND "${relative_header}" "${header_root}/" root_position)
-      if(root_position EQUAL 0)
+      if(root_position EQUAL 0 AND NOT relative_header IN_LIST NGIN_BASE_IORUNTIME_PUBLIC_HEADER_FILES)
         list(APPEND header_components "${component}")
       endif()
     endforeach()
@@ -161,11 +163,12 @@ endforeach()
 # configure-time contract before the compiled-target migration.
 set(NGIN_BASE_FOUNDATION_ALLOWED_HEADER_DEPENDENCIES Foundation)
 set(NGIN_BASE_EXECUTION_ALLOWED_HEADER_DEPENDENCIES Foundation Execution)
-set(NGIN_BASE_IO_ALLOWED_HEADER_DEPENDENCIES Foundation Execution IO)
+set(NGIN_BASE_IORUNTIME_ALLOWED_HEADER_DEPENDENCIES Foundation Execution IORuntime)
+set(NGIN_BASE_IO_ALLOWED_HEADER_DEPENDENCIES Foundation Execution IORuntime IO)
 set(NGIN_BASE_SERIALIZATION_ALLOWED_HEADER_DEPENDENCIES Foundation IO Serialization)
 set(NGIN_BASE_CRYPTO_ALLOWED_HEADER_DEPENDENCIES Foundation IO Serialization Crypto)
-set(NGIN_BASE_NET_ALLOWED_HEADER_DEPENDENCIES Foundation Execution IO Net)
-set(NGIN_BASE_NETTLS_ALLOWED_HEADER_DEPENDENCIES Foundation Execution IO Crypto Net NetTLS)
+set(NGIN_BASE_NET_ALLOWED_HEADER_DEPENDENCIES Foundation Execution IORuntime Net)
+set(NGIN_BASE_NETTLS_ALLOWED_HEADER_DEPENDENCIES Foundation Execution IORuntime IO Crypto Net NetTLS)
 
 foreach(component IN LISTS NGIN_BASE_COMPONENT_NAMES)
   string(TOUPPER "${component}" component_upper)

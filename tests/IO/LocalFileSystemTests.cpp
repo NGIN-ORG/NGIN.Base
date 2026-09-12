@@ -5,6 +5,7 @@
 #include <NGIN/IO/FileSystemUtilities.hpp>
 #include <NGIN/IO/LocalFileSystem.hpp>
 #include <NGIN/IO/Runtime.hpp>
+#include <NGIN/IO/RuntimeRunner.hpp>
 
 #include <array>
 #include <chrono>
@@ -322,6 +323,7 @@ TEST_CASE("IO.LocalFileSystem async file operations use value handles", "[IO][Lo
 {
     NGIN::Execution::ThreadPoolScheduler scheduler {1};
     NGIN::IO::Runtime                    runtime;
+    NGIN::IO::RuntimeRunner runner(runtime);
     NGIN::IO::LocalFileSystem            fs(runtime);
     const auto                           root     = MakeTempDir(fs);
     const auto                           filePath = root.Join("async.bin");
@@ -368,6 +370,7 @@ TEST_CASE("IO.LocalFileSystem async utility helpers work through IO::Runtime", "
 {
     NGIN::Execution::ThreadPoolScheduler scheduler {1};
     NGIN::IO::Runtime                    runtime;
+    NGIN::IO::RuntimeRunner runner(runtime);
     NGIN::IO::LocalFileSystem            fs(runtime);
     const auto                           root    = MakeTempDir(fs);
     const auto                           source  = root.Join("source.bin");
@@ -411,6 +414,7 @@ TEST_CASE("IO.LocalFileSystem async directory handles scope relative operations"
 {
     NGIN::Execution::ThreadPoolScheduler scheduler {1};
     NGIN::IO::Runtime                    runtime;
+    NGIN::IO::RuntimeRunner runner(runtime);
     NGIN::IO::LocalFileSystem            fs(runtime);
     const auto                           root      = MakeTempDir(fs);
     const auto                           nestedDir = root.Join("nested");
@@ -464,6 +468,7 @@ TEST_CASE("IO.LocalFileSystem async operations observe cancellation before dispa
 {
     NGIN::Execution::ThreadPoolScheduler scheduler {1};
     NGIN::IO::Runtime                    runtime;
+    NGIN::IO::RuntimeRunner runner(runtime);
     NGIN::IO::LocalFileSystem            fs(runtime);
     const auto                           root     = MakeTempDir(fs);
     const auto                           filePath = root.Join("cancel.txt");

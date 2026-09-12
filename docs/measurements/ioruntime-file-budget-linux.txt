@@ -1,0 +1,157 @@
+2026-09-11 shared file-handle admission budget; GCC 15.2 static Release; five serial before/after pairs, no CPU pinning
+Before = thread-pool fairness checkpoint. After adds queued/active handle capacity shared across handles and executors, using files.queueDepthHint. Neither is original baseline.
+Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.39
+before IORuntimeFileBenchmarks sha256=25f942cacd549ff687ac7c77362aec156a1b089fa52fe1ed1ba139e161b994e8
+before IORuntimeMixedBenchmarks sha256=9505acf634f953d656ceff5f8885a1eb25329512e6901e3d707474644b3ff5cb
+after IORuntimeFileBenchmarks sha256=7f6933c3a81fabf133af359beb3bcaf3a668587b4c8a7c25ca7ddd411b976c51
+after IORuntimeMixedBenchmarks sha256=07017091eeba64e651d3e5d04a28f66e5867d35b19066eb57a64021b4ea045db
+
+Run 1: before IORuntimeFileBenchmarks
+native cold_open_us=427.502 backend=1 bytes=65536
+native_read_at_64k samples=2000 p50_us=68.632 p95_us=121.233 p99_us=181.597 mean_us=77.0481
+native_write_at_64k samples=2000 p50_us=72.207 p95_us=138.453 p99_us=184.679 mean_us=82.4421
+fallback cold_open_us=226.175 backend=3 bytes=65536
+fallback_read_at_64k samples=2000 p50_us=73.122 p95_us=103.318 p99_us=144.926 mean_us=77.9702
+fallback_write_at_64k samples=2000 p50_us=73.934 p95_us=106.535 p99_us=168.518 mean_us=78.8825
+exit_code=0
+
+Run 1: after IORuntimeFileBenchmarks
+native cold_open_us=415.496 backend=1 bytes=65536
+native_read_at_64k samples=2000 p50_us=68.609 p95_us=104.884 p99_us=167.399 mean_us=74.6906
+native_write_at_64k samples=2000 p50_us=68.23 p95_us=104.051 p99_us=169.349 mean_us=73.9524
+fallback cold_open_us=247.576 backend=3 bytes=65536
+fallback_read_at_64k samples=2000 p50_us=74.701 p95_us=114.378 p99_us=170.462 mean_us=81.2888
+fallback_write_at_64k samples=2000 p50_us=75.93 p95_us=114.751 p99_us=177.539 mean_us=82.0699
+exit_code=0
+
+Run 2: before IORuntimeFileBenchmarks
+native cold_open_us=428.188 backend=1 bytes=65536
+native_read_at_64k samples=2000 p50_us=68.331 p95_us=110.237 p99_us=168.733 mean_us=75.5149
+native_write_at_64k samples=2000 p50_us=68.262 p95_us=110.1 p99_us=165.376 mean_us=75.2972
+fallback cold_open_us=263.682 backend=3 bytes=65536
+fallback_read_at_64k samples=2000 p50_us=74.339 p95_us=109.026 p99_us=147.672 mean_us=79.9723
+fallback_write_at_64k samples=2000 p50_us=74.041 p95_us=111.159 p99_us=157.822 mean_us=79.6985
+exit_code=0
+
+Run 2: after IORuntimeFileBenchmarks
+native cold_open_us=390.361 backend=1 bytes=65536
+native_read_at_64k samples=2000 p50_us=67.921 p95_us=108.518 p99_us=172.164 mean_us=74.6952
+native_write_at_64k samples=2000 p50_us=67.976 p95_us=112.455 p99_us=166.353 mean_us=75.257
+fallback cold_open_us=262.901 backend=3 bytes=65536
+fallback_read_at_64k samples=2000 p50_us=75.032 p95_us=106.75 p99_us=162.076 mean_us=80.8082
+fallback_write_at_64k samples=2000 p50_us=75.531 p95_us=115.106 p99_us=155.961 mean_us=81.7422
+exit_code=0
+
+Run 3: before IORuntimeFileBenchmarks
+native cold_open_us=417.849 backend=1 bytes=65536
+native_read_at_64k samples=2000 p50_us=68.161 p95_us=108.255 p99_us=164.803 mean_us=74.8839
+native_write_at_64k samples=2000 p50_us=66.993 p95_us=105.851 p99_us=163.301 mean_us=72.1115
+fallback cold_open_us=218.679 backend=3 bytes=65536
+fallback_read_at_64k samples=2000 p50_us=69.907 p95_us=103.467 p99_us=147.471 mean_us=75.6191
+fallback_write_at_64k samples=2000 p50_us=69.866 p95_us=108.001 p99_us=157.97 mean_us=76.0815
+exit_code=0
+
+Run 3: after IORuntimeFileBenchmarks
+native cold_open_us=362.015 backend=1 bytes=65536
+native_read_at_64k samples=2000 p50_us=64.979 p95_us=105.719 p99_us=153.85 mean_us=71.3615
+native_write_at_64k samples=2000 p50_us=65.431 p95_us=105.747 p99_us=140.416 mean_us=71.7658
+fallback cold_open_us=228.853 backend=3 bytes=65536
+fallback_read_at_64k samples=2000 p50_us=72.949 p95_us=101.916 p99_us=136.968 mean_us=77.1609
+fallback_write_at_64k samples=2000 p50_us=74.33 p95_us=123.86 p99_us=165.878 mean_us=81.4083
+exit_code=0
+
+Run 4: before IORuntimeFileBenchmarks
+native cold_open_us=427.215 backend=1 bytes=65536
+native_read_at_64k samples=2000 p50_us=69.585 p95_us=115 p99_us=157.489 mean_us=75.7732
+native_write_at_64k samples=2000 p50_us=65.268 p95_us=99.575 p99_us=143.123 mean_us=70.8462
+fallback cold_open_us=328.718 backend=3 bytes=65536
+fallback_read_at_64k samples=2000 p50_us=73.932 p95_us=107.513 p99_us=142.685 mean_us=79.0154
+fallback_write_at_64k samples=2000 p50_us=71.502 p95_us=102.807 p99_us=143.484 mean_us=76.8296
+exit_code=0
+
+Run 4: after IORuntimeFileBenchmarks
+native cold_open_us=439.868 backend=1 bytes=65536
+native_read_at_64k samples=2000 p50_us=68.109 p95_us=133.073 p99_us=196.292 mean_us=78.8205
+native_write_at_64k samples=2000 p50_us=65.392 p95_us=95.959 p99_us=142.897 mean_us=70.9883
+fallback cold_open_us=225.527 backend=3 bytes=65536
+fallback_read_at_64k samples=2000 p50_us=70.014 p95_us=106.784 p99_us=161.095 mean_us=76.6433
+fallback_write_at_64k samples=2000 p50_us=70.726 p95_us=101.714 p99_us=160.004 mean_us=75.9265
+exit_code=0
+
+Run 5: before IORuntimeFileBenchmarks
+native cold_open_us=373.007 backend=1 bytes=65536
+native_read_at_64k samples=2000 p50_us=64.726 p95_us=99.315 p99_us=165.332 mean_us=71.0999
+native_write_at_64k samples=2000 p50_us=64.856 p95_us=97.567 p99_us=142.844 mean_us=70.3859
+fallback cold_open_us=228.776 backend=3 bytes=65536
+fallback_read_at_64k samples=2000 p50_us=71.219 p95_us=101.537 p99_us=145.391 mean_us=76.2105
+fallback_write_at_64k samples=2000 p50_us=73.317 p95_us=118.122 p99_us=185.047 mean_us=80.8231
+exit_code=0
+
+Run 5: after IORuntimeFileBenchmarks
+native cold_open_us=473.701 backend=1 bytes=65536
+native_read_at_64k samples=2000 p50_us=69.935 p95_us=109.989 p99_us=167.344 mean_us=75.7063
+native_write_at_64k samples=2000 p50_us=69.311 p95_us=108.086 p99_us=140.363 mean_us=74.6024
+fallback cold_open_us=236.956 backend=3 bytes=65536
+fallback_read_at_64k samples=2000 p50_us=72.587 p95_us=100.543 p99_us=142.131 mean_us=77.9042
+fallback_write_at_64k samples=2000 p50_us=76.215 p95_us=109.451 p99_us=145.431 mean_us=80.974
+exit_code=0
+
+Run 1: after IORuntimeMixedBenchmarks
+Mixed runtime workload: four 64-byte UDP exchanges, independent 64-KiB file read/write, two yield loops; runtime timer root
+mixed=0 continuations=runtime file_backend=1 samples=1000 delay_us=1000 timer_overshoot_p50_us=138.414 timer_overshoot_p95_us=194.182 timer_overshoot_p99_us=233.719 timer_overshoot_max_us=472.365 timer_overshoot_mean_us=142.171 cold_setup_open_us=269.272 elapsed_including_joins_us=1.14237e+06 join_drain_us=0.535 udp_exchanges=0 file_reads=0 file_writes=0 yield_callbacks=0 udp_exchanges_per_second=0 file_transfers_per_second=0
+mixed=1 continuations=runtime file_backend=1 samples=1000 delay_us=1000 timer_overshoot_p50_us=10.182 timer_overshoot_p95_us=22.226 timer_overshoot_p99_us=40.08 timer_overshoot_max_us=164.853 timer_overshoot_mean_us=12.1984 cold_setup_open_us=310.838 elapsed_including_joins_us=1.0123e+06 join_drain_us=19.723 udp_exchanges=65400 file_reads=13900 file_writes=13901 yield_callbacks=207344 udp_exchanges_per_second=64605.1 file_transfers_per_second=27463.1
+mixed=0 continuations=external_one_worker file_backend=1 samples=1000 delay_us=1000 timer_overshoot_p50_us=139.34 timer_overshoot_p95_us=198.992 timer_overshoot_p99_us=257.149 timer_overshoot_max_us=577.028 timer_overshoot_mean_us=144.449 cold_setup_open_us=272.799 elapsed_including_joins_us=1.14462e+06 join_drain_us=1.995 udp_exchanges=0 file_reads=0 file_writes=0 yield_callbacks=0 udp_exchanges_per_second=0 file_transfers_per_second=0
+mixed=1 continuations=external_one_worker file_backend=1 samples=1000 delay_us=1000 timer_overshoot_p50_us=16.865 timer_overshoot_p95_us=57.412 timer_overshoot_p99_us=109.308 timer_overshoot_max_us=141.877 timer_overshoot_mean_us=22.0151 cold_setup_open_us=697.893 elapsed_including_joins_us=1.02226e+06 join_drain_us=42.654 udp_exchanges=40301 file_reads=5193 file_writes=5193 yield_callbacks=59703 udp_exchanges_per_second=39423.5 file_transfers_per_second=10159.9
+mixed=0 continuations=runtime file_backend=3 samples=1000 delay_us=1000 timer_overshoot_p50_us=136.225 timer_overshoot_p95_us=184.936 timer_overshoot_p99_us=225.405 timer_overshoot_max_us=800.777 timer_overshoot_mean_us=138.091 cold_setup_open_us=150.871 elapsed_including_joins_us=1.13823e+06 join_drain_us=1.53 udp_exchanges=0 file_reads=0 file_writes=0 yield_callbacks=0 udp_exchanges_per_second=0 file_transfers_per_second=0
+mixed=1 continuations=runtime file_backend=3 samples=1000 delay_us=1000 timer_overshoot_p50_us=12.193 timer_overshoot_p95_us=25.725 timer_overshoot_p99_us=79.611 timer_overshoot_max_us=301.564 timer_overshoot_mean_us=14.3707 cold_setup_open_us=220.133 elapsed_including_joins_us=1.01447e+06 join_drain_us=20.036 udp_exchanges=59384 file_reads=14649 file_writes=14648 yield_callbacks=164095 udp_exchanges_per_second=58537.1 file_transfers_per_second=28879.2
+mixed=0 continuations=external_one_worker file_backend=3 samples=1000 delay_us=1000 timer_overshoot_p50_us=132.863 timer_overshoot_p95_us=182.111 timer_overshoot_p99_us=235.901 timer_overshoot_max_us=477.731 timer_overshoot_mean_us=135.337 cold_setup_open_us=217.672 elapsed_including_joins_us=1.13548e+06 join_drain_us=0.883 udp_exchanges=0 file_reads=0 file_writes=0 yield_callbacks=0 udp_exchanges_per_second=0 file_transfers_per_second=0
+mixed=1 continuations=external_one_worker file_backend=3 samples=1000 delay_us=1000 timer_overshoot_p50_us=16.597 timer_overshoot_p95_us=57.729 timer_overshoot_p99_us=93.32 timer_overshoot_max_us=196.854 timer_overshoot_mean_us=21.4116 cold_setup_open_us=231.4 elapsed_including_joins_us=1.02161e+06 join_drain_us=43.792 udp_exchanges=36361 file_reads=4596 file_writes=4596 yield_callbacks=51193 udp_exchanges_per_second=35591.8 file_transfers_per_second=8997.54
+exit_code=0
+
+Run 2: after IORuntimeMixedBenchmarks
+Mixed runtime workload: four 64-byte UDP exchanges, independent 64-KiB file read/write, two yield loops; runtime timer root
+mixed=0 continuations=runtime file_backend=1 samples=1000 delay_us=1000 timer_overshoot_p50_us=130.911 timer_overshoot_p95_us=187.558 timer_overshoot_p99_us=260.17 timer_overshoot_max_us=444.861 timer_overshoot_mean_us=136.756 cold_setup_open_us=281.081 elapsed_including_joins_us=1.13687e+06 join_drain_us=0.908 udp_exchanges=0 file_reads=0 file_writes=0 yield_callbacks=0 udp_exchanges_per_second=0 file_transfers_per_second=0
+mixed=1 continuations=runtime file_backend=1 samples=1000 delay_us=1000 timer_overshoot_p50_us=10.385 timer_overshoot_p95_us=23.658 timer_overshoot_p99_us=58.009 timer_overshoot_max_us=137.728 timer_overshoot_mean_us=12.6751 cold_setup_open_us=262.161 elapsed_including_joins_us=1.01278e+06 join_drain_us=25.284 udp_exchanges=66476 file_reads=13464 file_writes=13466 yield_callbacks=216129 udp_exchanges_per_second=65636.9 file_transfers_per_second=26590.1
+mixed=0 continuations=external_one_worker file_backend=1 samples=1000 delay_us=1000 timer_overshoot_p50_us=128.412 timer_overshoot_p95_us=189.926 timer_overshoot_p99_us=255.267 timer_overshoot_max_us=955.645 timer_overshoot_mean_us=134.679 cold_setup_open_us=295.38 elapsed_including_joins_us=1.13479e+06 join_drain_us=1.025 udp_exchanges=0 file_reads=0 file_writes=0 yield_callbacks=0 udp_exchanges_per_second=0 file_transfers_per_second=0
+mixed=1 continuations=external_one_worker file_backend=1 samples=1000 delay_us=1000 timer_overshoot_p50_us=18.461 timer_overshoot_p95_us=57.572 timer_overshoot_p99_us=115.471 timer_overshoot_max_us=5917.14 timer_overshoot_mean_us=28.9722 cold_setup_open_us=627.997 elapsed_including_joins_us=1.02916e+06 join_drain_us=55.31 udp_exchanges=41121 file_reads=5333 file_writes=5333 yield_callbacks=64206 udp_exchanges_per_second=39956 file_transfers_per_second=10363.8
+mixed=0 continuations=runtime file_backend=3 samples=1000 delay_us=1000 timer_overshoot_p50_us=128.343 timer_overshoot_p95_us=173.593 timer_overshoot_p99_us=224.715 timer_overshoot_max_us=718.154 timer_overshoot_mean_us=130.234 cold_setup_open_us=187.019 elapsed_including_joins_us=1.13034e+06 join_drain_us=1.068 udp_exchanges=0 file_reads=0 file_writes=0 yield_callbacks=0 udp_exchanges_per_second=0 file_transfers_per_second=0
+mixed=1 continuations=runtime file_backend=3 samples=1000 delay_us=1000 timer_overshoot_p50_us=12.364 timer_overshoot_p95_us=23.806 timer_overshoot_p99_us=62.962 timer_overshoot_max_us=131.192 timer_overshoot_mean_us=13.6272 cold_setup_open_us=157.6 elapsed_including_joins_us=1.01373e+06 join_drain_us=36.361 udp_exchanges=59432 file_reads=14723 file_writes=14722 yield_callbacks=163668 udp_exchanges_per_second=58626.8 file_transfers_per_second=29046.1
+mixed=0 continuations=external_one_worker file_backend=3 samples=1000 delay_us=1000 timer_overshoot_p50_us=112.748 timer_overshoot_p95_us=161.899 timer_overshoot_p99_us=208.539 timer_overshoot_max_us=265.439 timer_overshoot_mean_us=117.031 cold_setup_open_us=234.316 elapsed_including_joins_us=1.11714e+06 join_drain_us=0.614 udp_exchanges=0 file_reads=0 file_writes=0 yield_callbacks=0 udp_exchanges_per_second=0 file_transfers_per_second=0
+mixed=1 continuations=external_one_worker file_backend=3 samples=1000 delay_us=1000 timer_overshoot_p50_us=16.703 timer_overshoot_p95_us=51.736 timer_overshoot_p99_us=85.1 timer_overshoot_max_us=139.9 timer_overshoot_mean_us=20.6179 cold_setup_open_us=201.04 elapsed_including_joins_us=1.02076e+06 join_drain_us=45.518 udp_exchanges=37309 file_reads=4757 file_writes=4756 yield_callbacks=53526 udp_exchanges_per_second=36550.2 file_transfers_per_second=9319.52
+exit_code=0
+
+Run 3: after IORuntimeMixedBenchmarks
+Mixed runtime workload: four 64-byte UDP exchanges, independent 64-KiB file read/write, two yield loops; runtime timer root
+mixed=0 continuations=runtime file_backend=1 samples=1000 delay_us=1000 timer_overshoot_p50_us=112.094 timer_overshoot_p95_us=157.329 timer_overshoot_p99_us=211.179 timer_overshoot_max_us=455.033 timer_overshoot_mean_us=114.99 cold_setup_open_us=291.88 elapsed_including_joins_us=1.11516e+06 join_drain_us=0.482 udp_exchanges=0 file_reads=0 file_writes=0 yield_callbacks=0 udp_exchanges_per_second=0 file_transfers_per_second=0
+mixed=1 continuations=runtime file_backend=1 samples=1000 delay_us=1000 timer_overshoot_p50_us=8.878 timer_overshoot_p95_us=22.468 timer_overshoot_p99_us=54.884 timer_overshoot_max_us=117.445 timer_overshoot_mean_us=11.2203 cold_setup_open_us=225.344 elapsed_including_joins_us=1.01136e+06 join_drain_us=35.733 udp_exchanges=69612 file_reads=13518 file_writes=13518 yield_callbacks=231351 udp_exchanges_per_second=68830 file_transfers_per_second=26732.3
+mixed=0 continuations=external_one_worker file_backend=1 samples=1000 delay_us=1000 timer_overshoot_p50_us=106.678 timer_overshoot_p95_us=157.653 timer_overshoot_p99_us=210.291 timer_overshoot_max_us=826.585 timer_overshoot_mean_us=112.001 cold_setup_open_us=252.934 elapsed_including_joins_us=1.11212e+06 join_drain_us=0.889 udp_exchanges=0 file_reads=0 file_writes=0 yield_callbacks=0 udp_exchanges_per_second=0 file_transfers_per_second=0
+mixed=1 continuations=external_one_worker file_backend=1 samples=1000 delay_us=1000 timer_overshoot_p50_us=17.682 timer_overshoot_p95_us=49.555 timer_overshoot_p99_us=104.684 timer_overshoot_max_us=164.656 timer_overshoot_mean_us=21.4767 cold_setup_open_us=248.439 elapsed_including_joins_us=1.02165e+06 join_drain_us=30.371 udp_exchanges=41057 file_reads=5303 file_writes=5301 yield_callbacks=60000 udp_exchanges_per_second=40187.1 file_transfers_per_second=10379.3
+mixed=0 continuations=runtime file_backend=3 samples=1000 delay_us=1000 timer_overshoot_p50_us=111.08 timer_overshoot_p95_us=174.35 timer_overshoot_p99_us=241.633 timer_overshoot_max_us=498.532 timer_overshoot_mean_us=118.83 cold_setup_open_us=143.906 elapsed_including_joins_us=1.11895e+06 join_drain_us=0.698 udp_exchanges=0 file_reads=0 file_writes=0 yield_callbacks=0 udp_exchanges_per_second=0 file_transfers_per_second=0
+mixed=1 continuations=runtime file_backend=3 samples=1000 delay_us=1000 timer_overshoot_p50_us=12.043 timer_overshoot_p95_us=22.493 timer_overshoot_p99_us=59.246 timer_overshoot_max_us=208.774 timer_overshoot_mean_us=13.3173 cold_setup_open_us=159.395 elapsed_including_joins_us=1.0134e+06 join_drain_us=18.44 udp_exchanges=62352 file_reads=15297 file_writes=15296 yield_callbacks=173103 udp_exchanges_per_second=61527.8 file_transfers_per_second=30188.6
+mixed=0 continuations=external_one_worker file_backend=3 samples=1000 delay_us=1000 timer_overshoot_p50_us=88.732 timer_overshoot_p95_us=131.522 timer_overshoot_p99_us=176.968 timer_overshoot_max_us=224.98 timer_overshoot_mean_us=92.5679 cold_setup_open_us=251.656 elapsed_including_joins_us=1.09272e+06 join_drain_us=0.852 udp_exchanges=0 file_reads=0 file_writes=0 yield_callbacks=0 udp_exchanges_per_second=0 file_transfers_per_second=0
+mixed=1 continuations=external_one_worker file_backend=3 samples=1000 delay_us=1000 timer_overshoot_p50_us=16.378 timer_overshoot_p95_us=62.74 timer_overshoot_p99_us=114.641 timer_overshoot_max_us=520.001 timer_overshoot_mean_us=23.4918 cold_setup_open_us=284.952 elapsed_including_joins_us=1.02367e+06 join_drain_us=44.646 udp_exchanges=35618 file_reads=4574 file_writes=4574 yield_callbacks=56881 udp_exchanges_per_second=34794.4 file_transfers_per_second=8936.47
+exit_code=0
+
+Run 4: after IORuntimeMixedBenchmarks
+Mixed runtime workload: four 64-byte UDP exchanges, independent 64-KiB file read/write, two yield loops; runtime timer root
+mixed=0 continuations=runtime file_backend=1 samples=1000 delay_us=1000 timer_overshoot_p50_us=87.597 timer_overshoot_p95_us=138.638 timer_overshoot_p99_us=187.924 timer_overshoot_max_us=388.213 timer_overshoot_mean_us=93.1111 cold_setup_open_us=287.45 elapsed_including_joins_us=1.09323e+06 join_drain_us=0.494 udp_exchanges=0 file_reads=0 file_writes=0 yield_callbacks=0 udp_exchanges_per_second=0 file_transfers_per_second=0
+mixed=1 continuations=runtime file_backend=1 samples=1000 delay_us=1000 timer_overshoot_p50_us=9.298 timer_overshoot_p95_us=22.747 timer_overshoot_p99_us=68.952 timer_overshoot_max_us=222.223 timer_overshoot_mean_us=11.8752 cold_setup_open_us=191.163 elapsed_including_joins_us=1.01199e+06 join_drain_us=27.083 udp_exchanges=70300 file_reads=13517 file_writes=13515 yield_callbacks=234699 udp_exchanges_per_second=69466.9 file_transfers_per_second=26711.6
+mixed=0 continuations=external_one_worker file_backend=1 samples=1000 delay_us=1000 timer_overshoot_p50_us=89.424 timer_overshoot_p95_us=130.262 timer_overshoot_p99_us=176.809 timer_overshoot_max_us=576.689 timer_overshoot_mean_us=92.7273 cold_setup_open_us=332.932 elapsed_including_joins_us=1.09285e+06 join_drain_us=0.937 udp_exchanges=0 file_reads=0 file_writes=0 yield_callbacks=0 udp_exchanges_per_second=0 file_transfers_per_second=0
+mixed=1 continuations=external_one_worker file_backend=1 samples=1000 delay_us=1000 timer_overshoot_p50_us=17.778 timer_overshoot_p95_us=48.044 timer_overshoot_p99_us=66.815 timer_overshoot_max_us=126.355 timer_overshoot_mean_us=21.1426 cold_setup_open_us=237.265 elapsed_including_joins_us=1.02132e+06 join_drain_us=55.792 udp_exchanges=41693 file_reads=5416 file_writes=5415 yield_callbacks=61983 udp_exchanges_per_second=40822.6 file_transfers_per_second=10604.9
+mixed=0 continuations=runtime file_backend=3 samples=1000 delay_us=1000 timer_overshoot_p50_us=88.763 timer_overshoot_p95_us=152.083 timer_overshoot_p99_us=211.863 timer_overshoot_max_us=682.819 timer_overshoot_mean_us=97.9816 cold_setup_open_us=142.322 elapsed_including_joins_us=1.09811e+06 join_drain_us=0.903 udp_exchanges=0 file_reads=0 file_writes=0 yield_callbacks=0 udp_exchanges_per_second=0 file_transfers_per_second=0
+mixed=1 continuations=runtime file_backend=3 samples=1000 delay_us=1000 timer_overshoot_p50_us=12.281 timer_overshoot_p95_us=25.242 timer_overshoot_p99_us=71.39 timer_overshoot_max_us=201.102 timer_overshoot_mean_us=14.0133 cold_setup_open_us=135.991 elapsed_including_joins_us=1.0141e+06 join_drain_us=21.641 udp_exchanges=60474 file_reads=14950 file_writes=14950 yield_callbacks=166823 udp_exchanges_per_second=59633.3 file_transfers_per_second=29484.3
+mixed=0 continuations=external_one_worker file_backend=3 samples=1000 delay_us=1000 timer_overshoot_p50_us=130.03 timer_overshoot_p95_us=189.176 timer_overshoot_p99_us=236.627 timer_overshoot_max_us=433.694 timer_overshoot_mean_us=135.356 cold_setup_open_us=213.252 elapsed_including_joins_us=1.13548e+06 join_drain_us=1.12 udp_exchanges=0 file_reads=0 file_writes=0 yield_callbacks=0 udp_exchanges_per_second=0 file_transfers_per_second=0
+mixed=1 continuations=external_one_worker file_backend=3 samples=1000 delay_us=1000 timer_overshoot_p50_us=19.029 timer_overshoot_p95_us=68.95 timer_overshoot_p99_us=118.817 timer_overshoot_max_us=185.448 timer_overshoot_mean_us=25.4974 cold_setup_open_us=747.962 elapsed_including_joins_us=1.0257e+06 join_drain_us=47.029 udp_exchanges=32846 file_reads=4216 file_writes=4216 yield_callbacks=49543 udp_exchanges_per_second=32022.9 file_transfers_per_second=8220.7
+exit_code=0
+
+Run 5: after IORuntimeMixedBenchmarks
+Mixed runtime workload: four 64-byte UDP exchanges, independent 64-KiB file read/write, two yield loops; runtime timer root
+mixed=0 continuations=runtime file_backend=1 samples=1000 delay_us=1000 timer_overshoot_p50_us=134.659 timer_overshoot_p95_us=188.887 timer_overshoot_p99_us=228.586 timer_overshoot_max_us=378.351 timer_overshoot_mean_us=136.093 cold_setup_open_us=324.981 elapsed_including_joins_us=1.13622e+06 join_drain_us=0.453 udp_exchanges=0 file_reads=0 file_writes=0 yield_callbacks=0 udp_exchanges_per_second=0 file_transfers_per_second=0
+mixed=1 continuations=runtime file_backend=1 samples=1000 delay_us=1000 timer_overshoot_p50_us=10.1 timer_overshoot_p95_us=23.046 timer_overshoot_p99_us=75.846 timer_overshoot_max_us=475.706 timer_overshoot_mean_us=13.2054 cold_setup_open_us=182.897 elapsed_including_joins_us=1.01333e+06 join_drain_us=38.034 udp_exchanges=66548 file_reads=13463 file_writes=13463 yield_callbacks=216592 udp_exchanges_per_second=65672.7 file_transfers_per_second=26571.8
+mixed=0 continuations=external_one_worker file_backend=1 samples=1000 delay_us=1000 timer_overshoot_p50_us=139.254 timer_overshoot_p95_us=202.124 timer_overshoot_p99_us=280.633 timer_overshoot_max_us=725.44 timer_overshoot_mean_us=146.951 cold_setup_open_us=285.881 elapsed_including_joins_us=1.1471e+06 join_drain_us=1.082 udp_exchanges=0 file_reads=0 file_writes=0 yield_callbacks=0 udp_exchanges_per_second=0 file_transfers_per_second=0
+mixed=1 continuations=external_one_worker file_backend=1 samples=1000 delay_us=1000 timer_overshoot_p50_us=17.303 timer_overshoot_p95_us=56.662 timer_overshoot_p99_us=99.318 timer_overshoot_max_us=200.524 timer_overshoot_mean_us=22.4229 cold_setup_open_us=238.091 elapsed_including_joins_us=1.02255e+06 join_drain_us=22.525 udp_exchanges=39523 file_reads=5082 file_writes=5081 yield_callbacks=58470 udp_exchanges_per_second=38651.3 file_transfers_per_second=9938.85
+mixed=0 continuations=runtime file_backend=3 samples=1000 delay_us=1000 timer_overshoot_p50_us=134.727 timer_overshoot_p95_us=181.576 timer_overshoot_p99_us=221.542 timer_overshoot_max_us=985.637 timer_overshoot_mean_us=135.695 cold_setup_open_us=143.09 elapsed_including_joins_us=1.1358e+06 join_drain_us=0.628 udp_exchanges=0 file_reads=0 file_writes=0 yield_callbacks=0 udp_exchanges_per_second=0 file_transfers_per_second=0
+mixed=1 continuations=runtime file_backend=3 samples=1000 delay_us=1000 timer_overshoot_p50_us=12.338 timer_overshoot_p95_us=24.308 timer_overshoot_p99_us=64.095 timer_overshoot_max_us=179.261 timer_overshoot_mean_us=13.9879 cold_setup_open_us=153.907 elapsed_including_joins_us=1.01408e+06 join_drain_us=25.753 udp_exchanges=60188 file_reads=14709 file_writes=14708 yield_callbacks=167559 udp_exchanges_per_second=59352.2 file_transfers_per_second=29008.5
+mixed=0 continuations=external_one_worker file_backend=3 samples=1000 delay_us=1000 timer_overshoot_p50_us=133.266 timer_overshoot_p95_us=209.291 timer_overshoot_p99_us=271.065 timer_overshoot_max_us=406.283 timer_overshoot_mean_us=139.672 cold_setup_open_us=289.855 elapsed_including_joins_us=1.13978e+06 join_drain_us=1.956 udp_exchanges=0 file_reads=0 file_writes=0 yield_callbacks=0 udp_exchanges_per_second=0 file_transfers_per_second=0
+mixed=1 continuations=external_one_worker file_backend=3 samples=1000 delay_us=1000 timer_overshoot_p50_us=17.866 timer_overshoot_p95_us=60.092 timer_overshoot_p99_us=120.054 timer_overshoot_max_us=1592.91 timer_overshoot_mean_us=25.5618 cold_setup_open_us=287.793 elapsed_including_joins_us=1.02574e+06 join_drain_us=65.416 udp_exchanges=33837 file_reads=4317 file_writes=4317 yield_callbacks=61272 udp_exchanges_per_second=32988 file_transfers_per_second=8417.38
+exit_code=0

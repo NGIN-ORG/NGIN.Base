@@ -10,6 +10,7 @@
 
 #include <NGIN/Execution/ScheduleResult.hpp>
 #include <NGIN/Execution/WorkItem.hpp>
+#include <NGIN/Execution/detail/CompletionQueue.hpp>
 #include <NGIN/Time/MonotonicClock.hpp>
 #include <NGIN/Time/TimePoint.hpp>
 
@@ -23,11 +24,21 @@ namespace NGIN::Execution
     {
     public:
         /// @brief Constructs an empty scheduler with reserved queue storage.
-        CooperativeScheduler()
+        explicit CooperativeScheduler(std::size_t completionCapacity = 4096) : m_completions(completionCapacity)
         {
             m_ready.reserve(256);
             m_timers.reserve(256);
         }
+
+        /// @brief Reserves a thread-safe terminal-delivery slot for a future pump call.
+        /// @note All tickets and queued completions must drain before scheduler destruction.
+        [[nodiscard]] std::expected<CompletionReservation, ScheduleError> ReserveCompletion(WorkItem item) noexcept
+        {
+            return m_completions.Reserve(std::move(item));
+        }
+
+        /// @brief Whether this thread is inside this scheduler's dispatch context.
+        [[nodiscard]] bool IsCurrent() const noexcept { return s_currentScheduler == this; }
 
         /// @brief Queues a non-empty work item for execution by a future pump call.
         [[nodiscard]] ScheduleResult Execute(WorkItem item) noexcept
@@ -72,6 +83,14 @@ namespace NGIN::Execution
         /// @return `true` when an item was invoked.
         [[nodiscard]] bool RunOneAt(NGIN::Time::TimePoint now)
         {
+            struct Context
+            {
+                CooperativeScheduler* previous;
+                ~Context() { s_currentScheduler = previous; }
+            } context {s_currentScheduler};
+            s_currentScheduler = this;
+            if (m_completions.RunOne())
+                return true;
             if (!m_timers.empty())
             {
                 Timer& next = m_timers.front();
@@ -134,5 +153,7 @@ namespace NGIN::Execution
 
         std::vector<WorkItem> m_ready {};
         std::vector<Timer>    m_timers {};
+        detail::CompletionQueue                          m_completions;
+        static inline thread_local CooperativeScheduler* s_currentScheduler {};
     };
 }// namespace NGIN::Execution

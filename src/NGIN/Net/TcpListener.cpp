@@ -3,6 +3,7 @@
 #include "SocketPlatform.hpp"
 
 #include "NetworkDriver.hpp"
+#include "SocketState.hpp"
 #include <NGIN/Async/Cancellation.hpp>
 #include <NGIN/Async/Task.hpp>
 #include <NGIN/Async/TaskContext.hpp>
@@ -65,49 +66,19 @@ namespace NGIN::Net
             return NGIN::Utilities::Unexpected(detail::LastError());
         }
 
-        TcpSocket socket(detail::FromNative(sock), true, m_runtime);
-        (void) detail::SetNonBlocking(socket.Handle(), true);
+        auto accepted = detail::FromNative(sock);
+        if (!accepted.IsOpen())
+            return NGIN::Utilities::Unexpected(NetError {NetErrorCode::ResourceExhausted});
+        TcpSocket socket(std::move(accepted), true, m_runtime);
+        if (!detail::SetNonBlocking(socket.Handle(), true))
+            return NGIN::Utilities::Unexpected(detail::LastError());
         return socket;
     }
 
     NGIN::Async::Task<TcpSocket, NetError> TcpListener::AcceptAsync(NGIN::Async::TaskContext&      ctx,
                                                                     NGIN::Async::CancellationToken token)
     {
-        const std::shared_ptr<NetworkDriver> backend = m_runtime ? AcquireNetworkDriver(*m_runtime) : nullptr;
-        if (!backend)
-        {
-            const auto fault = NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidTaskUsage, 0,
-                                                           "Async socket operations require a bound, running IO::Runtime");
-            co_return NGIN::Async::Completion<TcpSocket, NetError>::Faulted(fault);
-        }
-        NetworkDriver& driver           = *backend;
-        auto           operationContext = ctx.WithLinkedCancellationToken(token);
-        token                           = operationContext.GetCancellationToken();
-        if (token.IsCancellationRequested())
-        {
-            co_return NGIN::Async::Completion<TcpSocket, NetError>::Canceled();
-        }
-
-#if defined(NGIN_PLATFORM_WINDOWS)
-        auto handle = co_await driver.SubmitAccept(ctx, m_handle, token);
-        co_return TcpSocket(std::move(handle), true, m_runtime);
-#else
-        for (;;)
-        {
-            auto result = TryAccept();
-            if (result)
-            {
-                co_return std::move(*result);
-            }
-
-            if (result.error().code != NetErrorCode::WouldBlock)
-            {
-                co_return NGIN::Utilities::Unexpected(result.error());
-            }
-
-            co_await driver.WaitUntilReadable(ctx, m_handle, token);
-        }
-#endif
+        return NetworkDriver::SubmitAccept(ctx, m_runtime, detail::SocketHandleAccess::State(m_handle), std::move(token));
     }
 
     void TcpListener::Close() noexcept

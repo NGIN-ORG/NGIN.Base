@@ -1,0 +1,43 @@
+2026-09-11 shared file-handle overload allocation checkpoint; GCC 15.2 static Release; five serial processes
+Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.39
+Requested C++ allocation storage only; excludes allocator bookkeeping, instrument headers/padding, C/custom allocation bypassing replacement new, RSS, and kernel storage. Full fixture initialization/open/close/shutdown/destruction is inside the measured window. One complete warm-up fixture precedes each backend measurement.
+benchmarks/IORuntimeFileAllocationBenchmarks.cpp sha256=8f127556724c71808c6a44a5e37bc956202b204ac10596b306811f6f264d59a0
+benchmarks/AllocationInstrumentation.cpp sha256=8abd35d9a26f004a28c4d04ffb58394fb0e39335a9332d95eb1cacbcf0e3079f
+src/NGIN/IO/FileOperationGate.cpp sha256=fe6957ed9ab476075a8dad5c275bbb0b0ae91fc50da8ca58d3525faab06c0d73
+src/NGIN/IO/FileSystemDriver.cpp sha256=e2eea5bc86609bceef1314afae76132a1d7ce06bea58f5e2c435014393b90584
+build/benchmarks/benchmarks/Release/IORuntimeFileAllocationBenchmarks sha256=15a20ed58f3bbd6077122dbba4ca9e5b4f66994ac9dcc1109f27306fe4f3a7bb
+
+Run 1
+File allocation workload: requested C++ bytes; includes runtime/executor/file initialization and teardown; no latency acceptance data
+capacity=64 handles=2 external_cooperative_executors=4 rounds=16 accepted_per_round=64 rejected_per_round=256
+native operations=5120 allocations=27024 requested_bytes=17330304 peak_live_bytes_above_floor=375528 first_rejection_retained_bytes_max=0 retained_bytes_above_floor=0
+fallback operations=5120 allocations=27184 requested_bytes=17311744 peak_live_bytes_above_floor=372944 first_rejection_retained_bytes_max=1024 retained_bytes_above_floor=0
+exit_code=0
+
+Run 2
+File allocation workload: requested C++ bytes; includes runtime/executor/file initialization and teardown; no latency acceptance data
+capacity=64 handles=2 external_cooperative_executors=4 rounds=16 accepted_per_round=64 rejected_per_round=256
+native operations=5120 allocations=27024 requested_bytes=17330304 peak_live_bytes_above_floor=375528 first_rejection_retained_bytes_max=0 retained_bytes_above_floor=0
+fallback operations=5120 allocations=27184 requested_bytes=17311744 peak_live_bytes_above_floor=372944 first_rejection_retained_bytes_max=1024 retained_bytes_above_floor=0
+exit_code=0
+
+Run 3
+File allocation workload: requested C++ bytes; includes runtime/executor/file initialization and teardown; no latency acceptance data
+capacity=64 handles=2 external_cooperative_executors=4 rounds=16 accepted_per_round=64 rejected_per_round=256
+native operations=5120 allocations=27024 requested_bytes=17330304 peak_live_bytes_above_floor=375640 first_rejection_retained_bytes_max=0 retained_bytes_above_floor=0
+fallback operations=5120 allocations=27184 requested_bytes=17311744 peak_live_bytes_above_floor=372944 first_rejection_retained_bytes_max=1024 retained_bytes_above_floor=0
+exit_code=0
+
+Run 4
+File allocation workload: requested C++ bytes; includes runtime/executor/file initialization and teardown; no latency acceptance data
+capacity=64 handles=2 external_cooperative_executors=4 rounds=16 accepted_per_round=64 rejected_per_round=256
+native operations=5120 allocations=27024 requested_bytes=17330304 peak_live_bytes_above_floor=375528 first_rejection_retained_bytes_max=0 retained_bytes_above_floor=0
+fallback operations=5120 allocations=27184 requested_bytes=17311744 peak_live_bytes_above_floor=372944 first_rejection_retained_bytes_max=1024 retained_bytes_above_floor=0
+exit_code=0
+
+Run 5
+File allocation workload: requested C++ bytes; includes runtime/executor/file initialization and teardown; no latency acceptance data
+capacity=64 handles=2 external_cooperative_executors=4 rounds=16 accepted_per_round=64 rejected_per_round=256
+native operations=5120 allocations=27024 requested_bytes=17330304 peak_live_bytes_above_floor=375528 first_rejection_retained_bytes_max=0 retained_bytes_above_floor=0
+fallback operations=5120 allocations=27184 requested_bytes=17311744 peak_live_bytes_above_floor=372944 first_rejection_retained_bytes_max=1024 retained_bytes_above_floor=0
+exit_code=0

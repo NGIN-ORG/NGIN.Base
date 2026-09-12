@@ -1,0 +1,43 @@
+2026-09-11 diagnostic syscall counts; full sequential workload; traced timings excluded from performance results
+
+before
+strace: Process 42823 attached
+strace: Process 42824 attached
+strace: Process 42841 attached
+strace: Process 42879 attached
+strace: Process 42880 attached
+strace: Process 42881 attached
+strace: Process 42896 attached
+strace: Process 42897 attached
+strace: Process 42898 attached
+% time     seconds  usecs/call     calls    errors syscall
+------ ----------- ----------- --------- --------- ----------------
+ 82.97   11.676045         113    102697      4844 futex
+ 13.52    1.903065          79     24036           epoll_wait
+  1.88    0.265214          22     12023         1 read
+  1.62    0.228628          19     12019           write
+  0.00    0.000060           8         7           epoll_ctl
+  0.00    0.000038           9         4           eventfd2
+------ ----------- ----------- --------- --------- ----------------
+100.00   14.073050          93    150786      4845 total
+
+after
+strace: Process 42911 attached
+strace: Process 42912 attached
+strace: Process 42913 attached
+strace: Process 42934 attached
+strace: Process 42935 attached
+strace: Process 42936 attached
+strace: Process 42951 attached
+strace: Process 42952 attached
+strace: Process 42953 attached
+% time     seconds  usecs/call     calls    errors syscall
+------ ----------- ----------- --------- --------- ----------------
+ 82.59    9.398251         106     87996      9994 futex
+ 16.05    1.826722         151     12030           epoll_wait
+  0.80    0.091145          22      4015           write
+  0.56    0.063710          15      4019         1 read
+  0.00    0.000098          14         7           epoll_ctl
+  0.00    0.000048          12         4           eventfd2
+------ ----------- ----------- --------- --------- ----------------
+100.00   11.379974         105    108071      9995 total

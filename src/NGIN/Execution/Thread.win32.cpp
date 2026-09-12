@@ -1,7 +1,7 @@
 #include <NGIN/Execution/Thread.hpp>
 #include <NGIN/Text/Unicode/Convert.hpp>
 
-#include <Windows.h>
+#include <windows.h>
 #include <process.h>
 
 #include <algorithm>

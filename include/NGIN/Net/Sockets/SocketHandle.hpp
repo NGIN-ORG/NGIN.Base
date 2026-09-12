@@ -1,79 +1,52 @@
 /// @file SocketHandle.hpp
-/// @brief Lightweight socket handle wrapper.
+/// @brief Socket ownership with stable state for admitted asynchronous operations.
 #pragma once
 
 #include <NGIN/Defines.hpp>
 #include <NGIN/Primitives.hpp>
+#include <memory>
 
 namespace NGIN::Net
 {
     class SocketHandle;
 }
-
 namespace NGIN::Net::detail
 {
+    class SocketState;
+    struct SocketHandleAccess;
     [[nodiscard]] NGIN_NET_API bool CloseSocket(SocketHandle& handle) noexcept;
-}
-
+}// namespace NGIN::Net::detail
 namespace NGIN::Net
 {
-    /// @brief Lightweight socket handle wrapper with RAII lifetime.
+    /// @brief Owns a native socket; operations can retain its stable lifetime state.
+    /// @details Close prevents further admission and requests cancellation. Backend
+    /// leases defer native release until their final access. Moving transfers the
+    /// public owner without changing the state captured by admitted operations.
     class NGIN_NET_API SocketHandle final
     {
     public:
-        using NativeHandle = NGIN::IntPtr;
-
-        /// @brief Constructs a closed socket handle.
-        constexpr SocketHandle() noexcept = default;
-        /// @brief Takes ownership of a native socket handle.
-        explicit constexpr SocketHandle(NativeHandle handle) noexcept
-            : m_handle(handle)
-        {
-        }
-
-        /// @brief Socket handles are non-copyable because they uniquely own native state.
-        SocketHandle(const SocketHandle&) = delete;
-        /// @brief Socket handles are non-copy-assignable because they uniquely own native state.
+        using NativeHandle      = NGIN::IntPtr;
+        SocketHandle() noexcept = default;
+        /// @brief Takes native ownership, including closing it if state allocation fails.
+        /// @note On Windows an imported native handle does not establish tracked socket
+        /// mode; create asynchronous sockets through Open or listener acceptance.
+        /// @throws std::bad_alloc if stable ownership state cannot be allocated.
+        explicit SocketHandle(NativeHandle handle);
+        SocketHandle(const SocketHandle&)            = delete;
         SocketHandle& operator=(const SocketHandle&) = delete;
+        SocketHandle(SocketHandle&& other) noexcept;
+        SocketHandle& operator=(SocketHandle&& other) noexcept;
+        ~SocketHandle();
 
-        /// @brief Transfers native socket ownership from another handle.
-        SocketHandle(SocketHandle&& other) noexcept
-            : m_handle(other.m_handle)
-        {
-            other.Reset();
-        }
-
-        /// @brief Closes this socket and transfers native ownership from another handle.
-        SocketHandle& operator=(SocketHandle&& other) noexcept
-        {
-            if (this != &other)
-            {
-                (void) detail::CloseSocket(*this);
-                m_handle = other.m_handle;
-                other.Reset();
-            }
-            return *this;
-        }
-
-        /// @brief Closes the owned native socket.
-        ~SocketHandle() { Close(); }
-
-        /// @brief Returns whether this wrapper owns a native socket.
-        [[nodiscard]] constexpr bool IsOpen() const noexcept { return m_handle != InvalidHandle(); }
-
-        /// @brief Returns the native socket value without transferring ownership.
-        [[nodiscard]] constexpr NativeHandle Native() const noexcept { return m_handle; }
-
-        /// @brief Closes the socket; calling Close() repeatedly is safe.
+        [[nodiscard]] bool IsOpen() const noexcept;
+        /// @brief Borrows the native value, or -1 after Close; does not pin native lifetime.
+        [[nodiscard]] NativeHandle Native() const noexcept;
+        /// @brief Requests close without waiting; repeated calls are harmless.
         void Close() noexcept;
 
     private:
         friend bool detail::CloseSocket(SocketHandle& handle) noexcept;
-
-        static constexpr NativeHandle InvalidHandle() noexcept { return static_cast<NativeHandle>(-1); }
-
-        void Reset() noexcept { m_handle = InvalidHandle(); }
-
-        NativeHandle m_handle {InvalidHandle()};
+        friend struct detail::SocketHandleAccess;
+        std::shared_ptr<detail::SocketState> m_state;
     };
 }// namespace NGIN::Net

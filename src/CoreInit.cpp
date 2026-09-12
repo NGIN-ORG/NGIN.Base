@@ -1,5 +1,4 @@
 #include <NGIN/Defines.hpp>
-#include <NGIN/NGIN.hpp>
 
 namespace NGIN::detail
 {

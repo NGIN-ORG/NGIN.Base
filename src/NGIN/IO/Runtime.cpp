@@ -1,11 +1,8 @@
 #include <NGIN/IO/Runtime.hpp>
 
-#include "FileSystemDriver.hpp"
 #include "RuntimeBackend.hpp"
+#include "RuntimeLoop.hpp"
 
-#include <NGIN/Execution/Thread.hpp>
-#include <cmath>
-#include <condition_variable>
 #include <mutex>
 #include <stdexcept>
 
@@ -13,139 +10,148 @@ namespace NGIN::IO
 {
     struct Runtime::Impl
     {
-        explicit Impl(Options configured) : options(configured) {}
-        Options                                             options;
-        mutable std::mutex                                  mutex;
-        std::mutex                                          stopMutex;
-        std::condition_variable                             ready;
-        bool                                                stopped {false};
-        std::shared_ptr<NGIN::IO::detail::FileSystemDriver> files;
-        std::shared_ptr<detail::NetworkBackend>             network;
-        NGIN::Execution::Thread                             networkThread;
+        explicit Impl(Options configured)
+            : options(configured), loop({configured.submissionCapacity, configured.timerCapacity,
+                                         configured.completionCapacity, configured.operationCapacity, configured.registrationCapacity, configured.batchSize},
+                                        NGIN::Execution::WorkItem([this] { StopServices(); })) {}
+
+        void StopServices() noexcept
+        {
+            std::shared_ptr<detail::RuntimeService> fileService;
+            std::shared_ptr<detail::RuntimeService> networkService;
+            {
+                std::lock_guard lock(mutex);
+                fileService    = files;
+                networkService = network;
+            }
+            if (fileService)
+                fileService->Stop();
+            if (networkService)
+                networkService->Stop();
+        }
+
+        const Options                           options;
+        mutable std::mutex                      mutex;
+        detail::RuntimeLoop                     loop;
+        std::shared_ptr<detail::RuntimeService> files;
+        std::shared_ptr<detail::RuntimeService> network;
     };
 
     Runtime::Runtime() : Runtime(Options {}) {}
-
-    Runtime::Runtime(Options options) : m_impl(std::make_unique<Impl>(options))
+    Runtime::Runtime(Options options)
     {
-        if ((options.network.mode != NetworkMode::Background && options.network.mode != NetworkMode::Manual) ||
-            (options.files.backendPreference != FileBackendPreference::Auto &&
-             options.files.backendPreference != FileBackendPreference::Native &&
-             options.files.backendPreference != FileBackendPreference::Fallback))
-        {
-            throw std::invalid_argument("Unknown I/O runtime backend policy or network mode");
-        }
-        if (options.files.workerThreads == 0 || options.files.queueDepthHint == 0 ||
-            !std::isfinite(options.network.pollInterval.GetValue()) || options.network.pollInterval.GetValue() < 1.0)
-        {
-            throw std::invalid_argument("I/O runtime requires positive file capacities and a finite network poll interval >= 1 ms");
-        }
+        if (options.files.backendPreference != FileBackendPreference::Auto &&
+            options.files.backendPreference != FileBackendPreference::Native &&
+            options.files.backendPreference != FileBackendPreference::Fallback)
+            throw std::invalid_argument("Unknown I/O runtime file backend policy");
+        if (options.files.workerThreads == 0 || options.files.queueDepthHint == 0)
+            throw std::invalid_argument("I/O runtime requires positive file capacities");
+        m_impl = std::make_unique<Impl>(options);
     }
 
     Runtime::~Runtime()
     {
-        Stop();
+        try
+        {
+            Shutdown();
+        } catch (...)
+        {
+            std::terminate();
+        }
     }
     const Runtime::Options& Runtime::GetOptions() const noexcept
     {
         return m_impl->options;
     }
-
+    NGIN::Execution::ExecutorRef Runtime::GetExecutor() noexcept
+    {
+        return m_impl->loop.GetExecutor();
+    }
     bool Runtime::HasFileBackend() const noexcept
     {
         std::lock_guard lock(m_impl->mutex);
         return m_impl->files != nullptr;
     }
-
     bool Runtime::HasNetworkBackend() const noexcept
     {
         std::lock_guard lock(m_impl->mutex);
         return m_impl->network != nullptr;
     }
-
     Runtime::FileBackend Runtime::GetFileBackend() const noexcept
     {
         std::lock_guard lock(m_impl->mutex);
-        return m_impl->files ? m_impl->files->GetActiveBackend() : FileBackend::None;
+        return m_impl->files ? m_impl->files->GetFileBackend() : FileBackend::None;
     }
-
+    Runtime::State Runtime::GetState() const noexcept
+    {
+        switch (m_impl->loop.GetState())
+        {
+            case detail::RuntimeLoop::State::Running:
+                return State::Running;
+            case detail::RuntimeLoop::State::Stopping:
+                return State::Stopping;
+            case detail::RuntimeLoop::State::Stopped:
+                return State::Stopped;
+        }
+        std::terminate();
+    }
     bool Runtime::IsStopped() const noexcept
     {
-        std::lock_guard lock(m_impl->mutex);
-        return m_impl->stopped;
+        return GetState() == State::Stopped;
     }
-
     void Runtime::Run()
     {
-        if (m_impl->options.network.mode != NetworkMode::Manual)
-            throw std::logic_error("Runtime::Run requires Manual network mode");
-        std::unique_lock lock(m_impl->mutex);
-        m_impl->ready.wait(lock, [this] { return m_impl->stopped || m_impl->network != nullptr; });
-        if (m_impl->stopped)
-            return;
-        std::shared_ptr<detail::NetworkBackend> network = m_impl->network;
-        lock.unlock();
-        network->Run();
+        m_impl->loop.Run();
     }
-
-    void Runtime::PollOnce()
+    bool Runtime::PollOnce()
     {
-        if (m_impl->options.network.mode != NetworkMode::Manual)
-            throw std::logic_error("Runtime::PollOnce requires Manual network mode");
-        std::shared_ptr<detail::NetworkBackend> network;
-        {
-            std::lock_guard lock(m_impl->mutex);
-            if (m_impl->stopped)
-                return;
-            network = m_impl->network;
-        }
-        if (network)
-            network->PollOnce();
+        return m_impl->loop.PollOnce();
     }
-
-    void Runtime::Stop() noexcept
+    void Runtime::RequestStop() noexcept
     {
-        std::lock_guard stopLock(m_impl->stopMutex);
-        {
-            std::lock_guard lock(m_impl->mutex);
-            m_impl->stopped = true;
-            if (m_impl->files)
-                m_impl->files->Stop();
-            if (m_impl->network)
-                m_impl->network->Stop();
-        }
-        m_impl->ready.notify_all();
-        if (m_impl->networkThread.IsJoinable())
-            m_impl->networkThread.Join();
+        m_impl->loop.RequestStop();
+    }
+    void Runtime::Shutdown()
+    {
+        m_impl->loop.Shutdown();
+    }
+    std::optional<NGIN::Time::TimePoint> Runtime::NextDeadline() const noexcept
+    {
+        return m_impl->loop.NextDeadline();
+    }
+    std::intptr_t Runtime::NativeWaitHandle() const noexcept
+    {
+        return m_impl->loop.NativeHandle();
     }
 
-    std::shared_ptr<NGIN::IO::detail::FileSystemDriver> detail::RuntimeAccess::Files(Runtime& runtime)
+    std::expected<std::size_t, std::error_code>
+    Runtime::CopyNativeWaitSources(std::span<NativeWaitSource> destination) const noexcept
+    {
+        return m_impl->loop.CopyNativeWaitSources(destination);
+    }
+
+    std::shared_ptr<detail::RuntimeService> detail::RuntimeAccess::Acquire(
+            Runtime& runtime, RuntimeServiceKind kind, Factory factory)
     {
         std::lock_guard lock(runtime.m_impl->mutex);
-        if (runtime.m_impl->stopped)
+        if (runtime.GetState() != Runtime::State::Running)
             return {};
-        if (!runtime.m_impl->files)
-            runtime.m_impl->files = std::make_shared<NGIN::IO::detail::FileSystemDriver>(runtime.m_impl->options.files);
-        return runtime.m_impl->files;
+        auto& service = kind == RuntimeServiceKind::Files ? runtime.m_impl->files : runtime.m_impl->network;
+        if (!service)
+            service = factory(runtime);
+        return service;
     }
-
-    std::shared_ptr<detail::NetworkBackend> detail::RuntimeAccess::Network(Runtime& runtime, NetworkFactory factory)
+    detail::RuntimeLoop& detail::RuntimeAccess::Loop(Runtime& runtime) noexcept
     {
-        std::lock_guard lock(runtime.m_impl->mutex);
-        if (runtime.m_impl->stopped)
-            return {};
-        if (!runtime.m_impl->network)
-        {
-            std::shared_ptr<NetworkBackend> backend = factory(runtime.m_impl->options.network);
-            if (runtime.m_impl->options.network.mode == Runtime::NetworkMode::Background)
-            {
-                NGIN::Execution::Thread::Options options;
-                options.name = NGIN::Execution::ThreadName("NGIN.IO.Net");
-                runtime.m_impl->networkThread.Start([backend] { backend->Run(); }, options);
-            }
-            runtime.m_impl->network = std::move(backend);
-            runtime.m_impl->ready.notify_all();
-        }
-        return runtime.m_impl->network;
+        return runtime.m_impl->loop;
+    }
+    std::expected<NGIN::Execution::CompletionReservation, NGIN::Execution::ScheduleError>
+    detail::RuntimeAccess::ReserveOperation(Runtime& runtime, NGIN::Execution::WorkItem completion) noexcept
+    {
+        return runtime.m_impl->loop.ReserveOperation(std::move(completion));
+    }
+    void detail::RuntimeAccess::Run(Runtime& runtime, NGIN::Execution::WorkItem entered)
+    {
+        runtime.m_impl->loop.Run(std::move(entered));
     }
 }// namespace NGIN::IO

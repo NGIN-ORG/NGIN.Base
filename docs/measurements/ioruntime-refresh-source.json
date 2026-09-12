@@ -1,0 +1,19 @@
+{
+  "revision": "203f704e97a704259ef2db1ee8c93bf92763a7e1",
+  "status": "Original tracked source and three measurement-only harnesses rebuilt in static Release with GCC 15.2; no production baseline source changes",
+  "harnesses": {
+    "IORuntimeBenchmarks": {
+      "original": "056069e2e95812617c51a1bb0abfaa0634392be4daf8a3c8a74e5fbac51957e8",
+      "current": "93de19f303a75b9e99c7b870f099b3655f78d73f91fca0dd727992379e40c81b"
+    },
+    "IORuntimeFileBenchmarks": {
+      "original": "a2f7970b0e94281ec9369870821e5c2a418cea293582bde6acdc5ee44f5820d3",
+      "current": "5b145dfeec48c8f3a130ba57fdae302e33d7c37a255bf73c70a9b20a0fb8dbd2"
+    },
+    "IORuntimeNetworkBenchmarks": {
+      "original": "002ea8691a541ce6e077d8a24fe9974806644c0edff4595a176dd7e345ccf7fc",
+      "current": "a2b385164b65d059b9ba2fc27d87321e3daaba4f1e7cdd6eb9840289c85cdfce"
+    }
+  },
+  "package": "NGIN.Base"
+}

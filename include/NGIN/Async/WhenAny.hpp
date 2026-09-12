@@ -2,6 +2,7 @@
 /// @brief Structured task combinator that cancels and drains losing child operations.
 #pragma once
 
+#include <array>
 #include <coroutine>
 #include <functional>
 #include <memory>
@@ -22,176 +23,138 @@ namespace NGIN::Async
         template<typename Factory>
         using FactoryTask = std::remove_cvref_t<std::invoke_result_t<Factory&, TaskContext&>>;
 
-        template<typename E>
+        struct TrackedTask final
+        {
+            bool tracked {};
+            bool await_ready() const noexcept { return false; }
+            template<typename Promise>
+                requires std::derived_from<Promise, detail::PromiseRuntimeCommon>
+            bool await_suspend(std::coroutine_handle<Promise> awaiting) noexcept
+            {
+                tracked = awaiting.promise().m_taskContinuation.IsValid();
+                return false;
+            }
+            bool await_resume() const noexcept { return tracked; }
+        };
+
+        template<typename E, typename... Factories>
         struct SharedState final
         {
-            SharedState(TaskContext& parent, const NGIN::UIntSize childCount)
-                : exec(parent.GetExecutor()), totalChildren(childCount)
+            using Outcome                           = Completion<NGIN::UIntSize, E>;
+            static constexpr std::size_t ChildCount = sizeof...(Factories);
+
+            SharedState(TaskContext& parent, Factories... callbacks)
+                : exec(parent.GetExecutor()), factories(std::in_place, std::move(callbacks)...)
             {
-                loserCancellation.reserve(childCount);
-                childContexts.reserve(childCount);
-                for (NGIN::UIntSize index = 0; index < childCount; ++index)
+                loserCancellation.reserve(ChildCount);
+                childContexts.reserve(ChildCount);
+                for (std::size_t index = 0; index < ChildCount; ++index)
                 {
                     loserCancellation.emplace_back();
                     childContexts.push_back(parent.WithLinkedCancellationToken(loserCancellation.back().GetToken()));
                 }
             }
 
-            NGIN::Execution::ExecutorRef                 exec {};
-            std::mutex                                   mutex {};
-            bool                                         completed {false};
-            NGIN::UIntSize                               completedChildren {0};
-            NGIN::UIntSize                               totalChildren {0};
-            std::optional<Completion<NGIN::UIntSize, E>> firstCompletion {};
-            std::coroutine_handle<>                      continuation {};
-            std::coroutine_handle<>                      allContinuation {};
-            std::vector<CancellationSource>              loserCancellation {};
-            std::vector<TaskContext>                     childContexts {};
-
-            [[nodiscard]] TaskContext& ChildContext(const NGIN::UIntSize index) noexcept
+            void SelectWinner(std::size_t index, Outcome&& outcome) noexcept
             {
-                return childContexts[index];
-            }
-
-            [[nodiscard]] bool SetContinuation(std::coroutine_handle<> handle)
-            {
-                std::lock_guard<std::mutex> guard(mutex);
-                if (completed)
+                bool winner = false;
                 {
-                    return false;
-                }
-
-                continuation = handle;
-                return true;
-            }
-
-            [[nodiscard]] bool SetAllContinuation(std::coroutine_handle<> handle)
-            {
-                std::lock_guard<std::mutex> guard(mutex);
-                if (completedChildren == totalChildren)
-                {
-                    return false;
-                }
-                allContinuation = handle;
-                return true;
-            }
-
-            void Complete(const NGIN::UIntSize completedIndex, Completion<NGIN::UIntSize, E> outcome)
-            {
-                std::coroutine_handle<> firstToResume {};
-                std::coroutine_handle<> allToResume {};
-                bool                    selectedWinner = false;
-                {
-                    std::lock_guard<std::mutex> guard(mutex);
-                    ++completedChildren;
-                    if (!completed)
+                    std::lock_guard lock(mutex);
+                    if (!firstCompletion)
                     {
-                        completed       = true;
-                        selectedWinner  = true;
-                        firstCompletion = std::move(outcome);
-                        firstToResume   = continuation;
-                    }
-                    if (completedChildren == totalChildren)
-                    {
-                        allToResume = allContinuation;
-                    }
-                }
-
-                // Cancellation may synchronously invoke arbitrary callbacks, so it must remain outside the state lock.
-                if (selectedWinner)
-                {
-                    for (NGIN::UIntSize index = 0; index < loserCancellation.size(); ++index)
-                    {
-                        if (index != completedIndex)
+                        winner = true;
+                        try
                         {
-                            loserCancellation[index].Cancel();
+                            firstCompletion.emplace(std::move(outcome));
+                        } catch (...)
+                        {
+                            firstCompletion.emplace(Outcome::Faulted(ExceptionFault()));
                         }
                     }
                 }
-
-                Resume(firstToResume);
-                if (allToResume && allToResume != firstToResume)
-                {
-                    Resume(allToResume);
-                }
+                // Finish cancellation publication before contributing to the
+                // join. Another child's notification may run concurrently.
+                if (winner)
+                    for (std::size_t other = 0; other < ChildCount; ++other)
+                        if (other != index)
+                            loserCancellation[other].Cancel();
             }
 
-            void Resume(const std::coroutine_handle<> handle) const noexcept
+            void Complete() noexcept
             {
-                if (!handle)
+                detail::PromiseRuntimeCommon* target = nullptr;
+                NGIN::Execution::WorkItem     resume;
                 {
-                    return;
-                }
-
-                if (exec.IsValid())
-                {
-                    const NGIN::Execution::ScheduleResult result = exec.Execute(handle);
-                    if (!result)
+                    std::lock_guard lock(mutex);
+                    ++completedChildren;
+                    if (completedChildren == ChildCount && joinTarget)
                     {
-                        handle.resume();
+                        target = std::exchange(joinTarget, nullptr);
+                        resume = std::move(joinResume);
                     }
                 }
-                else
-                {
-                    handle.resume();
-                }
+                if (target)
+                    target->QueueContinuation(std::move(resume));
             }
+
+            static AsyncFault ExceptionFault() noexcept
+            {
+                AsyncFault fault = MakeAsyncFault(AsyncFaultCode::UnhandledException);
+#if NGIN_ASYNC_CAPTURE_EXCEPTIONS
+                fault.capturedException = std::current_exception();
+#endif
+                return fault;
+            }
+
+            NGIN::Execution::ExecutorRef                                            exec;
+            std::mutex                                                              mutex;
+            std::size_t                                                             completedChildren {};
+            std::optional<Outcome>                                                  firstCompletion;
+            detail::PromiseRuntimeCommon*                                           joinTarget {};
+            NGIN::Execution::WorkItem                                               joinResume;
+            std::vector<CancellationSource>                                         loserCancellation;
+            std::vector<TaskContext>                                                childContexts;
+            std::optional<std::tuple<Factories...>>                                 factories;
+            std::tuple<Operation<typename FactoryTask<Factories>::ValueType, E>...> operations;
+            std::array<std::optional<AsyncFault>, ChildCount>                       creationFailures;
+            std::array<bool, ChildCount>                                            observed {};
         };
 
-        template<typename E>
-        class AwaitAll final
+        template<typename State>
+        struct AwaitAll final
         {
-        public:
-            explicit AwaitAll(std::shared_ptr<SharedState<E>> state) noexcept
-                : m_state(std::move(state))
+            std::shared_ptr<State> state;
+
+            bool await_ready() const noexcept
             {
+                std::lock_guard lock(state->mutex);
+                return state->completedChildren == State::ChildCount;
             }
-
-            [[nodiscard]] bool await_ready() const
+            template<typename Promise>
+                requires std::derived_from<Promise, detail::PromiseRuntimeCommon>
+            bool await_suspend(std::coroutine_handle<Promise> awaiting) noexcept
             {
-                std::lock_guard<std::mutex> guard(m_state->mutex);
-                return m_state->completedChildren == m_state->totalChildren;
+                std::lock_guard lock(state->mutex);
+                if (state->completedChildren == State::ChildCount)
+                    return false;
+                // The preflight check precedes child creation, so this join
+                // never needs fresh admission or an inline rejection fallback.
+                assert(awaiting.promise().m_taskContinuation.IsValid());
+                awaiting.promise().RetainFrameReference();
+                state->joinTarget = &awaiting.promise();
+                state->joinResume = NGIN::Execution::WorkItem([awaiting] {
+                    detail::PromiseRuntimeCommon::ResumeRetained(awaiting);
+                });
+                return true;
             }
-
-            [[nodiscard]] bool await_suspend(std::coroutine_handle<> awaiting)
+            typename State::Outcome await_resume()
             {
-                return m_state->SetAllContinuation(awaiting);
+                // No child or cancellation callback can still access a factory.
+                // Release captures on the parent executor before returning.
+                state->factories.reset();
+                std::lock_guard lock(state->mutex);
+                return std::move(*state->firstCompletion);
             }
-
-            void await_resume() const noexcept {}
-
-        private:
-            std::shared_ptr<SharedState<E>> m_state;
-        };
-
-        template<typename E>
-        class AwaitFirst final
-        {
-        public:
-            explicit AwaitFirst(std::shared_ptr<SharedState<E>> state) noexcept
-                : m_state(std::move(state))
-            {
-            }
-
-            [[nodiscard]] bool await_ready() const
-            {
-                std::lock_guard<std::mutex> guard(m_state->mutex);
-                return m_state->completed;
-            }
-
-            [[nodiscard]] bool await_suspend(std::coroutine_handle<> awaiting)
-            {
-                return m_state->SetContinuation(awaiting);
-            }
-
-            [[nodiscard]] Completion<NGIN::UIntSize, E> await_resume() const
-            {
-                std::lock_guard<std::mutex> guard(m_state->mutex);
-                return std::move(*m_state->firstCompletion);
-            }
-
-        private:
-            std::shared_ptr<SharedState<E>> m_state;
         };
 
         template<typename E, typename T>
@@ -214,42 +177,89 @@ namespace NGIN::Async
             return Completion<NGIN::UIntSize, E>::Faulted(std::move(completion).Fault());
         }
 
-        template<std::size_t Index, typename T, typename E>
-        inline Task<void, E> Watch(std::shared_ptr<SharedState<E>> state, Operation<T, E> operation)
+        template<std::size_t Index, typename E, typename State>
+        void ObserveChild(const std::shared_ptr<State>&           state,
+                          NGIN::Execution::CompletionReservation& notification) noexcept
         {
-            Completion<T, E>         completion = co_await operation;
-            constexpr NGIN::UIntSize index      = static_cast<NGIN::UIntSize>(Index);
-            state->Complete(index, ConvertWinner<E>(index, std::move(completion)));
-            co_return;
+            using Outcome = typename State::Outcome;
+            if (!state->observed[Index])
+            {
+                state->observed[Index] = true;
+                std::optional<Outcome> outcome;
+                auto&                  operation = std::get<Index>(state->operations);
+                try
+                {
+                    if (state->creationFailures[Index])
+                        outcome.emplace(Outcome::Faulted(std::move(*state->creationFailures[Index])));
+                    else
+                        outcome.emplace(ConvertWinner<E>(static_cast<NGIN::UIntSize>(Index), operation.TakeResult()));
+                } catch (...)
+                {
+                    outcome.emplace(Outcome::Faulted(State::ExceptionFault()));
+                }
+                state->SelectWinner(Index, std::move(*outcome));
+                detail::OperationAccess::Retire(operation, notification);
+                return;
+            }
+            // This second invocation follows final frame destruction, including
+            // any lease still held by a concurrent cancellation/resume callback.
+            notification.Reset();
+            state->Complete();
         }
 
-        template<typename E, typename FactoriesTuple, std::size_t... Indices>
-        [[nodiscard]] inline auto SpawnChildren(
-                const std::shared_ptr<SharedState<E>>& state,
-                FactoriesTuple&                        factories,
+        template<typename E, typename State, std::size_t... Indices>
+        NGIN::Execution::ScheduleResult ReserveNotifications(
+                const std::shared_ptr<State>&                                          state,
+                std::array<NGIN::Execution::CompletionReservation, State::ChildCount>& notifications,
                 std::index_sequence<Indices...>)
         {
-            return std::tuple {
-                    Spawn(state->ChildContext(Indices),
-                          std::invoke(std::get<Indices>(factories), state->ChildContext(Indices)))...};
+            NGIN::Execution::ScheduleResult admission {};
+            ([&] {
+                if (!admission)
+                    return;
+                auto ticket = state->exec.ReserveCompletion(NGIN::Execution::WorkItem([state, notification = &notifications[Indices]] {
+                    ObserveChild<Indices, E>(state, *notification);
+                }));
+                if (!ticket)
+                    admission = std::unexpected(ticket.error());
+                else
+                    notifications[Indices] = std::move(*ticket);
+            }(),
+             ...);
+            return admission;
         }
 
-        template<typename E, typename OperationsTuple, std::size_t... Indices>
-        inline void DetachWatchers(
-                TaskContext&                           ctx,
-                const std::shared_ptr<SharedState<E>>& state,
-                OperationsTuple&                       operations,
-                std::index_sequence<Indices...>)
+        template<typename State, std::size_t... Indices>
+        void SpawnChildren(
+                const std::shared_ptr<State>&                                          state,
+                std::array<NGIN::Execution::CompletionReservation, State::ChildCount>& notifications,
+                std::index_sequence<Indices...>) noexcept
         {
-            (Detach(ctx, Watch<Indices>(state, std::move(std::get<Indices>(operations)))), ...);
+            ([&] {
+                try
+                {
+                    auto& ctx                            = state->childContexts[Indices];
+                    std::get<Indices>(state->operations) = Spawn(ctx, std::invoke(std::get<Indices>(*state->factories), ctx));
+                } catch (...)
+                {
+                    state->creationFailures[Indices] = State::ExceptionFault();
+                    notifications[Indices].Schedule();
+                    return;
+                }
+                if (!detail::OperationAccess::ObserveReusable(std::get<Indices>(state->operations), notifications[Indices]))
+                    std::terminate();
+            }(),
+             ...);
         }
     }// namespace detail::when_any
 
     /// @brief Runs child factories, cancels every loser, drains them, and returns the winning argument index.
     /// @details Each factory receives a child-specific context linked to the parent context. The first terminal child
     /// selects the outcome, after which cancellation is requested for every loser. The combinator returns only after
-    /// all child watchers finish, so a slow or non-cooperative loser adds observable completion latency. A winning
-    /// domain error, cancellation, or fault is propagated after the drain.
+    /// every child and its cancellation publication finish, so a slow or non-cooperative loser adds completion latency.
+    /// A winning domain error, cancellation, or fault is propagated after the drain. Terminal notifications are
+    /// reserved before invoking any factory; admission failure starts no children. Joining uses the parent's
+    /// existing continuation reservation and remains valid during executor shutdown. Factories are retained until join.
     template<typename... TFactories>
         requires(sizeof...(TFactories) > 0) &&
                 (std::invocable<TFactories&, TaskContext&> && ...) &&
@@ -271,21 +281,27 @@ namespace NGIN::Async
             co_return OutCompletion::Canceled();
         }
 
-        std::shared_ptr<detail::when_any::SharedState<E>> state =
-                std::make_shared<detail::when_any::SharedState<E>>(ctx, sizeof...(TFactories));
-        std::tuple<TFactories...> factoryTuple(std::move(factories)...);
-        auto                      operations = detail::when_any::SpawnChildren(
-                state,
-                factoryTuple,
-                std::make_index_sequence<sizeof...(TFactories)> {});
-        detail::when_any::DetachWatchers(
-                ctx,
-                state,
-                operations,
-                std::make_index_sequence<sizeof...(TFactories)> {});
+        if (!(co_await detail::when_any::TrackedTask {}))
+            co_return OutCompletion::Faulted(detail::MakeSchedulingFault(
+                    AsyncFaultCode::SchedulerDispatchFailed, NGIN::Execution::ScheduleError::Rejected));
 
-        OutCompletion winner = co_await detail::when_any::AwaitFirst<E> {state};
-        co_await detail::when_any::AwaitAll<E> {state};
-        co_return winner;
+        using State = detail::when_any::SharedState<E, TFactories...>;
+        std::shared_ptr<State>                                                state;
+        std::array<NGIN::Execution::CompletionReservation, State::ChildCount> notifications;
+        try
+        {
+            state          = std::make_shared<State>(ctx, std::move(factories)...);
+            auto admission = detail::when_any::ReserveNotifications<E>(
+                    state, notifications, std::index_sequence_for<TFactories...> {});
+            if (!admission)
+                co_return OutCompletion::Faulted(detail::MakeSchedulingFault(
+                        AsyncFaultCode::SchedulerDispatchFailed, admission.error()));
+        } catch (const std::bad_alloc&)
+        {
+            co_return OutCompletion::Faulted(detail::MakeSchedulingFault(
+                    AsyncFaultCode::SchedulerDispatchFailed, NGIN::Execution::ScheduleError::ResourceExhausted));
+        }
+        detail::when_any::SpawnChildren(state, notifications, std::index_sequence_for<TFactories...> {});
+        co_return co_await detail::when_any::AwaitAll<State> {state};
     }
 }// namespace NGIN::Async

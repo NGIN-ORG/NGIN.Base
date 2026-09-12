@@ -27,6 +27,7 @@ namespace NGIN::Net
         ServiceNotFound,
         AddressFamilyNotSupported,
         Unknown,
+        OperationInProgress,
     };
 
     /// @brief Structured error with optional native OS code.
@@ -80,6 +81,8 @@ namespace NGIN::Net
                 return std::make_error_code(std::errc::permission_denied);
             case NetErrorCode::ResourceExhausted:
                 return std::make_error_code(std::errc::no_buffer_space);
+            case NetErrorCode::OperationInProgress:
+                return std::make_error_code(std::errc::operation_in_progress);
             case NetErrorCode::InvalidArgument:
                 return std::make_error_code(std::errc::invalid_argument);
             case NetErrorCode::NameNotFound:

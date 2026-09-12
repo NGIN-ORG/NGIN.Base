@@ -1,0 +1,24 @@
+2026-09-11 initial allocation fixture assumption diagnostic
+
+The fixture initially required exact live bytes after each rejected delayed task,
+including the first rejection. That run failed after filling 64 one-hour delays:
+
+Runtime allocation workload: requested C++ bytes; instrumented process; no latency acceptance data
+overload_capacity=64 rounds=128 rejected_per_round=1024 timer_deadline_seconds=3600 timer_payload_bytes=1024
+instrumentation_check=passed ordinary/array/aligned/zero/overflow/concurrent/free
+submission_overload operations=139264 allocations=8192 requested_bytes=917504 peak_live_bytes_above_floor=7168 retained_bytes_above_floor=0
+completion_overload operations=139264 allocations=8192 requested_bytes=917504 peak_live_bytes_above_floor=7168 retained_bytes_above_floor=0
+long_timer_overload operations=139264 allocations=16384 requested_bytes=9502720 peak_live_bytes_above_floor=74240 retained_bytes_above_floor=0
+allocation mismatch floor_bytes=89568 now_bytes=90592 floor_count=389 now_count=389
+allocation benchmark failed: joined workload retained C++ allocation storage
+
+CancellationState stores shared registration nodes in a pmr::vector. The first
+transient 65th registration grows the 64-entry table to 128 entries; unregistering
+removes its node but retains table capacity. The observed 1,024-byte increase with
+unchanged allocation-object count matches that table replacement.
+
+The final fixture records the first-rejection increase, requires unchanged live
+bytes/count after each subsequent rejection, and verifies return to the initial
+level after canceling/joining and destroying the group. Peak counters include the
+first rejection and retained table. This is a fixture expectation correction;
+no production admission or validation rule was changed.

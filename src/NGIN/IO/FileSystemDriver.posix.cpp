@@ -4,7 +4,7 @@
 
 namespace NGIN::IO::detail
 {
-    std::unique_ptr<NativeFileBackend> CreateNativeFileBackend(const NGIN::IO::detail::FileSystemDriver::Options&)
+    std::shared_ptr<NativeFileBackend> CreateNativeFileBackend(FileSystemDriver&)
     {
         return {};
     }

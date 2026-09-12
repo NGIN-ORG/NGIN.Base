@@ -25,8 +25,12 @@ namespace NGIN::Net
 
     /// @brief TCP listen socket with non-blocking accept.
     /// @note Async operations require a bound, non-stopped runtime; otherwise they fault with InvalidTaskUsage.
-    /// Their optional token is linked with TaskContext cancellation. Do not move or destroy
-    /// the socket while an operation is pending. Concurrent access requires caller synchronization.
+    /// Their optional token is linked with TaskContext cancellation. Async tasks capture
+    /// stable socket state when created; later moves preserve pending operations. Close or
+    /// destruction cancels pending operations and defers native release until backend access
+    /// ends. Keep buffers and contexts alive until completion. Async use requires
+    /// nonblocking sockets. Synchronize moves and synchronous methods with other member calls.
+    /// Only one async accept may be admitted at once; overlap reports OperationInProgress.
     class NGIN_NET_API TcpListener final
     {
     public:

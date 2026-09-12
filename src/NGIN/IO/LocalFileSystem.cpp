@@ -1,7 +1,7 @@
 #include <NGIN/IO/LocalFileSystem.hpp>
 
 #include "AsyncDispatch.hpp"
-#include "RuntimeBackend.hpp"
+#include "FileSystemDriver.hpp"
 
 namespace NGIN::IO
 {
@@ -9,7 +9,7 @@ namespace NGIN::IO
     LocalFileSystem::LocalFileSystem(Runtime& runtime) noexcept : m_runtime(&runtime) {}
     std::shared_ptr<NGIN::IO::detail::FileSystemDriver> LocalFileSystem::AcquireDriver() const
     {
-        return m_runtime ? detail::RuntimeAccess::Files(*m_runtime) : nullptr;
+        return m_runtime ? detail::AcquireFileSystemDriver(*m_runtime) : nullptr;
     }
 
     ResultVoid LocalFileSystem::Move(const Path& from, const Path& to, const CopyOptions& options) noexcept

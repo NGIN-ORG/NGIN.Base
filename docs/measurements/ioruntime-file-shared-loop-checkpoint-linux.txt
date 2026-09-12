@@ -1,0 +1,38 @@
+Intermediate Linux shared-loop integration; before reusable task reservations and TaskScope.
+Not final performance acceptance. Five Release processes, 2000 operations per sample.
+
+Run 1
+native cold_open_us=498.581 backend=1 bytes=65536
+native_read_at_64k samples=2000 p50_us=60.127 p95_us=85.683 p99_us=120.02 mean_us=64.2529
+native_write_at_64k samples=2000 p50_us=60.731 p95_us=89.627 p99_us=128.145 mean_us=65.718
+fallback cold_open_us=231.168 backend=3 bytes=65536
+fallback_read_at_64k samples=2000 p50_us=67.119 p95_us=94.532 p99_us=133.933 mean_us=72.0117
+fallback_write_at_64k samples=2000 p50_us=68.542 p95_us=117.039 p99_us=172.453 mean_us=75.9845
+Run 2
+native cold_open_us=341.698 backend=1 bytes=65536
+native_read_at_64k samples=2000 p50_us=60.585 p95_us=83.992 p99_us=126.499 mean_us=64.7436
+native_write_at_64k samples=2000 p50_us=60.417 p95_us=87.816 p99_us=120.807 mean_us=65.2021
+fallback cold_open_us=237.634 backend=3 bytes=65536
+fallback_read_at_64k samples=2000 p50_us=67.635 p95_us=95.128 p99_us=134.492 mean_us=72.7757
+fallback_write_at_64k samples=2000 p50_us=68.467 p95_us=103.251 p99_us=149.94 mean_us=74.3172
+Run 3
+native cold_open_us=453.583 backend=1 bytes=65536
+native_read_at_64k samples=2000 p50_us=60.956 p95_us=91.979 p99_us=155.44 mean_us=66.695
+native_write_at_64k samples=2000 p50_us=62.399 p95_us=100.564 p99_us=162.172 mean_us=69.2496
+fallback cold_open_us=223.292 backend=3 bytes=65536
+fallback_read_at_64k samples=2000 p50_us=69.355 p95_us=95.59 p99_us=128.786 mean_us=73.7856
+fallback_write_at_64k samples=2000 p50_us=69.212 p95_us=108.12 p99_us=168.779 mean_us=75.2554
+Run 4
+native cold_open_us=405.93 backend=1 bytes=65536
+native_read_at_64k samples=2000 p50_us=60.383 p95_us=85.767 p99_us=127.786 mean_us=65.1889
+native_write_at_64k samples=2000 p50_us=61.08 p95_us=87.098 p99_us=127.003 mean_us=65.6796
+fallback cold_open_us=260.196 backend=3 bytes=65536
+fallback_read_at_64k samples=2000 p50_us=68.088 p95_us=95.228 p99_us=146.065 mean_us=73.2531
+fallback_write_at_64k samples=2000 p50_us=67.879 p95_us=102.489 p99_us=149.153 mean_us=73.6802
+Run 5
+native cold_open_us=435.485 backend=1 bytes=65536
+native_read_at_64k samples=2000 p50_us=60.541 p95_us=88.754 p99_us=134.53 mean_us=65.6888
+native_write_at_64k samples=2000 p50_us=61.583 p95_us=88.078 p99_us=128.816 mean_us=65.9496
+fallback cold_open_us=256.29 backend=3 bytes=65536
+fallback_read_at_64k samples=2000 p50_us=67.858 p95_us=101.268 p99_us=154.752 mean_us=73.9191
+fallback_write_at_64k samples=2000 p50_us=67.053 p95_us=97.029 p99_us=138.514 mean_us=71.979

@@ -45,6 +45,8 @@ namespace NGIN::Async
         InvalidTarget,
         /// @brief Stable registration-node allocation failed.
         ResourceExhausted,
+        /// @brief The executor cannot reserve continuation delivery (unsupported, stopped, or rejected).
+        CompletionUnavailable,
     };
 
     /// @brief Success or a recoverable cancellation-registration failure.
@@ -86,6 +88,8 @@ namespace NGIN::Async
         }
 
         /// @brief Unregisters the callback and returns this object to an empty state.
+        /// @details Joins an invocation on another thread, including its completion handoff.
+        /// A continuation already handed to its executor must still be joined by its owner.
         void Reset() noexcept;
 
         /// @brief Returns whether this object owns a callback registration.
@@ -132,6 +136,9 @@ namespace NGIN::Async
         }
 
         /// @brief Registers a callback and optional coroutine continuation for cancellation.
+        /// @details A supplied coroutine requires a valid executor with completion reservations.
+        /// Delivery is reserved before registration and never resumes inline. The caller owns
+        /// the coroutine lifetime through delivery and keeps its executor operational until then.
         [[nodiscard]] CancellationRegistrationResult Register(
                 CancellationRegistration&    outRegistration,
                 NGIN::Execution::ExecutorRef exec,
@@ -157,10 +164,9 @@ namespace NGIN::Async
         /// @brief Stable state-owned callback node shared by cancellation and registration handles.
         struct CancellationNode final
         {
-            NGIN::Execution::ExecutorRef exec {};
-            std::coroutine_handle<>      handle {};
-            CancellationCallback         callback {nullptr};
-            void*                        callbackContext {nullptr};
+            NGIN::Execution::CompletionReservation delivery {};
+            CancellationCallback                   callback {nullptr};
+            void*                                  callbackContext {nullptr};
 
             std::mutex              mutex {};
             std::condition_variable completedCondition {};
@@ -169,17 +175,27 @@ namespace NGIN::Async
 
             void Invoke() noexcept
             {
+                NGIN::Execution::CompletionReservation continuation;
                 {
                     std::lock_guard<std::mutex> guard(mutex);
                     if (status != CancellationNodeStatus::Registered)
                         return;
                     status         = CancellationNodeStatus::Invoking;
                     invokingThread = std::this_thread::get_id();
+                    continuation   = std::move(delivery);
                 }
 
                 bool shouldResume = true;
                 if (callback)
                     shouldResume = callback(callbackContext);
+
+                // Complete the handoff before Reset on another thread returns.
+                // The callback may reset its own registration; this local ticket
+                // remains valid until its decision to resume has been consumed.
+                if (shouldResume)
+                    continuation.Dispatch();
+                else
+                    continuation.Reset();
 
                 {
                     std::lock_guard<std::mutex> guard(mutex);
@@ -187,13 +203,6 @@ namespace NGIN::Async
                     invokingThread = {};
                 }
                 completedCondition.notify_all();
-
-                if (shouldResume && exec.IsValid() && handle)
-                {
-                    const NGIN::Execution::ScheduleResult result = exec.Execute(handle);
-                    if (!result)
-                        handle.resume();
-                }
             }
 
             /// @brief Prevents future invocation and waits for a callback already running on another thread.
@@ -203,7 +212,10 @@ namespace NGIN::Async
                 std::unique_lock<std::mutex> guard(mutex);
                 if (status == CancellationNodeStatus::Registered)
                 {
-                    status = CancellationNodeStatus::Unregistered;
+                    status      = CancellationNodeStatus::Unregistered;
+                    auto unused = std::move(delivery);
+                    guard.unlock();
+                    unused.Reset();
                     return;
                 }
                 if (status == CancellationNodeStatus::Invoking && invokingThread != std::this_thread::get_id())
@@ -371,28 +383,40 @@ namespace NGIN::Async
         if (!m_state)
             return {};
 
-        const bool wantsResume = exec.IsValid() && handle;
+        const bool wantsResume = static_cast<bool>(handle);
+        if (wantsResume && !exec.IsValid())
+            return std::unexpected(CancellationRegistrationError::InvalidTarget);
         if (!wantsResume && callback == nullptr)
             return std::unexpected(CancellationRegistrationError::InvalidTarget);
 
         std::shared_ptr<detail::CancellationNode> node;
+        Memory::Shared<detail::CancellationState> state = m_state;
         try
         {
             node = std::allocate_shared<detail::CancellationNode>(
-                    std::pmr::polymorphic_allocator<detail::CancellationNode> {m_state->resource});
-            node->exec            = exec;
-            node->handle          = handle;
+                    std::pmr::polymorphic_allocator<detail::CancellationNode> {state->resource});
             node->callback        = callback;
             node->callbackContext = callbackCtx;
-
-            if (m_state->TryRegister(node))
+            if (wantsResume)
             {
-                outRegistration.m_state = m_state;
-                outRegistration.m_node  = std::move(node);
-                return {};
+                auto delivery = exec.ReserveCompletion(NGIN::Execution::WorkItem(handle));
+                if (!delivery)
+                    return std::unexpected(delivery.error() == NGIN::Execution::ScheduleError::ResourceExhausted
+                                                   ? CancellationRegistrationError::ResourceExhausted
+                                                   : CancellationRegistrationError::CompletionUnavailable);
+                node->delivery = std::move(*delivery);
             }
+
+            // Publish ownership before making the callback visible. Cancellation
+            // may run it immediately, reset the registration, and destroy its owner.
+            // Do not access outRegistration again after successful publication.
+            outRegistration.m_state = state;
+            outRegistration.m_node  = node;
+            if (state->TryRegister(node))
+                return {};
         } catch (const std::bad_alloc&)
         {
+            outRegistration.Reset();
             return std::unexpected(CancellationRegistrationError::ResourceExhausted);
         }
 

@@ -1,0 +1,142 @@
+Network scaling; distinct UDP endpoints (reuseAddress=false); GCC 15.2 Release; Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.39
+Original source revision 203f704e97a704259ef2db1ee8c93bf92763a7e1; no CPU affinity; shared development host; serial paired runs
+
+run=1 implementation=original
+Network-only workload: one continuation worker; 64-byte UDP; 8 active sockets; send-to-joined-receive latency
+cold sockets=8 setup_us=185.698 file_backend=0
+idle sockets=8 seconds=1 cpu_us=6807 voluntary_switches=936 threads=4 maxrss_kib=12204
+suspended_receive sockets=8 active=8 samples=2000 p50_us=34.77 p95_us=68.648 p99_us=110.213 mean_us=40.4544 operations_per_second_including_rearm=14437.1
+cancel_all sockets=8 join_us=207.305
+shutdown sockets=8 us=747.482
+cold sockets=1024 setup_us=131865 file_backend=0
+idle sockets=1024 seconds=1 cpu_us=11652 voluntary_switches=931 threads=4 maxrss_kib=12204
+suspended_receive sockets=1024 active=8 samples=2000 p50_us=35.014 p95_us=58.398 p99_us=100.946 mean_us=39.1662 operations_per_second_including_rearm=14783.2
+cancel_all sockets=1024 join_us=26824
+shutdown sockets=1024 us=626.533
+
+run=1 implementation=current
+Network-only workload: one continuation worker; 64-byte UDP; 8 active sockets; send-to-joined-receive latency
+cold sockets=8 setup_us=232.119 file_backend=0
+idle sockets=8 seconds=1 cpu_us=19 voluntary_switches=1 threads=4 maxrss_kib=12204
+suspended_receive sockets=8 active=8 samples=2000 p50_us=37.201 p95_us=61.435 p99_us=111.396 mean_us=41.4983 operations_per_second_including_rearm=12621.5
+cancel_all sockets=8 join_us=240.793
+shutdown sockets=8 us=55.304
+cold sockets=1024 setup_us=90678.2 file_backend=0
+idle sockets=1024 seconds=1 cpu_us=22 voluntary_switches=1 threads=4 maxrss_kib=12204
+suspended_receive sockets=1024 active=8 samples=2000 p50_us=35.385 p95_us=59.345 p99_us=102.77 mean_us=42.6961 operations_per_second_including_rearm=12429.7
+cancel_all sockets=1024 join_us=27250.1
+shutdown sockets=1024 us=75.221
+
+run=2 implementation=original
+Network-only workload: one continuation worker; 64-byte UDP; 8 active sockets; send-to-joined-receive latency
+cold sockets=8 setup_us=174.787 file_backend=0
+idle sockets=8 seconds=1 cpu_us=7439 voluntary_switches=936 threads=4 maxrss_kib=12204
+suspended_receive sockets=8 active=8 samples=2000 p50_us=34.512 p95_us=58.982 p99_us=100.051 mean_us=38.4291 operations_per_second_including_rearm=15035
+cancel_all sockets=8 join_us=191.495
+shutdown sockets=8 us=777.897
+cold sockets=1024 setup_us=98993.2 file_backend=0
+idle sockets=1024 seconds=1 cpu_us=13140 voluntary_switches=931 threads=4 maxrss_kib=12204
+suspended_receive sockets=1024 active=8 samples=2000 p50_us=35.504 p95_us=69.062 p99_us=102.27 mean_us=40.6651 operations_per_second_including_rearm=14433.3
+cancel_all sockets=1024 join_us=28332
+shutdown sockets=1024 us=236.242
+
+run=2 implementation=current
+Network-only workload: one continuation worker; 64-byte UDP; 8 active sockets; send-to-joined-receive latency
+cold sockets=8 setup_us=244.562 file_backend=0
+idle sockets=8 seconds=1 cpu_us=26 voluntary_switches=1 threads=4 maxrss_kib=12204
+suspended_receive sockets=8 active=8 samples=2000 p50_us=38.716 p95_us=68.265 p99_us=99.743 mean_us=43.768 operations_per_second_including_rearm=11709.2
+cancel_all sockets=8 join_us=221.544
+shutdown sockets=8 us=52.297
+cold sockets=1024 setup_us=90526.8 file_backend=0
+idle sockets=1024 seconds=1 cpu_us=20 voluntary_switches=1 threads=4 maxrss_kib=12204
+suspended_receive sockets=1024 active=8 samples=2000 p50_us=36.105 p95_us=57.525 p99_us=103.582 mean_us=39.8216 operations_per_second_including_rearm=12959.8
+cancel_all sockets=1024 join_us=29040
+shutdown sockets=1024 us=63.743
+
+run=3 implementation=original
+Network-only workload: one continuation worker; 64-byte UDP; 8 active sockets; send-to-joined-receive latency
+cold sockets=8 setup_us=205.711 file_backend=0
+idle sockets=8 seconds=1 cpu_us=6530 voluntary_switches=938 threads=4 maxrss_kib=12204
+suspended_receive sockets=8 active=8 samples=2000 p50_us=34.965 p95_us=55.78 p99_us=107.356 mean_us=38.8234 operations_per_second_including_rearm=14937.4
+cancel_all sockets=8 join_us=194.595
+shutdown sockets=8 us=750.203
+cold sockets=1024 setup_us=100781 file_backend=0
+idle sockets=1024 seconds=1 cpu_us=10795 voluntary_switches=935 threads=4 maxrss_kib=12204
+suspended_receive sockets=1024 active=8 samples=2000 p50_us=35.041 p95_us=53.768 p99_us=83.129 mean_us=38.3856 operations_per_second_including_rearm=15044.2
+cancel_all sockets=1024 join_us=26385.3
+shutdown sockets=1024 us=972.321
+
+run=3 implementation=current
+Network-only workload: one continuation worker; 64-byte UDP; 8 active sockets; send-to-joined-receive latency
+cold sockets=8 setup_us=253.17 file_backend=0
+idle sockets=8 seconds=1 cpu_us=31 voluntary_switches=1 threads=4 maxrss_kib=12204
+suspended_receive sockets=8 active=8 samples=2000 p50_us=37.603 p95_us=60.787 p99_us=120.866 mean_us=41.7796 operations_per_second_including_rearm=12491.4
+cancel_all sockets=8 join_us=221.065
+shutdown sockets=8 us=54.559
+cold sockets=1024 setup_us=93888.8 file_backend=0
+idle sockets=1024 seconds=1 cpu_us=21 voluntary_switches=1 threads=4 maxrss_kib=12204
+suspended_receive sockets=1024 active=8 samples=2000 p50_us=37.224 p95_us=62.182 p99_us=107.251 mean_us=41.4082 operations_per_second_including_rearm=12563.6
+cancel_all sockets=1024 join_us=28442.4
+shutdown sockets=1024 us=61.623
+
+run=4 implementation=original
+Network-only workload: one continuation worker; 64-byte UDP; 8 active sockets; send-to-joined-receive latency
+cold sockets=8 setup_us=180.648 file_backend=0
+idle sockets=8 seconds=1 cpu_us=7348 voluntary_switches=918 threads=4 maxrss_kib=12204
+suspended_receive sockets=8 active=8 samples=2000 p50_us=36.812 p95_us=63.525 p99_us=108.467 mean_us=42.2692 operations_per_second_including_rearm=13885.7
+cancel_all sockets=8 join_us=203.224
+shutdown sockets=8 us=648.581
+cold sockets=1024 setup_us=100909 file_backend=0
+idle sockets=1024 seconds=1 cpu_us=12750 voluntary_switches=917 threads=4 maxrss_kib=12204
+suspended_receive sockets=1024 active=8 samples=2000 p50_us=35.579 p95_us=62.357 p99_us=110.157 mean_us=40.2526 operations_per_second_including_rearm=14473.9
+cancel_all sockets=1024 join_us=26679.9
+shutdown sockets=1024 us=91.957
+
+run=4 implementation=current
+Network-only workload: one continuation worker; 64-byte UDP; 8 active sockets; send-to-joined-receive latency
+cold sockets=8 setup_us=198.046 file_backend=0
+idle sockets=8 seconds=1 cpu_us=17 voluntary_switches=1 threads=4 maxrss_kib=12204
+suspended_receive sockets=8 active=8 samples=2000 p50_us=36.128 p95_us=56.647 p99_us=108.712 mean_us=40.6486 operations_per_second_including_rearm=12741.5
+cancel_all sockets=8 join_us=224.381
+shutdown sockets=8 us=56.655
+cold sockets=1024 setup_us=109555 file_backend=0
+idle sockets=1024 seconds=1 cpu_us=23 voluntary_switches=1 threads=4 maxrss_kib=12204
+suspended_receive sockets=1024 active=8 samples=2000 p50_us=36.447 p95_us=55.245 p99_us=92.517 mean_us=39.3612 operations_per_second_including_rearm=12911.4
+cancel_all sockets=1024 join_us=27504.9
+shutdown sockets=1024 us=60.841
+
+run=5 implementation=original
+Network-only workload: one continuation worker; 64-byte UDP; 8 active sockets; send-to-joined-receive latency
+cold sockets=8 setup_us=223.79 file_backend=0
+idle sockets=8 seconds=1 cpu_us=8148 voluntary_switches=924 threads=4 maxrss_kib=12204
+suspended_receive sockets=8 active=8 samples=2000 p50_us=35.33 p95_us=59.776 p99_us=103.221 mean_us=39.4234 operations_per_second_including_rearm=14612.8
+cancel_all sockets=8 join_us=193.3
+shutdown sockets=8 us=758.786
+cold sockets=1024 setup_us=106658 file_backend=0
+idle sockets=1024 seconds=1 cpu_us=12118 voluntary_switches=924 threads=4 maxrss_kib=12204
+suspended_receive sockets=1024 active=8 samples=2000 p50_us=35.062 p95_us=57.708 p99_us=100.746 mean_us=38.7568 operations_per_second_including_rearm=14812.1
+cancel_all sockets=1024 join_us=27075.7
+shutdown sockets=1024 us=600.68
+
+run=5 implementation=current
+Network-only workload: one continuation worker; 64-byte UDP; 8 active sockets; send-to-joined-receive latency
+cold sockets=8 setup_us=321.371 file_backend=0
+idle sockets=8 seconds=1 cpu_us=28 voluntary_switches=1 threads=4 maxrss_kib=12204
+suspended_receive sockets=8 active=8 samples=2000 p50_us=35.686 p95_us=54.504 p99_us=89.135 mean_us=39.2021 operations_per_second_including_rearm=13105.2
+cancel_all sockets=8 join_us=323.427
+shutdown sockets=8 us=52.528
+cold sockets=1024 setup_us=114856 file_backend=0
+idle sockets=1024 seconds=1 cpu_us=12 voluntary_switches=1 threads=4 maxrss_kib=12204
+suspended_receive sockets=1024 active=8 samples=2000 p50_us=36.216 p95_us=53.257 p99_us=94.782 mean_us=39.2794 operations_per_second_including_rearm=13118.1
+cancel_all sockets=1024 join_us=28100.3
+shutdown sockets=1024 us=78.689
+
+Network-only executable sections (GNU size):
+original
+   text	   data	    bss	    dec	    hex	filename
+ 185332	   1872	    740	 187944	  2de28	original/IORuntimeNetworkBenchmarks
+current
+   text	   data	    bss	    dec	    hex	filename
+ 239596	   2272	    648	 242516	  3b354	current/IORuntimeNetworkBenchmarks
+
+Executable paths normalized in this recorded artifact. Measurements are unchanged.

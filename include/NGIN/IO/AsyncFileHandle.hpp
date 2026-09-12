@@ -8,6 +8,14 @@
 namespace NGIN::IO
 {
     /// @brief Move-only type-erased handle for cancellation-aware asynchronous file IO.
+    /// @details Operation calls snapshot shared backend state before returning a cold task.
+    /// Moving or releasing this handle does not invalidate an existing task. The caller
+    /// keeps its context, executor, and borrowed buffers alive through completion.
+    /// Local filesystem handles serialize sequential operations in task admission order;
+    /// explicit offsets may overlap. Callers coordinate conflicting buffers and ranges.
+    /// Local queued and active operations share the runtime's files.queueDepthHint
+    /// budget across handles and executors. Saturation reports ResourceExhausted.
+    /// Local transfers are limited to UINT32_MAX bytes and offsets to INT64_MAX.
     class NGIN_IO_API AsyncFileHandle
     {
     public:
@@ -69,60 +77,28 @@ namespace NGIN::IO
         explicit operator bool() const noexcept { return IsValid(); }
 
         /// @brief Asynchronously reads from the backend's sequential position.
-        AsyncTask<UIntSize> ReadAsync(NGIN::Async::TaskContext& ctx, std::span<NGIN::Byte> destination)
-        {
-            if (!IsValid() || m_operations->read == nullptr)
-                co_return MakeInvalidHandleError("async file handle is empty");
-            co_return co_await m_operations->read(m_state, ctx, destination);
-        }
+        AsyncTask<UIntSize> ReadAsync(NGIN::Async::TaskContext& ctx, std::span<NGIN::Byte> destination);
 
         /// @brief Asynchronously writes at the backend's sequential position.
-        AsyncTask<UIntSize> WriteAsync(NGIN::Async::TaskContext& ctx, std::span<const NGIN::Byte> source)
-        {
-            if (!IsValid() || m_operations->write == nullptr)
-                co_return MakeInvalidHandleError("async file handle is empty");
-            co_return co_await m_operations->write(m_state, ctx, source);
-        }
+        AsyncTask<UIntSize> WriteAsync(NGIN::Async::TaskContext& ctx, std::span<const NGIN::Byte> source);
 
         /// @brief Asynchronously reads at an absolute offset without changing sequential position.
-        AsyncTask<UIntSize> ReadAtAsync(NGIN::Async::TaskContext& ctx, UInt64 offset, std::span<NGIN::Byte> destination)
-        {
-            if (!IsValid() || m_operations->readAt == nullptr)
-                co_return MakeInvalidHandleError("async file handle is empty");
-            co_return co_await m_operations->readAt(m_state, ctx, offset, destination);
-        }
+        AsyncTask<UIntSize> ReadAtAsync(NGIN::Async::TaskContext& ctx, UInt64 offset, std::span<NGIN::Byte> destination);
 
         /// @brief Asynchronously writes at an absolute offset without changing sequential position.
-        AsyncTask<UIntSize> WriteAtAsync(NGIN::Async::TaskContext& ctx, UInt64 offset, std::span<const NGIN::Byte> source)
-        {
-            if (!IsValid() || m_operations->writeAt == nullptr)
-                co_return MakeInvalidHandleError("async file handle is empty");
-            co_return co_await m_operations->writeAt(m_state, ctx, offset, source);
-        }
+        /// @note Local append handles reject this operation with NotSupported.
+        AsyncTask<UIntSize> WriteAtAsync(NGIN::Async::TaskContext& ctx, UInt64 offset, std::span<const NGIN::Byte> source);
 
         /// @brief Asynchronously flushes buffered contents to storage.
-        AsyncTaskVoid FlushAsync(NGIN::Async::TaskContext& ctx)
-        {
-            if (!IsValid() || m_operations->flush == nullptr)
-            {
-                co_await NGIN::Async::DomainFailure(MakeInvalidHandleError("async file handle is empty"));
-                co_return;
-            }
-            co_await m_operations->flush(m_state, ctx);
-            co_return;
-        }
+        /// @note Local handles wait for earlier admitted work and block later work.
+        AsyncTaskVoid FlushAsync(NGIN::Async::TaskContext& ctx);
 
         /// @brief Asynchronously closes the backend file resource.
-        AsyncTaskVoid CloseAsync(NGIN::Async::TaskContext& ctx)
-        {
-            if (!IsValid() || m_operations->close == nullptr)
-            {
-                co_await NGIN::Async::DomainFailure(MakeInvalidHandleError("async file handle is empty"));
-                co_return;
-            }
-            co_await m_operations->close(m_state, ctx);
-            co_return;
-        }
+        /// @note Local handles close admission, drain earlier backend work, then close.
+        /// New operations report Busy while closing; repeated close after closure succeeds.
+        /// Cancellation of a queued close reopens admission. Submitted close may still close.
+        /// Capacity rejection leaves the handle open and does not close admission.
+        AsyncTaskVoid CloseAsync(NGIN::Async::TaskContext& ctx);
 
         /// @brief Returns whether the bound backend reports an open file resource.
         [[nodiscard]] bool IsOpen() const noexcept
@@ -131,14 +107,6 @@ namespace NGIN::IO
         }
 
     private:
-        [[nodiscard]] static IOError MakeInvalidHandleError(const char* message) noexcept
-        {
-            IOError error;
-            error.code    = IOErrorCode::InvalidArgument;
-            error.message = message;
-            return error;
-        }
-
         std::shared_ptr<void> m_state {};
         const Operations*     m_operations {nullptr};
     };

@@ -1,6 +1,6 @@
 #include <NGIN/Execution/ThisThread.hpp>
 
-#include <Windows.h>
+#include <windows.h>
 
 #include <algorithm>
 #include <array>

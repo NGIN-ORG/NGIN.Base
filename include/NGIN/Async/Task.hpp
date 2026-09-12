@@ -42,6 +42,7 @@ namespace NGIN::Async
 
     namespace detail
     {
+        struct OperationAccess;
         [[nodiscard]] inline AsyncFault MakeSchedulingFault(
                 const AsyncFaultCode                 code,
                 const NGIN::Execution::ScheduleError error) noexcept
@@ -50,25 +51,6 @@ namespace NGIN::Async
             fault.code   = code;
             fault.native = static_cast<int>(error);
             return fault;
-        }
-
-        inline void ResumeOnExecutor(NGIN::Execution::ExecutorRef exec, std::coroutine_handle<> handle) noexcept
-        {
-            if (!handle)
-            {
-                return;
-            }
-
-            if (exec.IsValid())
-            {
-                const NGIN::Execution::ScheduleResult result = exec.Execute(handle);
-                if (!result)
-                    handle.resume();
-            }
-            else
-            {
-                handle.resume();
-            }
         }
 
         struct PromiseRuntimeCommon
@@ -95,15 +77,126 @@ namespace NGIN::Async
             static_assert(std::atomic<std::uint32_t>::is_always_lock_free,
                           "Task frame-reference state must remain lock-free on supported platforms");
 
-            std::atomic<bool>              m_finished {false};
-            NGIN::Sync::AtomicCondition    m_finishedCondition {};
-            std::coroutine_handle<>        m_continuation {};
-            CompletionHandler              m_completionHandler {};
-            std::atomic<ContinuationState> m_continuationState {ContinuationState::Empty};
-            TaskContext*                   m_ctx {nullptr};
-            NGIN::Execution::ExecutorRef   m_executor {};
-            std::atomic<std::uint32_t>     m_frameReferences {1};
-            std::atomic<bool>              m_executionReferenceActive {false};
+            std::atomic<bool>                       m_finished {false};
+            NGIN::Sync::AtomicCondition             m_finishedCondition {};
+            std::coroutine_handle<>                 m_continuation {};
+            CompletionHandler                       m_completionHandler {};
+            std::atomic<ContinuationState>          m_continuationState {ContinuationState::Empty};
+            TaskContext*                            m_ctx {nullptr};
+            CancellationToken                       m_waitCancellation {};
+            NGIN::Execution::ExecutorRef            m_executor {};
+            std::atomic<std::uint32_t>              m_frameReferences {1};
+            std::atomic<bool>                       m_executionReferenceActive {false};
+            NGIN::Execution::CompletionReservation  m_taskContinuation {};
+            NGIN::Execution::CompletionReservation  m_foreignContinuation {};
+            PromiseRuntimeCommon*                   m_continuationTarget {};
+            NGIN::Execution::WorkItem               m_pendingContinuation {};
+            NGIN::Execution::CompletionReservation* m_reusableObserver {};
+            NGIN::Execution::CompletionReservation* m_retirementObserver {};
+            std::atomic<unsigned>                   m_submissionFlags {0};
+
+            /// Queues one continuation using the task's pre-admitted storage.
+            void QueueContinuation(NGIN::Execution::WorkItem work) noexcept
+            {
+                assert(m_taskContinuation.IsValid());
+                m_pendingContinuation = std::move(work);
+                m_taskContinuation.Schedule();
+            }
+
+            /// Ends a queued continuation's retention before entering user code.
+            /// Active execution keeps a pending task alive until it completes.
+            template<typename Handle>
+            static void ResumeRetained(Handle awaiting) noexcept
+            {
+                auto&      promise = awaiting.promise();
+                const bool pending = !promise.m_finished.load(std::memory_order_acquire);
+                assert(!pending || promise.m_executionReferenceActive.load(std::memory_order_acquire));
+                promise.ReleaseFrameReference(awaiting);
+                if (pending)
+                    awaiting.resume();
+            }
+
+            /// Reserves one reusable continuation and lifetime slot for a started task.
+            /// Unsupported executors may run standalone tasks, but cannot suspend a
+            /// parent waiting for a child without reserving its terminal delivery.
+            [[nodiscard]] NGIN::Execution::ScheduleResult ReserveExecution() noexcept
+            {
+                if (!m_executor.SupportsCompletionReservations())
+                    return {};
+                auto ticket = m_executor.ReserveCompletion(NGIN::Execution::WorkItem([this] {
+                    auto work = std::move(m_pendingContinuation);
+                    work.Invoke();
+                }));
+                if (!ticket)
+                    return std::unexpected(ticket.error());
+                m_taskContinuation = std::move(*ticket);
+                return {};
+            }
+
+            /// Submits one token-free step using the active task's reserved completion.
+            /// Execution owns the frame until submission and dispatch/discard have both
+            /// finished. Neither side accesses the frame after publishing its last event.
+            template<typename Handle>
+            [[nodiscard]] NGIN::Execution::ScheduleResult SubmitTracked(
+                    Handle self, bool timed = false, NGIN::Time::TimePoint until = {}) noexcept
+            {
+                assert(m_taskContinuation.IsValid());
+                assert(m_executionReferenceActive.load(std::memory_order_acquire));
+                m_submissionFlags.store(0, std::memory_order_relaxed);
+                NGIN::Execution::WorkItem work {SubmissionWork<Handle>(self)};
+                const auto                result = timed ? m_executor.ExecuteAt(std::move(work), until) : m_executor.Execute(std::move(work));
+                if (!result)
+                {
+                    // Rejection destroys the submitted item before returning. No
+                    // dispatch can finish before admission arms the handshake.
+                    CompleteSubmissionFailure(self, result.error());
+                    return result;
+                }
+                const unsigned observed = m_submissionFlags.fetch_or(SubmissionArmed, std::memory_order_acq_rel);
+                if (observed & (SubmissionReady | SubmissionDiscarded))
+                    QueueSubmissionResult(self, (observed & SubmissionReady) != 0);
+                return result;
+            }
+
+            /// Admits and starts a task. Untracked executors retain standalone support.
+            template<typename Handle>
+            [[nodiscard]] NGIN::Execution::ScheduleResult StartExecution(Handle self) noexcept
+            {
+                auto result = ReserveExecution();
+                if (result && m_taskContinuation.IsValid())
+                    return SubmitTracked(self);
+                if (result)
+                    result = m_executor.Execute(self);
+                if (!result)
+                    CompleteSubmissionFailure(self, result.error());
+                return result;
+            }
+
+            template<typename Handle>
+            static void DeliverChild(std::coroutine_handle<> child) noexcept
+            {
+                Handle     self              = Handle::from_address(child.address());
+                auto&      promise           = self.promise();
+                const auto continuation      = promise.m_continuation;
+                const auto completionHandler = promise.m_completionHandler;
+#if NGIN_ASYNC_CAPTURE_EXCEPTIONS
+                const auto propagateException = promise.m_setChildException;
+                const auto exception          = promise.m_exception;
+#endif
+                // The awaiting Task/Operation owner retains the child while its
+                // handler consumes the result. End delivery's extra hold first,
+                // so unwinding the parent can destroy child locals before the
+                // parent locals they borrow. Never access the child afterward.
+                promise.ReleaseFrameReference(self);
+#if NGIN_ASYNC_CAPTURE_EXCEPTIONS
+                if (propagateException && exception)
+                    propagateException(exception, continuation);
+#endif
+                if (completionHandler)
+                    completionHandler(child, continuation);
+                else
+                    continuation.resume();
+            }
 
 #if NGIN_ASYNC_CAPTURE_EXCEPTIONS
             std::exception_ptr m_exception {};
@@ -164,7 +257,10 @@ namespace NGIN::Async
                 assert(previous != 0);
                 if (previous == 1)
                 {
+                    auto* retired = m_retirementObserver;
                     self.destroy();
+                    if (retired)
+                        retired->Schedule();
                 }
             }
 
@@ -179,7 +275,10 @@ namespace NGIN::Async
                     ,
                     const ExceptionPropagator exceptionPropagator
 #endif
-                    ) noexcept
+                    ,
+                    PromiseRuntimeCommon*                   target           = nullptr,
+                    NGIN::Execution::CompletionReservation* delivery         = nullptr,
+                    NGIN::Execution::CompletionReservation* reusableObserver = nullptr) noexcept
             {
                 ContinuationState expected = ContinuationState::Empty;
                 if (!m_continuationState.compare_exchange_strong(
@@ -193,8 +292,12 @@ namespace NGIN::Async
                                    : ContinuationInstallResult::AlreadyInstalled;
                 }
 
-                m_continuation      = continuation;
-                m_completionHandler = completionHandler;
+                m_continuation       = continuation;
+                m_completionHandler  = completionHandler;
+                m_continuationTarget = target;
+                m_reusableObserver   = reusableObserver;
+                if (delivery)
+                    m_foreignContinuation = std::move(*delivery);
 #if NGIN_ASYNC_CAPTURE_EXCEPTIONS
                 m_setChildException = exceptionPropagator;
 #endif
@@ -244,32 +347,82 @@ namespace NGIN::Async
 
                 const std::coroutine_handle<> continuation = CompleteContinuation();
 
-#if NGIN_ASYNC_CAPTURE_EXCEPTIONS
-                if (continuation && m_setChildException && m_exception)
-                {
-                    m_setChildException(m_exception, continuation);
-                }
-#endif
-
-                if (!continuation)
-                {
-                    ReleaseExecutionReference(self);
-                    return true;
-                }
-
-                if (m_completionHandler)
-                {
-                    m_completionHandler(std::coroutine_handle<>::from_address(self.address()), continuation);
-                }
-                else
-                {
-                    ResumeOnExecutor(m_executor, continuation);
-                }
+                PromiseRuntimeCommon* target           = m_continuationTarget;
+                auto                  delivery         = std::move(m_foreignContinuation);
+                auto*                 reusableObserver = m_reusableObserver;
+                if (continuation)
+                    RetainFrameReference();
+                // Release execution before publishing the observer. Observers can
+                // then destroy a completed Operation and its frame during joining.
+                auto execution = std::move(m_taskContinuation);
                 ReleaseExecutionReference(self);
+                if (continuation && target)
+                    target->QueueContinuation(NGIN::Execution::WorkItem([self] { DeliverChild<Handle>(self); }));
+                else if (delivery.IsValid())
+                    delivery.Dispatch();
+                else if (reusableObserver)
+                    reusableObserver->Schedule();
                 return true;
             }
 
         private:
+            enum SubmissionFlag : unsigned
+            {
+                SubmissionArmed     = 1,
+                SubmissionReady     = 2,
+                SubmissionDiscarded = 4,
+            };
+
+            template<typename Handle>
+            struct SubmissionWork final
+            {
+                explicit SubmissionWork(Handle incoming) noexcept : handle(incoming) {}
+                SubmissionWork(SubmissionWork&& other) noexcept : handle(std::exchange(other.handle, {})) {}
+                SubmissionWork(const SubmissionWork&) = delete;
+                ~SubmissionWork()
+                {
+                    if (Handle self = std::exchange(handle, {}))
+                        self.promise().SignalSubmission(self, SubmissionDiscarded);
+                }
+                void operator()() noexcept
+                {
+                    if (Handle self = std::exchange(handle, {}))
+                        self.promise().SignalSubmission(self, SubmissionReady);
+                }
+                Handle handle;
+            };
+
+            template<typename Handle>
+            void SignalSubmission(Handle self, unsigned event) noexcept
+            {
+                const unsigned observed = m_submissionFlags.fetch_or(event, std::memory_order_acq_rel);
+                if (observed & SubmissionArmed)
+                {
+                    if (event == SubmissionReady)
+                        self.resume();
+                    else
+                        QueueSubmissionResult(self, false);
+                }
+            }
+
+            template<typename Handle>
+            void QueueSubmissionResult(Handle self, bool ready) noexcept
+            {
+                QueueContinuation(NGIN::Execution::WorkItem([self, ready] {
+                    if (ready)
+                        self.resume();
+                    else
+                        CompleteSubmissionFailure(self, NGIN::Execution::ScheduleError::Stopped);
+                }));
+            }
+
+            template<typename Handle>
+            static void CompleteSubmissionFailure(Handle self, NGIN::Execution::ScheduleError error) noexcept
+            {
+                self.promise().SetFault(MakeSchedulingFault(AsyncFaultCode::SchedulerDispatchFailed, error));
+                self.promise().MarkFinishedAndResume(self);
+            }
+
             template<typename Handle>
             void ReleaseExecutionReference(Handle self) noexcept
             {
@@ -336,6 +489,10 @@ namespace NGIN::Async
             template<typename ChildPromise>
             void PropagateFromChild(ChildPromise& child) noexcept
             {
+#if NGIN_ASYNC_CAPTURE_EXCEPTIONS
+                if (child.m_exception)
+                    this->SetChildException(child.m_exception);
+#endif
                 if (!child.m_completion.has_value() || child.m_completion->Succeeded())
                 {
                     return;
@@ -427,6 +584,10 @@ namespace NGIN::Async
             template<typename ChildPromise>
             void PropagateFromChild(ChildPromise& child) noexcept
             {
+#if NGIN_ASYNC_CAPTURE_EXCEPTIONS
+                if (child.m_exception)
+                    this->SetChildException(child.m_exception);
+#endif
                 if (!child.m_completion.has_value() || child.m_completion->Succeeded())
                 {
                     return;
@@ -678,20 +839,20 @@ namespace NGIN::Async
         /// @brief Returns whether the task completed with an unexpected fault.
         [[nodiscard]] bool IsFaulted() const noexcept
         {
-            return m_handle && m_handle.promise().m_completion.has_value() && m_handle.promise().m_completion->IsFault();
+            return IsCompleted() && m_handle.promise().m_completion.has_value() && m_handle.promise().m_completion->IsFault();
         }
 
         /// @brief Returns whether the task completed through cancellation.
         [[nodiscard]] bool IsCanceled() const noexcept
         {
-            return m_handle && m_handle.promise().m_completion.has_value() && m_handle.promise().m_completion->IsCanceled();
+            return IsCompleted() && m_handle.promise().m_completion.has_value() && m_handle.promise().m_completion->IsCanceled();
         }
 
 #if NGIN_ASYNC_CAPTURE_EXCEPTIONS
         /// @brief Returns the exception captured from an unhandled coroutine exception, if any.
         [[nodiscard]] std::exception_ptr GetException() const noexcept
         {
-            if (!m_handle)
+            if (!IsCompleted())
             {
                 return {};
             }
@@ -788,7 +949,7 @@ namespace NGIN::Async
             /// @brief Returns whether the task already completed successfully.
             [[nodiscard]] bool await_ready() const noexcept
             {
-                return m_task.m_handle &&
+                return !m_ctx->IsCancellationRequested() && m_task.m_handle &&
                        m_task.m_handle.promise().m_finished.load(std::memory_order_acquire) &&
                        m_task.m_handle.promise().IsSucceeded();
             }
@@ -797,36 +958,17 @@ namespace NGIN::Async
             template<typename ParentPromise>
             std::coroutine_handle<> await_suspend(std::coroutine_handle<ParentPromise> awaiting) noexcept
             {
-                awaiting.promise().RetainFrameReference();
-                if (m_ctx == nullptr || m_ctx->IsCancellationRequested())
+                if (m_ctx == nullptr || (!m_task.IsStarted() && m_ctx->IsCancellationRequested()))
                 {
                     awaiting.promise().SetCanceled();
                     awaiting.promise().MarkFinishedAndResume(awaiting);
-                    awaiting.promise().ReleaseFrameReference(awaiting);
                     return std::noop_coroutine();
                 }
 
-                m_awaiting                                              = awaiting;
-                const CancellationRegistrationResult registrationResult = m_ctx->GetCancellationToken().Register(
-                        m_cancellationRegistration,
-                        {},
-                        {},
-                        &Task::template CancelAwaitingContinuation<ParentPromise, CancellablePropagationAwaiter>,
-                        this);
-                if (!registrationResult)
-                {
-                    AsyncFault fault;
-                    fault.code   = AsyncFaultCode::CancellationRegistrationFailed;
-                    fault.native = static_cast<int>(registrationResult.error());
-                    awaiting.promise().SetFault(std::move(fault));
-                    awaiting.promise().MarkFinishedAndResume(awaiting);
-                    awaiting.promise().ReleaseFrameReference(awaiting);
-                    return std::noop_coroutine();
-                }
+                if (m_task.m_handle)
+                    m_task.m_handle.promise().m_waitCancellation = m_ctx->GetCancellationToken();
 
-                const std::coroutine_handle<> next = m_task.template AwaitSuspend<ParentPromise>(awaiting);
-                awaiting.promise().ReleaseFrameReference(awaiting);
-                return next;
+                return m_task.template AwaitSuspend<ParentPromise>(awaiting);
             }
 
             /// @brief Moves the successful child value into the parent coroutine.
@@ -842,10 +984,8 @@ namespace NGIN::Async
             template<typename, typename>
             friend class Task;
 
-            Task&                    m_task;
-            TaskContext*             m_ctx {};
-            CancellationRegistration m_cancellationRegistration {};
-            std::coroutine_handle<>  m_awaiting {};
+            Task&        m_task;
+            TaskContext* m_ctx {};
         };
 
         /// @brief Creates a non-owning failure-propagating awaiter for an lvalue task.
@@ -860,7 +1000,9 @@ namespace NGIN::Async
             return OwnedPropagationAwaiter {std::move(*this)};
         }
 
-        /// @brief Creates a cancellation-aware failure-propagating awaiter.
+        /// @brief Observes cancellation while joining this child to its terminal result.
+        /// @details Canceling the wait does not end backend access or detach the child.
+        /// The child's own context controls cancellation of its operations.
         [[nodiscard]] CancellablePropagationAwaiter WithCancellation(TaskContext& ctx) noexcept
         {
             return CancellablePropagationAwaiter {*this, ctx};
@@ -925,16 +1067,7 @@ namespace NGIN::Async
                 return false;
             }
 
-            const NGIN::Execution::ScheduleResult result = m_executor.Execute(m_handle);
-            if (!result)
-            {
-                promise.SetFault(detail::MakeSchedulingFault(
-                        AsyncFaultCode::SchedulerDispatchFailed,
-                        result.error()));
-                promise.MarkFinishedAndResume(m_handle);
-                return false;
-            }
-            return true;
+            return static_cast<bool>(promise.StartExecution(m_handle));
         }
 
         template<typename ParentPromise>
@@ -957,6 +1090,12 @@ namespace NGIN::Async
             }
             if (child.m_finished.load(std::memory_order_acquire))
             {
+                if (child.m_waitCancellation.IsCancellationRequested())
+                {
+                    awaiting.promise().SetCanceled();
+                    awaiting.promise().MarkFinishedAndResume(awaiting);
+                    return std::noop_coroutine();
+                }
                 if (child.IsSucceeded())
                 {
                     return awaiting;
@@ -967,6 +1106,13 @@ namespace NGIN::Async
                 return std::noop_coroutine();
             }
 
+            if (!awaiting.promise().m_taskContinuation.IsValid())
+            {
+                awaiting.promise().SetFault(detail::MakeSchedulingFault(
+                        AsyncFaultCode::SchedulerDispatchFailed, NGIN::Execution::ScheduleError::Rejected));
+                awaiting.promise().MarkFinishedAndResume(awaiting);
+                return std::noop_coroutine();
+            }
             awaiting.promise().RetainFrameReference();
             const detail::PromiseRuntimeCommon::ContinuationInstallResult installResult = child.TryInstallContinuation(
                     awaiting,
@@ -975,24 +1121,32 @@ namespace NGIN::Async
                     ,
                     &Task::template PropagateChildException<ParentPromise>
 #endif
-            );
+                    ,
+                    &awaiting.promise());
             if (installResult == detail::PromiseRuntimeCommon::ContinuationInstallResult::AlreadyCompleted)
             {
+                if (child.m_waitCancellation.IsCancellationRequested())
+                {
+                    awaiting.promise().SetCanceled();
+                    awaiting.promise().ReleaseFrameReference(awaiting);
+                    awaiting.promise().MarkFinishedAndResume(awaiting);
+                    return std::noop_coroutine();
+                }
                 if (child.IsSucceeded())
                 {
                     awaiting.promise().ReleaseFrameReference(awaiting);
                     return awaiting;
                 }
                 awaiting.promise().PropagateFromChild(child);
-                awaiting.promise().MarkFinishedAndResume(awaiting);
                 awaiting.promise().ReleaseFrameReference(awaiting);
+                awaiting.promise().MarkFinishedAndResume(awaiting);
                 return std::noop_coroutine();
             }
             if (installResult == detail::PromiseRuntimeCommon::ContinuationInstallResult::AlreadyInstalled)
             {
                 awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidContinuationState));
-                awaiting.promise().MarkFinishedAndResume(awaiting);
                 awaiting.promise().ReleaseFrameReference(awaiting);
+                awaiting.promise().MarkFinishedAndResume(awaiting);
                 return std::noop_coroutine();
             }
 
@@ -1007,14 +1161,7 @@ namespace NGIN::Async
                     return std::noop_coroutine();
                 }
 
-                const NGIN::Execution::ScheduleResult result = m_executor.Execute(m_handle);
-                if (!result)
-                {
-                    child.SetFault(detail::MakeSchedulingFault(
-                            AsyncFaultCode::SchedulerDispatchFailed,
-                            result.error()));
-                    child.MarkFinishedAndResume(m_handle);
-                }
+                (void) child.StartExecution(m_handle);
             }
 
             return std::noop_coroutine();
@@ -1047,16 +1194,22 @@ namespace NGIN::Async
                 return;
             }
 
+            if (child.m_waitCancellation.IsCancellationRequested())
+            {
+                parentHandle.promise().SetCanceled();
+                parentHandle.promise().ReleaseFrameReference(parentHandle);
+                parentHandle.promise().MarkFinishedAndResume(parentHandle);
+                return;
+            }
             if (child.IsSucceeded())
             {
-                detail::ResumeOnExecutor(child.m_executor, continuation);
-                parentHandle.promise().ReleaseFrameReference(parentHandle);
+                detail::PromiseRuntimeCommon::ResumeRetained(parentHandle);
                 return;
             }
 
             parentHandle.promise().PropagateFromChild(child);
-            parentHandle.promise().MarkFinishedAndResume(parentHandle);
             parentHandle.promise().ReleaseFrameReference(parentHandle);
+            parentHandle.promise().MarkFinishedAndResume(parentHandle);
         }
 
 #if NGIN_ASYNC_CAPTURE_EXCEPTIONS
@@ -1076,27 +1229,6 @@ namespace NGIN::Async
             }
         }
 #endif
-
-        template<typename ParentPromise, typename TAwaiter>
-        static bool CancelAwaitingContinuation(void* rawAwaiter) noexcept
-        {
-            TAwaiter* awaiter = static_cast<TAwaiter*>(rawAwaiter);
-            if (awaiter == nullptr || !awaiter->m_awaiting)
-            {
-                return false;
-            }
-
-            std::coroutine_handle<ParentPromise> parentHandle =
-                    std::coroutine_handle<ParentPromise>::from_address(awaiter->m_awaiting.address());
-            if (parentHandle.promise().m_finished.load(std::memory_order_acquire))
-            {
-                return false;
-            }
-
-            parentHandle.promise().SetCanceled();
-            parentHandle.promise().MarkFinishedAndResume(parentHandle);
-            return false;
-        }
 
         handle_type                  m_handle {};
         NGIN::Execution::ExecutorRef m_executor {};
@@ -1227,20 +1359,20 @@ namespace NGIN::Async
         /// @brief Returns whether the task completed with an unexpected fault.
         [[nodiscard]] bool IsFaulted() const noexcept
         {
-            return m_handle && m_handle.promise().m_completion.has_value() && m_handle.promise().m_completion->IsFault();
+            return IsCompleted() && m_handle.promise().m_completion.has_value() && m_handle.promise().m_completion->IsFault();
         }
 
         /// @brief Returns whether the task completed through cancellation.
         [[nodiscard]] bool IsCanceled() const noexcept
         {
-            return m_handle && m_handle.promise().m_completion.has_value() && m_handle.promise().m_completion->IsCanceled();
+            return IsCompleted() && m_handle.promise().m_completion.has_value() && m_handle.promise().m_completion->IsCanceled();
         }
 
 #if NGIN_ASYNC_CAPTURE_EXCEPTIONS
         /// @brief Returns the exception captured from an unhandled coroutine exception, if any.
         [[nodiscard]] std::exception_ptr GetException() const noexcept
         {
-            if (!m_handle)
+            if (!IsCompleted())
             {
                 return {};
             }
@@ -1333,7 +1465,7 @@ namespace NGIN::Async
             /// @brief Returns whether the task already completed successfully.
             [[nodiscard]] bool await_ready() const noexcept
             {
-                return m_task.m_handle &&
+                return !m_ctx->IsCancellationRequested() && m_task.m_handle &&
                        m_task.m_handle.promise().m_finished.load(std::memory_order_acquire) &&
                        m_task.m_handle.promise().IsSucceeded();
             }
@@ -1342,36 +1474,17 @@ namespace NGIN::Async
             template<typename ParentPromise>
             std::coroutine_handle<> await_suspend(std::coroutine_handle<ParentPromise> awaiting) noexcept
             {
-                awaiting.promise().RetainFrameReference();
-                if (m_ctx == nullptr || m_ctx->IsCancellationRequested())
+                if (m_ctx == nullptr || (!m_task.IsStarted() && m_ctx->IsCancellationRequested()))
                 {
                     awaiting.promise().SetCanceled();
                     awaiting.promise().MarkFinishedAndResume(awaiting);
-                    awaiting.promise().ReleaseFrameReference(awaiting);
                     return std::noop_coroutine();
                 }
 
-                m_awaiting                                              = awaiting;
-                const CancellationRegistrationResult registrationResult = m_ctx->GetCancellationToken().Register(
-                        m_cancellationRegistration,
-                        {},
-                        {},
-                        &Task::template CancelAwaitingContinuation<ParentPromise, CancellablePropagationAwaiter>,
-                        this);
-                if (!registrationResult)
-                {
-                    AsyncFault fault;
-                    fault.code   = AsyncFaultCode::CancellationRegistrationFailed;
-                    fault.native = static_cast<int>(registrationResult.error());
-                    awaiting.promise().SetFault(std::move(fault));
-                    awaiting.promise().MarkFinishedAndResume(awaiting);
-                    awaiting.promise().ReleaseFrameReference(awaiting);
-                    return std::noop_coroutine();
-                }
+                if (m_task.m_handle)
+                    m_task.m_handle.promise().m_waitCancellation = m_ctx->GetCancellationToken();
 
-                const std::coroutine_handle<> next = m_task.template AwaitSuspend<ParentPromise>(awaiting);
-                awaiting.promise().ReleaseFrameReference(awaiting);
-                return next;
+                return m_task.template AwaitSuspend<ParentPromise>(awaiting);
             }
 
             /// @brief Verifies that the child completed successfully.
@@ -1385,10 +1498,8 @@ namespace NGIN::Async
             template<typename, typename>
             friend class Task;
 
-            Task&                    m_task;
-            TaskContext*             m_ctx {};
-            CancellationRegistration m_cancellationRegistration {};
-            std::coroutine_handle<>  m_awaiting {};
+            Task&        m_task;
+            TaskContext* m_ctx {};
         };
 
         /// @brief Creates a non-owning failure-propagating awaiter for an lvalue task.
@@ -1403,7 +1514,9 @@ namespace NGIN::Async
             return OwnedPropagationAwaiter {std::move(*this)};
         }
 
-        /// @brief Creates a cancellation-aware failure-propagating awaiter.
+        /// @brief Observes cancellation while joining this child to its terminal result.
+        /// @details Canceling the wait does not end backend access or detach the child.
+        /// The child's own context controls cancellation of its operations.
         [[nodiscard]] CancellablePropagationAwaiter WithCancellation(TaskContext& ctx) noexcept
         {
             return CancellablePropagationAwaiter {*this, ctx};
@@ -1462,6 +1575,12 @@ namespace NGIN::Async
             }
             if (child.m_finished.load(std::memory_order_acquire))
             {
+                if (child.m_waitCancellation.IsCancellationRequested())
+                {
+                    awaiting.promise().SetCanceled();
+                    awaiting.promise().MarkFinishedAndResume(awaiting);
+                    return std::noop_coroutine();
+                }
                 if (child.IsSucceeded())
                 {
                     return awaiting;
@@ -1472,6 +1591,13 @@ namespace NGIN::Async
                 return std::noop_coroutine();
             }
 
+            if (!awaiting.promise().m_taskContinuation.IsValid())
+            {
+                awaiting.promise().SetFault(detail::MakeSchedulingFault(
+                        AsyncFaultCode::SchedulerDispatchFailed, NGIN::Execution::ScheduleError::Rejected));
+                awaiting.promise().MarkFinishedAndResume(awaiting);
+                return std::noop_coroutine();
+            }
             awaiting.promise().RetainFrameReference();
             const detail::PromiseRuntimeCommon::ContinuationInstallResult installResult = child.TryInstallContinuation(
                     awaiting,
@@ -1480,24 +1606,32 @@ namespace NGIN::Async
                     ,
                     &Task::template PropagateChildException<ParentPromise>
 #endif
-            );
+                    ,
+                    &awaiting.promise());
             if (installResult == detail::PromiseRuntimeCommon::ContinuationInstallResult::AlreadyCompleted)
             {
+                if (child.m_waitCancellation.IsCancellationRequested())
+                {
+                    awaiting.promise().SetCanceled();
+                    awaiting.promise().ReleaseFrameReference(awaiting);
+                    awaiting.promise().MarkFinishedAndResume(awaiting);
+                    return std::noop_coroutine();
+                }
                 if (child.IsSucceeded())
                 {
                     awaiting.promise().ReleaseFrameReference(awaiting);
                     return awaiting;
                 }
                 awaiting.promise().PropagateFromChild(child);
-                awaiting.promise().MarkFinishedAndResume(awaiting);
                 awaiting.promise().ReleaseFrameReference(awaiting);
+                awaiting.promise().MarkFinishedAndResume(awaiting);
                 return std::noop_coroutine();
             }
             if (installResult == detail::PromiseRuntimeCommon::ContinuationInstallResult::AlreadyInstalled)
             {
                 awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidContinuationState));
-                awaiting.promise().MarkFinishedAndResume(awaiting);
                 awaiting.promise().ReleaseFrameReference(awaiting);
+                awaiting.promise().MarkFinishedAndResume(awaiting);
                 return std::noop_coroutine();
             }
 
@@ -1512,14 +1646,7 @@ namespace NGIN::Async
                     return std::noop_coroutine();
                 }
 
-                const NGIN::Execution::ScheduleResult result = m_executor.Execute(m_handle);
-                if (!result)
-                {
-                    child.SetFault(detail::MakeSchedulingFault(
-                            AsyncFaultCode::SchedulerDispatchFailed,
-                            result.error()));
-                    child.MarkFinishedAndResume(m_handle);
-                }
+                (void) child.StartExecution(m_handle);
             }
 
             return std::noop_coroutine();
@@ -1552,16 +1679,22 @@ namespace NGIN::Async
                 return;
             }
 
+            if (child.m_waitCancellation.IsCancellationRequested())
+            {
+                parentHandle.promise().SetCanceled();
+                parentHandle.promise().ReleaseFrameReference(parentHandle);
+                parentHandle.promise().MarkFinishedAndResume(parentHandle);
+                return;
+            }
             if (child.IsSucceeded())
             {
-                detail::ResumeOnExecutor(child.m_executor, continuation);
-                parentHandle.promise().ReleaseFrameReference(parentHandle);
+                detail::PromiseRuntimeCommon::ResumeRetained(parentHandle);
                 return;
             }
 
             parentHandle.promise().PropagateFromChild(child);
-            parentHandle.promise().MarkFinishedAndResume(parentHandle);
             parentHandle.promise().ReleaseFrameReference(parentHandle);
+            parentHandle.promise().MarkFinishedAndResume(parentHandle);
         }
 
 #if NGIN_ASYNC_CAPTURE_EXCEPTIONS
@@ -1581,27 +1714,6 @@ namespace NGIN::Async
             }
         }
 #endif
-
-        template<typename ParentPromise, typename TAwaiter>
-        static bool CancelAwaitingContinuation(void* rawAwaiter) noexcept
-        {
-            TAwaiter* awaiter = static_cast<TAwaiter*>(rawAwaiter);
-            if (awaiter == nullptr || !awaiter->m_awaiting)
-            {
-                return false;
-            }
-
-            std::coroutine_handle<ParentPromise> parentHandle =
-                    std::coroutine_handle<ParentPromise>::from_address(awaiter->m_awaiting.address());
-            if (parentHandle.promise().m_finished.load(std::memory_order_acquire))
-            {
-                return false;
-            }
-
-            parentHandle.promise().SetCanceled();
-            parentHandle.promise().MarkFinishedAndResume(parentHandle);
-            return false;
-        }
 
         handle_type                  m_handle {};
         NGIN::Execution::ExecutorRef m_executor {};
@@ -1681,13 +1793,13 @@ namespace NGIN::Async
         /// @brief Returns whether the operation completed with an unexpected fault.
         [[nodiscard]] bool IsFaulted() const noexcept
         {
-            return m_handle && m_handle.promise().m_completion.has_value() && m_handle.promise().m_completion->IsFault();
+            return IsCompleted() && m_handle.promise().m_completion.has_value() && m_handle.promise().m_completion->IsFault();
         }
 
         /// @brief Returns whether the operation completed through cancellation.
         [[nodiscard]] bool IsCanceled() const noexcept
         {
-            return m_handle && m_handle.promise().m_completion.has_value() && m_handle.promise().m_completion->IsCanceled();
+            return IsCompleted() && m_handle.promise().m_completion.has_value() && m_handle.promise().m_completion->IsCanceled();
         }
 
         /// @brief Consumes and returns the completion when available and not previously taken.
@@ -1746,6 +1858,27 @@ namespace NGIN::Async
                     return awaiting;
                 }
 
+                detail::PromiseRuntimeCommon*          target = nullptr;
+                NGIN::Execution::CompletionReservation delivery;
+                if constexpr (std::derived_from<ParentPromise, detail::PromiseRuntimeCommon>)
+                    target = &awaiting.promise();
+                if (!target || !target->m_taskContinuation.IsValid())
+                {
+                    target        = nullptr;
+                    auto executor = child.m_executor;
+                    if constexpr (requires { awaiting.promise().m_executor; })
+                        executor = awaiting.promise().m_executor;
+                    const auto childHandle = m_operation.m_handle;
+                    auto       reserved    = executor.ReserveCompletion(NGIN::Execution::WorkItem([childHandle] {
+                        detail::PromiseRuntimeCommon::DeliverChild<decltype(childHandle)>(childHandle);
+                    }));
+                    if (!reserved)
+                    {
+                        m_fault = detail::MakeSchedulingFault(AsyncFaultCode::SchedulerDispatchFailed, reserved.error());
+                        return awaiting;
+                    }
+                    delivery = std::move(*reserved);
+                }
                 constexpr bool retainsParent = requires(ParentPromise& promise, std::coroutine_handle<ParentPromise> handle) {
                     promise.RetainFrameReference();
                     promise.ReleaseFrameReference(handle);
@@ -1766,7 +1899,8 @@ namespace NGIN::Async
                         ,
                         nullptr
 #endif
-                );
+                        ,
+                        target, &delivery);
                 if (installResult == detail::PromiseRuntimeCommon::ContinuationInstallResult::AlreadyCompleted)
                 {
                     if constexpr (retainsParent)
@@ -1780,10 +1914,16 @@ namespace NGIN::Async
                     if constexpr (requires { awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidContinuationState)); })
                     {
                         awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidContinuationState));
-                        awaiting.promise().MarkFinishedAndResume(awaiting);
-                        if constexpr (retainsParent)
+                        if constexpr (std::derived_from<ParentPromise, detail::PromiseRuntimeCommon>)
                         {
                             awaiting.promise().ReleaseFrameReference(awaiting);
+                            awaiting.promise().MarkFinishedAndResume(awaiting);
+                        }
+                        else
+                        {
+                            awaiting.promise().MarkFinishedAndResume(awaiting);
+                            if constexpr (retainsParent)
+                                awaiting.promise().ReleaseFrameReference(awaiting);
                         }
                         return std::noop_coroutine();
                     }
@@ -1800,11 +1940,14 @@ namespace NGIN::Async
             /// @brief Consumes and returns the operation's completion.
             [[nodiscard]] Completion await_resume()
             {
+                if (m_fault)
+                    return Completion::Faulted(std::move(*m_fault));
                 return m_operation.TakeResult();
             }
 
         private:
-            Operation& m_operation;
+            Operation&                m_operation;
+            std::optional<AsyncFault> m_fault;
         };
 
         /// @brief Owning awaiter for an rvalue operation.
@@ -1813,7 +1956,13 @@ namespace NGIN::Async
         public:
             /// @brief Takes ownership of the awaited operation.
             explicit OwnedAwaiter(Operation&& operation) noexcept
-                : m_operation(std::move(operation))
+                : m_operation(std::move(operation)), m_awaiter(m_operation)
+            {
+            }
+
+            /// @brief Transfers an awaiter before suspension and rebinds its borrowed observer.
+            OwnedAwaiter(OwnedAwaiter&& other) noexcept
+                : m_operation(std::move(other.m_operation)), m_awaiter(m_operation)
             {
             }
 
@@ -1828,17 +1977,18 @@ namespace NGIN::Async
             template<typename ParentPromise>
             std::coroutine_handle<> await_suspend(std::coroutine_handle<ParentPromise> awaiting) noexcept
             {
-                return Awaiter {m_operation}.await_suspend(awaiting);
+                return m_awaiter.await_suspend(awaiting);
             }
 
             /// @brief Consumes and returns the operation's completion.
             [[nodiscard]] Completion await_resume()
             {
-                return m_operation.TakeResult();
+                return m_awaiter.await_resume();
             }
 
         private:
             Operation m_operation;
+            Awaiter   m_awaiter;
         };
 
         /// @brief Creates a non-owning awaiter for an lvalue operation.
@@ -1854,6 +2004,8 @@ namespace NGIN::Async
         }
 
     private:
+        friend struct detail::OperationAccess;
+
         /// @brief Grants the task-starting helper access to operation ownership state.
         template<typename TValue, typename TError>
         friend Operation<TValue, TError> Spawn(TaskContext&, Task<TValue, TError>&&) noexcept;
@@ -1867,14 +2019,18 @@ namespace NGIN::Async
         friend NGIN::Async::Completion<TValue, TError> SyncWait(TaskContext&, Task<TValue, TError>&&);
 
         template<typename ParentPromise>
-        static void ResumeRetainedContinuation(std::coroutine_handle<> self,
+        static void ResumeRetainedContinuation(std::coroutine_handle<>,
                                                std::coroutine_handle<> continuation) noexcept
         {
-            handle_type                          childHandle = handle_type::from_address(self.address());
             std::coroutine_handle<ParentPromise> parentHandle =
                     std::coroutine_handle<ParentPromise>::from_address(continuation.address());
-            detail::ResumeOnExecutor(childHandle.promise().m_executor, continuation);
-            parentHandle.promise().ReleaseFrameReference(parentHandle);
+            if constexpr (std::derived_from<ParentPromise, detail::PromiseRuntimeCommon>)
+                detail::PromiseRuntimeCommon::ResumeRetained(parentHandle);
+            else
+            {
+                continuation.resume();
+                parentHandle.promise().ReleaseFrameReference(parentHandle);
+            }
         }
 
         void WaitUntilComplete()
@@ -1986,13 +2142,13 @@ namespace NGIN::Async
         /// @brief Returns whether the operation completed with an unexpected fault.
         [[nodiscard]] bool IsFaulted() const noexcept
         {
-            return m_handle && m_handle.promise().m_completion.has_value() && m_handle.promise().m_completion->IsFault();
+            return IsCompleted() && m_handle.promise().m_completion.has_value() && m_handle.promise().m_completion->IsFault();
         }
 
         /// @brief Returns whether the operation completed through cancellation.
         [[nodiscard]] bool IsCanceled() const noexcept
         {
-            return m_handle && m_handle.promise().m_completion.has_value() && m_handle.promise().m_completion->IsCanceled();
+            return IsCompleted() && m_handle.promise().m_completion.has_value() && m_handle.promise().m_completion->IsCanceled();
         }
 
         /// @brief Consumes and returns the completion when available and not previously taken.
@@ -2051,6 +2207,27 @@ namespace NGIN::Async
                     return awaiting;
                 }
 
+                detail::PromiseRuntimeCommon*          target = nullptr;
+                NGIN::Execution::CompletionReservation delivery;
+                if constexpr (std::derived_from<ParentPromise, detail::PromiseRuntimeCommon>)
+                    target = &awaiting.promise();
+                if (!target || !target->m_taskContinuation.IsValid())
+                {
+                    target        = nullptr;
+                    auto executor = child.m_executor;
+                    if constexpr (requires { awaiting.promise().m_executor; })
+                        executor = awaiting.promise().m_executor;
+                    const auto childHandle = m_operation.m_handle;
+                    auto       reserved    = executor.ReserveCompletion(NGIN::Execution::WorkItem([childHandle] {
+                        detail::PromiseRuntimeCommon::DeliverChild<decltype(childHandle)>(childHandle);
+                    }));
+                    if (!reserved)
+                    {
+                        m_fault = detail::MakeSchedulingFault(AsyncFaultCode::SchedulerDispatchFailed, reserved.error());
+                        return awaiting;
+                    }
+                    delivery = std::move(*reserved);
+                }
                 constexpr bool retainsParent = requires(ParentPromise& promise, std::coroutine_handle<ParentPromise> handle) {
                     promise.RetainFrameReference();
                     promise.ReleaseFrameReference(handle);
@@ -2071,7 +2248,8 @@ namespace NGIN::Async
                         ,
                         nullptr
 #endif
-                );
+                        ,
+                        target, &delivery);
                 if (installResult == detail::PromiseRuntimeCommon::ContinuationInstallResult::AlreadyCompleted)
                 {
                     if constexpr (retainsParent)
@@ -2085,10 +2263,16 @@ namespace NGIN::Async
                     if constexpr (requires { awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidContinuationState)); })
                     {
                         awaiting.promise().SetFault(MakeAsyncFault(AsyncFaultCode::InvalidContinuationState));
-                        awaiting.promise().MarkFinishedAndResume(awaiting);
-                        if constexpr (retainsParent)
+                        if constexpr (std::derived_from<ParentPromise, detail::PromiseRuntimeCommon>)
                         {
                             awaiting.promise().ReleaseFrameReference(awaiting);
+                            awaiting.promise().MarkFinishedAndResume(awaiting);
+                        }
+                        else
+                        {
+                            awaiting.promise().MarkFinishedAndResume(awaiting);
+                            if constexpr (retainsParent)
+                                awaiting.promise().ReleaseFrameReference(awaiting);
                         }
                         return std::noop_coroutine();
                     }
@@ -2105,11 +2289,14 @@ namespace NGIN::Async
             /// @brief Consumes and returns the operation's completion.
             [[nodiscard]] Completion await_resume()
             {
+                if (m_fault)
+                    return Completion::Faulted(std::move(*m_fault));
                 return m_operation.TakeResult();
             }
 
         private:
-            Operation& m_operation;
+            Operation&                m_operation;
+            std::optional<AsyncFault> m_fault;
         };
 
         /// @brief Owning awaiter for an rvalue operation.
@@ -2118,7 +2305,13 @@ namespace NGIN::Async
         public:
             /// @brief Takes ownership of the awaited operation.
             explicit OwnedAwaiter(Operation&& operation) noexcept
-                : m_operation(std::move(operation))
+                : m_operation(std::move(operation)), m_awaiter(m_operation)
+            {
+            }
+
+            /// @brief Transfers an awaiter before suspension and rebinds its borrowed observer.
+            OwnedAwaiter(OwnedAwaiter&& other) noexcept
+                : m_operation(std::move(other.m_operation)), m_awaiter(m_operation)
             {
             }
 
@@ -2133,17 +2326,18 @@ namespace NGIN::Async
             template<typename ParentPromise>
             std::coroutine_handle<> await_suspend(std::coroutine_handle<ParentPromise> awaiting) noexcept
             {
-                return Awaiter {m_operation}.await_suspend(awaiting);
+                return m_awaiter.await_suspend(awaiting);
             }
 
             /// @brief Consumes and returns the operation's completion.
             [[nodiscard]] Completion await_resume()
             {
-                return m_operation.TakeResult();
+                return m_awaiter.await_resume();
             }
 
         private:
             Operation m_operation;
+            Awaiter   m_awaiter;
         };
 
         /// @brief Creates a non-owning awaiter for an lvalue operation.
@@ -2159,6 +2353,8 @@ namespace NGIN::Async
         }
 
     private:
+        friend struct detail::OperationAccess;
+
         /// @brief Grants the task-starting helper access to operation ownership state.
         template<typename TValue, typename TError>
         friend Operation<TValue, TError> Spawn(TaskContext&, Task<TValue, TError>&&) noexcept;
@@ -2172,14 +2368,18 @@ namespace NGIN::Async
         friend NGIN::Async::Completion<TValue, TError> SyncWait(TaskContext&, Task<TValue, TError>&&);
 
         template<typename ParentPromise>
-        static void ResumeRetainedContinuation(std::coroutine_handle<> self,
+        static void ResumeRetainedContinuation(std::coroutine_handle<>,
                                                std::coroutine_handle<> continuation) noexcept
         {
-            handle_type                          childHandle = handle_type::from_address(self.address());
             std::coroutine_handle<ParentPromise> parentHandle =
                     std::coroutine_handle<ParentPromise>::from_address(continuation.address());
-            detail::ResumeOnExecutor(childHandle.promise().m_executor, continuation);
-            parentHandle.promise().ReleaseFrameReference(parentHandle);
+            if constexpr (std::derived_from<ParentPromise, detail::PromiseRuntimeCommon>)
+                detail::PromiseRuntimeCommon::ResumeRetained(parentHandle);
+            else
+            {
+                continuation.resume();
+                parentHandle.promise().ReleaseFrameReference(parentHandle);
+            }
         }
 
         void WaitUntilComplete()
@@ -2219,6 +2419,116 @@ namespace NGIN::Async
         bool                         m_resultTaken {false};
     };
 
+    namespace detail
+    {
+        /// Internal terminal observation consumes the Operation's single await slot.
+        /// The caller owns the Operation through the queued notification callback.
+        struct OperationAccess final
+        {
+            /// Borrows a stable reusable ticket until terminal observation. The
+            /// same ticket can then report frame retirement without new storage.
+            template<typename T, typename E>
+            [[nodiscard]] static bool ObserveReusable(Operation<T, E>&                        operation,
+                                                      NGIN::Execution::CompletionReservation& notification) noexcept
+            {
+                if (!notification.IsValid())
+                    return false;
+                if (!operation.m_handle)
+                {
+                    notification.Schedule();
+                    return true;
+                }
+                auto&      promise   = operation.m_handle.promise();
+                const auto installed = promise.TryInstallContinuation({}, nullptr
+#if NGIN_ASYNC_CAPTURE_EXCEPTIONS
+                                                                      ,
+                                                                      nullptr
+#endif
+                                                                      ,
+                                                                      nullptr, nullptr, &notification);
+                if (installed == PromiseRuntimeCommon::ContinuationInstallResult::AlreadyInstalled)
+                    return false;
+                if (installed == PromiseRuntimeCommon::ContinuationInstallResult::AlreadyCompleted)
+                    notification.Schedule();
+                return true;
+            }
+
+            /// Releases a completed operation and schedules notification only
+            /// after its last frame lease and all suspended locals are gone.
+            /// The borrowed ticket must remain valid until that notification.
+            template<typename T, typename E>
+            static void Retire(Operation<T, E>&                        operation,
+                               NGIN::Execution::CompletionReservation& notification) noexcept
+            {
+                assert(notification.IsValid());
+                if (!operation.m_handle)
+                {
+                    notification.Schedule();
+                    return;
+                }
+                assert(operation.IsCompleted());
+                auto& promise = operation.m_handle.promise();
+                assert(!promise.m_retirementObserver);
+                promise.m_retirementObserver = &notification;
+                operation.ReleaseHandle();
+            }
+
+            template<typename T, typename E>
+            struct RetirementAwaiter final
+            {
+                Operation<T, E>& operation;
+                bool             await_ready() const noexcept { return !operation.m_handle; }
+                template<typename Promise>
+                    requires std::derived_from<Promise, PromiseRuntimeCommon>
+                bool await_suspend(std::coroutine_handle<Promise> awaiting)
+                {
+                    auto& parent = awaiting.promise();
+                    if (!parent.m_taskContinuation.IsValid())
+                        throw std::logic_error("Joining frame retirement requires a tracked parent task");
+                    parent.RetainFrameReference();
+                    parent.m_pendingContinuation = NGIN::Execution::WorkItem([awaiting] {
+                        PromiseRuntimeCommon::ResumeRetained(awaiting);
+                    });
+                    OperationAccess::Retire(operation, parent.m_taskContinuation);
+                    return true;
+                }
+                void await_resume() const noexcept {}
+            };
+
+            template<typename T, typename E>
+            [[nodiscard]] static RetirementAwaiter<T, E> JoinRetirement(Operation<T, E>& operation) noexcept
+            {
+                return {operation};
+            }
+
+            template<typename T, typename E>
+            [[nodiscard]] static bool Observe(Operation<T, E>&                       operation,
+                                              NGIN::Execution::CompletionReservation notification) noexcept
+            {
+                if (!notification.IsValid())
+                    return false;
+                if (!operation.m_handle)
+                {
+                    notification.Dispatch();
+                    return true;
+                }
+                auto&      promise   = operation.m_handle.promise();
+                const auto installed = promise.TryInstallContinuation({}, nullptr
+#if NGIN_ASYNC_CAPTURE_EXCEPTIONS
+                                                                      ,
+                                                                      nullptr
+#endif
+                                                                      ,
+                                                                      nullptr, &notification);
+                if (installed == PromiseRuntimeCommon::ContinuationInstallResult::AlreadyInstalled)
+                    return false;
+                if (installed == PromiseRuntimeCommon::ContinuationInstallResult::AlreadyCompleted)
+                    notification.Dispatch();
+                return true;
+            }
+        };
+    }// namespace detail
+
     /// @brief Starts a cold task on the context executor and returns its running owner.
     /// @return An invalid operation when the task is empty; otherwise the started operation.
     template<typename T, typename E>
@@ -2241,14 +2551,7 @@ namespace NGIN::Async
             return operation;
         }
 
-        const NGIN::Execution::ScheduleResult result = promise.m_executor.Execute(handle);
-        if (!result)
-        {
-            promise.SetFault(detail::MakeSchedulingFault(
-                    AsyncFaultCode::SchedulerDispatchFailed,
-                    result.error()));
-            promise.MarkFinishedAndResume(handle);
-        }
+        (void) promise.StartExecution(handle);
         return operation;
     }
 

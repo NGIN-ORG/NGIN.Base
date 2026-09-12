@@ -31,8 +31,13 @@ namespace NGIN::Net
 
     /// @brief UDP socket with non-blocking Try* operations.
     /// @note Async operations require a bound, non-stopped runtime; otherwise they fault with InvalidTaskUsage.
-    /// Their optional token is linked with TaskContext cancellation. Do not move or destroy
-    /// the socket while an operation is pending. Concurrent access requires caller synchronization.
+    /// Their optional token is linked with TaskContext cancellation. Async tasks capture
+    /// stable socket state when created; later moves preserve pending operations. Close or
+    /// destruction cancels pending operations and defers native release until backend access
+    /// ends. Keep buffers and contexts alive until completion. Async use requires
+    /// nonblocking sockets. Synchronize moves and synchronous methods with other member calls.
+    /// One async read and one async write may overlap; same-direction overlap reports
+    /// OperationInProgress.
     class NGIN_NET_API UdpSocket final
     {
     public:

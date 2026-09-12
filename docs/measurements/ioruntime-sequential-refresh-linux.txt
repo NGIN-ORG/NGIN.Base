@@ -1,0 +1,241 @@
+Sequential refresh; original revision 203f704e97a704259ef2db1ee8c93bf92763a7e1; GCC 15.2 Release; Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.39
+
+run=1 implementation=original workload=IORuntimeBenchmarks
+IORuntime baseline workload: 2000 sequential operations; 64-byte UDP; one continuation worker
+spawn_yield_join samples=2000 p50_us=24.375 p95_us=38.652 p99_us=73.981 mean_us=26.7127
+network_cold_us=156.2
+udp_ready_exchange samples=2000 p50_us=25.865 p95_us=43.199 p99_us=93.414 mean_us=29.5776
+network_idle wall_us=1.00022e+06 cpu_us=5577 threads=4 voluntary_switches=937 maxrss_kib=12608
+network_pending_idle wall_us=1.00012e+06 cpu_us=7949 threads=4 voluntary_switches=936 maxrss_kib=12608
+network_cancel_us=63.933
+network_stop_us=786.599
+file_backend=1 requested=0 cold_us=384.921
+file_stat samples=2000 p50_us=48.951 p95_us=78.039 p99_us=120.581 mean_us=54.0502
+files_idle wall_us=1.00013e+06 cpu_us=20 threads=6 voluntary_switches=1 maxrss_kib=12608
+file_backend=3 requested=2 cold_us=156.732
+file_stat samples=2000 p50_us=46.648 p95_us=67.312 p99_us=124.359 mean_us=50.641
+files_idle wall_us=1.00013e+06 cpu_us=22 threads=5 voluntary_switches=1 maxrss_kib=12608
+
+run=1 implementation=original workload=IORuntimeFileBenchmarks
+native cold_open_us=300.374 backend=1 bytes=65536
+native_read_at_64k samples=2000 p50_us=48.891 p95_us=72.181 p99_us=104.443 mean_us=53.0952
+native_write_at_64k samples=2000 p50_us=71.056 p95_us=100.235 p99_us=148.707 mean_us=76.9809
+fallback cold_open_us=153.445 backend=3 bytes=65536
+fallback_read_at_64k samples=2000 p50_us=48.426 p95_us=69.647 p99_us=108.881 mean_us=52.6821
+fallback_write_at_64k samples=2000 p50_us=49.083 p95_us=78.776 p99_us=112.137 mean_us=54.6488
+
+run=1 implementation=current workload=IORuntimeBenchmarks
+IORuntime baseline workload: 2000 sequential operations; 64-byte UDP; one continuation worker
+spawn_yield_join samples=2000 p50_us=23.313 p95_us=30.352 p99_us=51.595 mean_us=24.5795
+network_cold_us=272.716
+udp_ready_exchange samples=2000 p50_us=45.693 p95_us=71.906 p99_us=108.115 mean_us=49.356
+network_idle wall_us=1.0002e+06 cpu_us=30 threads=4 voluntary_switches=1 maxrss_kib=12608
+network_pending_idle wall_us=1.00011e+06 cpu_us=176 threads=4 voluntary_switches=3 maxrss_kib=12608
+network_cancel_us=81.284
+network_stop_us=58.504
+file_backend=1 requested=0 cold_us=312.888
+file_stat samples=2000 p50_us=64.552 p95_us=86.45 p99_us=139.399 mean_us=68.6819
+files_idle wall_us=1.00011e+06 cpu_us=24 threads=6 voluntary_switches=1 maxrss_kib=12608
+file_backend=3 requested=2 cold_us=193.831
+file_stat samples=2000 p50_us=66 p95_us=105.541 p99_us=157.948 mean_us=71.7953
+files_idle wall_us=1.00017e+06 cpu_us=23 threads=6 voluntary_switches=1 maxrss_kib=12608
+
+run=1 implementation=current workload=IORuntimeFileBenchmarks
+native cold_open_us=665.067 backend=1 bytes=65536
+native_read_at_64k samples=2000 p50_us=61.004 p95_us=99.585 p99_us=138.993 mean_us=66.5044
+native_write_at_64k samples=2000 p50_us=60.961 p95_us=95.349 p99_us=142.958 mean_us=65.9304
+fallback cold_open_us=213.477 backend=3 bytes=65536
+fallback_read_at_64k samples=2000 p50_us=66.092 p95_us=108.234 p99_us=153.76 mean_us=72.7148
+fallback_write_at_64k samples=2000 p50_us=68.082 p95_us=110.476 p99_us=174.767 mean_us=75.14
+
+run=2 implementation=original workload=IORuntimeBenchmarks
+IORuntime baseline workload: 2000 sequential operations; 64-byte UDP; one continuation worker
+spawn_yield_join samples=2000 p50_us=21.979 p95_us=29.291 p99_us=77.983 mean_us=23.8328
+network_cold_us=161.143
+udp_ready_exchange samples=2000 p50_us=24.636 p95_us=41.07 p99_us=88.582 mean_us=27.4259
+network_idle wall_us=1.00062e+06 cpu_us=7372 threads=4 voluntary_switches=931 maxrss_kib=12608
+network_pending_idle wall_us=1.01301e+06 cpu_us=8289 threads=4 voluntary_switches=923 maxrss_kib=12608
+network_cancel_us=65.691
+network_stop_us=828.3
+file_backend=1 requested=0 cold_us=268.42
+file_stat samples=2000 p50_us=47.226 p95_us=73.284 p99_us=117.019 mean_us=51.0252
+files_idle wall_us=1.001e+06 cpu_us=26 threads=6 voluntary_switches=1 maxrss_kib=12608
+file_backend=3 requested=2 cold_us=302.82
+file_stat samples=2000 p50_us=47.114 p95_us=83.53 p99_us=139.651 mean_us=53.0469
+files_idle wall_us=1.00182e+06 cpu_us=30 threads=5 voluntary_switches=1 maxrss_kib=12608
+
+run=2 implementation=original workload=IORuntimeFileBenchmarks
+native cold_open_us=260.462 backend=1 bytes=65536
+native_read_at_64k samples=2000 p50_us=49.462 p95_us=82.966 p99_us=139.962 mean_us=55.5385
+native_write_at_64k samples=2000 p50_us=71.987 p95_us=115.213 p99_us=164.196 mean_us=80.4597
+fallback cold_open_us=157.674 backend=3 bytes=65536
+fallback_read_at_64k samples=2000 p50_us=49.012 p95_us=76.012 p99_us=125.072 mean_us=54.1965
+fallback_write_at_64k samples=2000 p50_us=48.775 p95_us=73.954 p99_us=118.974 mean_us=53.0251
+
+run=2 implementation=current workload=IORuntimeBenchmarks
+IORuntime baseline workload: 2000 sequential operations; 64-byte UDP; one continuation worker
+spawn_yield_join samples=2000 p50_us=22.662 p95_us=35.499 p99_us=87.331 mean_us=25.2007
+network_cold_us=252.681
+udp_ready_exchange samples=2000 p50_us=45.333 p95_us=81.41 p99_us=143.711 mean_us=51.6713
+network_idle wall_us=1.00035e+06 cpu_us=27 threads=4 voluntary_switches=1 maxrss_kib=12608
+network_pending_idle wall_us=1.00027e+06 cpu_us=95 threads=4 voluntary_switches=3 maxrss_kib=12608
+network_cancel_us=118.095
+network_stop_us=76.838
+file_backend=1 requested=0 cold_us=484.029
+file_stat samples=2000 p50_us=64.67 p95_us=102.397 p99_us=148.811 mean_us=70.1611
+files_idle wall_us=1.00046e+06 cpu_us=22 threads=6 voluntary_switches=1 maxrss_kib=12608
+file_backend=3 requested=2 cold_us=562.745
+file_stat samples=2000 p50_us=64.206 p95_us=92.328 p99_us=142.201 mean_us=69.1557
+files_idle wall_us=1.00014e+06 cpu_us=17 threads=6 voluntary_switches=1 maxrss_kib=12608
+
+run=2 implementation=current workload=IORuntimeFileBenchmarks
+native cold_open_us=653.435 backend=1 bytes=65536
+native_read_at_64k samples=2000 p50_us=61.598 p95_us=94.604 p99_us=147.891 mean_us=65.7198
+native_write_at_64k samples=2000 p50_us=62.477 p95_us=86.998 p99_us=135.585 mean_us=66.7947
+fallback cold_open_us=208.657 backend=3 bytes=65536
+fallback_read_at_64k samples=2000 p50_us=69.055 p95_us=94.212 p99_us=144.866 mean_us=73.2809
+fallback_write_at_64k samples=2000 p50_us=68.771 p95_us=89.793 p99_us=139.613 mean_us=72.8125
+
+run=3 implementation=original workload=IORuntimeBenchmarks
+IORuntime baseline workload: 2000 sequential operations; 64-byte UDP; one continuation worker
+spawn_yield_join samples=2000 p50_us=23.224 p95_us=30.95 p99_us=50.017 mean_us=24.4251
+network_cold_us=227.58
+udp_ready_exchange samples=2000 p50_us=25.7 p95_us=37.939 p99_us=58.323 mean_us=27.6748
+network_idle wall_us=1.0002e+06 cpu_us=8092 threads=4 voluntary_switches=922 maxrss_kib=12608
+network_pending_idle wall_us=1.00017e+06 cpu_us=8353 threads=4 voluntary_switches=926 maxrss_kib=12608
+network_cancel_us=89.868
+network_stop_us=779.073
+file_backend=1 requested=0 cold_us=1004.95
+file_stat samples=2000 p50_us=47.558 p95_us=75.938 p99_us=165.225 mean_us=53.4704
+files_idle wall_us=1.00015e+06 cpu_us=23 threads=6 voluntary_switches=1 maxrss_kib=12608
+file_backend=3 requested=2 cold_us=173.104
+file_stat samples=2000 p50_us=46.873 p95_us=64.141 p99_us=107.346 mean_us=50.4304
+files_idle wall_us=1.00017e+06 cpu_us=54 threads=5 voluntary_switches=1 maxrss_kib=12608
+
+run=3 implementation=original workload=IORuntimeFileBenchmarks
+native cold_open_us=259.814 backend=1 bytes=65536
+native_read_at_64k samples=2000 p50_us=48.083 p95_us=68.875 p99_us=106.037 mean_us=51.6153
+native_write_at_64k samples=2000 p50_us=71.346 p95_us=112.059 p99_us=166.783 mean_us=78.8093
+fallback cold_open_us=148.936 backend=3 bytes=65536
+fallback_read_at_64k samples=2000 p50_us=48.612 p95_us=74.385 p99_us=111.608 mean_us=53.2951
+fallback_write_at_64k samples=2000 p50_us=48.565 p95_us=64.41 p99_us=94.116 mean_us=51.4707
+
+run=3 implementation=current workload=IORuntimeBenchmarks
+IORuntime baseline workload: 2000 sequential operations; 64-byte UDP; one continuation worker
+spawn_yield_join samples=2000 p50_us=23.283 p95_us=31.706 p99_us=58.76 mean_us=25.003
+network_cold_us=277.733
+udp_ready_exchange samples=2000 p50_us=45.416 p95_us=68.586 p99_us=96.901 mean_us=48.4042
+network_idle wall_us=1.00024e+06 cpu_us=29 threads=4 voluntary_switches=1 maxrss_kib=12608
+network_pending_idle wall_us=1.00019e+06 cpu_us=95 threads=4 voluntary_switches=3 maxrss_kib=12608
+network_cancel_us=235.361
+network_stop_us=162.007
+file_backend=1 requested=0 cold_us=658.398
+file_stat samples=2000 p50_us=63.993 p95_us=104.803 p99_us=159.897 mean_us=70.3411
+files_idle wall_us=1.00013e+06 cpu_us=26 threads=6 voluntary_switches=1 maxrss_kib=12608
+file_backend=3 requested=2 cold_us=436.388
+file_stat samples=2000 p50_us=64.203 p95_us=98.732 p99_us=152.289 mean_us=70.2067
+files_idle wall_us=1.00013e+06 cpu_us=25 threads=6 voluntary_switches=1 maxrss_kib=12608
+
+run=3 implementation=current workload=IORuntimeFileBenchmarks
+native cold_open_us=405.374 backend=1 bytes=65536
+native_read_at_64k samples=2000 p50_us=69.617 p95_us=121.178 p99_us=166.315 mean_us=76.9935
+native_write_at_64k samples=2000 p50_us=70.602 p95_us=136.514 p99_us=174 mean_us=80.6415
+fallback cold_open_us=273.135 backend=3 bytes=65536
+fallback_read_at_64k samples=2000 p50_us=70.792 p95_us=116.692 p99_us=164.941 mean_us=78.2156
+fallback_write_at_64k samples=2000 p50_us=71.176 p95_us=108.627 p99_us=154.927 mean_us=76.9676
+
+run=4 implementation=original workload=IORuntimeBenchmarks
+IORuntime baseline workload: 2000 sequential operations; 64-byte UDP; one continuation worker
+spawn_yield_join samples=2000 p50_us=23.672 p95_us=31.441 p99_us=47.819 mean_us=25.2997
+network_cold_us=214.155
+udp_ready_exchange samples=2000 p50_us=26.276 p95_us=38.758 p99_us=61.921 mean_us=29.129
+network_idle wall_us=1.00023e+06 cpu_us=6748 threads=4 voluntary_switches=935 maxrss_kib=12608
+network_pending_idle wall_us=1.00014e+06 cpu_us=6936 threads=4 voluntary_switches=935 maxrss_kib=12608
+network_cancel_us=70.695
+network_stop_us=1038.19
+file_backend=1 requested=0 cold_us=331.825
+file_stat samples=2000 p50_us=52.898 p95_us=82.677 p99_us=131.398 mean_us=57.0013
+files_idle wall_us=1.00015e+06 cpu_us=16 threads=6 voluntary_switches=1 maxrss_kib=12608
+file_backend=3 requested=2 cold_us=348.839
+file_stat samples=2000 p50_us=47.088 p95_us=64.962 p99_us=99.191 mean_us=50.4632
+files_idle wall_us=1.00015e+06 cpu_us=23 threads=5 voluntary_switches=1 maxrss_kib=12608
+
+run=4 implementation=original workload=IORuntimeFileBenchmarks
+native cold_open_us=480.548 backend=1 bytes=65536
+native_read_at_64k samples=2000 p50_us=51.606 p95_us=81.62 p99_us=123.118 mean_us=56.6147
+native_write_at_64k samples=2000 p50_us=71.84 p95_us=101.475 p99_us=145.727 mean_us=78.2159
+fallback cold_open_us=131.765 backend=3 bytes=65536
+fallback_read_at_64k samples=2000 p50_us=46.859 p95_us=66.347 p99_us=103.011 mean_us=51.3013
+fallback_write_at_64k samples=2000 p50_us=48.073 p95_us=68.608 p99_us=98.01 mean_us=52.3362
+
+run=4 implementation=current workload=IORuntimeBenchmarks
+IORuntime baseline workload: 2000 sequential operations; 64-byte UDP; one continuation worker
+spawn_yield_join samples=2000 p50_us=23.454 p95_us=47.998 p99_us=76.971 mean_us=26.8805
+network_cold_us=574.139
+udp_ready_exchange samples=2000 p50_us=47.928 p95_us=116.844 p99_us=204.096 mean_us=59.3023
+network_idle wall_us=1.00034e+06 cpu_us=33 threads=4 voluntary_switches=1 maxrss_kib=12608
+network_pending_idle wall_us=1.00013e+06 cpu_us=112 threads=4 voluntary_switches=3 maxrss_kib=12608
+network_cancel_us=88.839
+network_stop_us=58.976
+file_backend=1 requested=0 cold_us=268.845
+file_stat samples=2000 p50_us=66.886 p95_us=91.216 p99_us=138.085 mean_us=71.2698
+files_idle wall_us=1.00018e+06 cpu_us=20 threads=6 voluntary_switches=1 maxrss_kib=12608
+file_backend=3 requested=2 cold_us=251.729
+file_stat samples=2000 p50_us=64.789 p95_us=99.103 p99_us=155.571 mean_us=71.1105
+files_idle wall_us=1.00015e+06 cpu_us=33 threads=6 voluntary_switches=1 maxrss_kib=12608
+
+run=4 implementation=current workload=IORuntimeFileBenchmarks
+native cold_open_us=456.279 backend=1 bytes=65536
+native_read_at_64k samples=2000 p50_us=64.034 p95_us=114.694 p99_us=156.101 mean_us=71.5011
+native_write_at_64k samples=2000 p50_us=63.695 p95_us=105.503 p99_us=168.117 mean_us=71.3669
+fallback cold_open_us=284.118 backend=3 bytes=65536
+fallback_read_at_64k samples=2000 p50_us=73.554 p95_us=119.096 p99_us=170.607 mean_us=80.5389
+fallback_write_at_64k samples=2000 p50_us=74.868 p95_us=119.478 p99_us=153.812 mean_us=81.1839
+
+run=5 implementation=original workload=IORuntimeBenchmarks
+IORuntime baseline workload: 2000 sequential operations; 64-byte UDP; one continuation worker
+spawn_yield_join samples=2000 p50_us=23.97 p95_us=35.19 p99_us=57.264 mean_us=26.0305
+network_cold_us=178.039
+udp_ready_exchange samples=2000 p50_us=26.164 p95_us=41.904 p99_us=70.571 mean_us=29.3528
+network_idle wall_us=1.0006e+06 cpu_us=6508 threads=4 voluntary_switches=935 maxrss_kib=12608
+network_pending_idle wall_us=1.00132e+06 cpu_us=7394 threads=4 voluntary_switches=916 maxrss_kib=12608
+network_cancel_us=111.277
+network_stop_us=1098.69
+file_backend=1 requested=0 cold_us=405.466
+file_stat samples=2000 p50_us=48.176 p95_us=72.622 p99_us=114.006 mean_us=52.9087
+files_idle wall_us=1.00131e+06 cpu_us=26 threads=6 voluntary_switches=1 maxrss_kib=12608
+file_backend=3 requested=2 cold_us=190.164
+file_stat samples=2000 p50_us=52.367 p95_us=105.025 p99_us=143.335 mean_us=61.4011
+files_idle wall_us=1.00392e+06 cpu_us=28 threads=5 voluntary_switches=1 maxrss_kib=12608
+
+run=5 implementation=original workload=IORuntimeFileBenchmarks
+native cold_open_us=298.764 backend=1 bytes=65536
+native_read_at_64k samples=2000 p50_us=47.736 p95_us=67.731 p99_us=107.67 mean_us=51.3195
+native_write_at_64k samples=2000 p50_us=72.189 p95_us=101.451 p99_us=150.997 mean_us=77.4627
+fallback cold_open_us=172.132 backend=3 bytes=65536
+fallback_read_at_64k samples=2000 p50_us=48.698 p95_us=70.048 p99_us=105.537 mean_us=52.1079
+fallback_write_at_64k samples=2000 p50_us=49.15 p95_us=71.504 p99_us=104.262 mean_us=53.1271
+
+run=5 implementation=current workload=IORuntimeBenchmarks
+IORuntime baseline workload: 2000 sequential operations; 64-byte UDP; one continuation worker
+spawn_yield_join samples=2000 p50_us=23.183 p95_us=31.142 p99_us=55.382 mean_us=24.7701
+network_cold_us=265.63
+udp_ready_exchange samples=2000 p50_us=47.47 p95_us=70.71 p99_us=103.365 mean_us=50.0763
+network_idle wall_us=1.0004e+06 cpu_us=33 threads=4 voluntary_switches=1 maxrss_kib=12608
+network_pending_idle wall_us=1.00021e+06 cpu_us=120 threads=4 voluntary_switches=3 maxrss_kib=12608
+network_cancel_us=131.832
+network_stop_us=52.423
+file_backend=1 requested=0 cold_us=396.558
+file_stat samples=2000 p50_us=64.522 p95_us=89.647 p99_us=128.586 mean_us=68.5915
+files_idle wall_us=1.00019e+06 cpu_us=20 threads=6 voluntary_switches=1 maxrss_kib=12608
+file_backend=3 requested=2 cold_us=328.37
+file_stat samples=2000 p50_us=68.776 p95_us=122.414 p99_us=156.906 mean_us=76.7251
+files_idle wall_us=1.00015e+06 cpu_us=22 threads=6 voluntary_switches=1 maxrss_kib=12608
+
+run=5 implementation=current workload=IORuntimeFileBenchmarks
+native cold_open_us=622.336 backend=1 bytes=65536
+native_read_at_64k samples=2000 p50_us=68.162 p95_us=122.687 p99_us=181.145 mean_us=75.5394
+native_write_at_64k samples=2000 p50_us=64.55 p95_us=116.117 p99_us=161.33 mean_us=72.1359
+fallback cold_open_us=237.701 backend=3 bytes=65536
+fallback_read_at_64k samples=2000 p50_us=75.421 p95_us=145.324 p99_us=186.069 mean_us=85.6099
+fallback_write_at_64k samples=2000 p50_us=71.214 p95_us=110.341 p99_us=155.722 mean_us=77.7045

@@ -6,6 +6,7 @@
 #include "WorkItem.hpp"
 #include <NGIN/Execution/ScheduleResult.hpp>
 #include <NGIN/Execution/Thread.hpp>
+#include <NGIN/Execution/detail/CompletionQueue.hpp>
 #include <NGIN/Sync/AtomicCondition.hpp>
 #include <NGIN/Sync/SpinLock.hpp>
 #include <NGIN/Time/MonotonicClock.hpp>
@@ -30,8 +31,9 @@ namespace NGIN::Execution
         /// <summary>
         /// Construct a thread pool with the given number of threads.
         /// </summary>
-        explicit ThreadPoolScheduler(size_t threadCount = static_cast<size_t>(ThisThread::HardwareConcurrency()))
-            : m_stop(false)
+        explicit ThreadPoolScheduler(size_t threadCount        = static_cast<size_t>(ThisThread::HardwareConcurrency()),
+                                     size_t completionCapacity = 4096)
+            : m_stop(false), m_completions(completionCapacity, +[](void* state) noexcept { static_cast<ThreadPoolScheduler*>(state)->m_workWake.NotifyAll(); }, this)
         {
             if (threadCount == 0)
             {
@@ -40,16 +42,30 @@ namespace NGIN::Execution
             m_workers.resize(threadCount);
             m_threads.reserve(threadCount);
 
-            for (size_t i = 0; i < threadCount; ++i)
+            try
             {
-                Thread::Options options {};
-                options.name = MakeIndexedThreadName("NGIN.TPW", i);
-                m_threads.emplace_back([this, i] { WorkerLoop(i); }, options);
-            }
+                for (size_t i = 0; i < threadCount; ++i)
+                {
+                    Thread::Options options {};
+                    options.name = MakeIndexedThreadName("NGIN.TPW", i);
+                    m_threads.emplace_back([this, i] { WorkerLoop(i); }, options);
+                }
+                {
+                    Thread::Options options {};
+                    options.name = ThreadName("NGIN.TPT");
+                    m_timerThread.Start([this] { TimerLoop(); }, options);
+                }
+            } catch (...)
             {
-                Thread::Options options {};
-                options.name = ThreadName("NGIN.TPT");
-                m_timerThread.Start([this] { TimerLoop(); }, options);
+                m_stop.store(true, std::memory_order_release);
+                m_workWake.NotifyAll();
+                m_timerWake.NotifyAll();
+                for (auto& thread: m_threads)
+                    if (thread.IsJoinable())
+                        thread.Join();
+                if (m_timerThread.IsJoinable())
+                    m_timerThread.Join();
+                throw;
             }
         }
 
@@ -58,7 +74,15 @@ namespace NGIN::Execution
         /// </summary>
         ~ThreadPoolScheduler()
         {
+            m_completions.Close();
             m_stop.store(true, std::memory_order_release);
+            // Retiring an accepted cancellation-aware timer can publish its
+            // reserved terminal delivery. Do this before joining the workers.
+            ClearAllWork();
+            {
+                std::lock_guard<std::mutex> lock(m_timersMutex);
+                m_timerHeap.clear();
+            }
             m_workWake.NotifyAll();
             m_timerWake.NotifyAll();
             for (auto& t: m_threads)
@@ -72,12 +96,18 @@ namespace NGIN::Execution
             {
                 m_timerThread.Join();
             }
-            ClearAllWork();
-            {
-                std::lock_guard<std::mutex> lock(m_timersMutex);
-                m_timerHeap.clear();
-            }
         }
+
+        /// @brief Reserves terminal delivery independently of ordinary work queues.
+        /// @details Destruction waits for outstanding tickets to be released or delivered.
+        /// A ticket may be dispatched during destruction; its work runs on a pool worker.
+        [[nodiscard]] std::expected<CompletionReservation, ScheduleError> ReserveCompletion(WorkItem item) noexcept
+        {
+            return m_completions.Reserve(std::move(item));
+        }
+
+        /// @brief Whether the calling thread is currently dispatching on this executor.
+        [[nodiscard]] bool IsCurrent() const noexcept { return s_currentScheduler == this; }
 
         /// @brief Queues work for a local worker or the shared injection queue.
         [[nodiscard]] ScheduleResult Execute(WorkItem item) noexcept
@@ -133,13 +163,9 @@ namespace NGIN::Execution
         /// @return `true` when an item was invoked.
         bool RunOne() noexcept
         {
-            WorkItem work = TryDequeueAny();
-            if (work.IsEmpty())
-            {
-                return false;
-            }
-            work.Invoke();
-            return true;
+            DispatchContext context(this);
+            size_t          cursor = m_manualSourceCursor.fetch_add(1, std::memory_order_relaxed) % 4;
+            return TryRunOne(s_workerIndex, cursor);
         }
 
         /// @brief Executes available work on the calling thread until none remains.
@@ -184,6 +210,25 @@ namespace NGIN::Execution
 
 
     private:
+        struct DispatchContext
+        {
+            explicit DispatchContext(ThreadPoolScheduler* scheduler) noexcept
+                : previous(s_currentScheduler), previousIndex(s_workerIndex)
+            {
+                if (s_currentScheduler != scheduler)
+                {
+                    s_currentScheduler = scheduler;
+                    s_workerIndex      = static_cast<size_t>(-1);
+                }
+            }
+            ~DispatchContext()
+            {
+                s_currentScheduler = previous;
+                s_workerIndex      = previousIndex;
+            }
+            ThreadPoolScheduler* previous;
+            size_t               previousIndex;
+        };
         static ThreadName MakeIndexedThreadName(std::string_view prefix, std::size_t index) noexcept
         {
             std::array<char, ThreadName::MaxBytes + 1> buffer {};
@@ -361,32 +406,53 @@ namespace NGIN::Execution
             return m_injection.TrySteal();
         }
 
-        [[nodiscard]] WorkItem TryDequeueAny() noexcept
+        // Rotate between completion delivery, external injection, and both ends
+        // of the local deque. New local work retains a locality-friendly turn,
+        // while old local/injected work cannot be displaced forever by YieldNow.
+        [[nodiscard]] bool TryRunOne(size_t index, size_t& sourceCursor) noexcept
         {
-            if (s_currentScheduler == this && s_workerIndex < m_workers.size())
+            for (size_t attempt = 0; attempt != 4; ++attempt)
             {
-                if (auto local = m_workers[s_workerIndex].TryPop(); !local.IsEmpty())
+                const size_t source = sourceCursor;
+                sourceCursor        = (sourceCursor + 1) % 4;
+                WorkItem work;
+                switch (source)
                 {
-                    return local;
+                    case 0:
+                        if (m_completions.RunOne())
+                            return true;
+                        break;
+                    case 1:
+                        work = TryDequeueInjection();
+                        break;
+                    case 2:
+                        if (index < m_workers.size())
+                            work = m_workers[index].TrySteal();
+                        break;
+                    case 3:
+                        if (index < m_workers.size())
+                            work = m_workers[index].TryPop();
+                        break;
+                }
+                if (!work.IsEmpty())
+                {
+                    work.Invoke();
+                    return true;
                 }
             }
-            if (auto injected = TryDequeueInjection(); !injected.IsEmpty())
+            const size_t first = index < m_workers.size() ? index + 1 : 0;
+            for (size_t offset = 0; offset < m_workers.size(); ++offset)
             {
-                return injected;
-            }
-            if (s_currentScheduler == this && !m_workers.empty())
-            {
-                const size_t self = s_workerIndex < m_workers.size() ? s_workerIndex : 0;
-                for (size_t offset = 1; offset < m_workers.size(); ++offset)
+                const size_t victim = (first + offset) % m_workers.size();
+                if (victim == index)
+                    continue;
+                if (auto stolen = m_workers[victim].TrySteal(); !stolen.IsEmpty())
                 {
-                    const size_t victim = (self + offset) % m_workers.size();
-                    if (auto stolen = m_workers[victim].TrySteal(); !stolen.IsEmpty())
-                    {
-                        return stolen;
-                    }
+                    stolen.Invoke();
+                    return true;
                 }
             }
-            return {};
+            return false;
         }
 
         void TimerLoop() noexcept
@@ -455,31 +521,24 @@ namespace NGIN::Execution
 
         void WorkerLoop(size_t index) noexcept
         {
-            s_currentScheduler = this;
-            s_workerIndex      = index;
+            s_currentScheduler  = this;
+            s_workerIndex       = index;
+            size_t sourceCursor = 0;
 
             for (;;)
             {
-                if (m_stop.load(std::memory_order_acquire))
+                if (m_stop.load(std::memory_order_acquire) && m_completions.Outstanding() == 0)
                 {
                     break;
                 }
 
-                WorkItem work = TryDequeueAny();
-                if (!work.IsEmpty())
-                {
-                    work.Invoke();
+                if (TryRunOne(index, sourceCursor))
                     continue;
-                }
 
                 const auto observedWakeGeneration = m_workWake.Load();
-                work                              = TryDequeueAny();
-                if (!work.IsEmpty())
-                {
-                    work.Invoke();
+                if (TryRunOne(index, sourceCursor))
                     continue;
-                }
-                if (m_stop.load(std::memory_order_acquire))
+                if (m_stop.load(std::memory_order_acquire) && m_completions.Outstanding() == 0)
                 {
                     break;
                 }
@@ -500,9 +559,11 @@ namespace NGIN::Execution
 
         NGIN::Sync::AtomicCondition m_workWake;
 
-        std::atomic<bool> m_stop;
-        int               m_priority {0};
-        uint64_t          m_affinityMask {0};
+        std::atomic<size_t>     m_manualSourceCursor {0};
+        std::atomic<bool>       m_stop;
+        detail::CompletionQueue m_completions;
+        int                     m_priority {0};
+        uint64_t                m_affinityMask {0};
 
         std::vector<TimerEntry>     m_timerHeap;
         std::mutex                  m_timersMutex;

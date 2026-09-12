@@ -1,3 +1,4 @@
+#include <NGIN/Execution/detail/CompletionQueue.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <exception>
@@ -14,6 +15,10 @@ namespace
     class ManualExecutor
     {
     public:
+        auto ReserveCompletion(NGIN::Execution::WorkItem item) noexcept
+        {
+            return m_completions.Reserve(std::move(item));
+        }
         ManualExecutor()
         {
             m_queue.reserve(256);
@@ -32,6 +37,8 @@ namespace
 
         [[nodiscard]] bool RunOne() noexcept
         {
+            if (m_completions.RunOne())
+                return true;
             if (m_head >= m_queue.size())
             {
                 m_queue.clear();
@@ -56,6 +63,7 @@ namespace
         }
 
     private:
+        NGIN::Execution::detail::CompletionQueue m_completions;
         std::vector<NGIN::Execution::WorkItem> m_queue;
         std::size_t                            m_head {0};
     };

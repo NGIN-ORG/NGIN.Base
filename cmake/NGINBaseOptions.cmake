@@ -8,7 +8,7 @@ option(NGIN_BASE_BUILD_EXAMPLES "Build NGIN.Base examples" OFF)
 option(NGIN_BASE_BUILD_BENCHMARKS "Build NGIN.Base benchmarks" OFF)
 option(NGIN_BASE_BUILD_FUZZERS "Build optional LLVM libFuzzer harnesses for parser-heavy components" OFF)
 set(NGIN_BASE_BUILD_COMPONENTS "all" CACHE STRING
-  "Components to build: all, or a semicolon-separated subset of Foundation;Execution;IO;Serialization;Crypto;Net;NetTLS")
+  "Components to build: all, or a semicolon-separated subset of Foundation;Execution;IORuntime;IO;Serialization;Crypto;Net;NetTLS")
 
 # Extended developer / diagnostics options.
 set(_ngin_base_crypto_cng_default OFF)

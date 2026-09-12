@@ -49,52 +49,77 @@ namespace NGIN::IO::detail
             return false;
         }
 
-        void await_suspend(std::coroutine_handle<> awaiting) noexcept
+        bool await_suspend(std::coroutine_handle<> awaiting) noexcept
         {
-            m_state->resumeExecutor = m_resumeExecutor;
-            m_state->awaiting       = awaiting;
+            // Keep setup state alive even if an executor dispatches completion
+            // before await_suspend returns and destroys the awaiter.
+            std::shared_ptr<State> state = m_state;
 
             if (!m_driver.HasBackend())
             {
                 CompleteWithFault(NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidTaskUsage));
-                return;
+                return false;
             }
 
             if (m_cancellation.IsCancellationRequested())
             {
                 CompleteCanceled();
-                return;
+                return false;
             }
 
+            auto reservation = m_resumeExecutor.ReserveCompletion(NGIN::Execution::WorkItem(awaiting));
+            if (!reservation)
+            {
+                state->CompleteFault(NGIN::Async::MakeAsyncFault(
+                        NGIN::Async::AsyncFaultCode::SchedulerDispatchFailed,
+                        static_cast<int>(reservation.error())));
+                return false;
+            }
+            state->delivery = std::move(*reservation);
+            auto runtimeCompletion = RuntimeAccess::ReserveOperation(m_driver.GetRuntime(),
+                    NGIN::Execution::WorkItem([state] { state->Deliver(); }));
+            if (!runtimeCompletion)
+            {
+                state->delivery.Reset();
+                state->CompleteFault(NGIN::Async::MakeAsyncFault(
+                        NGIN::Async::AsyncFaultCode::SchedulerDispatchFailed,
+                        static_cast<int>(runtimeCompletion.error())));
+                return false;
+            }
+            state->runtimeCompletion = std::move(*runtimeCompletion);
+            state->driver = &m_driver;
+
             const NGIN::Async::CancellationRegistrationResult registrationResult = m_cancellation.Register(
-                    m_state->registration,
+                    state->registration,
                     {},
                     {},
                     +[](void* rawState) noexcept -> bool {
-                        auto* state = static_cast<State*>(rawState);
-                        if (!state)
+                        State* callbackState = static_cast<State*>(rawState);
+                        if (!callbackState)
                         {
                             return false;
                         }
-                        state->CompleteCanceled();
+                        // A running blocking call cannot be interrupted safely.
+                        // Its worker owns terminal publication after all buffer access.
+                        callbackState->cancellationRequested.store(true, std::memory_order_release);
                         return false;
                     },
-                    m_state.get());
+                    state.get());
             if (!registrationResult)
             {
                 NGIN::Async::AsyncFault fault =
                         NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::CancellationRegistrationFailed);
                 fault.native = static_cast<int>(registrationResult.error());
                 CompleteWithFault(std::move(fault));
-                return;
+                return true;
             }
 
-            std::shared_ptr<State>                state          = m_state;
             TOperation                            operation      = std::move(m_operation);
             const NGIN::Execution::ScheduleResult scheduleResult = m_driver.GetExecutor().Execute(
                     [state, operation = std::move(operation)]() mutable noexcept {
-                        if (state->done.load(std::memory_order_acquire))
+                        if (state->cancellationRequested.load(std::memory_order_acquire) || state->driver->IsStopping())
                         {
+                            state->CompleteCanceled();
                             return;
                         }
                         try
@@ -111,8 +136,9 @@ namespace NGIN::IO::detail
                 NGIN::Async::AsyncFault fault =
                         NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::SchedulerDispatchFailed);
                 fault.native = static_cast<int>(scheduleResult.error());
-                CompleteWithFault(std::move(fault));
+                state->CompleteFault(std::move(fault));
             }
+            return true;
         }
 
         DriverCompletion<TResult> await_resume() noexcept
@@ -123,27 +149,32 @@ namespace NGIN::IO::detail
     private:
         struct State
         {
-            std::atomic<bool>                     done {false};
-            NGIN::Execution::ExecutorRef          resumeExecutor {};
-            std::coroutine_handle<>               awaiting {};
-            NGIN::Async::CancellationRegistration registration {};
-            DriverCompletion<TResult>             completion {};
+            std::atomic<bool>                      done {false};
+            std::atomic<bool>                      cancellationRequested {false};
+            NGIN::Execution::CompletionReservation delivery {};
+            NGIN::Execution::CompletionReservation runtimeCompletion {};
+            FileSystemDriver* driver {};
+            NGIN::Async::CancellationRegistration  registration {};
+            DriverCompletion<TResult>              completion {};
 
             void Resume() noexcept
             {
+                if (runtimeCompletion.IsValid())
+                    runtimeCompletion.Dispatch();
+                else
+                    delivery.Dispatch();
+            }
+
+            void Deliver() noexcept
+            {
                 registration.Reset();
-                if (awaiting)
+                if (completion.IsResult() && (cancellationRequested.load(std::memory_order_acquire) || driver->IsStopping()))
                 {
-                    if (resumeExecutor.IsValid())
-                    {
-                        const NGIN::Execution::ScheduleResult result = resumeExecutor.Execute(awaiting);
-                        if (result)
-                        {
-                            return;
-                        }
-                    }
-                    awaiting.resume();
+                    completion.status = DriverCompletion<TResult>::Status::Canceled;
+                    completion.result.reset();
                 }
+                driver = nullptr;
+                delivery.Dispatch();
             }
 
             void CompleteCanceled() noexcept
@@ -173,6 +204,11 @@ namespace NGIN::IO::detail
 
             void CompleteResult(TResult result) noexcept
             {
+                if (cancellationRequested.load(std::memory_order_acquire))
+                {
+                    CompleteCanceled();
+                    return;
+                }
                 bool expected = false;
                 if (!done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
                 {

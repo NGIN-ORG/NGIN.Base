@@ -4,9 +4,33 @@
 #include <NGIN/Execution/ThreadPoolScheduler.hpp>
 #include <NGIN/IO/LocalFileSystem.hpp>
 #include <NGIN/IO/Runtime.hpp>
+#include <NGIN/IO/RuntimeRunner.hpp>
 
+#include <array>
 #include <limits>
 #include <stdexcept>
+
+TEST_CASE("IO.Runtime exposes host sources without initializing resource backends", "[IO][Runtime][Host]")
+{
+    NGIN::IO::Runtime                         runtime;
+    std::array<NGIN::IO::NativeWaitSource, 1> sources;
+    const auto                                copied = runtime.CopyNativeWaitSources(sources);
+#if defined(_WIN32)
+    REQUIRE_FALSE(copied);
+    REQUIRE(copied.error() == std::errc::operation_not_supported);
+#else
+    REQUIRE(copied);
+    REQUIRE(*copied == 1);
+    REQUIRE(sources[0].handle >= 0);
+    REQUIRE(sources[0].interests == NGIN::IO::NativeWaitSource::Read);
+    const auto missing = runtime.CopyNativeWaitSources({});
+    REQUIRE_FALSE(missing);
+    REQUIRE(missing.error() == std::errc::no_buffer_space);
+#endif
+    REQUIRE_FALSE(runtime.HasFileBackend());
+    REQUIRE_FALSE(runtime.HasNetworkBackend());
+    runtime.Shutdown();
+}
 
 TEST_CASE("IO.Runtime creates no backend for construction or synchronous use", "[IO][Runtime]")
 {
@@ -19,8 +43,8 @@ TEST_CASE("IO.Runtime creates no backend for construction or synchronous use", "
     REQUIRE_FALSE(runtime.HasFileBackend());
     REQUIRE_FALSE(runtime.HasNetworkBackend());
     REQUIRE(runtime.GetFileBackend() == NGIN::IO::Runtime::FileBackend::None);
-    runtime.Stop();
-    runtime.Stop();
+    runtime.Shutdown();
+    runtime.Shutdown();
     REQUIRE(runtime.IsStopped());
     REQUIRE(files.TempDirectory());
 }
@@ -29,6 +53,7 @@ TEST_CASE("IO.Runtime shares lazy filesystem services across resources and conte
 {
     NGIN::Execution::ThreadPoolScheduler scheduler(2);
     NGIN::IO::Runtime                    runtime({.files = {.backendPreference = NGIN::IO::Runtime::FileBackendPreference::Fallback}});
+    NGIN::IO::RuntimeRunner              runner(runtime);
     NGIN::IO::LocalFileSystem            first(runtime);
     NGIN::IO::LocalFileSystem            second(runtime);
     NGIN::Async::TaskContext             firstContext(scheduler);
@@ -43,7 +68,7 @@ TEST_CASE("IO.Runtime shares lazy filesystem services across resources and conte
     REQUIRE(runtime.HasFileBackend());
     REQUIRE(runtime.GetFileBackend() == NGIN::IO::Runtime::FileBackend::WorkerFallback);
     REQUIRE_FALSE(runtime.HasNetworkBackend());
-    runtime.Stop();
+    runtime.Shutdown();
     auto rejected = NGIN::Async::SyncWait(firstContext, first.GetInfoAsync(firstContext, *directory));
     REQUIRE(rejected.IsFault());
     REQUIRE(rejected.Fault().code == NGIN::Async::AsyncFaultCode::InvalidTaskUsage);
@@ -59,20 +84,21 @@ TEST_CASE("IO.Runtime requires an explicit binding for asynchronous filesystem o
     REQUIRE(result.Fault().code == NGIN::Async::AsyncFaultCode::InvalidTaskUsage);
 }
 
-TEST_CASE("IO.Runtime validates configuration and polling mode", "[IO][Runtime]")
+TEST_CASE("IO.Runtime validates positive admission limits", "[IO][Runtime]")
 {
     using Runtime = NGIN::IO::Runtime;
-    REQUIRE_THROWS_AS(Runtime(Runtime::Options {.network = {.mode = static_cast<Runtime::NetworkMode>(255)}}), std::invalid_argument);
+    REQUIRE_THROWS_AS(Runtime(Runtime::Options {.files = {.backendPreference = static_cast<Runtime::FileBackendPreference>(255)}}), std::invalid_argument);
     REQUIRE_THROWS_AS(Runtime(Runtime::Options {.files = {.workerThreads = 0}}), std::invalid_argument);
     REQUIRE_THROWS_AS(Runtime(Runtime::Options {.files = {.queueDepthHint = 0}}), std::invalid_argument);
-    REQUIRE_THROWS_AS(Runtime(Runtime::Options {.network = {.pollInterval = NGIN::Units::Milliseconds(0)}}), std::invalid_argument);
-    REQUIRE_THROWS_AS(Runtime(Runtime::Options {.network = {.pollInterval = NGIN::Units::Milliseconds(std::numeric_limits<double>::infinity())}}), std::invalid_argument);
+    REQUIRE_THROWS_AS(Runtime(Runtime::Options {.submissionCapacity = 0}), std::invalid_argument);
+    REQUIRE_THROWS_AS(Runtime(Runtime::Options {.timerCapacity = 0}), std::invalid_argument);
+    REQUIRE_THROWS_AS(Runtime(Runtime::Options {.completionCapacity = 0}), std::invalid_argument);
+    REQUIRE_THROWS_AS(Runtime(Runtime::Options {.operationCapacity = 0}), std::invalid_argument);
+    REQUIRE_THROWS_AS(Runtime(Runtime::Options {.registrationCapacity = 0}), std::invalid_argument);
+    REQUIRE_THROWS_AS(Runtime(Runtime::Options {.batchSize = 0}), std::invalid_argument);
     Runtime runtime;
-    REQUIRE_THROWS_AS(runtime.PollOnce(), std::logic_error);
-    REQUIRE_THROWS_AS(runtime.Run(), std::logic_error);
-    Runtime manual({.network = {.mode = Runtime::NetworkMode::Manual}});
-    manual.PollOnce();
-    REQUIRE_FALSE(manual.HasNetworkBackend());
-    manual.Stop();
-    manual.Run();
+    REQUIRE_FALSE(runtime.PollOnce());
+    REQUIRE_FALSE(runtime.HasNetworkBackend());
+    runtime.Shutdown();
+    runtime.Run();
 }

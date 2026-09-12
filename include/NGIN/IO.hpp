@@ -11,6 +11,8 @@
 #include <NGIN/IO/DynamicLibrary.hpp>
 #include <NGIN/IO/FileHandle.hpp>
 #include <NGIN/IO/Runtime.hpp>
+#include <NGIN/IO/RuntimeRunner.hpp>
+#include <NGIN/IO/RunTask.hpp>
 #include <NGIN/IO/FileSystemTypes.hpp>
 #include <NGIN/IO/FileSystemUtilities.hpp>
 #include <NGIN/IO/FileView.hpp>

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "FileOperationGate.hpp"
+
 #include <NGIN/IO/AsyncFileHandle.hpp>
 #include <NGIN/IO/LocalFileSystem.hpp>
 
@@ -15,20 +17,34 @@ namespace NGIN::IO::detail
 {
     struct OpenedAsyncPosixFile final
     {
+        OpenedAsyncPosixFile() = default;
+        OpenedAsyncPosixFile(OpenedAsyncPosixFile&& other) noexcept;
+        OpenedAsyncPosixFile& operator=(OpenedAsyncPosixFile&& other) noexcept;
+        OpenedAsyncPosixFile(const OpenedAsyncPosixFile&)            = delete;
+        OpenedAsyncPosixFile& operator=(const OpenedAsyncPosixFile&) = delete;
+        ~OpenedAsyncPosixFile();
+
         int  fd {-1};
         Path path {};
         bool canRead {false};
         bool canWrite {false};
+        bool appendMode {false};
     };
 
     struct LocalAsyncFileState final
     {
+        explicit LocalAsyncFileState(std::shared_ptr<FileSystemDriver> owner) noexcept
+            : driver(std::move(owner)), operations(*driver) {}
+        ~LocalAsyncFileState();
+        bool                                                NativeIsOpen() const noexcept;
         std::shared_ptr<NGIN::IO::detail::FileSystemDriver> driver {};
         Path                                                path {};
         bool                                                canRead {false};
         bool                                                canWrite {false};
+        bool                                                appendMode {false};
         int                                                 fd {-1};
         mutable std::mutex                                  mutex {};
+        FileOperationGate                                   operations;
     };
 
     [[nodiscard]] inline IOErrorCode MapErrnoCode(const int code) noexcept
@@ -166,6 +182,7 @@ namespace NGIN::IO::detail
             const Path& path, const FileOpenOptions& options) noexcept
     {
         OpenedAsyncPosixFile opened;
+        opened.appendMode     = options.access == FileAccess::Append;
         opened.path           = path;
         opened.canRead        = options.access == FileAccess::Read || options.access == FileAccess::ReadWrite;
         opened.canWrite       = options.access == FileAccess::Write || options.access == FileAccess::ReadWrite || options.access == FileAccess::Append;
@@ -182,7 +199,6 @@ namespace NGIN::IO::detail
     [[nodiscard]] inline Result<UIntSize> LocalAsyncFileReadSync(
             LocalAsyncFileState& state, std::span<NGIN::Byte> destination) noexcept
     {
-        std::lock_guard<std::mutex> guard(state.mutex);
         if (state.fd < 0)
             return Result<UIntSize>(NGIN::Utilities::Unexpected<IOError>(
                     MakeInlineError(IOErrorCode::InvalidArgument, "file not open", state.path)));
@@ -206,7 +222,6 @@ namespace NGIN::IO::detail
     [[nodiscard]] inline Result<UIntSize> LocalAsyncFileWriteSync(
             LocalAsyncFileState& state, std::span<const NGIN::Byte> source) noexcept
     {
-        std::lock_guard<std::mutex> guard(state.mutex);
         if (state.fd < 0)
             return Result<UIntSize>(NGIN::Utilities::Unexpected<IOError>(
                     MakeInlineError(IOErrorCode::InvalidArgument, "file not open", state.path)));
@@ -230,7 +245,6 @@ namespace NGIN::IO::detail
     [[nodiscard]] inline Result<UIntSize> LocalAsyncFileReadAtSync(
             LocalAsyncFileState& state, UInt64 offset, std::span<NGIN::Byte> destination) noexcept
     {
-        std::lock_guard<std::mutex> guard(state.mutex);
         if (state.fd < 0)
             return Result<UIntSize>(NGIN::Utilities::Unexpected<IOError>(
                     MakeInlineError(IOErrorCode::InvalidArgument, "file not open", state.path)));
@@ -254,7 +268,6 @@ namespace NGIN::IO::detail
     [[nodiscard]] inline Result<UIntSize> LocalAsyncFileWriteAtSync(
             LocalAsyncFileState& state, UInt64 offset, std::span<const NGIN::Byte> source) noexcept
     {
-        std::lock_guard<std::mutex> guard(state.mutex);
         if (state.fd < 0)
             return Result<UIntSize>(NGIN::Utilities::Unexpected<IOError>(
                     MakeInlineError(IOErrorCode::InvalidArgument, "file not open", state.path)));
@@ -277,7 +290,6 @@ namespace NGIN::IO::detail
 
     [[nodiscard]] inline ResultVoid LocalAsyncFileFlushSync(LocalAsyncFileState& state) noexcept
     {
-        std::lock_guard<std::mutex> guard(state.mutex);
         if (state.fd < 0)
             return ResultVoid(NGIN::Utilities::Unexpected<IOError>(
                     MakeInlineError(IOErrorCode::InvalidArgument, "file not open", state.path)));

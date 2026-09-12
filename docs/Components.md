@@ -1,6 +1,6 @@
 # NGIN.Base Components
 
-NGIN.Base ships seven independently compiled ownership components. The component
+NGIN.Base ships eight independently compiled ownership components. The component
 model is enforced at configure time and is shared by build-tree and installed
 package exports.
 
@@ -10,6 +10,7 @@ package exports.
 | --- | --- |
 | Foundation | Containers, exceptions, hashing, math, memory, metadata, SIMD, synchronization, text, time, utilities, primitives, units, and benchmarking |
 | Execution | Async tasks, cancellation, threads, fibers, executors, and schedulers |
+| IORuntime | Shared runtime lifecycle, event-loop integration, and private backend attachment |
 | IO | Paths, files, directories, filesystem drivers, the VFS, and dynamic libraries |
 | Serialization | Serialization core plus JSON and XML |
 | Crypto | Crypto providers, algorithms, keys, certificates, tokens, and secure memory |
@@ -26,21 +27,25 @@ are not standalone public contracts.
 
 ```text
 Foundation
-   `--> Execution --> IO --> Serialization --> Crypto --.
-                       `--> Net ------------------------> NetTLS
+   `--> Execution --> IORuntime --> IO --> Serialization --> Crypto --.
+                            `--> Net --------------------------------> NetTLS
 ```
 
 In explicit terms:
 
 - Foundation has no NGIN.Base component dependency.
 - Execution depends on Foundation.
-- IO depends on Foundation and Execution.
+- IORuntime depends on Foundation and Execution.
+- IO depends on Foundation, Execution, and IORuntime.
 - Serialization depends on Foundation and IO.
 - Crypto depends on Foundation, IO, and Serialization.
-- Net depends on Foundation, Execution, and IO.
+- Net depends on Foundation, Execution, and IORuntime.
 - NetTLS depends on Net and Crypto.
 
-This keeps plaintext sockets and transports independent of Crypto. Applications
+This keeps plaintext sockets and transports independent of filesystem code and Crypto.
+`NGIN/IO/Runtime.hpp` belongs to IORuntime despite its public namespace.
+IO and Net supply their factories through a private attachment boundary; the
+runtime has no link-time reference to either factory. Applications
 that need TLS include `<NGIN/NetTLS.hpp>` and link `NGIN::Base::NetTLS`.
 
 The 2026-08-05 public-header include audit found no dependency outside these
@@ -51,7 +56,7 @@ their public target links.
 
 Each component provides `NGIN::Base::<Component>::Static`,
 `NGIN::Base::<Component>::Shared`, and a preferred-form
-`NGIN::Base::<Component>` alias. When all seven components are present,
+`NGIN::Base::<Component>` alias. When all eight components are present,
 `NGIN::Base::Static`, `NGIN::Base::Shared`, and `NGIN::Base` are interface
 aggregates over the corresponding components; they do not compile a second
 copy of component sources. Subset builds intentionally omit these aggregates
@@ -99,6 +104,6 @@ When tests are enabled, `NGINBasePublicHeaderChecks` compiles every public
 contract header in an independent translation unit. This catches accidental
 reliance on transitive includes. Detail headers are compiled through their
 owning public header. Component-focused tests link the narrow owning component.
-The installed-consumer matrix configures isolated Foundation, Execution, Net,
+The installed-consumer matrix configures isolated Foundation, Execution, IORuntime, IO, Net,
 NetTLS, and complete packages, then links and runs a consumer against each
 installed export.

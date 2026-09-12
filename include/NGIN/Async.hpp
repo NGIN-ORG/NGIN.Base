@@ -17,5 +17,6 @@
 #include <NGIN/Async/Task.hpp>
 #include <NGIN/Async/TaskCanceled.hpp>
 #include <NGIN/Async/TaskContext.hpp>
+#include <NGIN/Async/TaskScope.hpp>
 #include <NGIN/Async/WhenAll.hpp>
 #include <NGIN/Async/WhenAny.hpp>

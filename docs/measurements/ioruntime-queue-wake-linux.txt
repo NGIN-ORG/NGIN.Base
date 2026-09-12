@@ -1,0 +1,412 @@
+2026-09-11 completion-retirement wake checkpoint; GCC 15.2 static Release; serial processes, no CPU pinning
+Before = deferred socket monitoring, old completion notifications (file binary predates socket-only optimization). After = deferred socket monitoring plus final-closed-retirement-only notifications. Neither is original baseline.
+Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.39
+before IORuntimeBenchmarks sha256=bf23700fc2607e206387be47d26585e8a8549254c6d621d3a5d4f75e9c36002a
+after IORuntimeBenchmarks sha256=786aafcdf2c9af80b2c5c6a521c6e1bf30af6bb82123ea4b47c59dd0ec399a5d
+before IORuntimeFileBenchmarks sha256=1e1c533ccb8dafb005a67655be5508531de1f7acb10fc8654377f1e71844a64f
+after IORuntimeFileBenchmarks sha256=e893b675e15f844865f9b0a66b91cc11b34127a9780f6eb84d2880f5fcf402bd
+before IORuntimeNetworkBenchmarks sha256=13ce9706ad5a2398884ddb08b32935cdd38fcae238371b28fe18b3afadc97d92
+after IORuntimeNetworkBenchmarks sha256=4553bcce5867b71601cad6c24aa0e251e1b2e1ef8500e195edfe0d5dc5c1a9b4
+
+Run 1: before IORuntimeBenchmarks
+IORuntime baseline workload: 2000 sequential operations; 64-byte UDP; one continuation worker
+spawn_yield_join samples=2000 p50_us=29.913 p95_us=53.049 p99_us=76.546 mean_us=33.3761
+network_cold_us=315.971
+udp_ready_exchange samples=2000 p50_us=44.682 p95_us=82.847 p99_us=126.165 mean_us=49.7079
+network_idle wall_us=1.00224e+06 cpu_us=19 threads=4 voluntary_switches=1 maxrss_kib=17428
+network_pending_idle wall_us=1.00017e+06 cpu_us=79 threads=4 voluntary_switches=3 maxrss_kib=17428
+network_cancel_us=145.151
+network_stop_us=56.645
+file_backend=1 requested=0 cold_us=281.926
+file_stat samples=2000 p50_us=78.44 p95_us=140.507 p99_us=187.64 mean_us=87.6638
+files_idle wall_us=1.00083e+06 cpu_us=30 threads=6 voluntary_switches=1 maxrss_kib=17428
+file_backend=3 requested=2 cold_us=184.847
+file_stat samples=2000 p50_us=74.354 p95_us=120.918 p99_us=164.194 mean_us=81.3397
+files_idle wall_us=1.00085e+06 cpu_us=28 threads=6 voluntary_switches=1 maxrss_kib=17428
+exit_code=0
+
+Run 1: after IORuntimeBenchmarks
+IORuntime baseline workload: 2000 sequential operations; 64-byte UDP; one continuation worker
+spawn_yield_join samples=2000 p50_us=27.215 p95_us=44.281 p99_us=70.785 mean_us=30.0191
+network_cold_us=248.331
+udp_ready_exchange samples=2000 p50_us=34.063 p95_us=62.171 p99_us=96.125 mean_us=38.7839
+network_idle wall_us=1.00205e+06 cpu_us=43 threads=4 voluntary_switches=1 maxrss_kib=17428
+network_pending_idle wall_us=1.01931e+06 cpu_us=94 threads=4 voluntary_switches=3 maxrss_kib=17428
+network_cancel_us=165.628
+network_stop_us=62.102
+file_backend=1 requested=0 cold_us=307.805
+file_stat samples=2000 p50_us=80.952 p95_us=136.454 p99_us=181.102 mean_us=88.8274
+files_idle wall_us=1.01019e+06 cpu_us=28 threads=6 voluntary_switches=1 maxrss_kib=17428
+file_backend=3 requested=2 cold_us=184.51
+file_stat samples=2000 p50_us=75.291 p95_us=117.805 p99_us=159.603 mean_us=81.866
+files_idle wall_us=1.00194e+06 cpu_us=27 threads=6 voluntary_switches=1 maxrss_kib=17428
+exit_code=0
+
+Run 1: before IORuntimeFileBenchmarks
+native cold_open_us=466.963 backend=1 bytes=65536
+native_read_at_64k samples=2000 p50_us=73.558 p95_us=124.449 p99_us=171.716 mean_us=80.7527
+native_write_at_64k samples=2000 p50_us=75.457 p95_us=126.185 p99_us=168.086 mean_us=82.0829
+fallback cold_open_us=271.238 backend=3 bytes=65536
+fallback_read_at_64k samples=2000 p50_us=80.917 p95_us=127.242 p99_us=187.515 mean_us=88.0528
+fallback_write_at_64k samples=2000 p50_us=80.5 p95_us=123.912 p99_us=170.335 mean_us=87.1649
+exit_code=0
+
+Run 1: after IORuntimeFileBenchmarks
+native cold_open_us=483.248 backend=1 bytes=65536
+native_read_at_64k samples=2000 p50_us=73.261 p95_us=130.626 p99_us=177.351 mean_us=81.1924
+native_write_at_64k samples=2000 p50_us=72.2 p95_us=130.539 p99_us=180.485 mean_us=80.6067
+fallback cold_open_us=256.317 backend=3 bytes=65536
+fallback_read_at_64k samples=2000 p50_us=82.522 p95_us=141.381 p99_us=199.223 mean_us=91.3928
+fallback_write_at_64k samples=2000 p50_us=82.604 p95_us=132.892 p99_us=199.826 mean_us=90.4357
+exit_code=0
+
+Run 1: before IORuntimeNetworkBenchmarks
+Network-only workload: one continuation worker; 64-byte UDP; 8 active sockets; send-to-joined-receive latency
+cold sockets=8 setup_us=273.103 file_backend=0
+idle sockets=8 seconds=1 cpu_us=20 voluntary_switches=1 threads=4 maxrss_kib=17428
+suspended_receive sockets=8 active=8 samples=2000 p50_us=43.757 p95_us=86.607 p99_us=127.97 mean_us=50.3209 operations_per_second_including_rearm=10340.5
+cancel_all sockets=8 join_us=379.149
+shutdown sockets=8 us=72.868
+cold sockets=1024 setup_us=93113.3 file_backend=0
+idle sockets=1024 seconds=1 cpu_us=24 voluntary_switches=1 threads=4 maxrss_kib=17428
+suspended_receive sockets=1024 active=8 samples=2000 p50_us=43.616 p95_us=83.263 p99_us=119.296 mean_us=50.0264 operations_per_second_including_rearm=10392
+cancel_all sockets=1024 join_us=34054
+shutdown sockets=1024 us=101.772
+exit_code=0
+
+Run 1: after IORuntimeNetworkBenchmarks
+Network-only workload: one continuation worker; 64-byte UDP; 8 active sockets; send-to-joined-receive latency
+cold sockets=8 setup_us=259.427 file_backend=0
+idle sockets=8 seconds=1 cpu_us=24 voluntary_switches=1 threads=4 maxrss_kib=17428
+suspended_receive sockets=8 active=8 samples=2000 p50_us=42.209 p95_us=80.046 p99_us=122.358 mean_us=48.3132 operations_per_second_including_rearm=10725.8
+cancel_all sockets=8 join_us=269.821
+shutdown sockets=8 us=66.182
+cold sockets=1024 setup_us=120045 file_backend=0
+idle sockets=1024 seconds=1 cpu_us=33 voluntary_switches=1 threads=4 maxrss_kib=17428
+suspended_receive sockets=1024 active=8 samples=2000 p50_us=41.663 p95_us=74.428 p99_us=137.088 mean_us=47.4822 operations_per_second_including_rearm=10943.2
+cancel_all sockets=1024 join_us=32019.8
+shutdown sockets=1024 us=75.929
+exit_code=0
+
+Run 2: before IORuntimeBenchmarks
+IORuntime baseline workload: 2000 sequential operations; 64-byte UDP; one continuation worker
+spawn_yield_join samples=2000 p50_us=27.013 p95_us=48.071 p99_us=78.149 mean_us=30.7265
+network_cold_us=298.672
+udp_ready_exchange samples=2000 p50_us=42.772 p95_us=85.453 p99_us=123.525 mean_us=48.4669
+network_idle wall_us=1.01081e+06 cpu_us=35 threads=4 voluntary_switches=1 maxrss_kib=17428
+network_pending_idle wall_us=1.00047e+06 cpu_us=96 threads=4 voluntary_switches=3 maxrss_kib=17428
+network_cancel_us=189.046
+network_stop_us=65.979
+file_backend=1 requested=0 cold_us=400.068
+file_stat samples=2000 p50_us=72.631 p95_us=117.114 p99_us=164.283 mean_us=78.9651
+files_idle wall_us=1.00016e+06 cpu_us=21 threads=6 voluntary_switches=1 maxrss_kib=17428
+file_backend=3 requested=2 cold_us=264.826
+file_stat samples=2000 p50_us=71.842 p95_us=116.55 p99_us=161.45 mean_us=78.7442
+files_idle wall_us=1.00141e+06 cpu_us=24 threads=6 voluntary_switches=1 maxrss_kib=17428
+exit_code=0
+
+Run 2: after IORuntimeBenchmarks
+IORuntime baseline workload: 2000 sequential operations; 64-byte UDP; one continuation worker
+spawn_yield_join samples=2000 p50_us=27.968 p95_us=48.387 p99_us=69.523 mean_us=30.8409
+network_cold_us=282.213
+udp_ready_exchange samples=2000 p50_us=36.524 p95_us=74.343 p99_us=99.4 mean_us=41.8974
+network_idle wall_us=1.00249e+06 cpu_us=19 threads=4 voluntary_switches=1 maxrss_kib=17428
+network_pending_idle wall_us=1.0005e+06 cpu_us=80 threads=4 voluntary_switches=3 maxrss_kib=17428
+network_cancel_us=151.887
+network_stop_us=72.043
+file_backend=1 requested=0 cold_us=279.016
+file_stat samples=2000 p50_us=77.072 p95_us=122.386 p99_us=163.698 mean_us=83.6796
+files_idle wall_us=1.00449e+06 cpu_us=27 threads=6 voluntary_switches=1 maxrss_kib=17428
+file_backend=3 requested=2 cold_us=199.286
+file_stat samples=2000 p50_us=76.438 p95_us=122.141 p99_us=163.319 mean_us=83.0583
+files_idle wall_us=1.00022e+06 cpu_us=24 threads=6 voluntary_switches=1 maxrss_kib=17428
+exit_code=0
+
+Run 2: before IORuntimeFileBenchmarks
+native cold_open_us=378.83 backend=1 bytes=65536
+native_read_at_64k samples=2000 p50_us=71.861 p95_us=118.652 p99_us=164.84 mean_us=78.475
+native_write_at_64k samples=2000 p50_us=72.589 p95_us=118.745 p99_us=159.074 mean_us=79.0113
+fallback cold_open_us=247.901 backend=3 bytes=65536
+fallback_read_at_64k samples=2000 p50_us=80.392 p95_us=135.186 p99_us=179.837 mean_us=88.4426
+fallback_write_at_64k samples=2000 p50_us=82.22 p95_us=133.45 p99_us=170.924 mean_us=89.697
+exit_code=0
+
+Run 2: after IORuntimeFileBenchmarks
+native cold_open_us=409.49 backend=1 bytes=65536
+native_read_at_64k samples=2000 p50_us=72.619 p95_us=129.376 p99_us=172.242 mean_us=81.0529
+native_write_at_64k samples=2000 p50_us=70.789 p95_us=117.483 p99_us=167.029 mean_us=77.7041
+fallback cold_open_us=252.993 backend=3 bytes=65536
+fallback_read_at_64k samples=2000 p50_us=80.602 p95_us=130.346 p99_us=182.329 mean_us=88.0962
+fallback_write_at_64k samples=2000 p50_us=81.101 p95_us=122.349 p99_us=169.766 mean_us=87.5047
+exit_code=0
+
+Run 2: before IORuntimeNetworkBenchmarks
+Network-only workload: one continuation worker; 64-byte UDP; 8 active sockets; send-to-joined-receive latency
+cold sockets=8 setup_us=306.048 file_backend=0
+idle sockets=8 seconds=1 cpu_us=32 voluntary_switches=1 threads=4 maxrss_kib=17428
+suspended_receive sockets=8 active=8 samples=2000 p50_us=45.833 p95_us=92.364 p99_us=140.531 mean_us=53.9955 operations_per_second_including_rearm=9674.87
+cancel_all sockets=8 join_us=306.47
+shutdown sockets=8 us=87.734
+cold sockets=1024 setup_us=93780.3 file_backend=0
+idle sockets=1024 seconds=1 cpu_us=15 voluntary_switches=1 threads=4 maxrss_kib=17428
+suspended_receive sockets=1024 active=8 samples=2000 p50_us=45.475 p95_us=85.118 p99_us=129.221 mean_us=51.8807 operations_per_second_including_rearm=9989.89
+cancel_all sockets=1024 join_us=40234
+shutdown sockets=1024 us=138.129
+exit_code=0
+
+Run 2: after IORuntimeNetworkBenchmarks
+Network-only workload: one continuation worker; 64-byte UDP; 8 active sockets; send-to-joined-receive latency
+cold sockets=8 setup_us=290.132 file_backend=0
+idle sockets=8 seconds=1 cpu_us=27 voluntary_switches=1 threads=4 maxrss_kib=17428
+suspended_receive sockets=8 active=8 samples=2000 p50_us=45.308 p95_us=87.551 p99_us=124.689 mean_us=52.1242 operations_per_second_including_rearm=9890.39
+cancel_all sockets=8 join_us=318.376
+shutdown sockets=8 us=107.326
+cold sockets=1024 setup_us=110237 file_backend=0
+idle sockets=1024 seconds=1 cpu_us=21 voluntary_switches=1 threads=4 maxrss_kib=17428
+suspended_receive sockets=1024 active=8 samples=2000 p50_us=45.185 p95_us=86.064 p99_us=122.611 mean_us=52.269 operations_per_second_including_rearm=9803.94
+cancel_all sockets=1024 join_us=36001.9
+shutdown sockets=1024 us=117.339
+exit_code=0
+
+Run 3: before IORuntimeBenchmarks
+IORuntime baseline workload: 2000 sequential operations; 64-byte UDP; one continuation worker
+spawn_yield_join samples=2000 p50_us=30.119 p95_us=54.483 p99_us=79.253 mean_us=33.9426
+network_cold_us=299.799
+udp_ready_exchange samples=2000 p50_us=46.275 p95_us=94.716 p99_us=140.813 mean_us=53.8683
+network_idle wall_us=1.00293e+06 cpu_us=36 threads=4 voluntary_switches=1 maxrss_kib=17428
+network_pending_idle wall_us=1.01206e+06 cpu_us=109 threads=4 voluntary_switches=3 maxrss_kib=17428
+network_cancel_us=156.274
+network_stop_us=65.055
+file_backend=1 requested=0 cold_us=307.003
+file_stat samples=2000 p50_us=78.976 p95_us=126.707 p99_us=167.36 mean_us=85.3837
+files_idle wall_us=1.0002e+06 cpu_us=50 threads=6 voluntary_switches=1 maxrss_kib=17428
+file_backend=3 requested=2 cold_us=171.622
+file_stat samples=2000 p50_us=75.363 p95_us=124.909 p99_us=170.98 mean_us=82.6618
+files_idle wall_us=1.00016e+06 cpu_us=22 threads=6 voluntary_switches=1 maxrss_kib=17428
+exit_code=0
+
+Run 3: after IORuntimeBenchmarks
+IORuntime baseline workload: 2000 sequential operations; 64-byte UDP; one continuation worker
+spawn_yield_join samples=2000 p50_us=27.212 p95_us=45.812 p99_us=63.827 mean_us=29.712
+network_cold_us=340.426
+udp_ready_exchange samples=2000 p50_us=34.033 p95_us=60.735 p99_us=89.322 mean_us=38.6747
+network_idle wall_us=1.00229e+06 cpu_us=46 threads=4 voluntary_switches=1 maxrss_kib=17428
+network_pending_idle wall_us=1.00025e+06 cpu_us=85 threads=4 voluntary_switches=3 maxrss_kib=17428
+network_cancel_us=135.484
+network_stop_us=66.565
+file_backend=1 requested=0 cold_us=319.001
+file_stat samples=2000 p50_us=78.334 p95_us=131.451 p99_us=172.056 mean_us=86.3499
+files_idle wall_us=1.00199e+06 cpu_us=23 threads=6 voluntary_switches=1 maxrss_kib=17428
+file_backend=3 requested=2 cold_us=299.252
+file_stat samples=2000 p50_us=79.638 p95_us=136.597 p99_us=186.609 mean_us=88.0418
+files_idle wall_us=1.00067e+06 cpu_us=28 threads=6 voluntary_switches=1 maxrss_kib=17428
+exit_code=0
+
+Run 3: before IORuntimeFileBenchmarks
+native cold_open_us=511.046 backend=1 bytes=65536
+native_read_at_64k samples=2000 p50_us=74.328 p95_us=122.968 p99_us=172.26 mean_us=81.465
+native_write_at_64k samples=2000 p50_us=78.196 p95_us=154.775 p99_us=197.179 mean_us=90.4327
+fallback cold_open_us=272.616 backend=3 bytes=65536
+fallback_read_at_64k samples=2000 p50_us=81.913 p95_us=128.766 p99_us=173.103 mean_us=88.799
+fallback_write_at_64k samples=2000 p50_us=83.412 p95_us=139.181 p99_us=200.765 mean_us=91.7777
+exit_code=0
+
+Run 3: after IORuntimeFileBenchmarks
+native cold_open_us=908.562 backend=1 bytes=65536
+native_read_at_64k samples=2000 p50_us=75.884 p95_us=138.602 p99_us=182.376 mean_us=84.7134
+native_write_at_64k samples=2000 p50_us=75.611 p95_us=134.223 p99_us=179.487 mean_us=83.9121
+fallback cold_open_us=285.58 backend=3 bytes=65536
+fallback_read_at_64k samples=2000 p50_us=82.941 p95_us=135.747 p99_us=180.557 mean_us=90.5798
+fallback_write_at_64k samples=2000 p50_us=81.778 p95_us=128.893 p99_us=182.446 mean_us=89.3665
+exit_code=0
+
+Run 3: before IORuntimeNetworkBenchmarks
+Network-only workload: one continuation worker; 64-byte UDP; 8 active sockets; send-to-joined-receive latency
+cold sockets=8 setup_us=270.991 file_backend=0
+idle sockets=8 seconds=1 cpu_us=23 voluntary_switches=1 threads=4 maxrss_kib=17428
+suspended_receive sockets=8 active=8 samples=2000 p50_us=46.263 p95_us=94.547 p99_us=145.017 mean_us=54.8354 operations_per_second_including_rearm=9478.88
+cancel_all sockets=8 join_us=313.534
+shutdown sockets=8 us=67.791
+cold sockets=1024 setup_us=120453 file_backend=0
+idle sockets=1024 seconds=1 cpu_us=18 voluntary_switches=1 threads=4 maxrss_kib=17428
+suspended_receive sockets=1024 active=8 samples=2000 p50_us=42.912 p95_us=82.456 p99_us=125.818 mean_us=49.0056 operations_per_second_including_rearm=10441.5
+cancel_all sockets=1024 join_us=39220.7
+shutdown sockets=1024 us=107.001
+exit_code=0
+
+Run 3: after IORuntimeNetworkBenchmarks
+Network-only workload: one continuation worker; 64-byte UDP; 8 active sockets; send-to-joined-receive latency
+cold sockets=8 setup_us=313.092 file_backend=0
+idle sockets=8 seconds=1 cpu_us=28 voluntary_switches=1 threads=4 maxrss_kib=17428
+suspended_receive sockets=8 active=8 samples=2000 p50_us=41.77 p95_us=79.281 p99_us=127.278 mean_us=48.402 operations_per_second_including_rearm=10789.8
+cancel_all sockets=8 join_us=244.98
+shutdown sockets=8 us=64.522
+cold sockets=1024 setup_us=100613 file_backend=0
+idle sockets=1024 seconds=1 cpu_us=20 voluntary_switches=1 threads=4 maxrss_kib=17428
+suspended_receive sockets=1024 active=8 samples=2000 p50_us=41.294 p95_us=74.598 p99_us=122.217 mean_us=47.1005 operations_per_second_including_rearm=10915.9
+cancel_all sockets=1024 join_us=36796.2
+shutdown sockets=1024 us=90.773
+exit_code=0
+
+Run 4: before IORuntimeBenchmarks
+IORuntime baseline workload: 2000 sequential operations; 64-byte UDP; one continuation worker
+spawn_yield_join samples=2000 p50_us=28.962 p95_us=60.887 p99_us=94.774 mean_us=34.1945
+network_cold_us=304.814
+udp_ready_exchange samples=2000 p50_us=52.265 p95_us=124.551 p99_us=153.861 mean_us=62.3889
+network_idle wall_us=1.01432e+06 cpu_us=28 threads=4 voluntary_switches=1 maxrss_kib=17428
+network_pending_idle wall_us=1.00077e+06 cpu_us=102 threads=4 voluntary_switches=3 maxrss_kib=17428
+network_cancel_us=141.645
+network_stop_us=53.678
+file_backend=1 requested=0 cold_us=271.465
+file_stat samples=2000 p50_us=81.834 p95_us=151.472 p99_us=202.921 mean_us=92.1312
+files_idle wall_us=1.00116e+06 cpu_us=20 threads=6 voluntary_switches=1 maxrss_kib=17428
+file_backend=3 requested=2 cold_us=158.866
+file_stat samples=2000 p50_us=75.611 p95_us=126.503 p99_us=183.224 mean_us=83.3636
+files_idle wall_us=1.0019e+06 cpu_us=27 threads=6 voluntary_switches=1 maxrss_kib=17428
+exit_code=0
+
+Run 4: after IORuntimeBenchmarks
+IORuntime baseline workload: 2000 sequential operations; 64-byte UDP; one continuation worker
+spawn_yield_join samples=2000 p50_us=28.191 p95_us=65.841 p99_us=103.673 mean_us=34.835
+network_cold_us=428.32
+udp_ready_exchange samples=2000 p50_us=35.961 p95_us=68.489 p99_us=127.444 mean_us=41.5918
+network_idle wall_us=1.00499e+06 cpu_us=26 threads=4 voluntary_switches=1 maxrss_kib=17428
+network_pending_idle wall_us=1.00329e+06 cpu_us=115 threads=4 voluntary_switches=3 maxrss_kib=17428
+network_cancel_us=161.191
+network_stop_us=70.502
+file_backend=1 requested=0 cold_us=547.4
+file_stat samples=2000 p50_us=77.674 p95_us=137.291 p99_us=192.478 mean_us=86.7206
+files_idle wall_us=1.00786e+06 cpu_us=28 threads=6 voluntary_switches=1 maxrss_kib=17428
+file_backend=3 requested=2 cold_us=183.63
+file_stat samples=2000 p50_us=74.978 p95_us=124.941 p99_us=172.715 mean_us=82.7449
+files_idle wall_us=1.01947e+06 cpu_us=22 threads=6 voluntary_switches=1 maxrss_kib=17428
+exit_code=0
+
+Run 4: before IORuntimeFileBenchmarks
+native cold_open_us=444.536 backend=1 bytes=65536
+native_read_at_64k samples=2000 p50_us=74.187 p95_us=142.479 p99_us=192.741 mean_us=83.975
+native_write_at_64k samples=2000 p50_us=72.419 p95_us=130.113 p99_us=184.98 mean_us=80.8261
+fallback cold_open_us=308.917 backend=3 bytes=65536
+fallback_read_at_64k samples=2000 p50_us=81.449 p95_us=139.572 p99_us=190.756 mean_us=89.4902
+fallback_write_at_64k samples=2000 p50_us=80.226 p95_us=131.39 p99_us=186.899 mean_us=88.1255
+exit_code=0
+
+Run 4: after IORuntimeFileBenchmarks
+native cold_open_us=520.049 backend=1 bytes=65536
+native_read_at_64k samples=2000 p50_us=72.847 p95_us=134.019 p99_us=186.401 mean_us=81.1796
+native_write_at_64k samples=2000 p50_us=75.986 p95_us=131.049 p99_us=197.04 mean_us=84.4396
+fallback cold_open_us=278.399 backend=3 bytes=65536
+fallback_read_at_64k samples=2000 p50_us=83.668 p95_us=144.647 p99_us=188.486 mean_us=92.3582
+fallback_write_at_64k samples=2000 p50_us=84.041 p95_us=149.311 p99_us=194.581 mean_us=93.3832
+exit_code=0
+
+Run 4: before IORuntimeNetworkBenchmarks
+Network-only workload: one continuation worker; 64-byte UDP; 8 active sockets; send-to-joined-receive latency
+cold sockets=8 setup_us=239.492 file_backend=0
+idle sockets=8 seconds=1 cpu_us=30 voluntary_switches=1 threads=4 maxrss_kib=17428
+suspended_receive sockets=8 active=8 samples=2000 p50_us=45.703 p95_us=88.697 p99_us=125.952 mean_us=52.3316 operations_per_second_including_rearm=9978.42
+cancel_all sockets=8 join_us=276.101
+shutdown sockets=8 us=73.055
+cold sockets=1024 setup_us=96699.3 file_backend=0
+idle sockets=1024 seconds=1 cpu_us=24 voluntary_switches=1 threads=4 maxrss_kib=17428
+suspended_receive sockets=1024 active=8 samples=2000 p50_us=44.802 p95_us=88.438 p99_us=124.395 mean_us=51.9675 operations_per_second_including_rearm=10009.6
+cancel_all sockets=1024 join_us=36705.2
+shutdown sockets=1024 us=111.946
+exit_code=0
+
+Run 4: after IORuntimeNetworkBenchmarks
+Network-only workload: one continuation worker; 64-byte UDP; 8 active sockets; send-to-joined-receive latency
+cold sockets=8 setup_us=267.578 file_backend=0
+idle sockets=8 seconds=1 cpu_us=33 voluntary_switches=1 threads=4 maxrss_kib=17428
+suspended_receive sockets=8 active=8 samples=2000 p50_us=42.866 p95_us=83.148 p99_us=120.594 mean_us=49.5532 operations_per_second_including_rearm=10522.2
+cancel_all sockets=8 join_us=424.242
+shutdown sockets=8 us=77.287
+cold sockets=1024 setup_us=96462 file_backend=0
+idle sockets=1024 seconds=1 cpu_us=17 voluntary_switches=1 threads=4 maxrss_kib=17428
+suspended_receive sockets=1024 active=8 samples=2000 p50_us=49.293 p95_us=101.192 p99_us=148.236 mean_us=57.8508 operations_per_second_including_rearm=9076.37
+cancel_all sockets=1024 join_us=39428.9
+shutdown sockets=1024 us=155.25
+exit_code=0
+
+Run 5: before IORuntimeBenchmarks
+IORuntime baseline workload: 2000 sequential operations; 64-byte UDP; one continuation worker
+spawn_yield_join samples=2000 p50_us=30.538 p95_us=60.277 p99_us=96.748 mean_us=35.0587
+network_cold_us=299.539
+udp_ready_exchange samples=2000 p50_us=46.895 p95_us=91.916 p99_us=147.299 mean_us=53.3692
+network_idle wall_us=1.0045e+06 cpu_us=19 threads=4 voluntary_switches=1 maxrss_kib=17428
+network_pending_idle wall_us=1.00282e+06 cpu_us=110 threads=4 voluntary_switches=3 maxrss_kib=17428
+network_cancel_us=147.856
+network_stop_us=94.681
+file_backend=1 requested=0 cold_us=333.078
+file_stat samples=2000 p50_us=94.3 p95_us=166.679 p99_us=223.882 mean_us=105.892
+files_idle wall_us=1.03979e+06 cpu_us=44 threads=6 voluntary_switches=1 maxrss_kib=17428
+file_backend=3 requested=2 cold_us=250.091
+file_stat samples=2000 p50_us=82.98 p95_us=142.517 p99_us=187.347 mean_us=91.7077
+files_idle wall_us=1.00015e+06 cpu_us=18 threads=6 voluntary_switches=1 maxrss_kib=17428
+exit_code=0
+
+Run 5: after IORuntimeBenchmarks
+IORuntime baseline workload: 2000 sequential operations; 64-byte UDP; one continuation worker
+spawn_yield_join samples=2000 p50_us=25.903 p95_us=50.479 p99_us=72.558 mean_us=29.8753
+network_cold_us=311.482
+udp_ready_exchange samples=2000 p50_us=33.135 p95_us=63.678 p99_us=95.502 mean_us=38.1403
+network_idle wall_us=1.00025e+06 cpu_us=45 threads=4 voluntary_switches=1 maxrss_kib=17428
+network_pending_idle wall_us=1.00017e+06 cpu_us=129 threads=4 voluntary_switches=3 maxrss_kib=17428
+network_cancel_us=150.416
+network_stop_us=57.261
+file_backend=1 requested=0 cold_us=283.454
+file_stat samples=2000 p50_us=74.069 p95_us=124.63 p99_us=168.971 mean_us=80.9965
+files_idle wall_us=1.00395e+06 cpu_us=23 threads=6 voluntary_switches=1 maxrss_kib=17428
+file_backend=3 requested=2 cold_us=176.78
+file_stat samples=2000 p50_us=80.598 p95_us=151.43 p99_us=210.492 mean_us=91.5865
+files_idle wall_us=1.00645e+06 cpu_us=23 threads=6 voluntary_switches=1 maxrss_kib=17428
+exit_code=0
+
+Run 5: before IORuntimeFileBenchmarks
+native cold_open_us=427.578 backend=1 bytes=65536
+native_read_at_64k samples=2000 p50_us=73.677 p95_us=119.713 p99_us=165.527 mean_us=80.1059
+native_write_at_64k samples=2000 p50_us=74.105 p95_us=129.856 p99_us=193.511 mean_us=82.6323
+fallback cold_open_us=252.086 backend=3 bytes=65536
+fallback_read_at_64k samples=2000 p50_us=83.2 p95_us=140.318 p99_us=201.277 mean_us=92.4951
+fallback_write_at_64k samples=2000 p50_us=81.303 p95_us=128.867 p99_us=174.665 mean_us=88.3308
+exit_code=0
+
+Run 5: after IORuntimeFileBenchmarks
+native cold_open_us=390.817 backend=1 bytes=65536
+native_read_at_64k samples=2000 p50_us=71.204 p95_us=115.077 p99_us=156.535 mean_us=78.2361
+native_write_at_64k samples=2000 p50_us=71.972 p95_us=117.312 p99_us=169.285 mean_us=79.1953
+fallback cold_open_us=264.599 backend=3 bytes=65536
+fallback_read_at_64k samples=2000 p50_us=82.437 p95_us=137.839 p99_us=178.808 mean_us=90.8207
+fallback_write_at_64k samples=2000 p50_us=81.981 p95_us=132.635 p99_us=176.408 mean_us=89.9929
+exit_code=0
+
+Run 5: before IORuntimeNetworkBenchmarks
+Network-only workload: one continuation worker; 64-byte UDP; 8 active sockets; send-to-joined-receive latency
+cold sockets=8 setup_us=478.155 file_backend=0
+idle sockets=8 seconds=1 cpu_us=19 voluntary_switches=1 threads=4 maxrss_kib=17428
+suspended_receive sockets=8 active=8 samples=2000 p50_us=44.998 p95_us=86.793 p99_us=138.793 mean_us=52.0936 operations_per_second_including_rearm=10053.9
+cancel_all sockets=8 join_us=353.851
+shutdown sockets=8 us=70.262
+cold sockets=1024 setup_us=121998 file_backend=0
+idle sockets=1024 seconds=1 cpu_us=26 voluntary_switches=1 threads=4 maxrss_kib=17428
+suspended_receive sockets=1024 active=8 samples=2000 p50_us=43.406 p95_us=81.062 p99_us=122.015 mean_us=49.2642 operations_per_second_including_rearm=10470.9
+cancel_all sockets=1024 join_us=33341.8
+shutdown sockets=1024 us=158.605
+exit_code=0
+
+Run 5: after IORuntimeNetworkBenchmarks
+Network-only workload: one continuation worker; 64-byte UDP; 8 active sockets; send-to-joined-receive latency
+cold sockets=8 setup_us=278.21 file_backend=0
+idle sockets=8 seconds=1 cpu_us=27 voluntary_switches=1 threads=4 maxrss_kib=17428
+suspended_receive sockets=8 active=8 samples=2000 p50_us=41.829 p95_us=85.429 p99_us=144.236 mean_us=49.649 operations_per_second_including_rearm=10616.4
+cancel_all sockets=8 join_us=265.824
+shutdown sockets=8 us=72.187
+cold sockets=1024 setup_us=100918 file_backend=0
+idle sockets=1024 seconds=1 cpu_us=13 voluntary_switches=1 threads=4 maxrss_kib=17428
+suspended_receive sockets=1024 active=8 samples=2000 p50_us=44.376 p95_us=94.438 p99_us=140.764 mean_us=53.1028 operations_per_second_including_rearm=9861.81
+cancel_all sockets=1024 join_us=34892.8
+shutdown sockets=1024 us=103.448
+exit_code=0
+
+GNU size, current network-only executable: text=239956 data=2272 bss=648 bytes
+GNU size, preserved pre-optimization network-only executable: text=239596 data=2272 bss=648 bytes

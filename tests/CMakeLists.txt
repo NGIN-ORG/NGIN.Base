@@ -160,6 +160,23 @@ else()
   )
 endif()
 
+# Compile the same loop tests against the portable poll/wakeup implementation
+# on Linux as well as the normal epoll implementation. This links only Execution.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  ngin_base_add_test_executable(
+    IO_RuntimeLoopPortableTests
+    "${CMAKE_CURRENT_SOURCE_DIR}/IO/RuntimeLoopTests.cpp"
+    "IO"
+    "Base.IO.RuntimeLoopPortable."
+    "NGIN::Base::Execution"
+  )
+  target_sources(IO_RuntimeLoopPortableTests PRIVATE
+    "${_base_root_dir}/src/NGIN/IO/RuntimeLoop.cpp"
+    "${_base_root_dir}/src/NGIN/IO/RuntimePoller.cpp"
+  )
+  target_compile_definitions(IO_RuntimeLoopPortableTests PRIVATE NGIN_RUNTIME_POLLER_PORTABLE=1)
+endif()
+
 ngin_base_configure_test_targets("${NGIN_BASE_TEST_TARGETS}")
 
 if(TARGET SIMD_AVX512RuntimeTestsTests AND NGIN_BASE_COMPILER_HAS_MAVX512_BASELINE)
@@ -174,7 +191,9 @@ set(_ngin_base_package_matrix_root "${_base_binary_dir}/package-consumer-matrix"
 set(_ngin_base_package_matrix
   "Foundation|Foundation|FALSE|NGIN/Primitives.hpp|NGIN/Async/Task.hpp"
   "Execution|Execution|FALSE|NGIN/Async/Task.hpp|NGIN/IO/Path.hpp"
-  "Net|Net|FALSE|NGIN/Net.hpp|NGIN/Crypto.hpp"
+  "IORuntime|IORuntime|FALSE|NGIN/IO/Runtime.hpp|NGIN/IO/LocalFileSystem.hpp"
+  "IO|IO|FALSE|NGIN/IO/AsyncFileHandle.hpp|NGIN/Net.hpp"
+  "Net|Net|FALSE|NGIN/Net.hpp|NGIN/IO/LocalFileSystem.hpp"
   "NetTLS|NetTLS|TRUE|NGIN/NetTLS.hpp|NONE"
   "all|Complete|TRUE|NGIN/NGIN.hpp|NONE"
 )

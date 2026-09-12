@@ -33,7 +33,9 @@ configurations.
 - Numeric IPv6 scope identifiers are supported. Interface-name scopes require
   an OS lookup and are intentionally not accepted by pure endpoint parsing.
 - Windows async sockets use IOCP. Linux uses epoll, macOS uses kqueue, and other
-  POSIX targets use the select fallback.
+  POSIX targets use the poll fallback. Socket and native file completions share
+  the runtime loop; current cross-platform verification is tracked in
+  [IORuntimeImplementation.md](IORuntimeImplementation.md).
 - TLS is not part of the default build. The provider-neutral API is available
   on every platform and returns `ProviderUnavailable` when no implementation
   was compiled. The OpenSSL 3 provider is enabled explicitly with
@@ -55,11 +57,11 @@ configurations.
 
 ## Linkage and packaging
 
-- Foundation, Execution, IO, Serialization, Crypto, Net, and NetTLS are independently
+- Foundation, Execution, IORuntime, IO, Serialization, Crypto, Net, and NetTLS are independently
   compiled in static and shared forms. Aggregate targets are interface-only and
   do not duplicate component objects.
 - Build-tree and installed package exports provide canonical aggregate and
-  per-component targets. External-consumer matrices link and run all seven
+  per-component targets. External-consumer matrices link and run all eight
   preferred targets.
 - Component-specific import/export macros define the Windows DLL ABI; automatic
   symbol export is not used.
