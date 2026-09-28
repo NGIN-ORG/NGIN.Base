@@ -24,9 +24,10 @@ namespace NGIN::IO::detail
         };
 
         [[nodiscard]] bool IsResult() const noexcept { return status == Status::Result; }
-        [[nodiscard]] bool IsCanceled() const noexcept { return status == Status::Canceled; }
+        [[nodiscard]] bool IsStopped() const noexcept { return status == Status::Canceled; }
         [[nodiscard]] bool IsFault() const noexcept { return status == Status::Fault; }
 
+        NGIN::Async::StopReason                stopReason {NGIN::Async::StopReason::Requested};
         Status                                 status {Status::Fault};
         std::optional<TResult>                 result {};
         std::optional<NGIN::Async::AsyncFault> fault {};
@@ -42,6 +43,7 @@ namespace NGIN::IO::detail
         DriverDispatchAwaiter(NGIN::IO::detail::FileSystemDriver& driver, NGIN::Async::TaskContext& ctx, TOperation operation)
             : m_driver(driver), m_resumeExecutor(ctx.GetExecutor()), m_cancellation(ctx.GetCancellationToken()), m_operation(std::move(operation)), m_state(std::make_shared<State>())
         {
+            m_state->cancellation = m_cancellation;
         }
 
         bool await_ready() const noexcept
@@ -75,9 +77,11 @@ namespace NGIN::IO::detail
                         static_cast<int>(reservation.error())));
                 return false;
             }
-            state->delivery = std::move(*reservation);
+            state->delivery        = std::move(*reservation);
+            state->executor        = m_resumeExecutor;
+            state->awaiting        = awaiting;
             auto runtimeCompletion = RuntimeAccess::ReserveOperation(m_driver.GetRuntime(),
-                    NGIN::Execution::WorkItem([state] { state->Deliver(); }));
+                                                                     NGIN::Execution::WorkItem([state] { state->Deliver(); }));
             if (!runtimeCompletion)
             {
                 state->delivery.Reset();
@@ -87,7 +91,7 @@ namespace NGIN::IO::detail
                 return false;
             }
             state->runtimeCompletion = std::move(*runtimeCompletion);
-            state->driver = &m_driver;
+            state->driver            = &m_driver;
 
             const NGIN::Async::CancellationRegistrationResult registrationResult = m_cancellation.Register(
                     state->registration,
@@ -149,11 +153,19 @@ namespace NGIN::IO::detail
     private:
         struct State
         {
+            NGIN::Async::CancellationToken cancellation;
+            NGIN::Async::StopReason        CancellationReason() const noexcept
+            {
+                return cancellation.IsCancellationRequested() ? cancellation.GetStopReason() : NGIN::Async::StopReason::RuntimeShutdown;
+            }
+
+            NGIN::Execution::ExecutorRef           executor;
+            std::coroutine_handle<>                awaiting;
             std::atomic<bool>                      done {false};
             std::atomic<bool>                      cancellationRequested {false};
             NGIN::Execution::CompletionReservation delivery {};
             NGIN::Execution::CompletionReservation runtimeCompletion {};
-            FileSystemDriver* driver {};
+            FileSystemDriver*                      driver {};
             NGIN::Async::CancellationRegistration  registration {};
             DriverCompletion<TResult>              completion {};
 
@@ -170,11 +182,15 @@ namespace NGIN::IO::detail
                 registration.Reset();
                 if (completion.IsResult() && (cancellationRequested.load(std::memory_order_acquire) || driver->IsStopping()))
                 {
-                    completion.status = DriverCompletion<TResult>::Status::Canceled;
+                    completion.status     = DriverCompletion<TResult>::Status::Canceled;
+                    completion.stopReason = CancellationReason();
                     completion.result.reset();
                 }
-                driver = nullptr;
-                delivery.Dispatch();
+                driver                           = nullptr;
+                auto                      ticket = std::move(delivery);
+                NGIN::Execution::WorkItem work(awaiting);
+                if (!executor.TryDispatchInline(work))
+                    ticket.Dispatch();
             }
 
             void CompleteCanceled() noexcept
@@ -185,7 +201,8 @@ namespace NGIN::IO::detail
                     return;
                 }
 
-                completion.status = DriverCompletion<TResult>::Status::Canceled;
+                completion.status     = DriverCompletion<TResult>::Status::Canceled;
+                completion.stopReason = CancellationReason();
                 Resume();
             }
 

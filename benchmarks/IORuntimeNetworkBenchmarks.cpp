@@ -1,4 +1,5 @@
 #include <NGIN/Async/Task.hpp>
+#include <NGIN/Async/TaskSupervisor.hpp>
 #include <NGIN/Execution/ThreadPoolScheduler.hpp>
 #include <NGIN/IO/Runtime.hpp>
 #include <NGIN/IO/RuntimeRunner.hpp>
@@ -89,7 +90,7 @@ namespace
     {
     public:
         Receivers(IO::Runtime& runtime, Execution::ThreadPoolScheduler& scheduler, std::size_t count)
-            : context(scheduler, cancellation.GetToken()), joining(scheduler)
+            : context(scheduler, cancellation.GetToken()), joining(scheduler), owner(context.GetEnvironment(), count)
         {
             receivers.reserve(count);
             std::set<UInt16> ports;
@@ -107,11 +108,13 @@ namespace
                 if (receiver->operation)
                     (void) Async::SyncWait(joining, Join(joining, *receiver->operation));
             }
+            if (!joined)
+                (void) Async::SyncWait(joining, JoinOwner());
         }
         void Start(std::size_t index)
         {
             auto& receiver = *receivers[index];
-            receiver.operation.emplace(Async::Spawn(context, receiver.socket.ReceiveFromAsync(context, receiver.buffer)));
+            receiver.operation.emplace(owner.Spawn(receiver.socket.ReceiveFromAsync(context, receiver.buffer)).value());
         }
         void DrainSubmissions()
         {
@@ -141,14 +144,22 @@ namespace
                     continue;
                 const auto result = Async::SyncWait(joining, Join(joining, *receiver->operation));
                 receiver->operation.reset();
-                Require(result.IsCanceled(), "pending receive did not cancel");
+                Require(result.IsStopped(), "pending receive did not cancel");
             }
+            Require(Async::SyncWait(joining, JoinOwner()).Succeeded(), "receive owner join failed");
+            joined = true;
         }
         const Net::Endpoint& Endpoint(std::size_t index) const { return receivers[index]->endpoint; }
 
     private:
+        Async::Task<void> JoinOwner()
+        {
+            (void) co_await owner.Join();
+        }
         Async::CancellationSource              cancellation;
         Async::TaskContext                     context, joining;
+        Async::TaskSupervisor<Net::NetError>   owner;
+        bool                                   joined {false};
         std::vector<std::unique_ptr<Receiver>> receivers;
     };
 
@@ -200,9 +211,11 @@ int main()
             std::array<Byte, 64> payload {};
             std::vector<double>  samples;
             samples.reserve(iterations);
-            const auto workload = Clock::now();
-            for (std::size_t index = 0; index != iterations; ++index)
+            auto workload = Clock::now();
+            for (std::size_t index = 0; index != iterations + 100; ++index)
             {
+                if (index == 100)
+                    workload = Clock::now();
                 const auto selected = index % active;
                 // Exclude rearm/barrier time from the latency sample while
                 // ensuring the receive was suspended before sending each packet.
@@ -211,7 +224,8 @@ int main()
                 const auto sent  = sender.TrySendTo(receivers.Endpoint(selected), payload);
                 Require(sent && *sent == payload.size(), "send failed or truncated");
                 receivers.Complete(selected);
-                samples.push_back(Microseconds(Clock::now() - start));
+                if (index >= 100)
+                    samples.push_back(Microseconds(Clock::now() - start));
                 receivers.Start(selected);
             }
             const double wall = Microseconds(Clock::now() - workload);

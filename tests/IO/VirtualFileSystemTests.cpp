@@ -359,7 +359,7 @@ TEST_CASE("IO.VirtualFileSystem async copy crosses mounts and cleans canceled de
             NGIN::IO::Path {"/target/canceled"},
             recursive);
     auto canceled = RunAsyncTask(canceledTask, canceledContext);
-    REQUIRE(canceled.IsCanceled());
+    REQUIRE(canceled.IsStopped());
     REQUIRE_FALSE(vfs.Exists(NGIN::IO::Path {"/target/canceled"}).value());
 
     RemoveTempDir(backingFs, root);

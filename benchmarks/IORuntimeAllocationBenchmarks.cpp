@@ -1,6 +1,7 @@
 #include "AllocationInstrumentation.hpp"
 
 #include <NGIN/Async/Task.hpp>
+#include <NGIN/Async/TaskSupervisor.hpp>
 #include <NGIN/IO/Runtime.hpp>
 #include <NGIN/Net/Sockets/UdpSocket.hpp>
 
@@ -268,16 +269,22 @@ namespace
         IO::Runtime&                            runtime;
         Async::CancellationSource               cancellation;
         Async::TaskContext                      context;
+        Async::TaskSupervisor<Error>             owner;
         std::vector<Async::Operation<T, Error>> operations;
         explicit Pending(IO::Runtime& io)
-            : runtime(io), context(io.GetExecutor(), cancellation.GetToken())
+            : runtime(io), context(io.GetExecutor(), cancellation.GetToken()),
+              owner(context.GetEnvironment(), capacity + 1,
+                    {.report = [](void*, Async::AsyncError<Error>) noexcept {
+                        // The retained operation below verifies each expected overload error.
+                        return true;
+                    }})
         {
             operations.reserve(capacity + 1);
         }
         void Cancel() noexcept
         {
             cancellation.Cancel();
-            while (!std::all_of(operations.begin(), operations.end(), [](const auto& op) { return op.IsCompleted(); }))
+            while (owner.Pending() != 0)
             {
                 runtime.PollOnce();
                 std::this_thread::yield();
@@ -286,6 +293,7 @@ namespace
         ~Pending()
         {
             Cancel();
+            (void) owner.TryJoin();
             operations.clear();
             Drain(runtime);
         }
@@ -304,7 +312,7 @@ namespace
         const auto  run                  = [&] {
             Pending<void> pending(runtime);
             for (std::size_t index = 0; index != capacity; ++index)
-                pending.operations.push_back(Async::Spawn(pending.context, LongDelay(pending.context)));
+                pending.operations.push_back(pending.owner.Spawn(LongDelay(pending.context)).value());
             Drain(runtime);
             for (const auto& operation: pending.operations)
                 Require(!operation.IsCompleted(), "long delay admission failed early");
@@ -312,14 +320,14 @@ namespace
             Stats       rejectionFloor = full;
             for (std::size_t index = 0; index != 256; ++index)
             {
-                pending.operations.push_back(Async::Spawn(pending.context, LongDelay(pending.context)));
+                pending.operations.push_back(pending.owner.Spawn(LongDelay(pending.context)).value());
                 Drain(runtime);
                 auto& rejected = pending.operations.back();
                 Require(rejected.IsCompleted(), "delay overload admitted an extra timer");
                 {
                     const auto result = rejected.TakeResult();
-                    Require(result.IsFault() && result.Fault().code == Async::AsyncFaultCode::SchedulerDispatchFailed &&
-                                                      result.Fault().native == static_cast<int>(ScheduleError::ResourceExhausted),
+                    Require(result.Error().IsFault() && result.Error().Fault().code == Async::AsyncFaultCode::SchedulerDispatchFailed &&
+                                                      result.Error().Fault().native == static_cast<int>(ScheduleError::ResourceExhausted),
                                               "delay overload did not report timer resource exhaustion");
                 }
                 pending.operations.pop_back();
@@ -337,7 +345,7 @@ namespace
             }
             pending.Cancel();
             for (auto& operation: pending.operations)
-                Require(operation.TakeResult().IsCanceled(), "long delay did not cancel");
+                Require(operation.TakeResult().IsStopped(), "long delay did not cancel");
             Require(!runtime.NextDeadline(), "long delay retained a canceled deadline");
         };
         run();
@@ -368,8 +376,8 @@ namespace
         const auto  run                  = [&] {
             Pending<Net::DatagramReceiveResult, Net::NetError> pending(runtime);
             for (std::size_t index = 0; index != capacity; ++index)
-                pending.operations.push_back(Async::Spawn(pending.context,
-                                                                            sockets[index].ReceiveFromAsync(pending.context, buffers[index])));
+                pending.operations.push_back(pending.owner.Spawn(
+                    sockets[index].ReceiveFromAsync(pending.context, buffers[index])).value());
             Drain(runtime);
             for (const auto& operation: pending.operations)
                 Require(!operation.IsCompleted(), "socket admission failed early");
@@ -377,18 +385,18 @@ namespace
             Stats       rejectionFloor = full;
             for (std::size_t index = 0; index != 256; ++index)
             {
-                pending.operations.push_back(Async::Spawn(pending.context,
-                                                                            sockets.back().ReceiveFromAsync(pending.context, buffers.back())));
+                pending.operations.push_back(pending.owner.Spawn(
+                    sockets.back().ReceiveFromAsync(pending.context, buffers.back())).value());
                 Drain(runtime);
                 auto& rejected = pending.operations.back();
                 Require(rejected.IsCompleted(), "socket overload admitted an extra receive");
                 {
                     const auto result = rejected.TakeResult();
                     if (registrationLimit)
-                        Require(result.IsDomainError() && result.DomainError().code == Net::NetErrorCode::ResourceExhausted,
+                        Require(result.Error().IsDomainError() && result.Error().DomainError().code == Net::NetErrorCode::ResourceExhausted,
                                                   "registration overload did not report resource exhaustion");
                     else
-                        Require(result.IsFault() && result.Fault().code == Async::AsyncFaultCode::SchedulerDispatchFailed,
+                        Require(result.Error().IsFault() && result.Error().Fault().code == Async::AsyncFaultCode::SchedulerDispatchFailed,
                                                   "operation overload did not report a scheduling fault");
                 }
                 pending.operations.pop_back();
@@ -406,7 +414,7 @@ namespace
             }
             pending.Cancel();
             for (auto& operation: pending.operations)
-                Require(operation.TakeResult().IsCanceled(), "pending socket did not cancel");
+                Require(operation.TakeResult().IsStopped(), "pending socket did not cancel");
         };
         run();
         const Stats before = Begin();
@@ -501,13 +509,15 @@ namespace
         const auto run = [&](bool ready) {
             if (ready)
                 Require(sender.TrySendTo(endpoint, buffer).has_value(), "ready send failed");
-            auto operation = Async::Spawn(context, receiver.ReceiveFromAsync(context, buffer));
+            Async::TaskSupervisor<Net::NetError> owner(context.GetEnvironment(), 1);
+            auto operation = owner.Spawn(receiver.ReceiveFromAsync(context, buffer)).value();
             // A guard closes and drains before buffer/context destruction on error.
             struct Join final
             {
                 IO::Runtime&         runtime;
                 Net::UdpSocket&      socket;
                 decltype(operation)& task;
+                decltype(owner)&     root;
                 ~Join()
                 {
                     if (!task.IsCompleted())
@@ -519,8 +529,14 @@ namespace
                             std::this_thread::yield();
                         }
                     }
+                    while (root.Pending() != 0)
+                    {
+                        runtime.PollOnce();
+                        std::this_thread::yield();
+                    }
+                    (void) root.TryJoin();
                 }
-            } join {runtime, receiver, operation};
+            } join {runtime, receiver, operation, owner};
             Drain(runtime);
             if (!ready)
             {
@@ -552,12 +568,13 @@ namespace
             {
                 Require(counted.submissions - countsBefore.submissions == counted.submissionCallbacks - countsBefore.submissionCallbacks,
                         "selected executor left submission callbacks undispatched");
-#if defined(_WIN32)
-                // Even primed receives retire through the shared IOCP packet.
-                constexpr std::size_t expectedCompletions = 2000;
-#else
-                const std::size_t expectedCompletions = ready ? 0 : 2000;
-#endif
+                // Ownership dispatches startup, completion observation, and retirement
+                // publication. Socket delivery resumes inline on this runtime executor.
+                constexpr std::size_t expectedCompletions = 3 * 2000;
+                if (counted.completionCallbacks - countsBefore.completionCallbacks != expectedCompletions)
+                    std::cerr << "receive callbacks ready=" << ready
+                              << " expected=" << expectedCompletions
+                              << " actual=" << counted.completionCallbacks - countsBefore.completionCallbacks << '\n';
                 Require(counted.completionCallbacks - countsBefore.completionCallbacks == expectedCompletions,
                         "receive completion used an unexpected number of executor callbacks");
                 std::cout << (ready ? "runtime_ready_receive_callbacks" : "runtime_suspended_receive_callbacks")

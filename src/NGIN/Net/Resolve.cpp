@@ -1,3 +1,4 @@
+#include <NGIN/Async/ExecutorTransitions.hpp>
 #include <NGIN/Net/Resolve.hpp>
 
 #include "SocketPlatform.hpp"
@@ -161,6 +162,7 @@ namespace NGIN::Net
 
         struct AsyncResolveCompletion final
         {
+            NGIN::Async::StopReason                                      stopReason {NGIN::Async::StopReason::Requested};
             AsyncResolveStatus                                           status {AsyncResolveStatus::Fault};
             std::optional<ResolveExpected<std::vector<ResolvedAddress>>> result {};
             std::optional<NGIN::Async::AsyncFault>                       fault {};
@@ -182,7 +184,7 @@ namespace NGIN::Net
 
             [[nodiscard]] bool await_ready() const noexcept { return false; }
 
-            void await_suspend(std::coroutine_handle<> awaiting)
+            bool await_suspend(std::coroutine_handle<> awaiting)
             {
                 auto state               = m_state;
                 auto driverExecutor      = m_driver.GetExecutor();
@@ -195,92 +197,120 @@ namespace NGIN::Net
 
                 state->resumeExecutor = resumeExecutor;
                 state->awaiting       = awaiting;
-                if (!driverExecutor.IsValid() || !resumeExecutor.IsValid())
+                auto delivery         = resumeExecutor.ReserveCompletion(NGIN::Execution::WorkItem(awaiting));
+                if (!delivery)
                 {
-                    state->CompleteFault(
-                            NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidTaskUsage));
-                    return;
+                    state->completion.status = AsyncResolveStatus::Fault;
+                    state->completion.fault  = NGIN::Async::MakeAsyncFault(
+                            NGIN::Async::AsyncFaultCode::SchedulerDispatchFailed, static_cast<int>(delivery.error()));
+                    return false;
                 }
-                if (contextCancellation.IsCancellationRequested() || cancellation.IsCancellationRequested())
+                state->delivery = std::move(*delivery);
+                struct CommitSetup final
                 {
-                    state->Complete(AsyncResolveStatus::Canceled);
-                    return;
-                }
-                if (options.timeout && options.timeout->count() <= 0)
+                    std::shared_ptr<State> state;
+                    ~CommitSetup() { state->Signal(1U); }
+                } commit {state};
+                try
                 {
-                    state->Complete(AsyncResolveStatus::TimedOut);
-                    return;
-                }
+                    if (!driverExecutor.IsValid() || !resumeExecutor.IsValid())
+                    {
+                        state->CompleteFault(
+                                NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidTaskUsage));
+                        return true;
+                    }
+                    if (contextCancellation.IsCancellationRequested() || cancellation.IsCancellationRequested())
+                    {
+                        state->Complete(AsyncResolveStatus::Canceled, contextCancellation.IsCancellationRequested() ? contextCancellation.GetStopReason() : cancellation.GetStopReason());
+                        return true;
+                    }
+                    if (options.timeout && options.timeout->count() <= 0)
+                    {
+                        state->Complete(AsyncResolveStatus::TimedOut);
+                        return true;
+                    }
 
-                const NGIN::Async::CancellationRegistrationResult contextRegistrationResult =
-                        RegisterCancellation(contextCancellation, state->contextRegistration, state.get());
-                if (!contextRegistrationResult)
-                {
-                    state->CompleteFault(NGIN::Async::MakeAsyncFault(
-                            NGIN::Async::AsyncFaultCode::CancellationRegistrationFailed,
-                            static_cast<int>(contextRegistrationResult.error())));
-                    return;
-                }
-                if (state->done.load(std::memory_order_acquire))
-                {
-                    return;
-                }
-                const NGIN::Async::CancellationRegistrationResult explicitRegistrationResult =
-                        RegisterCancellation(cancellation, state->explicitRegistration, state.get());
-                if (!explicitRegistrationResult)
-                {
-                    state->CompleteFault(NGIN::Async::MakeAsyncFault(
-                            NGIN::Async::AsyncFaultCode::CancellationRegistrationFailed,
-                            static_cast<int>(explicitRegistrationResult.error())));
-                    return;
-                }
-                if (state->done.load(std::memory_order_acquire))
-                {
-                    return;
-                }
+                    const NGIN::Async::CancellationRegistrationResult contextRegistrationResult =
+                            RegisterCancellation(contextCancellation, state->contextRegistration, state.get());
+                    if (!contextRegistrationResult)
+                    {
+                        state->CompleteFault(NGIN::Async::MakeAsyncFault(
+                                NGIN::Async::AsyncFaultCode::CancellationRegistrationFailed,
+                                static_cast<int>(contextRegistrationResult.error())));
+                        return true;
+                    }
+                    if (state->done.load(std::memory_order_acquire))
+                    {
+                        return true;
+                    }
+                    const NGIN::Async::CancellationRegistrationResult explicitRegistrationResult =
+                            RegisterCancellation(cancellation, state->explicitRegistration, state.get());
+                    if (!explicitRegistrationResult)
+                    {
+                        state->CompleteFault(NGIN::Async::MakeAsyncFault(
+                                NGIN::Async::AsyncFaultCode::CancellationRegistrationFailed,
+                                static_cast<int>(explicitRegistrationResult.error())));
+                        return true;
+                    }
+                    if (state->done.load(std::memory_order_acquire))
+                    {
+                        return true;
+                    }
 
-                const std::optional<std::chrono::milliseconds> timeout        = options.timeout;
-                const NGIN::Execution::ScheduleResult          dispatchResult = driverExecutor.Execute(
-                        [state, host = std::move(host), service = std::move(service), options = std::move(options)]() mutable {
-                            if (state->done.load(std::memory_order_acquire))
-                            {
-                                return;
-                            }
-                            try
-                            {
-                                auto value = Resolve(host, service, options);
-                                state->CompleteResult(std::move(value));
-                            } catch (...)
-                            {
-                                state->CompleteFault(
-                                        NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::UnknownRuntimeFailure));
-                            }
-                        });
-                if (!dispatchResult)
-                {
-                    state->CompleteFault(NGIN::Async::MakeAsyncFault(
-                            NGIN::Async::AsyncFaultCode::SchedulerDispatchFailed,
-                            static_cast<int>(dispatchResult.error())));
-                    return;
-                }
+                    const std::optional<std::chrono::milliseconds> timeout = options.timeout;
+                    if (timeout)
+                    {
+                        const NGIN::UInt64 milliseconds  = static_cast<NGIN::UInt64>(timeout->count());
+                        const NGIN::UInt64 now           = NGIN::Time::MonotonicClock::Now().ToNanoseconds();
+                        const NGIN::UInt64 maximumAdd    = (std::numeric_limits<NGIN::UInt64>::max)() - now;
+                        const NGIN::UInt64 add           = milliseconds > maximumAdd / 1'000'000ull
+                                                                   ? maximumAdd
+                                                                   : milliseconds * 1'000'000ull;
+                        auto               timeoutResult = resumeExecutor.ScheduleTimer(
+                                NGIN::Execution::WorkItem([state] { state->Complete(AsyncResolveStatus::TimedOut); }),
+                                NGIN::Time::TimePoint::FromNanoseconds(now + add));
+                        if (!timeoutResult)
+                        {
+                            state->CompleteFault(NGIN::Async::MakeAsyncFault(
+                                    NGIN::Async::AsyncFaultCode::SchedulerDispatchFailed,
+                                    static_cast<int>(timeoutResult.error())));
+                            return true;
+                        }
+                        state->timer = std::move(*timeoutResult);
+                    }
+                    if (state->done.load(std::memory_order_acquire))
+                        return true;
 
-                if (timeout)
-                {
-                    const NGIN::UInt64                    milliseconds  = static_cast<NGIN::UInt64>(timeout->count());
-                    const NGIN::UInt64                    now           = NGIN::Time::MonotonicClock::Now().ToNanoseconds();
-                    const NGIN::UInt64                    maximumAdd    = (std::numeric_limits<NGIN::UInt64>::max)() - now;
-                    const NGIN::UInt64                    add           = milliseconds > maximumAdd / 1'000'000ull
-                                                                                  ? maximumAdd
-                                                                                  : milliseconds * 1'000'000ull;
-                    const NGIN::Execution::ScheduleResult timeoutResult = resumeExecutor.ExecuteAt(
-                            [state] { state->Complete(AsyncResolveStatus::TimedOut); },
-                            NGIN::Time::TimePoint::FromNanoseconds(now + add));
-                    if (!timeoutResult)
+                    const NGIN::Execution::ScheduleResult dispatchResult = driverExecutor.Execute(
+                            [state, queued = QueuedLookup(state), host = std::move(host), service = std::move(service), options = std::move(options)]() mutable {
+                                queued.Started();
+                                if (state->done.load(std::memory_order_acquire))
+                                {
+                                    return;
+                                }
+                                try
+                                {
+                                    auto value = Resolve(host, service, options);
+                                    state->CompleteResult(std::move(value));
+                                } catch (...)
+                                {
+                                    state->CompleteFault(
+                                            NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::UnknownRuntimeFailure));
+                                }
+                            });
+                    if (!dispatchResult)
                     {
                         state->CompleteFault(NGIN::Async::MakeAsyncFault(
                                 NGIN::Async::AsyncFaultCode::SchedulerDispatchFailed,
-                                static_cast<int>(timeoutResult.error())));
+                                static_cast<int>(dispatchResult.error())));
+                        return true;
                     }
+
+                    return true;
+                } catch (...)
+                {
+                    state->CompleteFault(NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::UnhandledException));
+                    return true;
                 }
             }
 
@@ -290,38 +320,62 @@ namespace NGIN::Net
             }
 
         private:
-            struct State final
+            struct State final : std::enable_shared_from_this<State>
             {
-                std::atomic<bool>                     done {false};
-                NGIN::Execution::ExecutorRef          resumeExecutor {};
-                std::coroutine_handle<>               awaiting {};
-                NGIN::Async::CancellationRegistration contextRegistration {};
-                NGIN::Async::CancellationRegistration explicitRegistration {};
-                AsyncResolveCompletion                completion {};
-
-                void Resume() noexcept
+                struct CancellationRequest
                 {
-                    contextRegistration.Reset();
-                    explicitRegistration.Reset();
-                    if (resumeExecutor.IsValid())
-                    {
-                        const NGIN::Execution::ScheduleResult result = resumeExecutor.Execute(awaiting);
-                        if (result)
-                        {
-                            return;
-                        }
-                    }
-                    awaiting.resume();
+                    State*                                state {};
+                    NGIN::Async::CancellationToken        token;
+                    NGIN::Async::CancellationRegistration registration;
+                };
+
+                std::atomic<bool>                      done {false};
+                std::atomic<unsigned>                  publication {0};
+                NGIN::Execution::CompletionReservation delivery;
+                NGIN::Execution::TimerRegistration     timer;
+                NGIN::Execution::ExecutorRef           resumeExecutor {};
+                std::coroutine_handle<>                awaiting {};
+                CancellationRequest                    contextRegistration {};
+                CancellationRequest                    explicitRegistration {};
+                AsyncResolveCompletion                 completion {};
+
+                void Signal(unsigned flag) noexcept
+                {
+                    const unsigned previous = publication.fetch_or(flag, std::memory_order_acq_rel);
+                    const unsigned observed = previous | flag;
+                    // Discard before setup commits waits for the submission result so
+                    // an admission failure preserves its specific scheduling error.
+                    if ((observed & 5U) == 5U && !(observed & 2U))
+                        CompleteFault(NGIN::Async::MakeAsyncFault(
+                                NGIN::Async::AsyncFaultCode::SchedulerDispatchFailed,
+                                static_cast<int>(NGIN::Execution::ScheduleError::Stopped)));
+                    if ((flag & 3U) && (observed & 3U) == 3U && !(previous & flag))
+                        Deliver();
                 }
 
-                void Complete(AsyncResolveStatus status) noexcept
+                void Resume() noexcept { Signal(2U); }
+
+                void Deliver() noexcept
+                {
+                    auto keepAlive = shared_from_this();
+                    contextRegistration.registration.Reset();
+                    explicitRegistration.registration.Reset();
+                    timer.Cancel();
+                    auto                      ticket = std::move(delivery);
+                    NGIN::Execution::WorkItem work(awaiting);
+                    if (!resumeExecutor.TryDispatchInline(work))
+                        ticket.Dispatch();
+                }
+
+                void Complete(AsyncResolveStatus status, NGIN::Async::StopReason reason = NGIN::Async::StopReason::Requested) noexcept
                 {
                     bool expected = false;
                     if (!done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
                     {
                         return;
                     }
-                    completion.status = status;
+                    completion.status     = status;
+                    completion.stopReason = reason;
                     Resume();
                 }
 
@@ -350,20 +404,37 @@ namespace NGIN::Net
                 }
             };
 
-            [[nodiscard]] static NGIN::Async::CancellationRegistrationResult RegisterCancellation(
-                    const NGIN::Async::CancellationToken&  token,
-                    NGIN::Async::CancellationRegistration& registration,
-                    State*                                 state)
+            struct QueuedLookup final
             {
+                explicit QueuedLookup(std::shared_ptr<State> value) noexcept : state(std::move(value)) {}
+                QueuedLookup(QueuedLookup&&) noexcept = default;
+                QueuedLookup(const QueuedLookup&)     = delete;
+                ~QueuedLookup()
+                {
+                    if (state)
+                        state->Signal(4U);
+                }
+                void                   Started() noexcept { state.reset(); }
+                std::shared_ptr<State> state;
+            };
+
+            [[nodiscard]] static NGIN::Async::CancellationRegistrationResult RegisterCancellation(
+                    const NGIN::Async::CancellationToken& token,
+                    State::CancellationRequest&           request,
+                    State*                                state)
+            {
+                request.state = state;
+                request.token = token;
                 return token.Register(
-                        registration,
+                        request.registration,
                         {},
                         {},
                         +[](void* rawState) noexcept -> bool {
-                            static_cast<State*>(rawState)->Complete(AsyncResolveStatus::Canceled);
+                            auto& triggered = *static_cast<State::CancellationRequest*>(rawState);
+                            triggered.state->Complete(AsyncResolveStatus::Canceled, triggered.token.GetStopReason());
                             return false;
                         },
-                        state);
+                        &request);
             }
 
             ResolverDriver&                m_driver;
@@ -492,6 +563,7 @@ namespace NGIN::Net
             ResolveOptions                 options,
             NGIN::Async::CancellationToken cancellation)
     {
+        co_await NGIN::Async::SwitchTo(context.GetExecutor());
         AsyncResolveCompletion completion = co_await ResolveAwaiter(
                 context,
                 driver,
@@ -502,7 +574,7 @@ namespace NGIN::Net
         switch (completion.status)
         {
             case AsyncResolveStatus::Canceled:
-                co_await NGIN::Async::Canceled();
+                co_await NGIN::Async::Stopped(completion.stopReason);
                 co_return std::vector<ResolvedAddress> {};
             case AsyncResolveStatus::TimedOut:
                 co_return NGIN::Utilities::Unexpected<ResolveError>(

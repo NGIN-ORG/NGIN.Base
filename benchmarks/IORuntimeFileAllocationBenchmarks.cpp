@@ -1,6 +1,7 @@
 #include "AllocationInstrumentation.hpp"
 
 #include <NGIN/Async/Task.hpp>
+#include <NGIN/Async/TaskSupervisor.hpp>
 #include <NGIN/Execution/CooperativeScheduler.hpp>
 #include <NGIN/IO/LocalFileSystem.hpp>
 
@@ -75,18 +76,28 @@ namespace
         Async::CancellationSource                                  cancellation;
         std::array<Execution::CooperativeScheduler, producers>     schedulers;
         std::array<std::unique_ptr<Async::TaskContext>, producers> contexts;
+        std::array<std::unique_ptr<Async::TaskSupervisor<IO::IOError>>, producers> owners;
         std::array<std::array<Byte, 64>, capacity + 1>             buffers {};
         std::vector<Async::Operation<UIntSize, IO::IOError>>       operations;
         explicit Pending(IO::Runtime& owner) : runtime(owner)
         {
             operations.reserve(capacity + 1);
             for (std::size_t index = 0; index != producers; ++index)
+            {
                 contexts[index] = std::make_unique<Async::TaskContext>(schedulers[index], cancellation.GetToken());
+                owners[index] = std::make_unique<Async::TaskSupervisor<IO::IOError>>(
+                    contexts[index]->GetEnvironment(), capacity / producers + 1,
+                    Async::TaskSupervisor<IO::IOError>::ErrorSink {
+                        .report = [](void*, Async::AsyncError<IO::IOError>) noexcept {
+                            // Each retained operation is checked for the expected overload error.
+                            return true;
+                        }});
+            }
         }
         void CancelAndJoin() noexcept
         {
             cancellation.Cancel();
-            while (!std::all_of(operations.begin(), operations.end(), [](const auto& operation) { return operation.IsCompleted(); }))
+            while (std::any_of(owners.begin(), owners.end(), [](const auto& owner) { return owner && owner->Pending() != 0; }))
             {
                 runtime.PollOnce();
                 for (auto& scheduler: schedulers)
@@ -97,6 +108,9 @@ namespace
         ~Pending()
         {
             CancelAndJoin();
+            for (auto& owner: owners)
+                if (owner)
+                    (void) owner->TryJoin();
             operations.clear();
             for (auto& scheduler: schedulers)
                 scheduler.RunUntilIdle();
@@ -111,8 +125,12 @@ namespace
         std::array<IO::AsyncFileHandle, 2> handles;
         for (auto& handle: handles)
         {
-            auto opening = Async::Spawn(context, files.OpenFileAsync(context, path, {}));
+            Async::TaskSupervisor<IO::IOError> owner(context.GetEnvironment(), 1);
+            auto opening = owner.Spawn(files.OpenFileAsync(context, path, {})).value();
             Wait(runtime, opening);
+            while (owner.Pending() != 0)
+                runtime.PollOnce();
+            Require(owner.TryJoin().has_value(), "file open owner did not join");
             auto result = opening.TakeResult();
             Require(result.Succeeded(), "file open failed");
             handle = std::move(result).Value();
@@ -127,8 +145,8 @@ namespace
             {
                 const std::size_t producer = index % producers;
                 auto&             selected = *pending.contexts[producer];
-                pending.operations.push_back(Async::Spawn(selected,
-                                                          handles[index % handles.size()].ReadAsync(selected, pending.buffers[index])));
+                pending.operations.push_back(pending.owners[producer]->Spawn(
+                    handles[index % handles.size()].ReadAsync(selected, pending.buffers[index])).value());
                 pending.schedulers[producer].RunUntilIdle();
                 Require(!pending.operations.back().IsCompleted(), "file handle admission failed before capacity");
             }
@@ -138,38 +156,42 @@ namespace
             {
                 const std::size_t producer = index % producers;
                 auto&             selected = *pending.contexts[producer];
-                pending.operations.push_back(Async::Spawn(selected,
-                                                          handles[index % handles.size()].ReadAsync(selected, pending.buffers.back())));
+                pending.operations.push_back(pending.owners[producer]->Spawn(
+                    handles[index % handles.size()].ReadAsync(selected, pending.buffers.back())).value());
                 pending.schedulers[producer].RunUntilIdle();
                 auto& rejected = pending.operations.back();
                 Require(rejected.IsCompleted(), "file overload admitted an extra read");
                 {
                     const auto result = rejected.TakeResult();
-                    Require(result.IsFault() && result.Fault().code == Async::AsyncFaultCode::SchedulerDispatchFailed &&
-                                    result.Fault().native == static_cast<int>(Execution::ScheduleError::ResourceExhausted),
+                    Require(result.Error().IsFault() && result.Error().Fault().code == Async::AsyncFaultCode::SchedulerDispatchFailed &&
+                                    result.Error().Fault().native == static_cast<int>(Execution::ScheduleError::ResourceExhausted),
                             "file overload did not report resource exhaustion");
                 }
                 pending.operations.pop_back();
                 const Stats now = Allocation::Snapshot();
-                if (index == 0)
+                if (index < producers)
                 {
                     rejectionFloor = now;
                     retainedGrowth = std::max(full.currentBytes, now.currentBytes) - full.currentBytes;
                 }
                 // Workers can still retire existing captures while the loop is
                 // parked. Decreases are valid; later rejections must not grow
-                // live storage past the first rejection's cancellation-table size.
+                // live storage past the warmed producers' cancellation-table size.
                 Require(now.currentBytes <= rejectionFloor.currentBytes && now.currentCount <= rejectionFloor.currentCount,
                         "repeated rejected file reads grew retained storage");
             }
             pending.CancelAndJoin();
             for (auto& operation: pending.operations)
-                Require(operation.TakeResult().IsCanceled(), "accepted file read did not finish cancellation");
+                Require(operation.TakeResult().IsStopped(), "accepted file read did not finish cancellation");
         }
         for (auto& handle: handles)
         {
-            auto closing = Async::Spawn(context, handle.CloseAsync(context));
+            Async::TaskSupervisor<IO::IOError> owner(context.GetEnvironment(), 1);
+            auto closing = owner.Spawn(handle.CloseAsync(context)).value();
             Wait(runtime, closing);
+            while (owner.Pending() != 0)
+                runtime.PollOnce();
+            Require(owner.TryJoin().has_value(), "file close owner did not join");
             Require(closing.TakeResult().Succeeded(), "file close failed after budget recovery");
         }
         runtime.Shutdown();

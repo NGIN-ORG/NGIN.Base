@@ -104,3 +104,80 @@ TEST_CASE("Thread pool RunOne can help the sole worker's local queue", "[Executi
     REQUIRE(helped);
     REQUIRE(affine);
 }
+
+TEST_CASE("Thread pool recursive helping defers beyond the dispatch depth limit", "[Execution][ThreadPoolScheduler][Budget]")
+{
+    ThreadPoolScheduler               scheduler(1);
+    int                               depth = 0, maximumDepth = 0, invoked = 0;
+    bool                              accepted = true;
+    std::promise<bool>                done;
+    auto                              result = done.get_future();
+    NGIN::Utilities::Callable<void()> work;
+    work = [&] {
+        ++depth;
+        maximumDepth = std::max(maximumDepth, depth);
+        ++invoked;
+        if (invoked < 100)
+        {
+            accepted &= bool(scheduler.Execute(WorkItem(work)));
+            (void) scheduler.RunOne();
+        }
+        --depth;
+        if (depth == 0 && (invoked == 100 || !accepted))
+            done.set_value(accepted && maximumDepth <= 16 && invoked == 100);
+    };
+    REQUIRE(scheduler.Execute(WorkItem(work)));
+    REQUIRE(result.get());
+}
+
+TEST_CASE("Thread pool helping charges reserved and ordinary work to its caller budget", "[Execution][ThreadPoolScheduler][Budget]")
+{
+    std::atomic<int>    invoked {0};
+    std::latch          started {1}, release {1};
+    ThreadPoolScheduler scheduler(1);
+    REQUIRE(scheduler.Execute(WorkItem([&] {
+        started.count_down();
+        release.wait();
+    })));
+    started.wait();
+    // The scope releases the parked worker even when a subsequent assertion fails.
+    struct Release final
+    {
+        std::latch& latch;
+        ~Release() { latch.count_down(); }
+    } guard {release};
+    auto completion = scheduler.ReserveCompletion(WorkItem([&] { ++invoked; }));
+    REQUIRE(completion);
+    completion->Dispatch();
+    for (int item = 0; item != 5; ++item)
+        REQUIRE(scheduler.Execute(WorkItem([&] { ++invoked; })));
+    {
+        detail::WorkBudget budget(2);
+        scheduler.RunUntilIdle();
+        REQUIRE(invoked.load() == 2);
+        REQUIRE_FALSE(scheduler.RunOne());
+    }
+    scheduler.RunUntilIdle();
+    REQUIRE(invoked.load() == 6);
+}
+
+TEST_CASE("Thread pool timer registration removes queued work and preserves detached timers", "[Execution][ThreadPoolScheduler][Timer]")
+{
+    ThreadPoolScheduler scheduler(1);
+    auto                state    = std::make_shared<int>(42);
+    std::weak_ptr<int>  released = state;
+    auto                deadline = NGIN::Time::TimePoint::FromNanoseconds(NGIN::Time::MonotonicClock::Now().ToNanoseconds() + 3600'000'000'000ULL);
+    auto                timer    = scheduler.ScheduleTimer(WorkItem([state] {}), deadline);
+    REQUIRE(timer);
+    state.reset();
+    REQUIRE_FALSE(released.expired());
+    REQUIRE(timer->Cancel());
+    REQUIRE(released.expired());
+    REQUIRE_FALSE(timer->Cancel());
+    std::promise<void> done;
+    auto               finished = done.get_future();
+    auto               detached = scheduler.ScheduleTimer(WorkItem([&] { done.set_value(); }), NGIN::Time::MonotonicClock::Now());
+    REQUIRE(detached);
+    detached->Detach();
+    REQUIRE(finished.wait_for(std::chrono::seconds(3)) == std::future_status::ready);
+}

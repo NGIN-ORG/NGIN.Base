@@ -61,8 +61,9 @@ namespace NGIN::IO
             UInt32                queueDepthHint {1024};
             FileBackendPreference backendPreference {FileBackendPreference::Auto};
         };
-        /// @brief Positive memory/admission limits and maximum callbacks per poll.
+        /// @brief Positive memory/admission limits and maximum cooperative work units per poll.
         /// @details Completion storage is reserved separately from ordinary work.
+        /// Each dispatched callback and eligible sequential task transfer consumes a unit.
         /// A callback cannot be preempted by batchSize; move blocking or expensive
         /// processing to an external executor.
         struct Options
@@ -117,6 +118,15 @@ namespace NGIN::IO
         /// @throws std::logic_error inside a callback, or off-owner without a committed driver.
         /// Shutdown after Stopped is an idempotent no-op.
         void Shutdown();
+
+        enum class ShutdownStatus { Stopped, Incomplete };
+        /// @brief Requests stop and drives or waits until drainage or a monotonic deadline.
+        /// @details Incomplete retains all runtime ownership and reserved delivery. Continue
+        /// driving or call Shutdown later; keep the runtime and borrowed resources alive.
+        /// Stopped covers runtime drainage, not application joins on external executors.
+        /// Deadlines are checked between batches; callbacks and backend stop hooks are not preempted.
+        /// Uses the same owner/callback restrictions as Shutdown. Destruction still drains.
+        [[nodiscard]] ShutdownStatus ShutdownUntil(NGIN::Time::TimePoint deadline);
 
         /// @brief Monotonic next-timer snapshot for an embedding application loop.
         [[nodiscard]] std::optional<NGIN::Time::TimePoint> NextDeadline() const noexcept;

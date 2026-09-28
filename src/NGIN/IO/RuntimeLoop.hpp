@@ -85,6 +85,7 @@ namespace NGIN::IO::detail
         void  Run(NGIN::Execution::WorkItem entered = {});
         void  RequestStop() noexcept;
         void  Shutdown();
+        [[nodiscard]] bool ShutdownUntil(NGIN::Time::TimePoint deadline);
         State GetState() const noexcept;
 
         // Host-loop snapshots. Notifications remain readable until PollOnce;
@@ -97,6 +98,7 @@ namespace NGIN::IO::detail
     private:
         std::expected<std::uint64_t, std::error_code> Register(
                 std::uintptr_t handle, unsigned interests, void* operation, std::shared_ptr<Handler> handler, bool arm) noexcept;
+        bool ShutdownImpl(std::optional<NGIN::Time::TimePoint> deadline);
         struct Impl;
         std::unique_ptr<Impl> m_impl;
     };

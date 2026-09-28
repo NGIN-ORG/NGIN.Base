@@ -6,7 +6,9 @@
 #include "WorkItem.hpp"
 #include <NGIN/Execution/ScheduleResult.hpp>
 #include <NGIN/Execution/Thread.hpp>
+#include <NGIN/Execution/TimerRegistration.hpp>
 #include <NGIN/Execution/detail/CompletionQueue.hpp>
+#include <NGIN/Execution/detail/WorkBudget.hpp>
 #include <NGIN/Sync/AtomicCondition.hpp>
 #include <NGIN/Sync/SpinLock.hpp>
 #include <NGIN/Time/MonotonicClock.hpp>
@@ -16,6 +18,7 @@
 #include <array>
 #include <atomic>
 #include <cstddef>
+#include <limits>
 #include <mutex>
 #include <utility>
 #include <vector>
@@ -79,10 +82,7 @@ namespace NGIN::Execution
             // Retiring an accepted cancellation-aware timer can publish its
             // reserved terminal delivery. Do this before joining the workers.
             ClearAllWork();
-            {
-                std::lock_guard<std::mutex> lock(m_timersMutex);
-                m_timerHeap.clear();
-            }
+            ClearTimers();
             m_workWake.NotifyAll();
             m_timerWake.NotifyAll();
             for (auto& t: m_threads)
@@ -141,12 +141,28 @@ namespace NGIN::Execution
             const NGIN::Time::TimePoint now = NGIN::Time::MonotonicClock::Now();
             if (resumeAt <= now)
                 return Execute(std::move(item));
+            auto registration = ScheduleTimer(std::move(item), resumeAt);
+            if (!registration)
+                return std::unexpected(registration.error());
+            registration->Detach();
+            return {};
+        }
+
+        [[nodiscard]] std::expected<TimerRegistration, ScheduleError> ScheduleTimer(
+                WorkItem item, NGIN::Time::TimePoint deadline) noexcept
+        {
+            if (item.IsEmpty())
+                return std::unexpected(ScheduleError::Rejected);
+            std::uint64_t identifier;
             try
             {
-                std::lock_guard<std::mutex> lock(m_timersMutex);
+                std::lock_guard lock(m_timersMutex);
                 if (m_stop.load(std::memory_order_acquire))
                     return std::unexpected(ScheduleError::Stopped);
-                m_timerHeap.emplace_back(resumeAt, std::move(item));
+                if (m_nextTimerIdentifier == (std::numeric_limits<std::uint64_t>::max)())
+                    return std::unexpected(ScheduleError::ResourceExhausted);
+                identifier = ++m_nextTimerIdentifier;
+                m_timerHeap.emplace_back(deadline, std::move(item), identifier);
                 std::push_heap(m_timerHeap.begin(), m_timerHeap.end(), TimerEntryCompare {});
             } catch (const std::bad_alloc&)
             {
@@ -156,7 +172,7 @@ namespace NGIN::Execution
                 return std::unexpected(ScheduleError::Rejected);
             }
             m_timerWake.NotifyOne();
-            return {};
+            return TimerRegistration(this, deadline.ToNanoseconds(), identifier, +[](void* state, std::uint64_t, std::uint64_t id) noexcept { return static_cast<ThreadPoolScheduler*>(state)->CancelTimer(id); });
         }
 
         /// @brief Executes at most one available work item on the calling thread.
@@ -356,14 +372,47 @@ namespace NGIN::Execution
             }
         };
 
-        using TimerEntry = std::pair<NGIN::Time::TimePoint, WorkItem>;
+        struct TimerEntry
+        {
+            NGIN::Time::TimePoint deadline;
+            WorkItem              work;
+            std::uint64_t         identifier;
+            TimerEntry(NGIN::Time::TimePoint time, WorkItem item, std::uint64_t id) noexcept
+                : deadline(time), work(std::move(item)), identifier(id) {}
+        };
         struct TimerEntryCompare
         {
             bool operator()(const TimerEntry& a, const TimerEntry& b) const noexcept
             {
-                return a.first > b.first;
+                return a.deadline > b.deadline;
             }
         };
+
+        bool CancelTimer(std::uint64_t identifier) noexcept
+        {
+            WorkItem retired;
+            {
+                std::lock_guard lock(m_timersMutex);
+                auto            found = std::find_if(m_timerHeap.begin(), m_timerHeap.end(),
+                                                     [identifier](const TimerEntry& entry) { return entry.identifier == identifier; });
+                if (found == m_timerHeap.end())
+                    return false;
+                retired = std::move(found->work);
+                m_timerHeap.erase(found);
+                std::make_heap(m_timerHeap.begin(), m_timerHeap.end(), TimerEntryCompare {});
+            }
+            m_timerWake.NotifyOne();
+            return true;
+        }
+
+        void ClearTimers() noexcept
+        {
+            std::vector<TimerEntry> retired;
+            {
+                std::lock_guard lock(m_timersMutex);
+                retired.swap(m_timerHeap);
+            }
+        }
 
         static inline thread_local ThreadPoolScheduler* s_currentScheduler = nullptr;
         static inline thread_local size_t               s_workerIndex      = static_cast<size_t>(-1);
@@ -411,6 +460,9 @@ namespace NGIN::Execution
         // while old local/injected work cannot be displaced forever by YieldNow.
         [[nodiscard]] bool TryRunOne(size_t index, size_t& sourceCursor) noexcept
         {
+            detail::DispatchBudget dispatch;
+            if (!dispatch.Entered())
+                return false;
             for (size_t attempt = 0; attempt != 4; ++attempt)
             {
                 const size_t source = sourceCursor;
@@ -420,7 +472,10 @@ namespace NGIN::Execution
                 {
                     case 0:
                         if (m_completions.RunOne())
+                        {
+                            dispatch.Invoked();
                             return true;
+                        }
                         break;
                     case 1:
                         work = TryDequeueInjection();
@@ -436,7 +491,12 @@ namespace NGIN::Execution
                 }
                 if (!work.IsEmpty())
                 {
-                    work.Invoke();
+                    dispatch.Invoked();
+                    // Shutdown may close admission before its queue-clear pass.
+                    // Retire dequeued ordinary work during that window instead of
+                    // starting a new body. Its destructor can publish reserved cleanup.
+                    if (!m_stop.load(std::memory_order_acquire))
+                        work.Invoke();
                     return true;
                 }
             }
@@ -448,7 +508,9 @@ namespace NGIN::Execution
                     continue;
                 if (auto stolen = m_workers[victim].TrySteal(); !stolen.IsEmpty())
                 {
-                    stolen.Invoke();
+                    dispatch.Invoked();
+                    if (!m_stop.load(std::memory_order_acquire))
+                        stolen.Invoke();
                     return true;
                 }
             }
@@ -468,15 +530,15 @@ namespace NGIN::Execution
                 {
                     std::lock_guard<std::mutex> lock(m_timersMutex);
                     const auto                  now = NGIN::Time::MonotonicClock::Now();
-                    while (!m_timerHeap.empty() && m_timerHeap.front().first <= now)
+                    while (!m_timerHeap.empty() && m_timerHeap.front().deadline <= now)
                     {
                         std::pop_heap(m_timerHeap.begin(), m_timerHeap.end(), TimerEntryCompare {});
                         try
                         {
-                            ready.push_back(std::move(m_timerHeap.back().second));
+                            ready.push_back(std::move(m_timerHeap.back().work));
                         } catch (...)
                         {
-                            allocationFallback = std::move(m_timerHeap.back().second);
+                            allocationFallback = std::move(m_timerHeap.back().work);
                         }
                         m_timerHeap.pop_back();
                         if (!allocationFallback.IsEmpty())
@@ -486,7 +548,7 @@ namespace NGIN::Execution
                     if (!m_timerHeap.empty())
                     {
                         hasNextWake = true;
-                        nextWakeAt  = m_timerHeap.front().first;
+                        nextWakeAt  = m_timerHeap.front().deadline;
                     }
                 }
 
@@ -566,6 +628,7 @@ namespace NGIN::Execution
         uint64_t                m_affinityMask {0};
 
         std::vector<TimerEntry>     m_timerHeap;
+        std::uint64_t               m_nextTimerIdentifier {0};
         std::mutex                  m_timersMutex;
         NGIN::Sync::AtomicCondition m_timerWake;
     };

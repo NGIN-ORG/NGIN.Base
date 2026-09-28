@@ -247,9 +247,9 @@ Use `Task<T, NetError>`.
 
 At the root of the program or in tests:
 
-- `Completion<T, NetError>::IsDomainError()` means a networking-domain failure
-- `IsCanceled()` means cancellation
-- `IsFault()` means async/runtime failure
+- `HasError()` identifies the Error channel; `Error().IsDomainError()` identifies a networking payload
+- `IsStopped()` identifies the Stopped channel; `StopReason()` explains why work stopped
+- `Error().IsFault()` identifies an async/runtime payload within the Error channel
 
 Cancellation is not reported as `NetError`.
 

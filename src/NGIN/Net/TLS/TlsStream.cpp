@@ -86,18 +86,18 @@ namespace NGIN::Net::TLS
                 bool                                            timedOut)
         {
             using Out = NGIN::Async::Completion<void, TlsError>;
-            if (completion.IsDomainError())
+            if ((completion.HasError() && completion.Error().IsDomainError()))
             {
                 return Out::DomainFailure(detail::MakeTransportError(
-                        std::move(completion).DomainError(), "inner transport operation failed"));
+                        std::move(completion).Error().DomainError(), "inner transport operation failed"));
             }
-            if (completion.IsCanceled())
+            if (completion.IsStopped())
             {
                 return Out::DomainFailure(CancellationError(timedOut));
             }
-            if (completion.IsFault())
+            if ((completion.HasError() && completion.Error().IsFault()))
             {
-                return Out::Faulted(std::move(completion).Fault());
+                return Out::Faulted(std::move(completion).Error().Fault());
             }
             return Out::Faulted(NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidTaskUsage));
         }
@@ -105,21 +105,10 @@ namespace NGIN::Net::TLS
         NGIN::Async::Task<void, TlsError> PropagateVoidCompletion(
                 NGIN::Async::Completion<void, TlsError> completion)
         {
-            if (completion.IsDomainError())
-            {
-                co_await NGIN::Async::DomainFailure(std::move(completion).DomainError());
-                co_return;
-            }
-            if (completion.IsCanceled())
-            {
-                co_await NGIN::Async::Canceled();
-                co_return;
-            }
-            if (completion.IsFault())
-            {
-                co_await NGIN::Async::Faulted(std::move(completion).Fault());
-                co_return;
-            }
+            if (completion.IsStopped())
+                co_await NGIN::Async::Stopped(completion.StopReason());
+            else if (completion.HasError())
+                co_await NGIN::Async::Failure(std::move(completion).Error());
             co_return;
         }
     }// namespace
@@ -214,13 +203,11 @@ namespace NGIN::Net::TLS
             std::size_t offset = 0;
             while (offset < encrypted.value().size())
             {
-                auto operation = NGIN::Async::Spawn(
+                auto operation = m_inner->WriteAsync(
                         ctx,
-                        m_inner->WriteAsync(
-                                ctx,
-                                NGIN::Net::ConstByteSpan {encrypted.value().data() + offset, encrypted.value().size() - offset},
-                                token));
-                auto completion = co_await operation;
+                        NGIN::Net::ConstByteSpan {encrypted.value().data() + offset, encrypted.value().size() - offset},
+                        token);
+                auto completion = co_await operation.AsCompletion();
                 if (!completion)
                 {
                     co_await PropagateVoidCompletion(MapNetFailureToVoid(
@@ -245,8 +232,8 @@ namespace NGIN::Net::TLS
             NGIN::Async::CancellationToken token)
     {
         std::array<NGIN::Byte, 16 * 1024> buffer {};
-        auto                              operation  = NGIN::Async::Spawn(ctx, m_inner->ReadAsync(ctx, buffer, token));
-        auto                              completion = co_await operation;
+        auto                              operation  = m_inner->ReadAsync(ctx, buffer, token);
+        auto                              completion = co_await operation.AsCompletion();
         if (!completion)
         {
             co_await PropagateVoidCompletion(MapNetFailureToVoid(
@@ -352,10 +339,8 @@ namespace NGIN::Net::TLS
                 co_return;
             }
 
-            auto flushOperation = NGIN::Async::Spawn(
-                    operationContext,
-                    FlushEncrypted(operationContext, operationContext.GetCancellationToken()));
-            auto flushCompletion = co_await flushOperation;
+            auto flushOperation  = FlushEncrypted(operationContext, operationContext.GetCancellationToken());
+            auto flushCompletion = co_await flushOperation.AsCompletion();
             if (!flushCompletion)
             {
                 finishTimeout();
@@ -373,10 +358,8 @@ namespace NGIN::Net::TLS
             }
             if (step.value().status == detail::TlsProviderStatus::WantRead)
             {
-                auto readOperation = NGIN::Async::Spawn(
-                        operationContext,
-                        ReceiveEncrypted(operationContext, operationContext.GetCancellationToken()));
-                auto readCompletion = co_await readOperation;
+                auto readOperation  = ReceiveEncrypted(operationContext, operationContext.GetCancellationToken());
+                auto readCompletion = co_await readOperation.AsCompletion();
                 if (!readCompletion)
                 {
                     finishTimeout();
@@ -436,21 +419,19 @@ namespace NGIN::Net::TLS
                 co_return step.error();
             }
 
-            auto flushOperation = NGIN::Async::Spawn(
-                    operationContext,
-                    FlushEncrypted(operationContext, operationContext.GetCancellationToken()));
-            auto flushCompletion = co_await flushOperation;
+            auto flushOperation  = FlushEncrypted(operationContext, operationContext.GetCancellationToken());
+            auto flushCompletion = co_await flushOperation.AsCompletion();
             if (!flushCompletion)
             {
                 m_state.store(TlsStreamState::Failed, std::memory_order_release);
-                if (flushCompletion.IsDomainError())
+                if ((flushCompletion.HasError() && flushCompletion.Error().IsDomainError()))
                 {
-                    co_return std::move(flushCompletion).DomainError();
+                    co_return std::move(flushCompletion).Error().DomainError();
                 }
-                if (flushCompletion.IsFault())
+                if ((flushCompletion.HasError() && flushCompletion.Error().IsFault()))
                 {
                     co_return NGIN::Async::Completion<NGIN::UInt32, TlsError>::Faulted(
-                            std::move(flushCompletion).Fault());
+                            std::move(flushCompletion).Error().Fault());
                 }
                 co_return CancellationError(false);
             }
@@ -466,21 +447,19 @@ namespace NGIN::Net::TLS
             }
             if (step.value().status == detail::TlsProviderStatus::WantRead)
             {
-                auto readOperation = NGIN::Async::Spawn(
-                        operationContext,
-                        ReceiveEncrypted(operationContext, operationContext.GetCancellationToken()));
-                auto readCompletion = co_await readOperation;
+                auto readOperation  = ReceiveEncrypted(operationContext, operationContext.GetCancellationToken());
+                auto readCompletion = co_await readOperation.AsCompletion();
                 if (!readCompletion)
                 {
                     m_state.store(TlsStreamState::Failed, std::memory_order_release);
-                    if (readCompletion.IsDomainError())
+                    if ((readCompletion.HasError() && readCompletion.Error().IsDomainError()))
                     {
-                        co_return std::move(readCompletion).DomainError();
+                        co_return std::move(readCompletion).Error().DomainError();
                     }
-                    if (readCompletion.IsFault())
+                    if ((readCompletion.HasError() && readCompletion.Error().IsFault()))
                     {
                         co_return NGIN::Async::Completion<NGIN::UInt32, TlsError>::Faulted(
-                                std::move(readCompletion).Fault());
+                                std::move(readCompletion).Error().Fault());
                     }
                     co_return CancellationError(false);
                 }
@@ -520,21 +499,19 @@ namespace NGIN::Net::TLS
                 co_return step.error();
             }
 
-            auto flushOperation = NGIN::Async::Spawn(
-                    operationContext,
-                    FlushEncrypted(operationContext, operationContext.GetCancellationToken()));
-            auto flushCompletion = co_await flushOperation;
+            auto flushOperation  = FlushEncrypted(operationContext, operationContext.GetCancellationToken());
+            auto flushCompletion = co_await flushOperation.AsCompletion();
             if (!flushCompletion)
             {
                 m_state.store(TlsStreamState::Failed, std::memory_order_release);
-                if (flushCompletion.IsDomainError())
+                if ((flushCompletion.HasError() && flushCompletion.Error().IsDomainError()))
                 {
-                    co_return std::move(flushCompletion).DomainError();
+                    co_return std::move(flushCompletion).Error().DomainError();
                 }
-                if (flushCompletion.IsFault())
+                if ((flushCompletion.HasError() && flushCompletion.Error().IsFault()))
                 {
                     co_return NGIN::Async::Completion<NGIN::UInt32, TlsError>::Faulted(
-                            std::move(flushCompletion).Fault());
+                            std::move(flushCompletion).Error().Fault());
                 }
                 co_return CancellationError(false);
             }
@@ -551,21 +528,19 @@ namespace NGIN::Net::TLS
             }
             if (step.value().status == detail::TlsProviderStatus::WantRead)
             {
-                auto readOperation = NGIN::Async::Spawn(
-                        operationContext,
-                        ReceiveEncrypted(operationContext, operationContext.GetCancellationToken()));
-                auto readCompletion = co_await readOperation;
+                auto readOperation  = ReceiveEncrypted(operationContext, operationContext.GetCancellationToken());
+                auto readCompletion = co_await readOperation.AsCompletion();
                 if (!readCompletion)
                 {
                     m_state.store(TlsStreamState::Failed, std::memory_order_release);
-                    if (readCompletion.IsDomainError())
+                    if ((readCompletion.HasError() && readCompletion.Error().IsDomainError()))
                     {
-                        co_return std::move(readCompletion).DomainError();
+                        co_return std::move(readCompletion).Error().DomainError();
                     }
-                    if (readCompletion.IsFault())
+                    if ((readCompletion.HasError() && readCompletion.Error().IsFault()))
                     {
                         co_return NGIN::Async::Completion<NGIN::UInt32, TlsError>::Faulted(
-                                std::move(readCompletion).Fault());
+                                std::move(readCompletion).Error().Fault());
                     }
                     co_return CancellationError(false);
                 }
@@ -616,10 +591,8 @@ namespace NGIN::Net::TLS
                 co_return;
             }
 
-            auto flushOperation = NGIN::Async::Spawn(
-                    operationContext,
-                    FlushEncrypted(operationContext, operationContext.GetCancellationToken()));
-            auto flushCompletion = co_await flushOperation;
+            auto flushOperation  = FlushEncrypted(operationContext, operationContext.GetCancellationToken());
+            auto flushCompletion = co_await flushOperation.AsCompletion();
             if (!flushCompletion)
             {
                 m_state.store(TlsStreamState::Failed, std::memory_order_release);
@@ -636,10 +609,8 @@ namespace NGIN::Net::TLS
             }
             if (step.value().status == detail::TlsProviderStatus::WantRead)
             {
-                auto readOperation = NGIN::Async::Spawn(
-                        operationContext,
-                        ReceiveEncrypted(operationContext, operationContext.GetCancellationToken()));
-                auto readCompletion = co_await readOperation;
+                auto readOperation  = ReceiveEncrypted(operationContext, operationContext.GetCancellationToken());
+                auto readCompletion = co_await readOperation.AsCompletion();
                 if (!readCompletion)
                 {
                     m_state.store(TlsStreamState::Failed, std::memory_order_release);
@@ -655,20 +626,20 @@ namespace NGIN::Net::TLS
             NGIN::Net::ByteSpan            destination,
             NGIN::Async::CancellationToken token)
     {
-        auto operation  = NGIN::Async::Spawn(ctx, ReadTlsAsync(ctx, destination, token));
-        auto completion = co_await operation;
-        if (completion.IsDomainError())
+        auto operation  = ReadTlsAsync(ctx, destination, token);
+        auto completion = co_await operation.AsCompletion();
+        if ((completion.HasError() && completion.Error().IsDomainError()))
         {
-            co_return std::move(completion).DomainError().ToNetError();
+            co_return std::move(completion).Error().DomainError().ToNetError();
         }
-        if (completion.IsCanceled())
+        if (completion.IsStopped())
         {
-            co_return NGIN::Async::Completion<NGIN::UInt32, NGIN::Net::NetError>::Canceled();
+            co_return NGIN::Async::Completion<NGIN::UInt32, NGIN::Net::NetError>::Stopped(completion.StopReason());
         }
-        if (completion.IsFault())
+        if ((completion.HasError() && completion.Error().IsFault()))
         {
             co_return NGIN::Async::Completion<NGIN::UInt32, NGIN::Net::NetError>::Faulted(
-                    std::move(completion).Fault());
+                    std::move(completion).Error().Fault());
         }
         co_return completion.Value();
     }
@@ -678,20 +649,20 @@ namespace NGIN::Net::TLS
             NGIN::Net::ConstByteSpan       source,
             NGIN::Async::CancellationToken token)
     {
-        auto operation  = NGIN::Async::Spawn(ctx, WriteTlsAsync(ctx, source, token));
-        auto completion = co_await operation;
-        if (completion.IsDomainError())
+        auto operation  = WriteTlsAsync(ctx, source, token);
+        auto completion = co_await operation.AsCompletion();
+        if ((completion.HasError() && completion.Error().IsDomainError()))
         {
-            co_return std::move(completion).DomainError().ToNetError();
+            co_return std::move(completion).Error().DomainError().ToNetError();
         }
-        if (completion.IsCanceled())
+        if (completion.IsStopped())
         {
-            co_return NGIN::Async::Completion<NGIN::UInt32, NGIN::Net::NetError>::Canceled();
+            co_return NGIN::Async::Completion<NGIN::UInt32, NGIN::Net::NetError>::Stopped(completion.StopReason());
         }
-        if (completion.IsFault())
+        if ((completion.HasError() && completion.Error().IsFault()))
         {
             co_return NGIN::Async::Completion<NGIN::UInt32, NGIN::Net::NetError>::Faulted(
-                    std::move(completion).Fault());
+                    std::move(completion).Error().Fault());
         }
         co_return completion.Value();
     }

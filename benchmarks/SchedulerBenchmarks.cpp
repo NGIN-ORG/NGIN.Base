@@ -1,5 +1,6 @@
 #include <NGIN/Async/Task.hpp>
 #include <NGIN/Async/TaskContext.hpp>
+#include <NGIN/Async/TaskSupervisor.hpp>
 #include <NGIN/Async/WhenAll.hpp>
 #include <NGIN/Benchmark.hpp>
 #include <NGIN/Execution/CooperativeScheduler.hpp>
@@ -10,6 +11,7 @@
 #include <cstdlib>
 #include <exception>
 #include <iostream>
+#include <stdexcept>
 #include <thread>
 #include <vector>
 
@@ -117,41 +119,6 @@ int main()
             benchCtx.stop();
         },
                             "FiberScheduler schedule+complete 10k coroutines");
-
-        Benchmark::Register([](BenchmarkContext& benchCtx) {
-            NGIN::Execution::FiberScheduler scheduler(numThreads, numFibers);
-            std::atomic<int>                completed {0};
-
-            NGIN::Async::TaskContext taskCtx(scheduler);
-
-            auto taskYieldMany = [](NGIN::Async::TaskContext& ctx, std::atomic<int>& completed) -> NGIN::Async::Task<void> {
-                for (int i = 0; i < yieldsPerYieldMany; ++i)
-                {
-                    co_await ctx.YieldNow();
-                }
-                completed.fetch_add(1, std::memory_order_release);
-                completed.notify_one();
-                co_return;
-            };
-
-            std::vector<NGIN::Async::Operation<void>> operations;
-            operations.reserve(numYieldManyTasks);
-
-            benchCtx.start();
-            for (int i = 0; i < numYieldManyTasks; ++i)
-            {
-                operations.emplace_back(NGIN::Async::Spawn(taskCtx, taskYieldMany(taskCtx, completed)));
-            }
-
-            auto value = completed.load(std::memory_order_acquire);
-            while (value < numYieldManyTasks)
-            {
-                completed.wait(value);
-                value = completed.load(std::memory_order_acquire);
-            }
-            benchCtx.stop();
-        },
-                            "FiberScheduler Task<void> Yield x8 2k");
 
         Benchmark::Register([](BenchmarkContext& benchCtx) {
             NGIN::Execution::FiberScheduler scheduler(numThreads, numFibers);
@@ -410,19 +377,21 @@ int main()
 
             std::vector<NGIN::Async::Operation<void>> operations;
             operations.reserve(numCoroutines);
+            NGIN::Async::TaskSupervisor<> roots(taskCtx.GetEnvironment(), numCoroutines);
+            NGIN::Async::TaskContext      joinContext(scheduler);
 
             benchCtx.start();
             for (int i = 0; i < numCoroutines; ++i)
             {
-                operations.emplace_back(NGIN::Async::Spawn(taskCtx, taskYield(taskCtx, completed)));
+                operations.emplace_back(roots.Spawn(taskYield(taskCtx, completed)).value());
             }
 
-            auto value = completed.load(std::memory_order_acquire);
-            while (value < numCoroutines)
-            {
-                completed.wait(value);
-                value = completed.load(std::memory_order_acquire);
-            }
+            auto join   = [&]() -> NGIN::Async::Task<bool> { co_return (co_await roots.Join()).Succeeded(); };
+            auto result = NGIN::Async::SyncWait(joinContext, join());
+            if (!result.Succeeded() || !result.Value())
+                throw std::runtime_error("scheduler benchmark roots failed");
+            if (completed.load(std::memory_order_acquire) != numCoroutines)
+                throw std::runtime_error("scheduler benchmark lost task completion");
             benchCtx.stop();
         },
                             "ThreadPoolScheduler Task<void> Yield 10k");
@@ -445,19 +414,21 @@ int main()
 
             std::vector<NGIN::Async::Operation<void>> operations;
             operations.reserve(numYieldManyTasks);
+            NGIN::Async::TaskSupervisor<> roots(taskCtx.GetEnvironment(), numYieldManyTasks);
+            NGIN::Async::TaskContext      joinContext(scheduler);
 
             benchCtx.start();
             for (int i = 0; i < numYieldManyTasks; ++i)
             {
-                operations.emplace_back(NGIN::Async::Spawn(taskCtx, taskYieldMany(taskCtx, completed)));
+                operations.emplace_back(roots.Spawn(taskYieldMany(taskCtx, completed)).value());
             }
 
-            auto value = completed.load(std::memory_order_acquire);
-            while (value < numYieldManyTasks)
-            {
-                completed.wait(value);
-                value = completed.load(std::memory_order_acquire);
-            }
+            auto join   = [&]() -> NGIN::Async::Task<bool> { co_return (co_await roots.Join()).Succeeded(); };
+            auto result = NGIN::Async::SyncWait(joinContext, join());
+            if (!result.Succeeded() || !result.Value())
+                throw std::runtime_error("scheduler benchmark roots failed");
+            if (completed.load(std::memory_order_acquire) != numYieldManyTasks)
+                throw std::runtime_error("scheduler benchmark lost task completion");
             benchCtx.stop();
         },
                             "ThreadPoolScheduler Task<void> Yield x8 2k");
@@ -475,8 +446,7 @@ int main()
 
             auto observeCanceled = [](NGIN::Async::TaskContext& ctx, std::atomic<int>& completed, auto delayCanceled)
                     -> NGIN::Async::Task<void> {
-                auto operation = NGIN::Async::Spawn(ctx, delayCanceled(ctx));
-                static_cast<void>(co_await operation);
+                static_cast<void>(co_await delayCanceled(ctx).AsCompletion());
                 completed.fetch_add(1, std::memory_order_release);
                 completed.notify_one();
                 co_return;
@@ -484,21 +454,23 @@ int main()
 
             std::vector<NGIN::Async::Operation<void>> operations;
             operations.reserve(numCoroutines);
+            NGIN::Async::TaskSupervisor<> roots(taskCtx.GetEnvironment(), numCoroutines);
+            NGIN::Async::TaskContext      joinContext(scheduler);
 
             benchCtx.start();
             for (int i = 0; i < numCoroutines; ++i)
             {
-                operations.emplace_back(NGIN::Async::Spawn(taskCtx, observeCanceled(taskCtx, completed, delayCanceled)));
+                operations.emplace_back(roots.Spawn(observeCanceled(taskCtx, completed, delayCanceled)).value());
             }
 
             cancelSource.Cancel();
 
-            auto value = completed.load(std::memory_order_acquire);
-            while (value < numCoroutines)
-            {
-                completed.wait(value);
-                value = completed.load(std::memory_order_acquire);
-            }
+            auto join   = [&]() -> NGIN::Async::Task<bool> { co_return (co_await roots.Join()).Succeeded(); };
+            auto result = NGIN::Async::SyncWait(joinContext, join());
+            if (!result.Succeeded() || !result.Value())
+                throw std::runtime_error("scheduler benchmark roots failed");
+            if (completed.load(std::memory_order_acquire) != numCoroutines)
+                throw std::runtime_error("scheduler benchmark lost task completion");
             benchCtx.stop();
         },
                             "ThreadPoolScheduler Task<void> Delay(100ms) + cancel 10k");
@@ -522,19 +494,21 @@ int main()
 
             std::vector<NGIN::Async::Operation<void>> operations;
             operations.reserve(numCoroutines);
+            NGIN::Async::TaskSupervisor<> roots(taskCtx.GetEnvironment(), numCoroutines);
+            NGIN::Async::TaskContext      joinContext(scheduler);
 
             benchCtx.start();
             for (int i = 0; i < numCoroutines; ++i)
             {
-                operations.emplace_back(NGIN::Async::Spawn(taskCtx, coordinator(taskCtx, completed, leaf)));
+                operations.emplace_back(roots.Spawn(coordinator(taskCtx, completed, leaf)).value());
             }
 
-            auto value = completed.load(std::memory_order_acquire);
-            while (value < numCoroutines)
-            {
-                completed.wait(value);
-                value = completed.load(std::memory_order_acquire);
-            }
+            auto join   = [&]() -> NGIN::Async::Task<bool> { co_return (co_await roots.Join()).Succeeded(); };
+            auto result = NGIN::Async::SyncWait(joinContext, join());
+            if (!result.Succeeded() || !result.Value())
+                throw std::runtime_error("scheduler benchmark roots failed");
+            if (completed.load(std::memory_order_acquire) != numCoroutines)
+                throw std::runtime_error("scheduler benchmark lost task completion");
             benchCtx.stop();
         },
                             "ThreadPoolScheduler Task WhenAll(2x Yield) 10k");
@@ -576,16 +550,21 @@ int main()
 
             std::vector<NGIN::Async::Operation<void>> operations;
             operations.reserve(numCoroutines);
+            NGIN::Async::TaskSupervisor<> roots(taskCtx.GetEnvironment(), numCoroutines);
 
             benchCtx.start();
             for (int i = 0; i < numCoroutines; ++i)
             {
-                operations.emplace_back(NGIN::Async::Spawn(taskCtx, taskYield(taskCtx, completed)));
+                operations.emplace_back(roots.Spawn(taskYield(taskCtx, completed)).value());
             }
-            while (completed.load(std::memory_order_relaxed) < numCoroutines)
-            {
-                static_cast<void>(scheduler.RunOne());
-            }
+            while (roots.Pending() != 0)
+                if (!scheduler.RunOne())
+                    throw std::runtime_error("scheduler became idle before root retirement");
+            auto report = roots.TryJoin();
+            if (!report || !report->Succeeded())
+                throw std::runtime_error("scheduler benchmark roots failed");
+            if (completed.load(std::memory_order_acquire) != numCoroutines)
+                throw std::runtime_error("scheduler benchmark lost task completion");
             benchCtx.stop();
         },
                             "CooperativeScheduler Task<void> Yield 10k");
@@ -606,16 +585,21 @@ int main()
 
             std::vector<NGIN::Async::Operation<void>> operations;
             operations.reserve(numYieldManyTasks);
+            NGIN::Async::TaskSupervisor<> roots(taskCtx.GetEnvironment(), numYieldManyTasks);
 
             benchCtx.start();
             for (int i = 0; i < numYieldManyTasks; ++i)
             {
-                operations.emplace_back(NGIN::Async::Spawn(taskCtx, taskYieldMany(taskCtx, completed)));
+                operations.emplace_back(roots.Spawn(taskYieldMany(taskCtx, completed)).value());
             }
-            while (completed.load(std::memory_order_relaxed) < numYieldManyTasks)
-            {
-                static_cast<void>(scheduler.RunOne());
-            }
+            while (roots.Pending() != 0)
+                if (!scheduler.RunOne())
+                    throw std::runtime_error("scheduler became idle before root retirement");
+            auto report = roots.TryJoin();
+            if (!report || !report->Succeeded())
+                throw std::runtime_error("scheduler benchmark roots failed");
+            if (completed.load(std::memory_order_acquire) != numYieldManyTasks)
+                throw std::runtime_error("scheduler benchmark lost task completion");
             benchCtx.stop();
         },
                             "CooperativeScheduler Task<void> Yield x8 2k");
@@ -633,26 +617,30 @@ int main()
 
             auto observeCanceled = [](NGIN::Async::TaskContext& ctx, std::atomic<int>& completed, auto delayCanceled)
                     -> NGIN::Async::Task<void> {
-                auto operation = NGIN::Async::Spawn(ctx, delayCanceled(ctx));
-                static_cast<void>(co_await operation);
+                static_cast<void>(co_await delayCanceled(ctx).AsCompletion());
                 completed.fetch_add(1, std::memory_order_relaxed);
                 co_return;
             };
 
             std::vector<NGIN::Async::Operation<void>> operations;
             operations.reserve(numCoroutines);
+            NGIN::Async::TaskSupervisor<> roots(taskCtx.GetEnvironment(), numCoroutines);
 
             benchCtx.start();
             for (int i = 0; i < numCoroutines; ++i)
             {
-                operations.emplace_back(NGIN::Async::Spawn(taskCtx, observeCanceled(taskCtx, completed, delayCanceled)));
+                operations.emplace_back(roots.Spawn(observeCanceled(taskCtx, completed, delayCanceled)).value());
             }
 
             cancelSource.Cancel();
-            while (completed.load(std::memory_order_relaxed) < numCoroutines)
-            {
-                static_cast<void>(scheduler.RunOne());
-            }
+            while (roots.Pending() != 0)
+                if (!scheduler.RunOne())
+                    throw std::runtime_error("scheduler became idle before root retirement");
+            auto report = roots.TryJoin();
+            if (!report || !report->Succeeded())
+                throw std::runtime_error("scheduler benchmark roots failed");
+            if (completed.load(std::memory_order_acquire) != numCoroutines)
+                throw std::runtime_error("scheduler benchmark lost task completion");
             benchCtx.stop();
         },
                             "CooperativeScheduler Task<void> Delay(100ms) + cancel 10k");
@@ -675,17 +663,22 @@ int main()
 
             std::vector<NGIN::Async::Operation<void>> operations;
             operations.reserve(numCoroutines);
+            NGIN::Async::TaskSupervisor<> roots(taskCtx.GetEnvironment(), numCoroutines);
 
             benchCtx.start();
             for (int i = 0; i < numCoroutines; ++i)
             {
-                operations.emplace_back(NGIN::Async::Spawn(taskCtx, coordinator(taskCtx, completed, leaf)));
+                operations.emplace_back(roots.Spawn(coordinator(taskCtx, completed, leaf)).value());
             }
 
-            while (completed.load(std::memory_order_relaxed) < numCoroutines)
-            {
-                static_cast<void>(scheduler.RunOne());
-            }
+            while (roots.Pending() != 0)
+                if (!scheduler.RunOne())
+                    throw std::runtime_error("scheduler became idle before root retirement");
+            auto report = roots.TryJoin();
+            if (!report || !report->Succeeded())
+                throw std::runtime_error("scheduler benchmark roots failed");
+            if (completed.load(std::memory_order_acquire) != numCoroutines)
+                throw std::runtime_error("scheduler benchmark lost task completion");
             benchCtx.stop();
         },
                             "CooperativeScheduler Task WhenAll(2x Yield) 10k");

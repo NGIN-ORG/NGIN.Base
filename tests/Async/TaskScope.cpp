@@ -1,3 +1,4 @@
+#include <NGIN/Async/TaskSupervisor.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <NGIN/Async/TaskScope.hpp>
@@ -10,9 +11,11 @@
 namespace
 {
     template<typename E>
-    NGIN::Async::Task<bool, E> JoinScope(NGIN::Async::TaskContext&, NGIN::Async::TaskScope<E>& scope)
+    NGIN::Async::Task<bool, E> JoinScope(NGIN::Async::TaskContext&, NGIN::Async::TaskScope<E>& scope, bool* resumed = nullptr)
     {
         const auto& result = co_await scope.Join();
+        if (resumed)
+            *resumed = true;
         co_return result.Succeeded();
     }
 }// namespace
@@ -32,8 +35,13 @@ TEST_CASE("TaskScope joins child values and releases owned coroutine factories",
         co_return observed;
     }));
     REQUIRE_FALSE(lifetime.expired());
-    auto joined = NGIN::Async::Spawn(context, JoinScope(context, scope));
+    auto joinedTask = JoinScope(context, scope);
+
+    NGIN::Async::TaskSupervisor<typename decltype(joinedTask)::ErrorType> joinedRoot(context.GetEnvironment(), 1);
+
+    auto joined = joinedRoot.Spawn(std::move(joinedTask)).value();
     executor.RunUntilIdle();
+    REQUIRE(joinedRoot.TryJoin());
     REQUIRE(joined.IsCompleted());
     REQUIRE(joined.TakeResult().Value());
     REQUIRE(scope.Pending() == 0);
@@ -63,15 +71,20 @@ TEST_CASE("TaskScope records the first failure and joins canceled siblings", "[A
     REQUIRE(scope.Spawn([](NGIN::Async::TaskContext&) -> NGIN::Async::Task<void, int> {
         co_await NGIN::Async::DomainFailure(23);
     }));
-    auto joined = NGIN::Async::Spawn(context, JoinScope(context, scope));
+    auto joinedTask = JoinScope(context, scope);
+
+    NGIN::Async::TaskSupervisor<typename decltype(joinedTask)::ErrorType> joinedRoot(context.GetEnvironment(), 1);
+
+    auto joined = joinedRoot.Spawn(std::move(joinedTask)).value();
     executor.RunUntilIdle();
+    REQUIRE(joinedRoot.TryJoin());
     REQUIRE(joined.IsCompleted());
     REQUIRE_FALSE(joined.TakeResult().Value());
     REQUIRE(scope.GetCancellationToken().IsCancellationRequested());
     REQUIRE(destroyed == 1);
     auto result = scope.TakeResult();
-    REQUIRE(result.IsDomainError());
-    REQUIRE(result.DomainError() == 23);
+    REQUIRE((result.HasError() && result.Error().IsDomainError()));
+    REQUIRE(result.Error().DomainError() == 23);
 }
 
 TEST_CASE("TaskScope rejects capacity before invoking another child factory", "[Async][Scope]")
@@ -89,8 +102,13 @@ TEST_CASE("TaskScope rejects capacity before invoking another child factory", "[
     REQUIRE_FALSE(rejected);
     REQUIRE(rejected.error() == NGIN::Execution::ScheduleError::ResourceExhausted);
     REQUIRE_FALSE(invoked);
-    auto joined = NGIN::Async::Spawn(context, JoinScope(context, scope));
+    auto joinedTask = JoinScope(context, scope);
+
+    NGIN::Async::TaskSupervisor<typename decltype(joinedTask)::ErrorType> joinedRoot(context.GetEnvironment(), 1);
+
+    auto joined = joinedRoot.Spawn(std::move(joinedTask)).value();
     executor.RunUntilIdle();
+    REQUIRE(joinedRoot.TryJoin());
     REQUIRE(joined.TakeResult().Value());
     auto closed = scope.Spawn([](NGIN::Async::TaskContext&) -> NGIN::Async::Task<void> { co_return; });
     REQUIRE_FALSE(closed);
@@ -107,12 +125,17 @@ TEST_CASE("TaskScope reports a throwing factory and joins existing children", "[
         throw std::runtime_error("factory failure");
         // This function deliberately is not a coroutine.
     }));
-    auto joined = NGIN::Async::Spawn(context, JoinScope(context, scope));
+    auto joinedTask = JoinScope(context, scope);
+
+    NGIN::Async::TaskSupervisor<typename decltype(joinedTask)::ErrorType> joinedRoot(context.GetEnvironment(), 1);
+
+    auto joined = joinedRoot.Spawn(std::move(joinedTask)).value();
     executor.RunUntilIdle();
+    REQUIRE(joinedRoot.TryJoin());
     REQUIRE_FALSE(joined.TakeResult().Value());
     auto result = scope.TakeResult();
-    REQUIRE(result.IsFault());
-    REQUIRE(result.Fault().code == NGIN::Async::AsyncFaultCode::UnhandledException);
+    REQUIRE((result.HasError() && result.Error().IsFault()));
+    REQUIRE(result.Error().Fault().code == NGIN::Async::AsyncFaultCode::UnhandledException);
 }
 
 TEST_CASE("TaskScope can join independently executed children more than once", "[Async][Scope]")
@@ -126,15 +149,25 @@ TEST_CASE("TaskScope can join independently executed children more than once", "
                           [](NGIN::Async::TaskContext& child) -> NGIN::Async::Task<void> {
                               co_await child.YieldNow();
                           }));
-    auto joined = NGIN::Async::Spawn(context, JoinScope(context, scope));
+    auto joinedTask = JoinScope(context, scope);
+
+    NGIN::Async::TaskSupervisor<typename decltype(joinedTask)::ErrorType> joinedRoot(context.GetEnvironment(), 1);
+
+    auto joined = joinedRoot.Spawn(std::move(joinedTask)).value();
     while (!joined.IsCompleted())
     {
         owner.RunUntilIdle();
         std::this_thread::yield();
     }
+    REQUIRE(joinedRoot.TryJoin());
     REQUIRE(joined.TakeResult().Value());
-    auto again = NGIN::Async::Spawn(context, JoinScope(context, scope));
+    auto againTask = JoinScope(context, scope);
+
+    NGIN::Async::TaskSupervisor<typename decltype(againTask)::ErrorType> againRoot(context.GetEnvironment(), 1);
+
+    auto again = againRoot.Spawn(std::move(againTask)).value();
     owner.RunUntilIdle();
+    REQUIRE(againRoot.TryJoin());
     REQUIRE(again.TakeResult().Value());
     REQUIRE(scope.TakeResult().Succeeded());
 }
@@ -146,6 +179,12 @@ TEST_CASE("TaskScope joining waits for the last canceled child frame lease", "[A
     NGIN::Async::TaskScope                scope(context.GetExecutor());
     NGIN::Execution::WorkItem             release;
     int                                   destroyed = 0;
+    bool                                  limitWork = false;
+    SECTION("eligible join") {}
+    SECTION("join defers after work exhaustion")
+    {
+        limitWork = true;
+    }
     struct Guard
     {
         int& count;
@@ -166,21 +205,94 @@ TEST_CASE("TaskScope joining waits for the last canceled child frame lease", "[A
     REQUIRE(scope.Spawn([&](NGIN::Async::TaskContext& child) -> NGIN::Async::Task<void> {
         Guard guard {destroyed};
         co_await HoldFrame {release};
-        scope.RequestCancel();
+        scope.RequestStop();
         co_await child.YieldNow();
     }));
-    auto joining = NGIN::Async::Spawn(context, JoinScope(context, scope));
+    bool joinResumed = false;
+    auto joiningTask = JoinScope(context, scope, &joinResumed);
+
+    NGIN::Async::TaskSupervisor<typename decltype(joiningTask)::ErrorType> joiningRoot(context.GetEnvironment(), 1);
+
+    auto joining = joiningRoot.Spawn(std::move(joiningTask)).value();
     executor.RunUntilIdle();
     const bool completedWithLease = joining.IsCompleted();
     const int  destroyedWithLease = destroyed;
     release.Invoke();
-    release = {};
+    release                             = {};
     const bool completedOutsideExecutor = joining.IsCompleted();
+    bool       completedAtRetirement;
+    {
+        NGIN::Execution::detail::WorkBudget budget(limitWork ? 1 : 64);
+        REQUIRE(executor.RunOne());
+        completedAtRetirement = joinResumed;
+    }
     executor.RunUntilIdle();
+    REQUIRE(completedAtRetirement == !limitWork);
     REQUIRE_FALSE(completedWithLease);
     REQUIRE(destroyedWithLease == 0);
     REQUIRE_FALSE(completedOutsideExecutor);
+    REQUIRE(joiningRoot.TryJoin());
     REQUIRE(joining.IsCompleted());
     REQUIRE(destroyed == 1);
-    REQUIRE(scope.TakeResult().IsCanceled());
+    REQUIRE(scope.TakeResult().IsStopped());
+}
+
+TEST_CASE("TaskScope reports produced errors in spawn order rather than completion order", "[Async][Scope]")
+{
+    using namespace NGIN::Async;
+    NGIN::Execution::CooperativeScheduler observer, first, second;
+    TaskContext                           context(observer);
+    TaskScope<int>                        scope(context.GetEnvironment(), 2);
+    REQUIRE(scope.SpawnOn(NGIN::Execution::ExecutorRef::From(first), [](TaskContext&) -> Task<int, int> {
+        co_return Completion<int, int>::DomainFailure(11);
+    }));
+    REQUIRE(scope.SpawnOn(NGIN::Execution::ExecutorRef::From(second), [](TaskContext&) -> Task<int, int> {
+        co_return Completion<int, int>::DomainFailure(22);
+    }));
+    second.RunUntilIdle();
+    observer.RunUntilIdle();
+    REQUIRE(scope.GetCancellationToken().IsCancellationRequested());
+    first.RunUntilIdle();
+    auto joiningTask = JoinScope(context, scope);
+
+    NGIN::Async::TaskSupervisor<typename decltype(joiningTask)::ErrorType> joiningRoot(context.GetEnvironment(), 1);
+
+    auto joining = joiningRoot.Spawn(std::move(joiningTask)).value();
+    observer.RunUntilIdle();
+    REQUIRE(joiningRoot.TryJoin());
+    REQUIRE(joining.IsCompleted());
+    const auto report = scope.TakeResult();
+    REQUIRE(report.Errors().size() == 2);
+    REQUIRE(report.Errors()[0].DomainError() == 11);
+    REQUIRE(report.Errors()[1].DomainError() == 22);
+}
+
+TEST_CASE("TaskScope stopped children do not cancel siblings and errors outrank stop", "[Async][Scope]")
+{
+    using namespace NGIN::Async;
+    NGIN::Execution::CooperativeScheduler observer, worker;
+    TaskContext                           context(observer);
+    TaskScope<int>                        scope(context.GetEnvironment(), 2);
+    REQUIRE(scope.Spawn([](TaskContext&) -> Task<int, int> {
+        co_return Completion<int, int>::Stopped(StopReason::Deadline);
+    }));
+    REQUIRE(scope.SpawnOn(NGIN::Execution::ExecutorRef::From(worker), [](TaskContext&) -> Task<int, int> {
+        co_return Completion<int, int>::DomainFailure(17);
+    }));
+    observer.RunUntilIdle();
+    REQUIRE_FALSE(scope.GetCancellationToken().IsCancellationRequested());
+    worker.RunUntilIdle();
+    auto joiningTask = JoinScope(context, scope);
+
+    NGIN::Async::TaskSupervisor<typename decltype(joiningTask)::ErrorType> joiningRoot(context.GetEnvironment(), 1);
+
+    auto joining = joiningRoot.Spawn(std::move(joiningTask)).value();
+    observer.RunUntilIdle();
+    REQUIRE(joiningRoot.TryJoin());
+    REQUIRE(joining.IsCompleted());
+    const auto report = scope.TakeResult();
+    REQUIRE(report.HasError());
+    REQUIRE_FALSE(report.IsStopped());
+    REQUIRE(report.Error().DomainError() == 17);
+    REQUIRE(report.StoppedReason() == StopReason::Deadline);
 }

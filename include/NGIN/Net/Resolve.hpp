@@ -23,6 +23,9 @@ namespace NGIN::Net
             const ResolveOptions& options = {});
 
     /// @brief Resolves a host and service asynchronously on an explicit resolver driver.
+    /// @note Context executor must support reserved completion delivery; a positive
+    /// timeout additionally requires removable timers. Setup failure starts no lookup.
+    /// Completion retires registrations and timeout storage before caller delivery.
     [[nodiscard]] NGIN_NET_API NGIN::Async::Task<std::vector<ResolvedAddress>, ResolveError> ResolveAsync(
             NGIN::Async::TaskContext&      context,
             ResolverDriver&                driver,

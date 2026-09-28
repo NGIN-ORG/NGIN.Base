@@ -306,3 +306,13 @@ if(TARGET IO_ProcessTests)
     NGIN_BASE_TEST_PROCESS_FIXTURE_FILENAME="$<TARGET_FILE_NAME:NGINBaseProcessFixture>"
   )
 endif()
+
+# Isolate intentional termination and verify it remains active with assertions disabled.
+add_executable(NGINBaseScopeLifetimeFixture Async/fixtures/ScopeLifetime.cpp)
+target_link_libraries(NGINBaseScopeLifetimeFixture PRIVATE ngin_base_test_config NGIN::Base::Execution)
+target_compile_definitions(NGINBaseScopeLifetimeFixture PRIVATE NDEBUG)
+add_test(NAME Base.Async.ScopeLifetime.ReleaseFailFast
+  COMMAND ${CMAKE_COMMAND}
+    -DFIXTURE=$<TARGET_FILE:NGINBaseScopeLifetimeFixture>
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunScopeLifetime.cmake)
+set_tests_properties(Base.Async.ScopeLifetime.ReleaseFailFast PROPERTIES LABELS "Base;Async" TIMEOUT 45)

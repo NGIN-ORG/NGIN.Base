@@ -16,6 +16,7 @@ namespace NGIN::IO::detail
             Canceled,
             Fault
         };
+        NGIN::Async::StopReason stopReason {NGIN::Async::StopReason::Requested};
         Status                  status {Status::Fault};
         Int64                   value {};
         int                     systemCode {};
@@ -42,7 +43,8 @@ namespace NGIN::IO::detail
             const auto state = m_state;
             if (state->cancellation.IsCancellationRequested() || m_driver.IsStopping())
             {
-                state->result.status = NativeOperationCompletion::Status::Canceled;
+                state->result.status     = NativeOperationCompletion::Status::Canceled;
+                state->result.stopReason = state->CancellationReason();
                 return false;
             }
             auto delivery = m_executor.ReserveCompletion(NGIN::Execution::WorkItem(awaiting));
@@ -52,6 +54,8 @@ namespace NGIN::IO::detail
                 return false;
             }
             state->delivery = std::move(*delivery);
+            state->executor = m_executor;
+            state->awaiting = awaiting;
             auto common     = RuntimeAccess::ReserveOperation(m_driver.GetRuntime(),
                                                               NGIN::Execution::WorkItem([state] { state->Deliver(); }));
             if (!common)
@@ -84,6 +88,13 @@ namespace NGIN::IO::detail
         }
         struct State
         {
+            NGIN::Async::StopReason CancellationReason() const noexcept
+            {
+                return cancellation.IsCancellationRequested() ? cancellation.GetStopReason() : NGIN::Async::StopReason::RuntimeShutdown;
+            }
+
+            NGIN::Execution::ExecutorRef           executor;
+            std::coroutine_handle<>                awaiting;
             FileSystemDriver*                      driver {};
             NGIN::Async::CancellationToken         cancellation;
             NGIN::Execution::CompletionReservation delivery;
@@ -107,9 +118,15 @@ namespace NGIN::IO::detail
             {
                 if (result.status == NativeOperationCompletion::Status::Completed &&
                     (cancellation.IsCancellationRequested() || driver->IsStopping()))
-                    result.status = NativeOperationCompletion::Status::Canceled;
-                driver = nullptr;
-                delivery.Dispatch();
+                {
+                    result.status     = NativeOperationCompletion::Status::Canceled;
+                    result.stopReason = CancellationReason();
+                }
+                driver                           = nullptr;
+                auto                      ticket = std::move(delivery);
+                NGIN::Execution::WorkItem work(awaiting);
+                if (!executor.TryDispatchInline(work))
+                    ticket.Dispatch();
             }
         };
         FileSystemDriver&            m_driver;

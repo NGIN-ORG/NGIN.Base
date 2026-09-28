@@ -2,6 +2,7 @@
 #include "../IO/RuntimeLoop.hpp"
 #include "SocketPlatform.hpp"
 #include "SocketState.hpp"
+#include <NGIN/Async/ExecutorTransitions.hpp>
 
 #include <NGIN/Async/Task.hpp>
 #include <NGIN/Net/Sockets/TcpSocket.hpp>
@@ -31,6 +32,10 @@ namespace NGIN::Net
 
         struct Operation final : Loop::Handler
         {
+            NGIN::Async::CancellationToken stopToken;
+            NGIN::Async::StopReason        stopReason {NGIN::Async::StopReason::Requested};
+            bool                           stopReasonSet {false};
+
             void                                                        Ready(const Poller::Event& event) noexcept override { owner->Complete(*this, event); }
             void                                                        Stop() noexcept override { owner->Cancel(*this); }
             Impl*                                                       owner {};
@@ -55,6 +60,8 @@ namespace NGIN::Net
             std::shared_ptr<detail::SocketState>                        accepted;
             detail::SocketLease                                         lease;
             NGIN::Async::CancellationRegistration                       cancellation, closeCancellation;
+            NGIN::Execution::ExecutorRef                                executor;
+            std::coroutine_handle<>                                     continuation;
             NGIN::Execution::CompletionReservation                      delivery, common;
             NGIN::Async::AsyncFault                                     fault;
             NetError                                                    error;
@@ -64,9 +71,14 @@ namespace NGIN::Net
         ~Impl() { assert(m_pending == 0); }
         void Stop() noexcept { m_stop.store(true, std::memory_order_release); }
 
-        void Cancel(Operation& operation) noexcept
+        void Cancel(Operation& operation, NGIN::Async::StopReason reason) noexcept
         {
             std::lock_guard lock(m_mutex);
+            if (!operation.stopReasonSet)
+            {
+                operation.stopReason    = reason;
+                operation.stopReasonSet = true;
+            }
             operation.cancellationRequested = true;
             if (operation.issued && !operation.done)
                 (void) ::CancelIoEx(reinterpret_cast<HANDLE>(operation.descriptor), &operation.overlapped);
@@ -79,6 +91,13 @@ namespace NGIN::Net
             if (operation.cancellationRequested || m_stop.load(std::memory_order_acquire) || operation.lease.IsClosing())
             {
                 operation.canceled = true;
+                if (!operation.stopReasonSet)
+                {
+                    operation.stopReason    = m_stop.load(std::memory_order_acquire)
+                                                      ? NGIN::Async::StopReason::RuntimeShutdown
+                                                      : NGIN::Async::StopReason::OwnerClosed;
+                    operation.stopReasonSet = true;
+                }
                 return false;
             }
             int result = SOCKET_ERROR;
@@ -217,6 +236,11 @@ namespace NGIN::Net
                 operation.canceled |= operation.cancellationRequested || m_stop.load(std::memory_order_acquire) ||
                                       m_loop.GetState() != Loop::State::Running || (operation.lease.IsValid() && operation.lease.IsClosing());
             }
+            if (operation.canceled && !operation.stopReasonSet)
+                operation.stopReason = operation.stopToken.IsCancellationRequested() ? operation.stopToken.GetStopReason()
+                                       : (m_stop.load(std::memory_order_acquire) || m_loop.GetState() != Loop::State::Running)
+                                               ? NGIN::Async::StopReason::RuntimeShutdown
+                                               : NGIN::Async::StopReason::OwnerClosed;
             if (operation.kind == Kind::Connect &&
                 ((operation.issued && operation.canceled) || (operation.connected && !operation.error.IsOk())))
                 operation.lease.RequestClose();
@@ -228,8 +252,16 @@ namespace NGIN::Net
         void Deliver(const std::shared_ptr<Operation>& operation) noexcept
         {
             Retire(*operation);
-            operation->delivery.Dispatch();
+            DispatchContinuation(operation);
+        }
+
+        static void DispatchContinuation(const std::shared_ptr<Operation>& operation) noexcept
+        {
             operation->common.Reset();
+            auto                      ticket = std::move(operation->delivery);
+            NGIN::Execution::WorkItem work(operation->continuation);
+            if (!operation->executor.TryDispatchInline(work))
+                ticket.Dispatch();
         }
 
         struct OperationAwaiter final
@@ -246,7 +278,9 @@ namespace NGIN::Net
                 operation->owner = &owner;
                 if (owner.m_stop.load(std::memory_order_acquire) || owner.m_loop.GetState() != Loop::State::Running || token.IsCancellationRequested())
                 {
-                    operation->canceled = true;
+                    operation->canceled      = true;
+                    operation->stopReason    = token.IsCancellationRequested() ? token.GetStopReason() : NGIN::Async::StopReason::RuntimeShutdown;
+                    operation->stopReasonSet = true;
                     return false;
                 }
                 auto delivery = executor.ReserveCompletion(NGIN::Execution::WorkItem(continuation));
@@ -255,8 +289,10 @@ namespace NGIN::Net
                     operation->fault = NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::SchedulerDispatchFailed, static_cast<int>(delivery.error()));
                     return false;
                 }
-                operation->delivery = std::move(*delivery);
-                auto common         = owner.m_loop.ReserveOperation(NGIN::Execution::WorkItem([operation] { operation->owner->Deliver(operation); }));
+                operation->delivery     = std::move(*delivery);
+                operation->executor     = executor;
+                operation->continuation = continuation;
+                auto common             = owner.m_loop.ReserveOperation(NGIN::Execution::WorkItem([operation] { operation->owner->Deliver(operation); }));
                 if (!common)
                 {
                     operation->fault = NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::SchedulerDispatchFailed, static_cast<int>(common.error()));
@@ -294,7 +330,7 @@ namespace NGIN::Net
                 }
                 const auto cancel = +[](void* raw) noexcept {
                     auto& pending = *static_cast<Operation*>(raw);
-                    pending.owner->Cancel(pending);
+                    pending.owner->Cancel(pending, pending.stopToken.GetStopReason());
                     return false;
                 };
                 const auto registered = token.Register(operation->cancellation, {}, {}, cancel, operation.get());
@@ -303,7 +339,12 @@ namespace NGIN::Net
                     operation->fault = NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::CancellationRegistrationFailed, static_cast<int>(registered.error()));
                     return false;
                 }
-                const auto closeRegistered = operation->lease.CloseToken().Register(operation->closeCancellation, {}, {}, cancel, operation.get());
+                const auto closeCancel = +[](void* raw) noexcept {
+                    auto& pending = *static_cast<Operation*>(raw);
+                    pending.owner->Cancel(pending, NGIN::Async::StopReason::OwnerClosed);
+                    return false;
+                };
+                const auto closeRegistered = operation->lease.CloseToken().Register(operation->closeCancellation, {}, {}, closeCancel, operation.get());
                 if (!closeRegistered)
                 {
                     operation->fault = NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::CancellationRegistrationFailed, static_cast<int>(closeRegistered.error()));
@@ -323,8 +364,7 @@ namespace NGIN::Net
 
             bool await_suspend(std::coroutine_handle<> continuation) noexcept
             {
-                const auto operation     = state;
-                const bool inlineAllowed = executor.IsCurrent();
+                const auto operation = state;
                 if (Setup(operation, continuation))
                 {
                     std::lock_guard lock(owner.m_mutex);
@@ -332,7 +372,11 @@ namespace NGIN::Net
                     if (!watched)
                     {
                         if (watched.error() == std::errc::operation_canceled)
-                            operation->canceled = true;
+                        {
+                            operation->canceled      = true;
+                            operation->stopReason    = NGIN::Async::StopReason::RuntimeShutdown;
+                            operation->stopReasonSet = true;
+                        }
                         else if (watched.error() == std::errc::no_buffer_space || watched.error() == std::errc::not_enough_memory)
                             operation->error = NetError {NetErrorCode::ResourceExhausted};
                         else
@@ -350,10 +394,9 @@ namespace NGIN::Net
                     }
                 }
                 owner.Retire(*operation);
-                if (!inlineAllowed && operation->delivery.IsValid())
+                if (operation->delivery.IsValid())
                 {
-                    operation->delivery.Dispatch();
-                    operation->common.Reset();
+                    DispatchContinuation(operation);
                     return true;
                 }
                 operation->delivery.Reset();
@@ -368,6 +411,7 @@ namespace NGIN::Net
                 std::shared_ptr<detail::SocketState> socket, Kind kind, ConstByteSpan source,
                 ByteSpan destination, Endpoint endpoint, NGIN::Async::CancellationToken token)
         {
+            co_await NGIN::Async::SwitchTo(ctx.GetExecutor());
             auto backend = runtime ? AcquireNetworkDriver(*runtime) : nullptr;
             if (!backend)
             {
@@ -385,6 +429,7 @@ namespace NGIN::Net
             auto operationContext  = ctx.WithLinkedCancellationToken(token);
             auto operation         = std::make_shared<Operation>();
             operation->kind        = kind;
+            operation->stopToken   = operationContext.GetCancellationToken();
             operation->source      = source;
             operation->destination = destination;
             operation->endpoint    = endpoint;
@@ -396,7 +441,7 @@ namespace NGIN::Net
                 if (!operation->fault.IsOk())
                     return Completion::Faulted(std::move(operation->fault));
                 if (operation->canceled)
-                    return Completion::Canceled();
+                    return Completion::Stopped(operation->stopReason);
                 if (!operation->error.IsOk())
                     return Completion::DomainFailure(operation->error);
                 if constexpr (std::is_void_v<Result>)
@@ -411,12 +456,12 @@ namespace NGIN::Net
             }();
             if constexpr (std::is_void_v<Result>)
             {
-                if (completion.IsFault())
-                    co_await NGIN::Async::Faulted(std::move(completion).Fault());
-                else if (completion.IsCanceled())
-                    co_await NGIN::Async::Canceled();
-                else if (completion.IsDomainError())
-                    co_await NGIN::Async::DomainFailure(completion.DomainError());
+                if ((completion.HasError() && completion.Error().IsFault()))
+                    co_await NGIN::Async::Faulted(std::move(completion).Error().Fault());
+                else if (completion.IsStopped())
+                    co_await NGIN::Async::Stopped(completion.StopReason());
+                else if ((completion.HasError() && completion.Error().IsDomainError()))
+                    co_await NGIN::Async::DomainFailure(completion.Error().DomainError());
                 co_return;
             }
             else

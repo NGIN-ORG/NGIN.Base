@@ -2,6 +2,7 @@
 /// @brief Cancellation tokens, registrations, sources, and linked cancellation ownership.
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <condition_variable>
 #include <coroutine>
@@ -16,9 +17,9 @@
 #include <utility>
 #include <vector>
 
+#include <NGIN/Async/StopReason.hpp>
 #include <NGIN/Async/TaskCanceled.hpp>
 #include <NGIN/Execution/ExecutorRef.hpp>
-#include <NGIN/Memory/SmartPointers.hpp>
 #include <NGIN/Sync/LockGuard.hpp>
 #include <NGIN/Sync/SpinLock.hpp>
 #include <NGIN/Time/MonotonicClock.hpp>
@@ -104,8 +105,8 @@ namespace NGIN::Async
 
         void MoveFrom(CancellationRegistration&& other) noexcept;
 
-        Memory::Shared<detail::CancellationState> m_state {};
-        std::shared_ptr<detail::CancellationNode> m_node {};
+        std::shared_ptr<detail::CancellationState> m_state {};
+        std::shared_ptr<detail::CancellationNode>  m_node {};
     };
 
     /// @brief Copyable observation handle for shared cancellation state.
@@ -115,9 +116,15 @@ namespace NGIN::Async
         /// @brief Constructs a token with no cancellation state.
         CancellationToken() = default;
         /// @brief Constructs a token that observes shared cancellation state.
-        explicit CancellationToken(Memory::Shared<detail::CancellationState> state) noexcept
+        explicit CancellationToken(std::shared_ptr<detail::CancellationState> state) noexcept
             : m_state(std::move(state))
         {
+        }
+
+        /// @brief Compares cancellation-state identity, including two cannot-stop tokens.
+        friend bool operator==(const CancellationToken& left, const CancellationToken& right) noexcept
+        {
+            return left.m_state.get() == right.m_state.get();
         }
 
         /// @brief Returns whether this token is associated with cancellation state.
@@ -128,6 +135,8 @@ namespace NGIN::Async
 
         /// @brief Returns whether cancellation has been requested.
         [[nodiscard]] bool IsCancellationRequested() const noexcept;
+        /// Returns the first published reason, or Requested if no request exists.
+        [[nodiscard]] StopReason GetStopReason() const noexcept;
 
         /// @brief Returns whether cancellation has been requested.
         [[nodiscard]] explicit operator bool() const noexcept
@@ -147,7 +156,7 @@ namespace NGIN::Async
                 void*                        callbackCtx = nullptr) const noexcept;
 
     private:
-        Memory::Shared<detail::CancellationState> m_state {};
+        std::shared_ptr<detail::CancellationState> m_state {};
         friend class CancellationSource;
     };
 
@@ -235,7 +244,7 @@ namespace NGIN::Async
                 registrations.reserve(8);
             }
 
-            std::atomic<bool>                                   canceled {false};
+            std::atomic<unsigned>                               stop {0};
             NGIN::Sync::SpinLock                                lock {};
             std::pmr::memory_resource*                          resource;
             std::pmr::vector<std::shared_ptr<CancellationNode>> registrations;
@@ -243,7 +252,7 @@ namespace NGIN::Async
             [[nodiscard]] bool TryRegister(const std::shared_ptr<CancellationNode>& node)
             {
                 NGIN::Sync::LockGuard guard(lock);
-                if (canceled.load(std::memory_order_acquire))
+                if (stop.load(std::memory_order_acquire))
                     return false;
                 registrations.push_back(node);
                 return true;
@@ -265,10 +274,10 @@ namespace NGIN::Async
                 }
             }
 
-            void Cancel() noexcept
+            void Cancel(StopReason reason = StopReason::Requested) noexcept
             {
-                const bool already = canceled.exchange(true, std::memory_order_acq_rel);
-                if (already)
+                unsigned expected = 0;
+                if (!stop.compare_exchange_strong(expected, 1U + static_cast<unsigned>(reason), std::memory_order_acq_rel))
                 {
                     return;
                 }
@@ -293,17 +302,18 @@ namespace NGIN::Async
     {
     public:
         /// @brief Constructs a new, independently cancelable source.
-        /// @param memoryResource Resource used by registration nodes and the state registration table. It must
+        /// @param memoryResource Resource used by source state, registration nodes, and the registration table. It must
         /// outlive the source and every token or registration created from it.
         explicit CancellationSource(std::pmr::memory_resource* memoryResource = std::pmr::get_default_resource())
-            : m_state(Memory::MakeShared<detail::CancellationState>(memoryResource))
+            : m_state(std::allocate_shared<detail::CancellationState>(
+                      std::pmr::polymorphic_allocator<detail::CancellationState>(memoryResource ? memoryResource : std::pmr::get_default_resource()), memoryResource))
         {
         }
 
         /// @brief Requests cancellation and fires registered callbacks once.
-        void Cancel() noexcept
+        void Cancel(StopReason reason = StopReason::Requested) noexcept
         {
-            m_state->Cancel();
+            m_state->Cancel(reason);
         }
 
         /// @brief Returns a token that observes this source.
@@ -315,7 +325,7 @@ namespace NGIN::Async
         /// @brief Returns whether cancellation has been requested.
         [[nodiscard]] bool IsCancellationRequested() const noexcept
         {
-            return m_state->canceled.load(std::memory_order_acquire);
+            return m_state->stop.load(std::memory_order_acquire);
         }
 
         /// @brief Schedules cancellation at an absolute monotonic time.
@@ -329,7 +339,7 @@ namespace NGIN::Async
             if (!exec.IsValid())
                 return std::unexpected(NGIN::Execution::ScheduleError::InvalidExecutor);
 
-            Memory::Shared<detail::CancellationState> state = m_state;
+            std::shared_ptr<detail::CancellationState> state = m_state;
             return exec.ExecuteAt(NGIN::Utilities::Callable<void()>([state]() noexcept { state->Cancel(); }), at);
         }
 
@@ -364,12 +374,18 @@ namespace NGIN::Async
         }
 
     private:
-        Memory::Shared<detail::CancellationState> m_state;
+        std::shared_ptr<detail::CancellationState> m_state;
     };
+
+    inline StopReason CancellationToken::GetStopReason() const noexcept
+    {
+        const auto value = m_state ? m_state->stop.load(std::memory_order_acquire) : 0U;
+        return value ? static_cast<StopReason>(value - 1U) : StopReason::Requested;
+    }
 
     inline bool CancellationToken::IsCancellationRequested() const noexcept
     {
-        return m_state && m_state->canceled.load(std::memory_order_acquire);
+        return m_state && m_state->stop.load(std::memory_order_acquire);
     }
 
     inline CancellationRegistrationResult CancellationToken::Register(
@@ -389,8 +405,8 @@ namespace NGIN::Async
         if (!wantsResume && callback == nullptr)
             return std::unexpected(CancellationRegistrationError::InvalidTarget);
 
-        std::shared_ptr<detail::CancellationNode> node;
-        Memory::Shared<detail::CancellationState> state = m_state;
+        std::shared_ptr<detail::CancellationNode>  node;
+        std::shared_ptr<detail::CancellationState> state = m_state;
         try
         {
             node = std::allocate_shared<detail::CancellationNode>(
@@ -427,35 +443,44 @@ namespace NGIN::Async
 
     namespace detail
     {
-        [[nodiscard]] inline bool CancelLinkedSource(void* ctx) noexcept
+        struct CancellationLink final
         {
-            auto* source = static_cast<CancellationSource*>(ctx);
-            if (source)
+            CancellationSource*      source;
+            CancellationToken        parent;
+            CancellationRegistration registration;
+            static bool              Notify(void* context) noexcept
             {
-                source->Cancel();
+                auto& link = *static_cast<CancellationLink*>(context);
+                link.source->Cancel(link.parent.GetStopReason());
+                return false;
             }
-            return false;
-        }
+        };
 
         struct LinkedCancellationState final
         {
-            CancellationSource                    source {};
-            std::vector<CancellationRegistration> registrations {};
+            explicit LinkedCancellationState(std::pmr::memory_resource* resource)
+                : source(resource), registrations(resource) {}
+            CancellationSource                 source;
+            std::pmr::vector<CancellationLink> registrations;
 
             void Link(std::initializer_list<CancellationToken> tokens)
             {
-                registrations.resize(tokens.size());
-
-                UIntSize index = 0;
-                for (const CancellationToken& token: tokens)
+                // Link callback addresses remain stable through registration and teardown.
+                if (std::any_of(tokens.begin(), tokens.end(), [](const CancellationToken& token) { return token.HasState(); }))
+                    registrations.reserve(tokens.size());
+                for (auto current = tokens.begin(); current != tokens.end(); ++current)
                 {
+                    const CancellationToken& token = *current;
+                    if (!token.HasState() || std::find(tokens.begin(), current, token) != current)
+                        continue;
                     if (token.IsCancellationRequested())
                     {
-                        source.Cancel();
+                        source.Cancel(token.GetStopReason());
                         return;
                     }
+                    registrations.push_back(CancellationLink {&source, token, {}});
                     const CancellationRegistrationResult result =
-                            token.Register(registrations[index++], {}, {}, &CancelLinkedSource, &source);
+                            token.Register(registrations.back().registration, {}, {}, &CancellationLink::Notify, &registrations.back());
                     if (!result && result.error() == CancellationRegistrationError::ResourceExhausted)
                         throw std::bad_alloc {};
                 }
@@ -473,8 +498,11 @@ namespace NGIN::Async
         LinkedCancellationSource() = default;
 
         /// @brief Links cancellation to any token in the supplied list.
-        explicit LinkedCancellationSource(std::initializer_list<CancellationToken> tokens)
-            : m_state(Memory::MakeShared<detail::LinkedCancellationState>())
+        explicit LinkedCancellationSource(std::initializer_list<CancellationToken> tokens,
+                                          std::pmr::memory_resource*               resource = std::pmr::get_default_resource())
+            : m_state(std::allocate_shared<detail::LinkedCancellationState>(
+                      std::pmr::polymorphic_allocator<detail::LinkedCancellationState>(resource ? resource : std::pmr::get_default_resource()),
+                      resource ? resource : std::pmr::get_default_resource()))
         {
             m_state->Link(tokens);
         }
@@ -498,11 +526,11 @@ namespace NGIN::Async
         }
 
         /// @brief Explicitly requests cancellation of the linked source.
-        void Cancel() noexcept
+        void Cancel(StopReason reason = StopReason::Requested) noexcept
         {
             if (m_state)
             {
-                m_state->source.Cancel();
+                m_state->source.Cancel(reason);
             }
         }
 
@@ -513,7 +541,7 @@ namespace NGIN::Async
         }
 
     private:
-        Memory::Shared<detail::LinkedCancellationState> m_state {};
+        std::shared_ptr<detail::LinkedCancellationState> m_state {};
     };
 
     /// @brief Convenience helper to create a linked cancellation source.
@@ -533,8 +561,8 @@ namespace NGIN::Async
         if (!m_node)
             return;
 
-        Memory::Shared<detail::CancellationState> state = std::move(m_state);
-        std::shared_ptr<detail::CancellationNode> node  = std::move(m_node);
+        std::shared_ptr<detail::CancellationState> state = std::move(m_state);
+        std::shared_ptr<detail::CancellationNode>  node  = std::move(m_node);
         if (state)
             state->Unregister(node);
         node->Unregister();

@@ -65,8 +65,8 @@ TEST_CASE("RunTask cancels and joins children before returning a root failure", 
         co_await PropagatedRootFailure(ctx);
         co_return 0;
     });
-    REQUIRE(result.IsDomainError());
-    REQUIRE(result.DomainError() == 23);
+    REQUIRE((result.HasError() && result.Error().IsDomainError()));
+    REQUIRE(result.Error().DomainError() == 23);
     REQUIRE(childDestroyed == 1);
     REQUIRE(rootDestroyed == 1);
     REQUIRE(order);
@@ -85,8 +85,8 @@ TEST_CASE("RunTask preserves a child failure when the root succeeds", "[IO][Runt
         (void) co_await scope.Join();
         co_return 42;
     });
-    REQUIRE(result.IsDomainError());
-    REQUIRE(result.DomainError() == 19);
+    REQUIRE((result.HasError() && result.Error().IsDomainError()));
+    REQUIRE(result.Error().DomainError() == 19);
     REQUIRE(runtime.IsStopped());
 }
 
@@ -125,7 +125,7 @@ TEST_CASE("RunTask converts factory exceptions and admission exhaustion into roo
         auto              result = NGIN::IO::RunTask(runtime, [](NGIN::Async::TaskContext&, NGIN::Async::TaskScope<>&) -> NGIN::Async::Task<void> {
             throw std::runtime_error("root factory failed");
         });
-        REQUIRE(result.IsFault());
+        REQUIRE((result.HasError() && result.Error().IsFault()));
         REQUIRE(runtime.IsStopped());
     }
     SECTION("root admission exhaustion")
@@ -133,9 +133,9 @@ TEST_CASE("RunTask converts factory exceptions and admission exhaustion into roo
         NGIN::IO::Runtime runtime({.completionCapacity = 1});
         bool              entered = false;
         auto              result  = NGIN::IO::RunTask(runtime, [&](NGIN::Async::TaskContext&, NGIN::Async::TaskScope<>&) -> NGIN::Async::Task<void> { entered = true; co_return; });
-        REQUIRE(result.IsFault());
+        REQUIRE((result.HasError() && result.Error().IsFault()));
         REQUIRE_FALSE(entered);
-        REQUIRE(result.Fault().native == static_cast<int>(NGIN::Execution::ScheduleError::ResourceExhausted));
+        REQUIRE(result.Error().Fault().native == static_cast<int>(NGIN::Execution::ScheduleError::ResourceExhausted));
         REQUIRE(runtime.IsStopped());
     }
 }
@@ -148,7 +148,7 @@ TEST_CASE("RunTask returns cancellation and does not take over another runtime o
         NGIN::Async::CancellationSource cancellation;
         cancellation.Cancel();
         auto result = NGIN::IO::RunTask(runtime, [](NGIN::Async::TaskContext& ctx, NGIN::Async::TaskScope<>&) -> NGIN::Async::Task<void> { co_await ctx.YieldNow(); }, cancellation.GetToken());
-        REQUIRE(result.IsCanceled());
+        REQUIRE(result.IsStopped());
         REQUIRE(runtime.IsStopped());
     }
     SECTION("different owner")
@@ -170,4 +170,24 @@ TEST_CASE("RunTask returns cancellation and does not take over another runtime o
         REQUIRE(runtime.GetState() == NGIN::IO::Runtime::State::Running);
         runtime.Shutdown();
     }
+}
+
+TEST_CASE("RunTask stops the body on child error and keeps that error primary", "[IO][Runtime][Root]")
+{
+    NGIN::IO::Runtime runtime;
+    bool              continued = false;
+    auto              result    = NGIN::IO::RunTask<int>(runtime, [&](NGIN::Async::TaskContext& context, NGIN::Async::TaskScope<int>& scope) -> NGIN::Async::Task<int, int> {
+        auto child = scope.Spawn([](NGIN::Async::TaskContext&) -> NGIN::Async::Task<void, int> {
+            co_await NGIN::Async::DomainFailure(47);
+        });
+        if (!child)
+            throw std::runtime_error("admission");
+        co_await context.Delay(NGIN::Units::Seconds(60));
+        continued = true;
+        co_return 42;
+    });
+    REQUIRE_FALSE(continued);
+    REQUIRE(result.HasError());
+    REQUIRE(result.Error().DomainError() == 47);
+    REQUIRE(runtime.IsStopped());
 }

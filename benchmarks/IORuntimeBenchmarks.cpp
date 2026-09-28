@@ -1,4 +1,5 @@
 #include <NGIN/Async/Task.hpp>
+#include <NGIN/Async/TaskSupervisor.hpp>
 #include <NGIN/Execution/ThreadPoolScheduler.hpp>
 #include <NGIN/IO/LocalFileSystem.hpp>
 #include <NGIN/IO/Runtime.hpp>
@@ -101,18 +102,19 @@ int main()
         NGIN::Async::TaskContext             ctx(scheduler);
         std::vector<double>                  samples;
         samples.reserve(iterations);
-        for (std::size_t i = 0; i < iterations; ++i)
+        for (std::size_t i = 0; i < iterations + 100; ++i)
         {
             const auto start = Clock::now();
             RequireSuccess(NGIN::Async::SyncWait(ctx, Yield(ctx)));
-            samples.push_back(Microseconds(Clock::now() - start));
+            if (i >= 100)
+                samples.push_back(Microseconds(Clock::now() - start));
         }
         Report("spawn_yield_join", samples);
 
-        const auto           coldStart = Clock::now();
-        NGIN::IO::Runtime    runtime;
+        const auto              coldStart = Clock::now();
+        NGIN::IO::Runtime       runtime;
         NGIN::IO::RuntimeRunner runner(runtime);
-        NGIN::Net::UdpSocket receiver(runtime), sender(runtime);
+        NGIN::Net::UdpSocket    receiver(runtime), sender(runtime);
         if (!receiver.Open(NGIN::Net::AddressFamily::V4) ||
             !receiver.Bind({NGIN::Net::IpAddress::LoopbackV4(), 0}) ||
             !sender.Open(NGIN::Net::AddressFamily::V4))
@@ -131,11 +133,12 @@ int main()
         RequireSuccess(NGIN::Async::SyncWait(ctx, Exchange(ctx, receiver, sender, endpoint)));
         std::cout << "network_cold_us=" << Microseconds(Clock::now() - coldStart) << '\n';
         samples.clear();
-        for (std::size_t i = 0; i < iterations; ++i)
+        for (std::size_t i = 0; i < iterations + 100; ++i)
         {
             const auto start = Clock::now();
             RequireSuccess(NGIN::Async::SyncWait(ctx, Exchange(ctx, receiver, sender, endpoint)));
-            samples.push_back(Microseconds(Clock::now() - start));
+            if (i >= 100)
+                samples.push_back(Microseconds(Clock::now() - start));
         }
         Report("udp_ready_exchange", samples);
 #if defined(__linux__)
@@ -144,16 +147,20 @@ int main()
         NGIN::Async::CancellationSource cancellation;
         NGIN::Async::TaskContext        cancelContext(scheduler, cancellation.GetToken());
         std::array<NGIN::Byte, 64>      pendingBuffer {};
-        auto                            pending = NGIN::Async::Spawn(cancelContext, receiver.ReceiveFromAsync(cancelContext, pendingBuffer));
+        auto                            pendingTask = receiver.ReceiveFromAsync(cancelContext, pendingBuffer);
+
+        NGIN::Async::TaskSupervisor<typename decltype(pendingTask)::ErrorType> pendingRoot(cancelContext.GetEnvironment(), 1);
+
+        auto pending = pendingRoot.Spawn(std::move(pendingTask)).value();
 #if defined(__linux__)
         ReportIdle("network_pending_idle");
 #endif
         const auto cancelStart = Clock::now();
         cancellation.Cancel();
-        auto join = [](NGIN::Async::Operation<NGIN::Net::DatagramReceiveResult, NGIN::Net::NetError>& operation)
-                -> NGIN::Async::Task<void> { (void) co_await operation; };
+        auto join = [&](NGIN::Async::Operation<NGIN::Net::DatagramReceiveResult, NGIN::Net::NetError>& operation)
+                -> NGIN::Async::Task<void> { (void) co_await operation; (void) co_await pendingRoot.Join(); };
         RequireSuccess(NGIN::Async::SyncWait(ctx, join(pending)));
-        if (!pending.IsCanceled())
+        if (!pending.IsStopped())
             throw std::runtime_error("pending receive did not cancel");
         std::cout << "network_cancel_us=" << Microseconds(Clock::now() - cancelStart) << '\n';
         const auto stopStart = Clock::now();
@@ -164,7 +171,7 @@ int main()
                                      NGIN::IO::Runtime::FileBackendPreference::Fallback})
         {
             NGIN::IO::Runtime         filesRuntime({.files = {.backendPreference = preference}});
-            NGIN::IO::RuntimeRunner filesRunner(filesRuntime);
+            NGIN::IO::RuntimeRunner   filesRunner(filesRuntime);
             NGIN::IO::LocalFileSystem files(filesRuntime);
             const auto                start = Clock::now();
             RequireSuccess(NGIN::Async::SyncWait(ctx, files.GetInfoAsync(ctx, NGIN::IO::Path("."))));
@@ -172,11 +179,12 @@ int main()
                       << " requested=" << static_cast<int>(preference)
                       << " cold_us=" << Microseconds(Clock::now() - start) << '\n';
             samples.clear();
-            for (std::size_t i = 0; i < iterations; ++i)
+            for (std::size_t i = 0; i < iterations + 100; ++i)
             {
                 const auto operationStart = Clock::now();
                 RequireSuccess(NGIN::Async::SyncWait(ctx, files.GetInfoAsync(ctx, NGIN::IO::Path("."))));
-                samples.push_back(Microseconds(Clock::now() - operationStart));
+                if (i >= 100)
+                    samples.push_back(Microseconds(Clock::now() - operationStart));
             }
             Report("file_stat", samples);
 #if defined(__linux__)

@@ -70,8 +70,8 @@ TEST_CASE("IO.Runtime shares lazy filesystem services across resources and conte
     REQUIRE_FALSE(runtime.HasNetworkBackend());
     runtime.Shutdown();
     auto rejected = NGIN::Async::SyncWait(firstContext, first.GetInfoAsync(firstContext, *directory));
-    REQUIRE(rejected.IsFault());
-    REQUIRE(rejected.Fault().code == NGIN::Async::AsyncFaultCode::InvalidTaskUsage);
+    REQUIRE((rejected.HasError() && rejected.Error().IsFault()));
+    REQUIRE(rejected.Error().Fault().code == NGIN::Async::AsyncFaultCode::InvalidTaskUsage);
 }
 
 TEST_CASE("IO.Runtime requires an explicit binding for asynchronous filesystem operations", "[IO][Runtime][Async]")
@@ -80,8 +80,8 @@ TEST_CASE("IO.Runtime requires an explicit binding for asynchronous filesystem o
     NGIN::Async::TaskContext             ctx(scheduler);
     NGIN::IO::LocalFileSystem            files;
     auto                                 result = NGIN::Async::SyncWait(ctx, files.GetInfoAsync(ctx, NGIN::IO::Path(".")));
-    REQUIRE(result.IsFault());
-    REQUIRE(result.Fault().code == NGIN::Async::AsyncFaultCode::InvalidTaskUsage);
+    REQUIRE((result.HasError() && result.Error().IsFault()));
+    REQUIRE(result.Error().Fault().code == NGIN::Async::AsyncFaultCode::InvalidTaskUsage);
 }
 
 TEST_CASE("IO.Runtime validates positive admission limits", "[IO][Runtime]")

@@ -93,18 +93,16 @@ namespace
         outgoing.fill(Byte {0x5a});
         while (!results.stop.load(std::memory_order_acquire))
         {
-            // Allocate both cold frames before either operation borrows a buffer.
-            // Spawn itself is noexcept and reports reservation failure as a result.
-            auto       reading = channel.receiver.ReceiveFromAsync(context, incoming);
-            auto       sending = channel.sender.SendToAsync(context, channel.endpoint, outgoing);
-            auto       receive = Async::Spawn(context, std::move(reading));
-            auto       send    = Async::Spawn(context, std::move(sending));
-            const auto sent    = co_await send;
+            // Prepare both cold frames before the receive borrows its buffer.
+            auto                            reading = channel.receiver.ReceiveFromAsync(context, incoming);
+            auto                            sending = channel.sender.SendToAsync(context, channel.endpoint, outgoing);
+            Async::TaskScope<Net::NetError> exchange(context.GetEnvironment(), 1);
+            auto                            receive = exchange.Spawn(std::move(reading)).value();
+            const auto                      sent    = co_await sending.AsCompletion();
             if (!sent.Succeeded())
                 channel.receiver.Close();
-            // Always join the receive before propagating a send failure: its
-            // buffer belongs to this frame even during scope cancellation.
             const auto received = co_await receive;
+            (void) co_await exchange.Join();
             Require(sent.Succeeded() && received.Succeeded(), "mixed UDP exchange failed");
             Require(sent.Value() == outgoing.size() && received.Value().bytesReceived == incoming.size() && incoming == outgoing,
                     "mixed UDP exchange lost or changed data");
@@ -118,9 +116,9 @@ namespace
         while (!results.stop.load(std::memory_order_acquire))
         {
             // Independent ranges let reads and writes overlap without a data race.
-            auto       operation   = Async::Spawn(context, writing ? file.WriteAtAsync(context, fileBytes, buffer)
-                                                                   : file.ReadAtAsync(context, 0, buffer));
-            const auto transferred = co_await operation;
+            auto       operation   = writing ? file.WriteAtAsync(context, fileBytes, buffer)
+                                             : file.ReadAtAsync(context, 0, buffer);
+            const auto transferred = co_await operation.AsCompletion();
             Require(transferred.Succeeded() && transferred.Value() == buffer.size(), "mixed file transfer failed");
             if (!writing)
                 Require(std::all_of(buffer.begin(), buffer.end(), [](Byte value) { return value == Byte {'x'}; }),
@@ -154,8 +152,8 @@ namespace
             IO::FileOpenOptions options;
             options.access      = IO::FileAccess::ReadWrite;
             options.disposition = IO::FileCreateDisposition::OpenExisting;
-            auto opening        = Async::Spawn(context, files.OpenFileAsync(context, IO::Path(temporary.path.string().c_str()), options));
-            auto opened         = co_await opening;
+            auto opening        = files.OpenFileAsync(context, IO::Path(temporary.path.string().c_str()), options);
+            auto opened         = co_await opening.AsCompletion();
             Require(opened.Succeeded(), "mixed file open failed (requested backend must be available)");
             auto file          = std::move(opened.Value());
             results.coldOpen   = Micros(Clock::now() - coldStart);
@@ -192,8 +190,8 @@ namespace
             (void) co_await scope.Join();
             results.joinDrain = Micros(Clock::now() - stop);
             results.elapsed   = Micros(Clock::now() - started);
-            auto closing      = Async::Spawn(context, file.CloseAsync(context));
-            Require((co_await closing).Succeeded(), "mixed file close failed");
+            auto closing      = file.CloseAsync(context);
+            Require((co_await closing.AsCompletion()).Succeeded(), "mixed file close failed");
         });
         Require(outcome.Succeeded() && runtime.IsStopped(), "mixed root or structured child join failed");
         Require(results.timerOvershoot.size() == samples, "timer samples were lost");

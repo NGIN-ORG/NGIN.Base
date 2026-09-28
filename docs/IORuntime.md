@@ -99,9 +99,11 @@ auto result = NGIN::IO::RunTask(io,
 
 `RunTask<E>` accepts a factory `(TaskContext&, TaskScope<E>&) -> Task<T, E>`.
 It owns runtime shutdown, cancels and joins remaining children on every root
-outcome, and returns root failure first, otherwise child failure or root success.
-A shutdown notification is reserved before starting the supervisor, so even a
-supervisor fault cannot lose the stop signal. RunTask's context and factory stay
+outcome, and returns a root error first, otherwise a child error, stopped outcome, or root success.
+The root context observes its child scope's token, so a child error stops a suspended root body; that
+child error outranks the resulting stopped body. An outer scope owns the supervisor and reserves its
+startup and retirement notification before admission. Shutdown is requested after supervisor frame
+retirement, so even a supervisor fault cannot lose the stop signal. RunTask's context and factory stay
 alive until joining and shutdown finish. The optional cancellation token reaches
 the root and every scoped child; the optional child capacity defaults to 256.
 
@@ -279,3 +281,19 @@ and reserved completion paths must notify the host (for example through its norm
 message queue), and it must stay operational while admitted work unwinds and joins.
 Do not block the UI thread in `SyncWait` when continuations target that same thread.
 The runner pattern also supports POSIX hosts that prefer a separate I/O thread.
+
+
+### Bounded shutdown waiting
+
+`Runtime::ShutdownUntil(deadline)` requests stop and returns `ShutdownStatus::Stopped`
+when runtime drainage completes, or `ShutdownStatus::Incomplete` when the monotonic
+absolute deadline expires. Incomplete retains ownership, backend state, and reserved
+completion delivery. Keep the runtime and borrowed resources alive and continue driving
+or call Shutdown later. An active RuntimeRunner continues running after a waiting
+thread times out. The deadline is checked between batches; callbacks and backend stop
+hooks are cooperative and cannot be preempted. Destruction still performs full shutdown.
+The same callback and fixed-owner restrictions apply as for Shutdown.
+
+Stopped identifies runtime/backend drainage, including transfer to external delivery
+executors. It does not prove application tasks have completed on those executors:
+keep them driven and join their TaskScope/TaskSupervisor owners separately.

@@ -1,14 +1,16 @@
 # I/O runtime implementation contracts
 
-These are the implementation decisions for `IORuntimePlan.md`. Until the plan's
-verification is complete, `IORuntime.md` describes the released implementation;
-this document does not claim that the new runtime is already implemented.
+These contracts describe the current implementation. AsyncRuntime redesign
+acceptance and remaining native/performance gates are tracked separately in
+[AsyncRuntime/Tasks.md](AsyncRuntime/Tasks.md).
 
 ## Admission and completion
 
-Admission linearizes under the runtime admission lock while the state is
-`Running`. It reserves an operation slot, backend request storage, and a tracked
-completion on the selected executor before any OS operation starts. Failure is
+Admission is staged across the runtime, service, and backend boundaries. Each
+boundary rejects stopping or exhausted state before its external work starts.
+A request reserves its required operation slot, backend request storage, and tracked
+completion on the selected executor before OS submission. A file gate lease counts
+queued/active handle work; backend admission independently rechecks runtime stop. Failure is
 reported as an async fault with the underlying `ScheduleError` (`Stopped` or
 `ResourceExhausted`); it never waits for capacity. Allocation failure during
 reservation has the same behavior and releases all partial reservations.
@@ -19,10 +21,12 @@ are positive and configurable. A reservation counts against its budget until
 released, including while awaiting backend completion. Completion queues use
 reserved nodes, so delivery cannot allocate or compete with ordinary work.
 
-Executor submission always queues on the runtime. A ready I/O result may avoid
-suspension only while already executing on the selected executor. Continuations
-of suspended operations queue through their reservation. No rejected submission
-causes inline execution. No recursive inline dispatch is needed or permitted.
+Ordinary executor submission queues on the runtime. A ready I/O result may avoid
+suspension only while executing on the selected executor. Suspended completion may
+resume inline when executor identity and the shared dispatch-depth/work budget allow
+it; otherwise it uses previously reserved delivery. Rejection never authorizes an
+inline fallback. Nested task transfers and callbacks count toward the same batch
+budget, and budget exhaustion defers through admitted continuation storage.
 External executors must explicitly support tracked completion reservations;
 otherwise I/O admission fails before touching OS state. They must remain alive
 and operational until dependent application operations have been joined.
@@ -120,3 +124,23 @@ shutdown, and returns a `Completion<T, E>`. Root failure takes precedence over
 child failure; otherwise the first child failure is returned. A root task must
 not block in `SyncWait` on the sole loop thread. CPU-heavy work belongs on an
 explicit external executor; callbacks cannot be preempted by batch fairness.
+
+
+### Bounded shutdown waiting
+
+`Runtime::ShutdownUntil(deadline)` requests stop and returns `ShutdownStatus::Stopped`
+when runtime drainage completes, or `ShutdownStatus::Incomplete` when the monotonic
+absolute deadline expires. Incomplete retains ownership, backend state, and reserved
+completion delivery. Keep the runtime and borrowed resources alive and continue driving
+or call Shutdown later. An active RuntimeRunner continues running after a waiting
+thread times out. The deadline is checked between batches; callbacks and backend stop
+hooks are cooperative and cannot be preempted. Destruction still performs full shutdown.
+The same callback and fixed-owner restrictions apply as for Shutdown.
+
+Stopped identifies runtime/backend drainage, including transfer to external delivery
+executors. It does not prove application tasks have completed on those executors:
+keep them driven and join their TaskScope/TaskSupervisor owners separately.
+
+
+The growing-resource acquisition/release ledger and overload evidence are recorded
+in [AsyncRuntime/ResourceBounds.md](AsyncRuntime/ResourceBounds.md).

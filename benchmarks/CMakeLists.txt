@@ -27,7 +27,10 @@ option(NGIN_BENCH_USE_GLM "Enable GLM linear-algebra comparisons" ON)
 
 function(ngin_add_benchmark target)
   add_executable(${target} ${ARGN})
-  if(target STREQUAL "IORuntimeAllocationBenchmarks")
+  if(target MATCHES "^AsyncRuntime")
+    # Both cost fixtures use private file-gate implementation and compiled IO.
+    set(component IO::Static)
+  elseif(target STREQUAL "IORuntimeAllocationBenchmarks")
     # Replacement new must cover the compiled runtime, including on Windows.
     set(component Net::Static)
   elseif(target STREQUAL "IORuntimeFileAllocationBenchmarks")
@@ -54,6 +57,11 @@ endfunction()
 
 ngin_add_benchmark(ExampleBenchmark ExampleBenchmark.cpp)
 ngin_add_benchmark(SchedulerBenchmarks SchedulerBenchmarks.cpp)
+if(TARGET NGIN::Base::IO::Static)
+  ngin_add_benchmark(AsyncRuntimeBenchmarks AsyncRuntimeBenchmarks.cpp)
+  ngin_add_benchmark(AsyncRuntimeAllocationBenchmarks AsyncRuntimeBenchmarks.cpp AllocationInstrumentation.cpp)
+  target_compile_definitions(AsyncRuntimeAllocationBenchmarks PRIVATE NGIN_ASYNC_MEASURE_ALLOCATIONS=1)
+endif()
 ngin_add_benchmark(IORuntimeBenchmarks IORuntimeBenchmarks.cpp)
 target_link_libraries(IORuntimeBenchmarks PRIVATE NGIN::Base::IO)
 ngin_add_benchmark(IORuntimeFileBenchmarks IORuntimeFileBenchmarks.cpp)

@@ -36,16 +36,16 @@ namespace NGIN::IO
             using T       = typename RootTask<Factory, E>::ValueType;
             using Outcome = NGIN::Async::Completion<T, E>;
             std::optional<Outcome>       outcome;
-            NGIN::Async::Operation<T, E> root;
+            NGIN::Async::detail::ProducerOperation<T, E> root;
             try
             {
-                root = NGIN::Async::Spawn(rootContext, std::invoke(factory, rootContext, scope));
+                root = NGIN::Async::detail::OperationAccess::Start(rootContext, std::invoke(factory, rootContext, scope));
                 outcome.emplace(co_await root);
             } catch (...)
             {
                 outcome.emplace(Outcome::Faulted(RootException()));
             }
-            scope.RequestCancel();
+            scope.RequestStop(NGIN::Async::StopReason::OwnerClosed);
             (void) co_await scope.Join();
             // Failure propagation can leave locals in a suspended root frame.
             // Keep them alive while children join, then release before shutdown.
@@ -53,15 +53,10 @@ namespace NGIN::IO
             try
             {
                 auto children = scope.TakeResult();
-                if (outcome->Succeeded() && !children.Succeeded())
-                {
-                    if (children.IsDomainError())
-                        outcome.emplace(Outcome::DomainFailure(std::move(children).DomainError()));
-                    else if (children.IsCanceled())
-                        outcome.emplace(Outcome::Canceled());
-                    else
-                        outcome.emplace(Outcome::Faulted(std::move(children).Fault()));
-                }
+                if (!outcome->HasError() && children.HasError())
+                    outcome.emplace(Outcome::Failure(children.RetainError()));
+                else if (outcome->Succeeded() && children.IsStopped())
+                    outcome.emplace(Outcome::Stopped(children.StopReason()));
             } catch (...)
             {
                 if (outcome->Succeeded())
@@ -103,27 +98,25 @@ namespace NGIN::IO
         }
         OwnedFactory              factory(std::forward<Factory>(root));
         NGIN::Async::TaskScope<E> scope(runtime.GetExecutor(), cancellation, childCapacity);
-        NGIN::Async::TaskContext  rootContext(runtime.GetExecutor(), std::move(cancellation));
+        NGIN::Async::TaskContext  rootContext(scope.GetEnvironment());
         NGIN::Async::TaskContext  supervisorContext(runtime.GetExecutor());
-        auto                      notification = runtime.GetExecutor().ReserveCompletion(NGIN::Execution::WorkItem([&runtime] {
-            runtime.RequestStop();
-        }));
-        if (!notification)
+        NGIN::Async::TaskScope<>  rootOwner(supervisorContext.GetEnvironment(), 1);
+        NGIN::Async::detail::RootScopeAccess::OnRetirement(rootOwner, +[](void* raw) noexcept { static_cast<Runtime*>(raw)->RequestStop(); }, &runtime);
+        auto operation = rootOwner.Spawn(detail::RunRoot(supervisorContext, rootContext, scope, factory));
+        if (!operation)
         {
             runtime.Shutdown();
             return Outcome::Faulted(NGIN::Async::detail::MakeSchedulingFault(
-                    NGIN::Async::AsyncFaultCode::SchedulerDispatchFailed, notification.error()));
+                    NGIN::Async::AsyncFaultCode::SchedulerDispatchFailed, operation.error()));
         }
-        auto operation = NGIN::Async::Spawn(supervisorContext,
-                                            detail::RunRoot(supervisorContext, rootContext, scope, factory));
-        if (!NGIN::Async::detail::OperationAccess::Observe(operation, std::move(*notification)))
-            std::terminate();
+        rootOwner.Close();
         runtime.Run();
-        auto result = operation.TakeResult();
+        NGIN::Async::detail::RootScopeAccess::JoinRetired(rootOwner);
+        auto result = operation->TakeResult();
         if (result.Succeeded())
             return std::move(result).Value();
-        if (result.IsCanceled())
-            return Outcome::Canceled();
-        return Outcome::Faulted(std::move(result).Fault());
+        if (result.IsStopped())
+            return Outcome::Stopped(result.StopReason());
+        return Outcome::Faulted(std::move(result).Error().Fault());
     }
 }// namespace NGIN::IO

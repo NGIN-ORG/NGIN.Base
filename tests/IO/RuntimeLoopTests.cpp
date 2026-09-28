@@ -1,3 +1,5 @@
+#include <NGIN/Async/TaskSupervisor.hpp>
+#include <NGIN/Execution/CooperativeScheduler.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "../../src/NGIN/IO/RuntimeLoop.hpp"
@@ -341,14 +343,25 @@ TEST_CASE("Runtime delay cancellation removes its long-duration timer immediatel
     {
         NGIN::Async::CancellationSource cancellation;
         NGIN::Async::TaskContext        context(loop.GetExecutor(), cancellation.GetToken());
-        auto                            operation = NGIN::Async::Spawn(context, LongDelay(context));
+        auto                            operationTask = LongDelay(context);
+
+        NGIN::Execution::CooperativeScheduler rootExecutor;
+
+        NGIN::Async::TaskContext rootContext(rootExecutor);
+
+        NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(rootContext.GetEnvironment(), 1);
+
+        auto operation = operationRoot.SpawnOn(context.GetExecutor(), std::move(operationTask)).value();
         REQUIRE_FALSE(loop.PollOnce());
+        rootExecutor.RunUntilIdle();
         REQUIRE(loop.NextDeadline());
         REQUIRE_FALSE(operation.IsCompleted());
         cancellation.Cancel();
         REQUIRE_FALSE(loop.NextDeadline());
         REQUIRE_FALSE(loop.PollOnce());
-        REQUIRE(operation.IsCanceled());
+        rootExecutor.RunUntilIdle();
+        REQUIRE(operation.IsStopped());
+        REQUIRE(operationRoot.TryJoin());
     }
 }
 
@@ -356,15 +369,26 @@ TEST_CASE("Runtime shutdown terminates a pending delay without an explicit cance
 {
     RuntimeLoop              loop({});
     NGIN::Async::TaskContext context(loop.GetExecutor());
-    auto                     operation = NGIN::Async::Spawn(context, LongDelay(context));
+    auto                     operationTask = LongDelay(context);
+
+    NGIN::Execution::CooperativeScheduler rootExecutor;
+
+    NGIN::Async::TaskContext rootContext(rootExecutor);
+
+    NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(rootContext.GetEnvironment(), 1);
+
+    auto operation = operationRoot.SpawnOn(context.GetExecutor(), std::move(operationTask)).value();
     REQUIRE_FALSE(loop.PollOnce());
+    rootExecutor.RunUntilIdle();
     REQUIRE_FALSE(operation.IsCompleted());
     loop.Shutdown();
+    rootExecutor.RunUntilIdle();
     REQUIRE(operation.IsCompleted());
-    REQUIRE(operation.IsFaulted());
+    REQUIRE(operation.HasError());
+    REQUIRE(operationRoot.TryJoin());
     auto result = operation.TakeResult();
-    REQUIRE(result.Fault().code == NGIN::Async::AsyncFaultCode::SchedulerDispatchFailed);
-    REQUIRE(result.Fault().native == static_cast<int>(ScheduleError::Stopped));
+    REQUIRE(result.Error().Fault().code == NGIN::Async::AsyncFaultCode::SchedulerDispatchFailed);
+    REQUIRE(result.Error().Fault().native == static_cast<int>(ScheduleError::Stopped));
 }
 
 TEST_CASE("Runtime timer installation racing cancellation reaches one terminal outcome", "[IO][Runtime][Timer]")
@@ -375,12 +399,24 @@ TEST_CASE("Runtime timer installation racing cancellation reaches one terminal o
     {
         NGIN::Async::CancellationSource cancellation;
         NGIN::Async::TaskContext        context(loop.GetExecutor(), cancellation.GetToken());
-        auto                            operation = NGIN::Async::Spawn(context, LongDelay(context));
+        auto                            operationTask = LongDelay(context);
+
+        NGIN::Execution::CooperativeScheduler rootExecutor;
+
+        NGIN::Async::TaskContext rootContext(rootExecutor);
+
+        NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(rootContext.GetEnvironment(), 1);
+
+        auto operation = operationRoot.SpawnOn(context.GetExecutor(), std::move(operationTask)).value();
         cancellation.Cancel();
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
         while (!operation.IsCompleted() && std::chrono::steady_clock::now() < deadline)
+        {
+            rootExecutor.RunUntilIdle();
             std::this_thread::yield();
-        REQUIRE(operation.IsCanceled());
+        }
+        REQUIRE(operation.IsStopped());
+        REQUIRE(operationRoot.TryJoin());
     }
 }
 
@@ -805,3 +841,85 @@ TEST_CASE("Runtime IOCP registration bounds and shutdown preserve existing handl
     REQUIRE(first->ready == 0);
 }
 #endif
+
+namespace
+{
+    NGIN::Async::Task<void> CountTransfer(int& visits)
+    {
+        ++visits;
+        co_return;
+    }
+
+    NGIN::Async::Task<void> CountChain(int& visits)
+    {
+        for (int child = 0; child != 128; ++child)
+            co_await CountTransfer(visits);
+    }
+}// namespace
+
+TEST_CASE("Runtime PollOnce charges sequential task transfers to the batch budget", "[IO][Runtime][Budget]")
+{
+    for (std::size_t batch: {std::size_t(1), std::size_t(4), std::size_t(16)})
+    {
+        RuntimeLoop              loop({.batchSize = batch});
+        ShutdownGuard            shutdown {loop};
+        NGIN::Async::TaskContext context(loop.GetExecutor());
+        int                      visits        = 0;
+        auto                     operationTask = CountChain(visits);
+
+        NGIN::Execution::CooperativeScheduler rootExecutor;
+
+        NGIN::Async::TaskContext rootContext(rootExecutor);
+
+        NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(rootContext.GetEnvironment(), 1);
+
+        auto operation = operationRoot.SpawnOn(context.GetExecutor(), std::move(operationTask)).value();
+        int  polls     = 0;
+        while (!operation.IsCompleted() && polls != 1024)
+        {
+            const int before = visits;
+            (void) loop.PollOnce();
+            rootExecutor.RunUntilIdle();
+            REQUIRE(visits - before <= static_cast<int>(batch));
+            ++polls;
+        }
+        REQUIRE(operation.IsCompleted());
+        REQUIRE(operationRoot.TryJoin());
+        REQUIRE(operation.TakeResult().Succeeded());
+        REQUIRE(visits == 128);
+        REQUIRE(polls > 1);
+    }
+}
+
+TEST_CASE("Nested runtime polls share dispatch depth and preserve ready backlog", "[IO][Runtime][Budget]")
+{
+    int                                       depth = 0, maximum = 0, visits = 0;
+    bool                                      backlog = false, affine = true;
+    std::vector<std::unique_ptr<RuntimeLoop>> loops;
+    for (int index = 0; index != 64; ++index)
+        loops.push_back(std::make_unique<RuntimeLoop>(RuntimeLoop::Options {.batchSize = 1024}));
+    for (std::size_t index = 0; index != loops.size(); ++index)
+    {
+        REQUIRE(loops[index]->GetExecutor().Execute([&, index] {
+            ++depth;
+            maximum = std::max(maximum, depth);
+            ++visits;
+            affine &= loops[index]->GetExecutor().IsCurrent();
+            if (index + 1 != loops.size())
+                backlog |= loops[index + 1]->PollOnce();
+            affine &= loops[index]->GetExecutor().IsCurrent();
+            --depth;
+        }));
+    }
+    (void) loops.front()->PollOnce();
+    REQUIRE(visits > 1);
+    REQUIRE(visits <= 16);
+    REQUIRE(backlog);
+    for (auto& loop: loops)
+        (void) loop->PollOnce();
+    REQUIRE(visits == 64);
+    REQUIRE(maximum <= 16);
+    REQUIRE(affine);
+    for (auto& loop: loops)
+        loop->Shutdown();
+}

@@ -11,8 +11,10 @@
 #include "../Support/FailureInjection.hpp"
 #include <NGIN/Async/Cancellation.hpp>
 #include <NGIN/Async/Task.hpp>
+#include <NGIN/Async/TaskSupervisor.hpp>
 #include <NGIN/Execution/CooperativeScheduler.hpp>
 #include <NGIN/Execution/InlineScheduler.hpp>
+#include <NGIN/Execution/ThreadPoolScheduler.hpp>
 #include <NGIN/Execution/WorkItem.hpp>
 #include <NGIN/Time/TimePoint.hpp>
 #include <NGIN/Units.hpp>
@@ -79,8 +81,8 @@ namespace
 
     private:
         NGIN::Execution::detail::CompletionQueue m_completions;
-        std::vector<NGIN::Execution::WorkItem> m_ready;
-        std::vector<NGIN::Execution::WorkItem> m_delayed;
+        std::vector<NGIN::Execution::WorkItem>   m_ready;
+        std::vector<NGIN::Execution::WorkItem>   m_delayed;
     };
 
     class RejectingExecutor final
@@ -99,56 +101,6 @@ namespace
         }
     };
 
-    class ConcurrentExecutor final
-    {
-    public:
-        ConcurrentExecutor()
-        {
-            m_threads.reserve(256);
-        }
-
-        ~ConcurrentExecutor()
-        {
-            Join();
-        }
-
-        NGIN::Execution::ScheduleResult Execute(NGIN::Execution::WorkItem item) noexcept
-        {
-            try
-            {
-                m_threads.emplace_back([work = std::move(item)]() mutable noexcept { work.Invoke(); });
-                return {};
-            } catch (const std::bad_alloc&)
-            {
-                return std::unexpected(NGIN::Execution::ScheduleError::ResourceExhausted);
-            } catch (...)
-            {
-                return std::unexpected(NGIN::Execution::ScheduleError::Rejected);
-            }
-        }
-
-        NGIN::Execution::ScheduleResult ExecuteAt(
-                NGIN::Execution::WorkItem item,
-                NGIN::Time::TimePoint) noexcept
-        {
-            return Execute(std::move(item));
-        }
-
-        void Join() noexcept
-        {
-            for (std::thread& thread: m_threads)
-            {
-                if (thread.joinable())
-                {
-                    thread.join();
-                }
-            }
-            m_threads.clear();
-        }
-
-    private:
-        std::vector<std::thread> m_threads;
-    };
 
     NGIN::Async::Task<int> AddAfterYield(NGIN::Async::TaskContext& ctx, int a, int b)
     {
@@ -229,31 +181,54 @@ namespace
     }
 }// namespace
 
+TEST_CASE("Destroying or replacing cold tasks never starts their bodies")
+{
+    int  entered  = 0;
+    auto makeTask = [&]() -> NGIN::Async::Task<void> {
+        ++entered;
+        co_return;
+    };
+    {
+        auto task = makeTask();
+        REQUIRE_FALSE(task.IsStarted());
+        REQUIRE_FALSE(task.IsCompleted());
+        auto moved = std::move(task);
+        moved      = makeTask();
+        REQUIRE(entered == 0);
+    }
+    REQUIRE(entered == 0);
+}
+
 TEST_CASE("Spawn consumes a cold task and returns a running operation")
 {
     NGIN::Execution::CooperativeScheduler scheduler;
     NGIN::Async::TaskContext              ctx(scheduler);
 
-    auto operation = NGIN::Async::Spawn(ctx, AddAfterYield(ctx, 2, 5));
+    auto operationTask = AddAfterYield(ctx, 2, 5);
+
+    NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(ctx.GetEnvironment(), 1);
+
+    auto operation = operationRoot.Spawn(std::move(operationTask)).value();
     scheduler.RunUntilIdle();
 
     REQUIRE(operation.IsCompleted());
+    REQUIRE(operationRoot.TryJoin());
     auto result = operation.TakeResult();
     REQUIRE(result);
     REQUIRE(result.Value() == 7);
 }
 
-TEST_CASE("Spawn converts scheduler rejection into an async fault")
+TEST_CASE("Scoped spawn reports scheduler admission rejection")
 {
-    RejectingExecutor        scheduler;
-    NGIN::Async::TaskContext ctx(scheduler);
-
-    NGIN::Async::Operation<int> operation = NGIN::Async::Spawn(ctx, AddAfterYield(ctx, 2, 5));
-    REQUIRE(operation.IsCompleted());
-    NGIN::Async::Completion<int, NGIN::Async::NoError> result = operation.TakeResult();
-    REQUIRE(result.IsFault());
-    CHECK(result.Fault().code == NGIN::Async::AsyncFaultCode::SchedulerDispatchFailed);
-    CHECK(result.Fault().native == static_cast<int>(NGIN::Execution::ScheduleError::Rejected));
+    RejectingExecutor                     scheduler;
+    NGIN::Async::TaskContext              ctx(scheduler);
+    NGIN::Execution::CooperativeScheduler ownerScheduler;
+    NGIN::Async::TaskContext              ownerContext(ownerScheduler);
+    NGIN::Async::TaskSupervisor<>         owner(ownerContext.GetEnvironment(), 1);
+    auto                                  admitted = owner.SpawnOn(ctx.GetExecutor(), AddAfterYield(ctx, 2, 5));
+    REQUIRE_FALSE(admitted);
+    REQUIRE(admitted.error() == NGIN::Execution::ScheduleError::Rejected);
+    REQUIRE(owner.TryJoin());
 }
 
 TEST_CASE("Task continuation publication racing completion has no lost wakeup")
@@ -263,7 +238,10 @@ TEST_CASE("Task continuation publication racing completion has no lost wakeup")
 
     for (int iteration = 0; iteration < 256; ++iteration)
     {
-        Runtime                 runtime;
+        Runtime runtime;
+        // Concurrent publication belongs to a running operation boundary.
+        runtime.m_execution = Runtime::ExecutionState::Create(Runtime::ContinuationState::Empty);
+        REQUIRE(runtime.m_execution);
         std::latch              start(3);
         InstallResult           installResult = InstallResult::AlreadyInstalled;
         std::coroutine_handle<> completedContinuation {};
@@ -303,13 +281,18 @@ TEST_CASE("Operation reports invalid result access before completion")
     NGIN::Execution::CooperativeScheduler scheduler;
     NGIN::Async::TaskContext              ctx(scheduler);
 
-    auto operation = NGIN::Async::Spawn(ctx, AddAfterYield(ctx, 2, 3));
+    auto operationTask = AddAfterYield(ctx, 2, 3);
+
+    NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(ctx.GetEnvironment(), 1);
+
+    auto operation = operationRoot.Spawn(std::move(operationTask)).value();
 
     auto early = operation.TakeResult();
     REQUIRE_FALSE(early);
-    REQUIRE(early.IsFault());
+    REQUIRE((early.HasError() && early.Error().IsFault()));
 
     scheduler.RunUntilIdle();
+    REQUIRE(operationRoot.TryJoin());
 }
 
 TEST_CASE("Operation result can be taken only once")
@@ -317,52 +300,82 @@ TEST_CASE("Operation result can be taken only once")
     NGIN::Execution::CooperativeScheduler scheduler;
     NGIN::Async::TaskContext              ctx(scheduler);
 
-    auto operation = NGIN::Async::Spawn(ctx, AddAfterYield(ctx, 4, 9));
+    auto operationTask = AddAfterYield(ctx, 4, 9);
+
+    NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(ctx.GetEnvironment(), 1);
+
+    auto operation = operationRoot.Spawn(std::move(operationTask)).value();
     scheduler.RunUntilIdle();
 
+    REQUIRE(operationRoot.TryJoin());
     auto first = operation.TakeResult();
     REQUIRE(first);
     REQUIRE(first.Value() == 13);
 
     auto second = operation.TakeResult();
     REQUIRE_FALSE(second);
-    REQUIRE(second.IsFault());
+    REQUIRE((second.HasError() && second.Error().IsFault()));
 }
 
-TEST_CASE("Detach explicitly runs fire-and-forget work")
+namespace
+{
+    NGIN::Async::Task<void> JoinSupervisor(NGIN::Async::TaskSupervisor<>& owner)
+    {
+        (void) co_await owner.Join();
+    }
+}// namespace
+
+TEST_CASE("Supervisor transfer explicitly owns application work")
 {
     NGIN::Execution::CooperativeScheduler scheduler;
     NGIN::Async::TaskContext              ctx(scheduler);
     int                                   value = 0;
 
-    NGIN::Async::Detach(ctx, IncrementAfterYield(ctx, value));
+    NGIN::Async::TaskSupervisor supervisor(ctx.GetEnvironment(), 1);
+    REQUIRE(supervisor.Transfer(IncrementAfterYield(ctx, value)));
+    auto joinedTask = JoinSupervisor(supervisor);
+
+    NGIN::Async::TaskSupervisor<typename decltype(joinedTask)::ErrorType> joinedRoot(ctx.GetEnvironment(), 1);
+
+    auto joined = joinedRoot.Spawn(std::move(joinedTask)).value();
     scheduler.RunUntilIdle();
 
     REQUIRE(value == 1);
+    REQUIRE(joinedRoot.TryJoin());
+    REQUIRE(joined.TakeResult().Succeeded());
 }
 
-TEST_CASE("Detached task destroys its frame exactly once after completion")
+TEST_CASE("Transferred task destroys its frame exactly once after completion")
 {
     NGIN::Execution::CooperativeScheduler scheduler;
     NGIN::Async::TaskContext              context(scheduler);
     NGIN::Tests::FrameLifetimeStatistics  statistics;
 
-    NGIN::Async::Detach(context, ProbeFrameLifetime(context, statistics));
+    NGIN::Async::TaskSupervisor supervisor(context.GetEnvironment(), 1);
+    REQUIRE(supervisor.Transfer(ProbeFrameLifetime(context, statistics)));
+    auto joinedTask = JoinSupervisor(supervisor);
+
+    NGIN::Async::TaskSupervisor<typename decltype(joinedTask)::ErrorType> joinedRoot(context.GetEnvironment(), 1);
+
+    auto joined = joinedRoot.Spawn(std::move(joinedTask)).value();
     scheduler.RunUntilIdle();
+    REQUIRE(joinedRoot.TryJoin());
+    REQUIRE(joined.TakeResult().Succeeded());
 
     CHECK(statistics.constructions.load(std::memory_order_relaxed) == 1U);
     CHECK(statistics.destructions.load(std::memory_order_relaxed) == 1U);
     CHECK(statistics.live.load(std::memory_order_relaxed) == 0U);
 }
 
-TEST_CASE("Detached canceled task destroys its suspended frame exactly once")
+TEST_CASE("Transferred canceled task destroys its suspended frame exactly once")
 {
     ManualTimerExecutor                  scheduler;
     NGIN::Async::CancellationSource      source;
     NGIN::Async::TaskContext             context(scheduler, source.GetToken());
     NGIN::Tests::FrameLifetimeStatistics statistics;
 
-    NGIN::Async::Detach(context, ProbeCanceledFrameLifetime(context, statistics));
+    NGIN::Async::TaskSupervisor supervisor(context.GetEnvironment(), 1);
+    REQUIRE(supervisor.Transfer(ProbeCanceledFrameLifetime(context, statistics)));
     scheduler.RunUntilIdle();
     REQUIRE(statistics.live.load(std::memory_order_relaxed) == 1U);
 
@@ -376,23 +389,33 @@ TEST_CASE("Detached canceled task destroys its suspended frame exactly once")
     scheduler.RunAllDelayed();
     scheduler.RunUntilIdle();
 
+    NGIN::Async::TaskContext joinContext(scheduler);
+    auto                     joinedTask = JoinSupervisor(supervisor);
+
+    NGIN::Async::TaskSupervisor<typename decltype(joinedTask)::ErrorType> joinedRoot(joinContext.GetEnvironment(), 1);
+
+    auto joined = joinedRoot.Spawn(std::move(joinedTask)).value();
+    scheduler.RunUntilIdle();
+    REQUIRE(joinedRoot.TryJoin());
+    REQUIRE(joined.TakeResult().Succeeded());
+
     CHECK(statistics.constructions.load(std::memory_order_relaxed) == 1U);
     CHECK(statistics.destructions.load(std::memory_order_relaxed) == 1U);
     CHECK(statistics.live.load(std::memory_order_relaxed) == 0U);
 }
 
-TEST_CASE("Operation ownership release racing completion destroys each frame exactly once")
+TEST_CASE("Operation result release racing completion destroys each owned frame exactly once")
 {
     for (std::size_t iteration = 0; iteration < 128; ++iteration)
     {
-        ConcurrentExecutor                   scheduler;
+        NGIN::Execution::ThreadPoolScheduler scheduler(2);
         NGIN::Async::TaskContext             context(scheduler);
         NGIN::Tests::FrameLifetimeStatistics statistics;
 
-        NGIN::Async::Operation<void> operation =
-                NGIN::Async::Spawn(context, ImmediateFrameProbe(statistics));
-        operation = {};
-        scheduler.Join();
+        NGIN::Async::TaskSupervisor<> owner(context.GetEnvironment(), 1);
+        auto                          operation = owner.Spawn(ImmediateFrameProbe(statistics)).value();
+        operation                               = {};
+        REQUIRE(NGIN::Async::SyncWait(context, JoinSupervisor(owner)).Succeeded());
 
         CHECK(statistics.constructions.load(std::memory_order_relaxed) == 1U);
         CHECK(statistics.destructions.load(std::memory_order_relaxed) == 1U);
@@ -400,16 +423,17 @@ TEST_CASE("Operation ownership release racing completion destroys each frame exa
     }
 }
 
-TEST_CASE("Detach racing immediate completion destroys each frame exactly once")
+TEST_CASE("Supervisor transfer racing immediate completion destroys each frame exactly once")
 {
     for (std::size_t iteration = 0; iteration < 128; ++iteration)
     {
-        ConcurrentExecutor                   scheduler;
+        NGIN::Execution::ThreadPoolScheduler scheduler(2);
         NGIN::Async::TaskContext             context(scheduler);
         NGIN::Tests::FrameLifetimeStatistics statistics;
 
-        NGIN::Async::Detach(context, ImmediateFrameProbe(statistics));
-        scheduler.Join();
+        NGIN::Async::TaskSupervisor supervisor(context.GetEnvironment(), 1);
+        REQUIRE(supervisor.Transfer(ImmediateFrameProbe(statistics)));
+        REQUIRE(NGIN::Async::SyncWait(context, JoinSupervisor(supervisor)).Succeeded());
 
         CHECK(statistics.constructions.load(std::memory_order_relaxed) == 1U);
         CHECK(statistics.destructions.load(std::memory_order_relaxed) == 1U);
@@ -422,10 +446,15 @@ TEST_CASE("Task can be awaited without spawning the child explicitly")
     NGIN::Execution::CooperativeScheduler scheduler;
     NGIN::Async::TaskContext              ctx(scheduler);
 
-    auto operation = NGIN::Async::Spawn(ctx, AwaitChild(ctx));
+    auto operationTask = AwaitChild(ctx);
+
+    NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(ctx.GetEnvironment(), 1);
+
+    auto operation = operationRoot.Spawn(std::move(operationTask)).value();
     scheduler.RunUntilIdle();
 
     REQUIRE(operation.IsCompleted());
+    REQUIRE(operationRoot.TryJoin());
     auto result = operation.TakeResult();
     REQUIRE(result);
     REQUIRE(result.Value() == 3);
@@ -436,14 +465,19 @@ TEST_CASE("Task domain errors propagate through co_await")
     NGIN::Execution::CooperativeScheduler scheduler;
     NGIN::Async::TaskContext              ctx(scheduler);
 
-    auto operation = NGIN::Async::Spawn(ctx, AwaitDomainError(ctx));
+    auto operationTask = AwaitDomainError(ctx);
+
+    NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(ctx.GetEnvironment(), 1);
+
+    auto operation = operationRoot.Spawn(std::move(operationTask)).value();
     scheduler.RunUntilIdle();
 
     REQUIRE(operation.IsCompleted());
+    REQUIRE(operationRoot.TryJoin());
     auto result = operation.TakeResult();
     REQUIRE_FALSE(result);
-    REQUIRE(result.IsDomainError());
-    REQUIRE(result.DomainError().code == 17);
+    REQUIRE((result.HasError() && result.Error().IsDomainError()));
+    REQUIRE(result.Error().DomainError().code == 17);
 }
 
 TEST_CASE("Task cancellation: Delay is woken by cancellation")
@@ -452,7 +486,11 @@ TEST_CASE("Task cancellation: Delay is woken by cancellation")
     NGIN::Async::CancellationSource source;
     NGIN::Async::TaskContext        ctx(exec, source.GetToken());
 
-    auto operation = NGIN::Async::Spawn(ctx, DelayForever(ctx));
+    auto operationTask = DelayForever(ctx);
+
+    NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(ctx.GetEnvironment(), 1);
+
+    auto operation = operationRoot.Spawn(std::move(operationTask)).value();
 
     exec.RunUntilIdle();
     REQUIRE_FALSE(operation.IsCompleted());
@@ -461,10 +499,11 @@ TEST_CASE("Task cancellation: Delay is woken by cancellation")
     exec.RunUntilIdle();
 
     REQUIRE(operation.IsCompleted());
-    REQUIRE(operation.IsCanceled());
+    REQUIRE(operation.IsStopped());
+    REQUIRE(operationRoot.TryJoin());
     auto result = operation.TakeResult();
     REQUIRE_FALSE(result);
-    REQUIRE(result.IsCanceled());
+    REQUIRE(result.IsStopped());
 }
 
 TEST_CASE("Task cancellation: CancelAt wakes Delay without firing timers")
@@ -473,7 +512,11 @@ TEST_CASE("Task cancellation: CancelAt wakes Delay without firing timers")
     NGIN::Async::CancellationSource source;
     NGIN::Async::TaskContext        ctx(exec, source.GetToken());
 
-    auto operation = NGIN::Async::Spawn(ctx, DelayForever(ctx));
+    auto operationTask = DelayForever(ctx);
+
+    NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(ctx.GetEnvironment(), 1);
+
+    auto operation = operationRoot.Spawn(std::move(operationTask)).value();
 
     exec.RunUntilIdle();
     REQUIRE_FALSE(operation.IsCompleted());
@@ -486,10 +529,11 @@ TEST_CASE("Task cancellation: CancelAt wakes Delay without firing timers")
     exec.RunUntilIdle();
 
     REQUIRE(operation.IsCompleted());
-    REQUIRE(operation.IsCanceled());
+    REQUIRE(operation.IsStopped());
+    REQUIRE(operationRoot.TryJoin());
     auto result = operation.TakeResult();
     REQUIRE_FALSE(result);
-    REQUIRE(result.IsCanceled());
+    REQUIRE(result.IsStopped());
 }
 
 TEST_CASE("Task propagates exceptions through co_await")
@@ -497,12 +541,17 @@ TEST_CASE("Task propagates exceptions through co_await")
     NGIN::Execution::CooperativeScheduler scheduler;
     NGIN::Async::TaskContext              ctx(scheduler);
 
-    auto operation = NGIN::Async::Spawn(ctx, AwaitChildThatThrows(ctx));
+    auto operationTask = AwaitChildThatThrows(ctx);
+
+    NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(ctx.GetEnvironment(), 1);
+
+    auto operation = operationRoot.Spawn(std::move(operationTask)).value();
     scheduler.RunUntilIdle();
 
     REQUIRE(operation.IsCompleted());
-    REQUIRE(operation.IsFaulted());
+    REQUIRE(operation.HasError());
+    REQUIRE(operationRoot.TryJoin());
     auto result = operation.TakeResult();
     REQUIRE_FALSE(result);
-    REQUIRE(result.IsFault());
+    REQUIRE((result.HasError() && result.Error().IsFault()));
 }

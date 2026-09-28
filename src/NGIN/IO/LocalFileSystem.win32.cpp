@@ -1,3 +1,4 @@
+#include <NGIN/Async/ExecutorTransitions.hpp>
 #include <NGIN/IO/LocalFileSystem.hpp>
 
 #include "AsyncDispatch.hpp"
@@ -1891,7 +1892,14 @@ namespace NGIN::IO
         AsyncTask<UIntSize> LocalAsyncFileRead(
                 const std::shared_ptr<void>& rawState, NGIN::Async::TaskContext& ctx, std::span<NGIN::Byte> destination)
         {
+            co_await NGIN::Async::SwitchTo(ctx.GetExecutor());
             auto state = std::static_pointer_cast<LocalAsyncFileState>(rawState);
+            detail::FileOperationLease lease(*state, ctx, detail::FileOperationGate::Kind::Position);
+            if (auto rejected = co_await lease)
+            {
+                co_await AsyncTaskVoid::FromCompletion(std::move(*rejected));
+                co_return 0;
+            }
             if (auto valid = detail::ValidateFileTransfer(state->path, state->canRead, false, state->appendMode, destination.size()); !valid)
                 co_return NGIN::Utilities::Unexpected<IOError>(std::move(valid).error());
             if (auto* backend = detail::GetNativeFileBackend(*state->driver); backend != nullptr)
@@ -1913,7 +1921,7 @@ namespace NGIN::IO
                     state->cursor = offset + static_cast<UInt64>(completion.value);
                 if (completion.status == NativeWindowsFileCompletion::Status::Canceled)
                 {
-                    co_await NGIN::Async::Canceled();
+                    co_await NGIN::Async::Stopped(completion.stopReason);
                     co_return 0;
                 }
                 if (completion.status == NativeWindowsFileCompletion::Status::Fault)
@@ -1935,9 +1943,9 @@ namespace NGIN::IO
             auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [state, destination]() mutable noexcept {
                 return LocalAsyncFileReadSync(*state, destination);
             });
-            if (completion.IsCanceled())
+            if (completion.IsStopped())
             {
-                co_await NGIN::Async::Canceled();
+                co_await NGIN::Async::Stopped(completion.stopReason);
                 co_return 0;
             }
             if (completion.IsFault())
@@ -1954,7 +1962,14 @@ namespace NGIN::IO
         AsyncTask<UIntSize> LocalAsyncFileWrite(
                 const std::shared_ptr<void>& rawState, NGIN::Async::TaskContext& ctx, std::span<const NGIN::Byte> source)
         {
+            co_await NGIN::Async::SwitchTo(ctx.GetExecutor());
             auto state = std::static_pointer_cast<LocalAsyncFileState>(rawState);
+            detail::FileOperationLease lease(*state, ctx, detail::FileOperationGate::Kind::Position);
+            if (auto rejected = co_await lease)
+            {
+                co_await AsyncTaskVoid::FromCompletion(std::move(*rejected));
+                co_return 0;
+            }
             if (auto valid = detail::ValidateFileTransfer(state->path, state->canWrite, true, state->appendMode, source.size()); !valid)
                 co_return NGIN::Utilities::Unexpected<IOError>(std::move(valid).error());
             if (auto* backend = detail::GetNativeFileBackend(*state->driver); backend != nullptr)
@@ -1976,7 +1991,7 @@ namespace NGIN::IO
                     state->cursor = offset + static_cast<UInt64>(completion.value);
                 if (completion.status == NativeWindowsFileCompletion::Status::Canceled)
                 {
-                    co_await NGIN::Async::Canceled();
+                    co_await NGIN::Async::Stopped(completion.stopReason);
                     co_return 0;
                 }
                 if (completion.status == NativeWindowsFileCompletion::Status::Fault)
@@ -1994,9 +2009,9 @@ namespace NGIN::IO
             auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [state, source]() mutable noexcept {
                 return LocalAsyncFileWriteSync(*state, source);
             });
-            if (completion.IsCanceled())
+            if (completion.IsStopped())
             {
-                co_await NGIN::Async::Canceled();
+                co_await NGIN::Async::Stopped(completion.stopReason);
                 co_return 0;
             }
             if (completion.IsFault())
@@ -2015,7 +2030,14 @@ namespace NGIN::IO
                                                  UInt64                       offset,
                                                  std::span<NGIN::Byte>        destination)
         {
+            co_await NGIN::Async::SwitchTo(ctx.GetExecutor());
             auto state = std::static_pointer_cast<LocalAsyncFileState>(rawState);
+            detail::FileOperationLease lease(*state, ctx, detail::FileOperationGate::Kind::Independent);
+            if (auto rejected = co_await lease)
+            {
+                co_await AsyncTaskVoid::FromCompletion(std::move(*rejected));
+                co_return 0;
+            }
             if (auto valid = detail::ValidateFileTransfer(state->path, state->canRead, false, state->appendMode, destination.size(), offset); !valid)
                 co_return NGIN::Utilities::Unexpected<IOError>(std::move(valid).error());
             if (auto* backend = detail::GetNativeFileBackend(*state->driver); backend != nullptr)
@@ -2032,7 +2054,7 @@ namespace NGIN::IO
                         });
                 if (completion.status == NativeWindowsFileCompletion::Status::Canceled)
                 {
-                    co_await NGIN::Async::Canceled();
+                    co_await NGIN::Async::Stopped(completion.stopReason);
                     co_return 0;
                 }
                 if (completion.status == NativeWindowsFileCompletion::Status::Fault)
@@ -2054,9 +2076,9 @@ namespace NGIN::IO
             auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [state, offset, destination]() mutable noexcept {
                 return LocalAsyncFileReadAtSync(*state, offset, destination);
             });
-            if (completion.IsCanceled())
+            if (completion.IsStopped())
             {
-                co_await NGIN::Async::Canceled();
+                co_await NGIN::Async::Stopped(completion.stopReason);
                 co_return 0;
             }
             if (completion.IsFault())
@@ -2075,7 +2097,14 @@ namespace NGIN::IO
                                                   UInt64                       offset,
                                                   std::span<const NGIN::Byte>  source)
         {
+            co_await NGIN::Async::SwitchTo(ctx.GetExecutor());
             auto state = std::static_pointer_cast<LocalAsyncFileState>(rawState);
+            detail::FileOperationLease lease(*state, ctx, detail::FileOperationGate::Kind::Independent);
+            if (auto rejected = co_await lease)
+            {
+                co_await AsyncTaskVoid::FromCompletion(std::move(*rejected));
+                co_return 0;
+            }
             if (auto valid = detail::ValidateFileTransfer(state->path, state->canWrite, true, state->appendMode, source.size(), offset); !valid)
                 co_return NGIN::Utilities::Unexpected<IOError>(std::move(valid).error());
             if (auto* backend = detail::GetNativeFileBackend(*state->driver); backend != nullptr)
@@ -2092,7 +2121,7 @@ namespace NGIN::IO
                         });
                 if (completion.status == NativeWindowsFileCompletion::Status::Canceled)
                 {
-                    co_await NGIN::Async::Canceled();
+                    co_await NGIN::Async::Stopped(completion.stopReason);
                     co_return 0;
                 }
                 if (completion.status == NativeWindowsFileCompletion::Status::Fault)
@@ -2110,9 +2139,9 @@ namespace NGIN::IO
             auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [state, offset, source]() mutable noexcept {
                 return LocalAsyncFileWriteAtSync(*state, offset, source);
             });
-            if (completion.IsCanceled())
+            if (completion.IsStopped())
             {
-                co_await NGIN::Async::Canceled();
+                co_await NGIN::Async::Stopped(completion.stopReason);
                 co_return 0;
             }
             if (completion.IsFault())
@@ -2128,7 +2157,14 @@ namespace NGIN::IO
 
         AsyncTaskVoid LocalAsyncFileFlush(const std::shared_ptr<void>& rawState, NGIN::Async::TaskContext& ctx)
         {
+            co_await NGIN::Async::SwitchTo(ctx.GetExecutor());
             auto state = std::static_pointer_cast<LocalAsyncFileState>(rawState);
+            detail::FileOperationLease lease(*state, ctx, detail::FileOperationGate::Kind::Flush);
+            if (auto rejected = co_await lease)
+            {
+                co_await AsyncTaskVoid::FromCompletion(std::move(*rejected));
+                co_return;
+            }
             if (auto* backend = detail::GetNativeFileBackend(*state->driver); backend != nullptr)
             {
                 auto completion = co_await SubmitNativeWindowsFile(
@@ -2140,7 +2176,7 @@ namespace NGIN::IO
                         });
                 if (completion.status == NativeWindowsFileCompletion::Status::Canceled)
                 {
-                    co_await NGIN::Async::Canceled();
+                    co_await NGIN::Async::Stopped(completion.stopReason);
                     co_return;
                 }
                 if (completion.status == NativeWindowsFileCompletion::Status::Fault)
@@ -2159,9 +2195,9 @@ namespace NGIN::IO
             auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [state]() mutable noexcept {
                 return LocalAsyncFileFlushSync(*state);
             });
-            if (completion.IsCanceled())
+            if (completion.IsStopped())
             {
-                co_await NGIN::Async::Canceled();
+                co_await NGIN::Async::Stopped(completion.stopReason);
                 co_return;
             }
             if (completion.IsFault())
@@ -2180,7 +2216,14 @@ namespace NGIN::IO
 
         AsyncTaskVoid LocalAsyncFileClose(const std::shared_ptr<void>& rawState, NGIN::Async::TaskContext& ctx)
         {
+            co_await NGIN::Async::SwitchTo(ctx.GetExecutor());
             auto state = std::static_pointer_cast<LocalAsyncFileState>(rawState);
+            detail::FileOperationLease lease(*state, ctx, detail::FileOperationGate::Kind::Close);
+            if (auto rejected = co_await lease)
+            {
+                co_await AsyncTaskVoid::FromCompletion(std::move(*rejected));
+                co_return;
+            }
             if (auto* backend = detail::GetNativeFileBackend(*state->driver); backend != nullptr)
             {
                 HANDLE handleToClose = INVALID_HANDLE_VALUE;
@@ -2217,7 +2260,7 @@ namespace NGIN::IO
                 restore.submitted = completion.submitted;
                 if (completion.status == NativeWindowsFileCompletion::Status::Canceled)
                 {
-                    co_await NGIN::Async::Canceled();
+                    co_await NGIN::Async::Stopped(completion.stopReason);
                     co_return;
                 }
                 if (completion.status == NativeWindowsFileCompletion::Status::Fault)
@@ -2236,9 +2279,9 @@ namespace NGIN::IO
             auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [state]() mutable noexcept {
                 return LocalAsyncFileCloseSync(*state);
             });
-            if (completion.IsCanceled())
+            if (completion.IsStopped())
             {
-                co_await NGIN::Async::Canceled();
+                co_await NGIN::Async::Stopped(completion.stopReason);
                 co_return;
             }
             if (completion.IsFault())
@@ -2258,18 +2301,12 @@ namespace NGIN::IO
         }
 
         const AsyncFileHandle::Operations LocalAsyncFileOperations {
-                .read    = &detail::WithFileOperation<UIntSize, LocalAsyncFileState, detail::FileOperationGate::Kind::Position,
-                                                      &LocalAsyncFileRead, std::span<NGIN::Byte>>,
-                .write   = &detail::WithFileOperation<UIntSize, LocalAsyncFileState, detail::FileOperationGate::Kind::Position,
-                                                      &LocalAsyncFileWrite, std::span<const NGIN::Byte>>,
-                .readAt  = &detail::WithFileOperation<UIntSize, LocalAsyncFileState, detail::FileOperationGate::Kind::Independent,
-                                                      &LocalAsyncFileReadAt, UInt64, std::span<NGIN::Byte>>,
-                .writeAt = &detail::WithFileOperation<UIntSize, LocalAsyncFileState, detail::FileOperationGate::Kind::Independent,
-                                                      &LocalAsyncFileWriteAt, UInt64, std::span<const NGIN::Byte>>,
-                .flush   = &detail::WithFileOperation<void, LocalAsyncFileState, detail::FileOperationGate::Kind::Flush,
-                                                      &LocalAsyncFileFlush>,
-                .close   = &detail::WithFileOperation<void, LocalAsyncFileState, detail::FileOperationGate::Kind::Close,
-                                                      &LocalAsyncFileClose>,
+                .read    = &LocalAsyncFileRead,
+                .write   = &LocalAsyncFileWrite,
+                .readAt  = &LocalAsyncFileReadAt,
+                .writeAt = &LocalAsyncFileWriteAt,
+                .flush   = &LocalAsyncFileFlush,
+                .close   = &LocalAsyncFileClose,
                 .isOpen  = &LocalAsyncFileIsOpen,
         };
 
@@ -2294,13 +2331,14 @@ namespace NGIN::IO
         AsyncTask<bool> LocalAsyncDirectoryExists(
                 const std::shared_ptr<void>& rawState, NGIN::Async::TaskContext& ctx, const Path& path)
         {
+            co_await NGIN::Async::SwitchTo(ctx.GetExecutor());
             auto state      = std::static_pointer_cast<LocalAsyncDirectoryState>(rawState);
             auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [state, path]() mutable noexcept {
                 return state->handle->Exists(path);
             });
-            if (completion.IsCanceled())
+            if (completion.IsStopped())
             {
-                co_await NGIN::Async::Canceled();
+                co_await NGIN::Async::Stopped(completion.stopReason);
                 co_return false;
             }
             if (completion.IsFault())
@@ -2319,13 +2357,14 @@ namespace NGIN::IO
                                                        const Path&                  path,
                                                        const MetadataOptions&       options)
         {
+            co_await NGIN::Async::SwitchTo(ctx.GetExecutor());
             auto state      = std::static_pointer_cast<LocalAsyncDirectoryState>(rawState);
             auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [state, path, options]() mutable noexcept {
                 return state->handle->GetInfo(path, options);
             });
-            if (completion.IsCanceled())
+            if (completion.IsStopped())
             {
-                co_await NGIN::Async::Canceled();
+                co_await NGIN::Async::Stopped(completion.stopReason);
                 co_return FileInfo {};
             }
             if (completion.IsFault())
@@ -2344,6 +2383,7 @@ namespace NGIN::IO
                                                                const Path&                  path,
                                                                const FileOpenOptions&       options)
         {
+            co_await NGIN::Async::SwitchTo(ctx.GetExecutor());
             auto state      = std::static_pointer_cast<LocalAsyncDirectoryState>(rawState);
             auto normalized = NormalizeRelativeHandlePath(path);
             if (!normalized.has_value())
@@ -2353,9 +2393,9 @@ namespace NGIN::IO
             auto       completion   = co_await detail::DispatchToDriver(*state->driver, ctx, [resolvedPath, options]() mutable noexcept {
                 return OpenAsyncWindowsFile(resolvedPath, options);
             });
-            if (completion.IsCanceled())
+            if (completion.IsStopped())
             {
-                co_await NGIN::Async::Canceled();
+                co_await NGIN::Async::Stopped(completion.stopReason);
                 co_return AsyncFileHandle {};
             }
             if (completion.IsFault())
@@ -2372,6 +2412,7 @@ namespace NGIN::IO
         AsyncTask<AsyncDirectoryHandle> LocalAsyncDirectoryOpenDirectory(
                 const std::shared_ptr<void>& rawState, NGIN::Async::TaskContext& ctx, const Path& path)
         {
+            co_await NGIN::Async::SwitchTo(ctx.GetExecutor());
             auto state      = std::static_pointer_cast<LocalAsyncDirectoryState>(rawState);
             auto normalized = NormalizeRelativeHandlePath(path);
             if (!normalized.has_value())
@@ -2381,9 +2422,9 @@ namespace NGIN::IO
             auto       completion   = co_await detail::DispatchToDriver(*state->driver, ctx, [resolvedPath]() mutable noexcept {
                 return LocalDirectoryHandle::Open(resolvedPath);
             });
-            if (completion.IsCanceled())
+            if (completion.IsStopped())
             {
-                co_await NGIN::Async::Canceled();
+                co_await NGIN::Async::Stopped(completion.stopReason);
                 co_return AsyncDirectoryHandle {};
             }
             if (completion.IsFault())
@@ -2405,13 +2446,14 @@ namespace NGIN::IO
         AsyncTask<Path> LocalAsyncDirectoryReadSymlink(
                 const std::shared_ptr<void>& rawState, NGIN::Async::TaskContext& ctx, const Path& path)
         {
+            co_await NGIN::Async::SwitchTo(ctx.GetExecutor());
             auto state      = std::static_pointer_cast<LocalAsyncDirectoryState>(rawState);
             auto completion = co_await detail::DispatchToDriver(*state->driver, ctx, [state, path]() mutable noexcept {
                 return state->handle->ReadSymlink(path);
             });
-            if (completion.IsCanceled())
+            if (completion.IsStopped())
             {
-                co_await NGIN::Async::Canceled();
+                co_await NGIN::Async::Stopped(completion.stopReason);
                 co_return Path {};
             }
             if (completion.IsFault())
@@ -2437,6 +2479,7 @@ namespace NGIN::IO
     AsyncTask<AsyncFileHandle> LocalFileSystem::OpenFileAsync(
             NGIN::Async::TaskContext& ctx, Path path, FileOpenOptions options)
     {
+        co_await NGIN::Async::SwitchTo(ctx.GetExecutor());
         const std::shared_ptr<NGIN::IO::detail::FileSystemDriver> driver = AcquireDriver();
         if (!driver)
         {
@@ -2449,9 +2492,9 @@ namespace NGIN::IO
                 *driver, ctx, [path = std::move(path), options]() mutable noexcept {
                     return OpenAsyncWindowsFile(path, options);
                 });
-        if (completion.IsCanceled())
+        if (completion.IsStopped())
         {
-            co_await NGIN::Async::Canceled();
+            co_await NGIN::Async::Stopped(completion.stopReason);
             co_return AsyncFileHandle {};
         }
         if (completion.IsFault())
@@ -2468,6 +2511,7 @@ namespace NGIN::IO
     AsyncTask<AsyncDirectoryHandle> LocalFileSystem::OpenDirectoryAsync(
             NGIN::Async::TaskContext& ctx, Path path)
     {
+        co_await NGIN::Async::SwitchTo(ctx.GetExecutor());
         const std::shared_ptr<NGIN::IO::detail::FileSystemDriver> driver = AcquireDriver();
         if (!driver)
         {
@@ -2480,9 +2524,9 @@ namespace NGIN::IO
         auto       completion     = co_await detail::DispatchToDriver(*driver, ctx, [path = std::move(path)]() mutable noexcept {
             return LocalDirectoryHandle::Open(path);
         });
-        if (completion.IsCanceled())
+        if (completion.IsStopped())
         {
-            co_await NGIN::Async::Canceled();
+            co_await NGIN::Async::Stopped(completion.stopReason);
             co_return AsyncDirectoryHandle {};
         }
         if (completion.IsFault())

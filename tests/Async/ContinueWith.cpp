@@ -1,3 +1,4 @@
+#include <NGIN/Async/TaskSupervisor.hpp>
 #include <NGIN/Execution/detail/CompletionQueue.hpp>
 #include <catch2/catch_test_macros.hpp>
 
@@ -61,8 +62,8 @@ namespace
 
     private:
         NGIN::Execution::detail::CompletionQueue m_completions;
-        std::vector<NGIN::Execution::WorkItem> m_ready;
-        std::vector<NGIN::Execution::WorkItem> m_delayed;
+        std::vector<NGIN::Execution::WorkItem>   m_ready;
+        std::vector<NGIN::Execution::WorkItem>   m_delayed;
     };
 
     NGIN::Async::Task<int> Throws(NGIN::Async::TaskContext&)
@@ -89,19 +90,23 @@ namespace
 
     NGIN::Async::Task<void> AwaitOperationFault(NGIN::Async::TaskContext& ctx)
     {
-        auto op     = NGIN::Async::Spawn(ctx, Throws(ctx));
-        auto result = co_await op;
+        NGIN::Async::TaskScope<> scope(ctx.GetEnvironment(), 1);
+        auto                     op     = scope.Spawn(Throws(ctx)).value();
+        auto                     result = co_await op;
+        (void) co_await scope.Join();
         if (!result)
         {
-            co_await NGIN::Async::Faulted(result.Fault());
+            co_await NGIN::Async::Faulted(result.Error().Fault());
         }
         co_return;
     }
 
     NGIN::Async::Task<int> AwaitOperationSuccess(NGIN::Async::TaskContext& ctx)
     {
-        auto op     = NGIN::Async::Spawn(ctx, Value(ctx));
-        auto result = co_await op;
+        NGIN::Async::TaskScope<> scope(ctx.GetEnvironment(), 1);
+        auto                     op     = scope.Spawn(Value(ctx)).value();
+        auto                     result = co_await op;
+        (void) co_await scope.Join();
         if (!result)
         {
             co_return result;
@@ -111,11 +116,13 @@ namespace
 
     NGIN::Async::Task<void> AwaitOperationCancellation(NGIN::Async::TaskContext& ctx)
     {
-        auto op     = NGIN::Async::Spawn(ctx, DelayThenValue(ctx));
-        auto result = co_await op;
-        if (result.IsCanceled())
+        NGIN::Async::TaskScope<> scope(ctx.GetEnvironment(), 1);
+        auto                     op     = scope.Spawn(DelayThenValue(ctx)).value();
+        auto                     result = co_await op;
+        (void) co_await scope.Join();
+        if (result.IsStopped())
         {
-            co_await NGIN::Async::Canceled();
+            co_await NGIN::Async::Stopped();
         }
         co_return;
     }
@@ -123,17 +130,23 @@ namespace
 
 TEST_CASE("Operation co_await exposes child fault as completion")
 {
-    NGIN::Execution::InlineScheduler scheduler;
-    NGIN::Async::CancellationSource  source;
-    NGIN::Async::TaskContext         ctx(scheduler, source.GetToken());
+    NGIN::Execution::CooperativeScheduler scheduler;
+    NGIN::Async::CancellationSource       source;
+    NGIN::Async::TaskContext              ctx(scheduler, source.GetToken());
 
-    auto op = NGIN::Async::Spawn(ctx, AwaitOperationFault(ctx));
+    auto opTask = AwaitOperationFault(ctx);
+
+    NGIN::Async::TaskSupervisor<typename decltype(opTask)::ErrorType> opRoot(ctx.GetEnvironment(), 1);
+
+    auto op = opRoot.Spawn(std::move(opTask)).value();
+    scheduler.RunUntilIdle();
 
     REQUIRE(op.IsCompleted());
-    REQUIRE(op.IsFaulted());
+    REQUIRE(op.HasError());
+    REQUIRE(opRoot.TryJoin());
     auto result = op.TakeResult();
     REQUIRE_FALSE(result);
-    REQUIRE(result.IsFault());
+    REQUIRE((result.HasError() && result.Error().IsFault()));
 }
 
 TEST_CASE("Operation co_await exposes child success")
@@ -141,12 +154,17 @@ TEST_CASE("Operation co_await exposes child success")
     NGIN::Execution::CooperativeScheduler scheduler;
     NGIN::Async::TaskContext              ctx(scheduler);
 
-    auto op = NGIN::Async::Spawn(ctx, AwaitOperationSuccess(ctx));
+    auto opTask = AwaitOperationSuccess(ctx);
+
+    NGIN::Async::TaskSupervisor<typename decltype(opTask)::ErrorType> opRoot(ctx.GetEnvironment(), 1);
+
+    auto op = opRoot.Spawn(std::move(opTask)).value();
 
     scheduler.RunUntilIdle();
 
     REQUIRE(op.IsCompleted());
-    REQUIRE_FALSE(op.IsFaulted());
+    REQUIRE_FALSE(op.HasError());
+    REQUIRE(opRoot.TryJoin());
     auto result = op.TakeResult();
     REQUIRE(result);
     REQUIRE(*result == 21);
@@ -158,7 +176,11 @@ TEST_CASE("Operation co_await is woken by cancellation")
     NGIN::Async::CancellationSource source;
     NGIN::Async::TaskContext        ctx(exec, source.GetToken());
 
-    auto op = NGIN::Async::Spawn(ctx, AwaitOperationCancellation(ctx));
+    auto opTask = AwaitOperationCancellation(ctx);
+
+    NGIN::Async::TaskSupervisor<typename decltype(opTask)::ErrorType> opRoot(ctx.GetEnvironment(), 1);
+
+    auto op = opRoot.Spawn(std::move(opTask)).value();
 
     exec.RunUntilIdle();
     REQUIRE_FALSE(op.IsCompleted());
@@ -167,8 +189,9 @@ TEST_CASE("Operation co_await is woken by cancellation")
     exec.RunUntilIdle();
 
     REQUIRE(op.IsCompleted());
-    REQUIRE(op.IsCanceled());
+    REQUIRE(op.IsStopped());
+    REQUIRE(opRoot.TryJoin());
     auto result = op.TakeResult();
     REQUIRE_FALSE(result);
-    REQUIRE(result.IsCanceled());
+    REQUIRE(result.IsStopped());
 }

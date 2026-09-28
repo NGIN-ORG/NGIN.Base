@@ -1,3 +1,4 @@
+#include <NGIN/Async/ExecutorTransitions.hpp>
 #include <NGIN/IO/AsyncFileHandle.hpp>
 
 namespace NGIN::IO
@@ -18,6 +19,7 @@ namespace NGIN::IO
         AsyncTask<UIntSize> DispatchData(NGIN::Async::TaskContext& ctx, std::shared_ptr<void> state,
                                          Function function, Args... args)
         {
+            co_await NGIN::Async::SwitchTo(ctx.GetExecutor());
             if (!state || !function)
                 co_return InvalidHandleError();
             co_return co_await function(state, ctx, args...);
@@ -26,6 +28,7 @@ namespace NGIN::IO
         AsyncTaskVoid DispatchControl(NGIN::Async::TaskContext& ctx, std::shared_ptr<void> state,
                                       AsyncFileHandle::FlushFn function)
         {
+            co_await NGIN::Async::SwitchTo(ctx.GetExecutor());
             if (!state || !function)
             {
                 co_await NGIN::Async::DomainFailure(InvalidHandleError());

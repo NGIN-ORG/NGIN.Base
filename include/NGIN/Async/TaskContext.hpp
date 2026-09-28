@@ -11,6 +11,7 @@
 #include <mutex>
 #include <utility>
 
+#include <NGIN/Async/AsyncEnvironment.hpp>
 #include <NGIN/Async/AsyncFault.hpp>
 #include <NGIN/Async/Cancellation.hpp>
 #include <NGIN/Execution/ExecutorRef.hpp>
@@ -144,13 +145,18 @@ namespace NGIN::Async
                 Canceled,
                 Fault
             };
-            explicit PendingResume(std::coroutine_handle<Promise> handle, bool removable) noexcept
-                : awaiting(handle), lease(handle.promise(), handle), removableTimer(removable) {}
+            explicit PendingResume(std::coroutine_handle<Promise> handle, bool removable,
+                                   NGIN::Execution::ExecutorRef selected, bool allowInline) noexcept
+                : awaiting(handle), lease(handle.promise(), handle), executor(selected),
+                  inlineDelivery(allowInline), removableTimer(removable) {}
 
             std::coroutine_handle<Promise>         awaiting;
             PromiseFrameLease<Promise>             lease;
             CancellationRegistration               registration;
             NGIN::Execution::CompletionReservation delivery;
+            NGIN::Execution::ExecutorRef           executor;
+            const bool                             inlineDelivery;
+            std::atomic<unsigned>                  publication {0};
             std::atomic<bool>                      claimed {false};
             std::atomic<unsigned>                  submission {0};
             Outcome                                outcome {Outcome::Ready};
@@ -199,8 +205,21 @@ namespace NGIN::Async
                 retired.Cancel();
                 outcome = result;
                 fault   = std::move(failure);
-                delivery.Dispatch();
+                Publish(2U);
             }
+
+            void Publish(unsigned flag) noexcept
+            {
+                const unsigned previous = publication.fetch_or(flag, std::memory_order_acq_rel);
+                if ((previous | flag) != 3U || (previous & flag))
+                    return;
+                auto                      ticket = std::move(delivery);
+                NGIN::Execution::WorkItem work([this] { Resume(); });
+                if (!inlineDelivery || !executor.TryDispatchInline(work))
+                    ticket.Dispatch();
+            }
+
+            CancellationToken cancellation;
 
             void Resume() noexcept
             {
@@ -222,7 +241,7 @@ namespace NGIN::Async
                 else
                 {
                     if (outcome == Outcome::Canceled)
-                        promise.SetCanceled();
+                        promise.SetStopped(cancellation.GetStopReason());
                     else
                         promise.SetFault(std::move(fault));
                     promise.MarkFinishedAndResume(handle);
@@ -237,9 +256,19 @@ namespace NGIN::Async
         {
             Promise&                   promise = awaiting.promise();
             PromiseFrameLease<Promise> setupLease(promise, awaiting);
+            if constexpr (requires { promise.RebindExecutor(exec); })
+            {
+                auto rebound = promise.RebindExecutor(exec);
+                if (!rebound)
+                {
+                    setupLease.Reset();
+                    CompleteSchedulingFailure(promise, awaiting, rebound.error());
+                    return std::noop_coroutine();
+                }
+            }
             if (cancellation.IsCancellationRequested())
             {
-                promise.SetCanceled();
+                promise.SetStopped(cancellation.GetStopReason());
                 setupLease.Reset();
                 promise.MarkFinishedAndResume(awaiting);
                 return std::noop_coroutine();
@@ -255,11 +284,11 @@ namespace NGIN::Async
             const bool removableTimer = timed && exec.SupportsTimerRemoval();
             if (!cancellation.HasState() && !removableTimer)
             {
-                if constexpr (requires { promise.SubmitTracked(awaiting, timed, until); promise.m_executor; })
+                if constexpr (requires { promise.SubmitTracked(awaiting, timed, until); promise.m_environment.executor; })
                 {
                     // Only the same dispatch binding can reuse this reservation.
                     // A context selecting another executor reserves its own path below.
-                    if (promise.m_taskContinuation.IsValid() && exec == promise.m_executor)
+                    if (promise.HasContinuation() && exec == promise.m_environment.executor)
                     {
                         setupLease.Reset();
                         (void) promise.SubmitTracked(awaiting, timed, until);
@@ -272,14 +301,18 @@ namespace NGIN::Async
             std::shared_ptr<State> state;
             try
             {
-                state = std::make_shared<State>(awaiting, removableTimer);
+                auto* resource = std::pmr::get_default_resource();
+                if constexpr (requires { promise.m_environment.resource; })
+                    resource = promise.m_environment.resource;
+                state = std::allocate_shared<State>(std::pmr::polymorphic_allocator<State>(resource), awaiting, removableTimer, exec, timed);
             } catch (const std::bad_alloc&)
             {
                 setupLease.Reset();
                 CompleteSchedulingFailure(promise, awaiting, NGIN::Execution::ScheduleError::ResourceExhausted);
                 return std::noop_coroutine();
             }
-            auto reservation = exec.ReserveCompletion(NGIN::Execution::WorkItem([state] { state->Resume(); }));
+            state->cancellation = cancellation;
+            auto reservation    = exec.ReserveCompletion(NGIN::Execution::WorkItem([state] { state->Resume(); }));
             if (!reservation)
             {
                 state->lease.Reset();
@@ -288,6 +321,11 @@ namespace NGIN::Async
                 return std::noop_coroutine();
             }
             state->delivery = std::move(*reservation);
+            struct CommitSetup final
+            {
+                std::shared_ptr<State> state;
+                ~CommitSetup() { state->Publish(1U); }
+            } commit {state};
             setupLease.Reset();
             const auto registered = cancellation.Register(state->registration, {}, {}, +[](void* rawState) noexcept {
                 static_cast<State*>(rawState)->Complete(State::Outcome::Canceled);
@@ -402,43 +440,53 @@ namespace NGIN::Async
         };
 
     public:
+        /// @brief Validates and snapshots the starter's logical environment.
+        explicit TaskContext(AsyncEnvironment environment)
+            : m_environment(std::move(environment))
+        {
+            m_environment.Validate();
+        }
+
+        /// @brief Returns an allocation-free snapshot of the bound environment.
+        [[nodiscard]] AsyncEnvironment GetEnvironment() const noexcept { return m_environment; }
+
         /// @brief Constructs a context from an executor reference and optional cancellation token.
         explicit TaskContext(NGIN::Execution::ExecutorRef executor, CancellationToken cancellation = {}) noexcept
-            : m_executor(executor), m_cancellation(std::move(cancellation))
+            : m_environment {.executor = executor, .cancellation = std::move(cancellation)}
         {
         }
 
         /// @brief Constructs a context that borrows a compatible scheduler.
         template<typename TScheduler>
         explicit TaskContext(TScheduler& scheduler, CancellationToken cancellation = {}) noexcept
-            : m_executor(NGIN::Execution::ExecutorRef::From(scheduler)), m_cancellation(std::move(cancellation))
+            : TaskContext(NGIN::Execution::ExecutorRef::From(scheduler), std::move(cancellation))
         {
         }
 
         /// @brief Returns whether this context has a usable executor.
         [[nodiscard]] bool HasExecutor() const noexcept
         {
-            return m_executor.IsValid();
+            return m_environment.executor.IsValid();
         }
 
         /// @brief Rebinds this context to an executor reference.
         void BindExecutor(NGIN::Execution::ExecutorRef executor) noexcept
         {
-            m_executor = executor;
+            m_environment.executor = executor;
         }
 
         /// @brief Rebinds this context to a borrowed compatible scheduler.
         template<typename TScheduler>
         void BindExecutor(TScheduler& scheduler) noexcept
         {
-            m_executor = NGIN::Execution::ExecutorRef::From(scheduler);
+            m_environment.executor = NGIN::Execution::ExecutorRef::From(scheduler);
         }
 
         /// @brief Replaces cancellation state and releases any linked-token ownership.
         void BindCancellationToken(CancellationToken cancellation) noexcept
         {
             m_cancellationOwner.reset();
-            m_cancellation = std::move(cancellation);
+            m_environment.cancellation = std::move(cancellation);
         }
 
         /// @brief Returns a copy of this context with replacement cancellation state.
@@ -453,20 +501,22 @@ namespace NGIN::Async
         /// @throws std::bad_alloc if linked-token ownership cannot be allocated; leaves this context unchanged.
         void BindLinkedCancellationToken(CancellationToken cancellation)
         {
-            if (!m_cancellation.HasState())
+            if (!m_environment.cancellation.HasState())
             {
                 BindCancellationToken(std::move(cancellation));
                 return;
             }
 
-            if (!cancellation.HasState())
+            if (!cancellation.HasState() || cancellation == m_environment.cancellation)
             {
                 return;
             }
 
             std::shared_ptr<detail::LinkedCancellationState> linked =
-                    std::make_shared<detail::LinkedCancellationState>();
-            linked->Link({m_cancellation, cancellation});
+                    std::allocate_shared<detail::LinkedCancellationState>(
+                            std::pmr::polymorphic_allocator<detail::LinkedCancellationState>(m_environment.resource),
+                            m_environment.resource);
+            linked->Link({m_environment.cancellation, cancellation});
 
             if (m_cancellationOwner)
             {
@@ -476,7 +526,7 @@ namespace NGIN::Async
                     std::shared_ptr<void> current {};
                 };
 
-                std::shared_ptr<OwnerChain> chain = std::make_shared<OwnerChain>();
+                std::shared_ptr<OwnerChain> chain = std::allocate_shared<OwnerChain>(std::pmr::polymorphic_allocator<OwnerChain>(m_environment.resource));
                 chain->previous                   = m_cancellationOwner;
                 chain->current                    = linked;
                 m_cancellationOwner               = std::move(chain);
@@ -486,7 +536,7 @@ namespace NGIN::Async
                 m_cancellationOwner = linked;
             }
 
-            m_cancellation = linked->source.GetToken();
+            m_environment.cancellation = linked->source.GetToken();
         }
 
         /// @brief Returns a copy whose cancellation observes both the current and supplied tokens.
@@ -501,31 +551,31 @@ namespace NGIN::Async
         /// @brief Returns the bound executor reference.
         [[nodiscard]] NGIN::Execution::ExecutorRef GetExecutor() const noexcept
         {
-            return m_executor;
+            return m_environment.executor;
         }
 
         /// @brief Returns the bound cancellation token.
         [[nodiscard]] CancellationToken GetCancellationToken() const noexcept
         {
-            return m_cancellation;
+            return m_environment.cancellation;
         }
 
         /// @brief Returns whether cancellation has been requested.
         [[nodiscard]] bool IsCancellationRequested() const noexcept
         {
-            return m_cancellation.IsCancellationRequested();
+            return m_environment.cancellation.IsCancellationRequested();
         }
 
         /// @brief Returns whether cancellation has been requested.
         [[nodiscard]] bool CheckCancellation() const noexcept
         {
-            return m_cancellation.IsCancellationRequested();
+            return m_environment.cancellation.IsCancellationRequested();
         }
 
         /// @brief Creates an awaiter that reschedules the current task through the bound executor.
         [[nodiscard]] auto YieldNow() const noexcept
         {
-            return YieldAwaiter {m_executor, m_cancellation};
+            return YieldAwaiter {m_environment.executor, m_environment.cancellation};
         }
 
         /// @brief Creates a cancellation-aware awaiter for a time-quantity delay.
@@ -533,12 +583,11 @@ namespace NGIN::Async
             requires NGIN::Units::QuantityOf<NGIN::Units::TIME, TUnit>
         [[nodiscard]] auto Delay(const TUnit& duration) const noexcept
         {
-            return DelayAwaiter<TUnit> {m_executor, m_cancellation, duration};
+            return DelayAwaiter<TUnit> {m_environment.executor, m_environment.cancellation, duration};
         }
 
     private:
-        NGIN::Execution::ExecutorRef m_executor {};
-        CancellationToken            m_cancellation {};
-        std::shared_ptr<void>        m_cancellationOwner {};
+        AsyncEnvironment      m_environment {};
+        std::shared_ptr<void> m_cancellationOwner {};
     };
 }// namespace NGIN::Async

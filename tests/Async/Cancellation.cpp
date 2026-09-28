@@ -1,3 +1,4 @@
+#include <NGIN/Async/TaskSupervisor.hpp>
 #include <NGIN/Execution/detail/CompletionQueue.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
@@ -10,7 +11,9 @@
 
 #include "../Support/FailureInjection.hpp"
 #include <NGIN/Async/Cancellation.hpp>
+#include <NGIN/Async/CurrentEnvironment.hpp>
 #include <NGIN/Async/Task.hpp>
+#include <NGIN/Execution/CooperativeScheduler.hpp>
 #include <NGIN/Execution/InlineScheduler.hpp>
 #include <NGIN/Execution/ThreadPoolScheduler.hpp>
 #include <NGIN/Execution/WorkItem.hpp>
@@ -196,8 +199,12 @@ TEST_CASE("Linked cancellation token wakes Delay")
     auto                            linked = NGIN::Async::CreateLinkedCancellationSource({a.GetToken(), b.GetToken()});
 
     NGIN::Async::TaskContext ctx(exec, linked.GetToken());
-    auto                     task = DelayForever(ctx);
-    auto                     op   = NGIN::Async::Spawn(ctx, std::move(task));
+    auto                     task   = DelayForever(ctx);
+    auto                     opTask = std::move(task);
+
+    NGIN::Async::TaskSupervisor<typename decltype(opTask)::ErrorType> opRoot(ctx.GetEnvironment(), 1);
+
+    auto op = opRoot.Spawn(std::move(opTask)).value();
 
     exec.RunUntilIdle();
     REQUIRE_FALSE(op.IsCompleted());
@@ -206,10 +213,11 @@ TEST_CASE("Linked cancellation token wakes Delay")
     exec.RunUntilIdle();
 
     REQUIRE(op.IsCompleted());
-    REQUIRE(op.IsCanceled());
+    REQUIRE(op.IsStopped());
+    REQUIRE(opRoot.TryJoin());
     auto result = op.TakeResult();
     REQUIRE_FALSE(result);
-    REQUIRE(result.IsCanceled());
+    REQUIRE(result.IsStopped());
 }
 
 TEST_CASE("CancelAfter schedules cancellation via executor")
@@ -531,4 +539,77 @@ TEST_CASE("Cancellation delivers an admitted continuation while its thread pool 
     REQUIRE(resumes == 1);
     REQUIRE(resumeThread != std::this_thread::get_id());
     REQUIRE(resumeThread != shutdownThread);
+}
+
+TEST_CASE("Linking identical cancellation tokens creates no additional context boundary", "[Async][Cancellation]")
+{
+    NGIN::Tests::FailureMemoryResource resource;
+    NGIN::Async::CancellationSource    source(&resource);
+    NGIN::Async::TaskContext           context(NGIN::Execution::ExecutorRef {}, source.GetToken());
+    const auto                         before = resource.AllocationAttempts();
+    resource.FailNextAllocation();
+    for (int i = 0; i < 64; ++i)
+        context.BindLinkedCancellationToken(source.GetToken());
+    REQUIRE(context.GetCancellationToken() == source.GetToken());
+    REQUIRE(resource.AllocationAttempts() == before);
+    source.Cancel();
+    REQUIRE(context.IsCancellationRequested());
+}
+
+TEST_CASE("Explicit linked sources register each distinct stoppable parent once", "[Async][Cancellation]")
+{
+    NGIN::Tests::FailureMemoryResource    resource;
+    NGIN::Async::CancellationSource       source(&resource);
+    const auto                            before = resource.AllocationAttempts();
+    NGIN::Async::LinkedCancellationSource linked {source.GetToken(), {}, source.GetToken(), {}};
+    const auto                            linkedAllocations = resource.AllocationAttempts() - before;
+    REQUIRE(linkedAllocations == 1);// The source reserves its table during construction; linking adds one node.
+    source.Cancel();
+    REQUIRE(linked.IsCancellationRequested());
+}
+
+namespace
+{
+    NGIN::Async::Task<void> CancellationBoundaryChain(int depth, bool suspend)
+    {
+        if (depth > 1)
+            co_await CancellationBoundaryChain(depth - 1, suspend);
+        else if (suspend)
+        {
+            NGIN::Async::TaskContext leaf(co_await NGIN::Async::CurrentEnvironment());
+            co_await leaf.Delay(NGIN::Units::Seconds(60));
+        }
+    }
+}// namespace
+
+TEST_CASE("Inherited cancellation boundary storage follows suspension rather than helper depth", "[Async][Cancellation]")
+{
+    const int                             depth   = GENERATE(1, 8, 64);
+    const bool                            suspend = GENERATE(false, true);
+    NGIN::Tests::FailureMemoryResource    resource;
+    NGIN::Async::CancellationSource       source(&resource);
+    NGIN::Execution::CooperativeScheduler scheduler;
+    NGIN::Async::TaskContext              context(NGIN::Async::AsyncEnvironment {
+                         .executor     = NGIN::Execution::ExecutorRef::From(scheduler),
+                         .cancellation = source.GetToken(),
+                         .resource     = &resource});
+    auto                                  operationTask = CancellationBoundaryChain(depth, suspend);
+
+    NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(context.GetEnvironment(), 1);
+
+    auto       operation = operationRoot.Spawn(std::move(operationTask)).value();
+    const auto before    = resource.AllocationAttempts();
+    scheduler.RunUntilIdle();
+    const auto boundaryAllocations   = resource.AllocationAttempts() - before;
+    const bool completedBeforeCancel = operation.IsCompleted();
+    source.Cancel();
+    scheduler.RunUntilIdle();
+    REQUIRE(operation.IsCompleted());
+    REQUIRE(operationRoot.TryJoin());
+    auto result = operation.TakeResult();
+    REQUIRE(boundaryAllocations == (suspend ? 2 : 0));
+    REQUIRE(completedBeforeCancel == !suspend);
+    REQUIRE(result.IsStopped() == suspend);
+    REQUIRE(result.Succeeded() == !suspend);
+    REQUIRE(scheduler.PendingTimers() == 0);
 }

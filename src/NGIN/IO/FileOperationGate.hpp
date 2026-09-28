@@ -82,7 +82,7 @@ namespace NGIN::IO::detail
             bool await_suspend(std::coroutine_handle<Promise> awaiting) noexcept
             {
                 auto& promise = awaiting.promise();
-                if (!promise.m_taskContinuation.IsValid())
+                if (!promise.HasContinuation())
                 {
                     m_node.status = Status::Fault;
                     m_node.fault  = NGIN::Async::detail::MakeSchedulingFault(
@@ -121,6 +121,13 @@ namespace NGIN::IO::detail
             void                           await_resume() noexcept { m_node.registration.Reset(); }
             Status                         GetStatus() const noexcept { return m_node.canceled ? Status::Canceled : m_node.status; }
             const NGIN::Async::AsyncFault& Fault() const noexcept { return m_node.fault; }
+            NGIN::Async::StopReason StopReason() const noexcept
+            {
+                // Cancellation callbacks set canceled. A canceled admission without
+                // such a callback means the runtime rejected new handle work.
+                return m_node.canceled ? m_context.GetCancellationToken().GetStopReason()
+                                       : NGIN::Async::StopReason::RuntimeShutdown;
+            }
             void                           Reset(bool closed = false) noexcept;
 
         private:
@@ -150,77 +157,60 @@ namespace NGIN::IO::detail
         bool               m_closed {false};
     };
 
-    // The backend operation is observed as an Operation so its failure cannot
-    // bypass lease retirement. Destroy its frame before admitting close, including
-    // a native close's rollback guard when backend admission failed.
-    template<typename T, typename State, typename Function, typename... Args>
-    AsyncTask<T> RunFileOperation(NGIN::Async::TaskContext& ctx, std::shared_ptr<void> rawState,
-                                  FileOperationGate::Kind kind, Function function, Args... args)
+    // Lives in the backend coroutine, before any request/rollback guard. Its
+    // destruction follows backend retirement and close rollback, without a Task layer.
+    template<typename State>
+    class FileOperationLease final
     {
-        using Outcome  = NGIN::Async::Completion<T, IOError>;
-        using Status   = FileOperationGate::Status;
-        auto state     = std::static_pointer_cast<State>(rawState);
-        auto admission = state->operations.Acquire(ctx, kind);
-        co_await admission;
-        std::optional<Outcome> result;
-        switch (admission.GetStatus())
+    public:
+        using Outcome = NGIN::Async::Completion<void, IOError>;
+        FileOperationLease(State& state, NGIN::Async::TaskContext& context, FileOperationGate::Kind kind)
+            : m_state(state), m_context(context), m_kind(kind), m_admission(state.operations, context, kind) {}
+        ~FileOperationLease()
         {
-            case Status::Canceled:
-                result.emplace(Outcome::Canceled());
-                break;
-            case Status::Fault:
-                result.emplace(Outcome::Faulted(admission.Fault()));
-                break;
-            case Status::Closing:
-            case Status::Closed: {
-                if constexpr (std::is_void_v<T>)
-                {
-                    if (kind == FileOperationGate::Kind::Close && admission.GetStatus() == Status::Closed)
-                    {
-                        result.emplace(Outcome::Success());
-                        break;
-                    }
-                }
-                IOError error(admission.GetStatus() == Status::Closing ? IOErrorCode::Busy : IOErrorCode::InvalidArgument);
-                error.path    = state->path;
-                error.message = admission.GetStatus() == Status::Closing ? "file close in progress" : "file is closed";
-                result.emplace(Outcome::DomainFailure(std::move(error)));
-                break;
-            }
-            case Status::Granted: {
-                if constexpr (requires { state->driver->IsStopping(); })
-                {
-                    if (state->driver->IsStopping())
-                    {
-                        result.emplace(Outcome::Canceled());
-                        break;
-                    }
-                }
-                auto operation = NGIN::Async::Spawn(ctx, function(rawState, ctx, args...));
-                result.emplace(co_await operation);
-                operation = {};
-                break;
-            }
+            m_admission.Reset(m_kind == FileOperationGate::Kind::Close && !m_state.NativeIsOpen());
         }
-        const bool closed = kind == FileOperationGate::Kind::Close && !state->NativeIsOpen();
-        admission.Reset(closed);
-        if constexpr (std::is_void_v<T>)
+        FileOperationLease(const FileOperationLease&) = delete;
+        FileOperationLease& operator=(const FileOperationLease&) = delete;
+        bool await_ready() const noexcept { return false; }
+        template<typename Promise>
+        bool await_suspend(std::coroutine_handle<Promise> awaiting) noexcept
         {
-            if (result->IsCanceled())
-                co_await NGIN::Async::Canceled();
-            else if (result->IsFault())
-                co_await NGIN::Async::Faulted(std::move(*result).Fault());
-            else if (result->IsDomainError())
-                co_await NGIN::Async::DomainFailure(std::move(*result).DomainError());
-            co_return;
+            return m_admission.await_suspend(awaiting);
         }
-        else
-            co_return std::move(*result);
-    }
-
-    template<typename T, typename State, FileOperationGate::Kind Kind, auto Function, typename... Args>
-    AsyncTask<T> WithFileOperation(const std::shared_ptr<void>& state, NGIN::Async::TaskContext& ctx, Args... args)
-    {
-        return RunFileOperation<T, State>(ctx, state, Kind, Function, args...);
-    }
+        // Empty means admitted; a completion means skip the backend, including an
+        // already-closed Close. Ready completion propagation creates no coroutine.
+        std::optional<Outcome> await_resume()
+        {
+            m_admission.await_resume();
+            using Status = FileOperationGate::Status;
+            switch (m_admission.GetStatus())
+            {
+                case Status::Canceled:
+                    return Outcome::Stopped(m_admission.StopReason());
+                case Status::Fault:
+                    return Outcome::Faulted(m_admission.Fault());
+                case Status::Closing:
+                case Status::Closed: {
+                    if (m_kind == FileOperationGate::Kind::Close && m_admission.GetStatus() == Status::Closed)
+                        return Outcome::Success();
+                    IOError error(m_admission.GetStatus() == Status::Closing ? IOErrorCode::Busy : IOErrorCode::InvalidArgument);
+                    error.path = m_state.path;
+                    error.message = m_admission.GetStatus() == Status::Closing ? "file close in progress" : "file is closed";
+                    return Outcome::DomainFailure(std::move(error));
+                }
+                case Status::Granted:
+                    if constexpr (requires { m_state.driver->IsStopping(); })
+                        if (m_state.driver->IsStopping())
+                            return Outcome::Stopped(NGIN::Async::StopReason::RuntimeShutdown);
+                    return {};
+            }
+            std::terminate();
+        }
+    private:
+        State& m_state;
+        NGIN::Async::TaskContext& m_context;
+        FileOperationGate::Kind m_kind;
+        FileOperationGate::Admission m_admission;
+    };
 }// namespace NGIN::IO::detail

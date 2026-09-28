@@ -12,11 +12,11 @@ Use it when you want:
 Most users only need these types:
 
 - `Task<T, E>`: a cold coroutine object
-- `Operation<T, E>`: a started task owned at a root boundary
-- `TaskContext`: executor and cancellation state
+- `Operation<T, E>`: a move-only result consumer; its scope owns execution
+- `AsyncEnvironment` / `TaskContext`: executor, cancellation, deadline, resource, and logical metadata
 - `Completion<T, E>`: the value-owned terminal result
 - `TaskScope<E>`: bounded child ownership, shared cancellation, and explicit joining
-- `WhenAll` / `WhenAny`: consumed-task combinators
+- `WhenAll` / `Race`: joined task groups and owning competition
 
 ## Core Contract
 
@@ -24,12 +24,98 @@ Most users only need these types:
 
 Start root work with:
 
-- `Spawn(ctx, std::move(task)) -> Operation<T, E>`
-- `Detach(ctx, std::move(task))` for explicit fire-and-forget
+- `TaskScope::Spawn(...)` for joined concurrent work
+- `TaskSupervisor::Transfer(...)` for explicitly supervised application work
 - `SyncWait(ctx, std::move(task)) -> Completion<T, E>` for blocking bridge code
 
 Inside another coroutine, compose child tasks with `co_await`. Child task
-failures propagate automatically.
+failures propagate automatically. Awaiting consumes the source task, including an lvalue task or a
+`WithCancellation` await. The awaiter owns the child through completion and retirement. A second await
+reports `InvalidTaskUsage`, whether the original child is pending or complete; Task objects must not be
+accessed concurrently from multiple threads. Fresh children using the active executor transfer directly and borrow
+one reserved continuation slot from their running root. They no longer submit or reserve a separate slot
+at each helper layer. Blocking-wait signaling, completion tickets, observer delivery, continuation publication,
+and submission handshake storage belong to one execution-state allocation per running root/producer/executor
+boundary. Allocation and reservation of this state are compiled into the Execution component. Sequential promises borrow that chain state; they retain only the per-frame outcome, continuation,
+context, and lifetime bookkeeping needed by suspension and backend leases. The current direct-chain work budget is 256 transfers (child entries plus returns);
+longer chains defer through the root slot. The cooperative scheduler alternates reserved deliveries with
+ordinary work/due timers when both are ready. Full runtime PollOnce accounting and the remaining I/O
+placement migration are still being completed in the AsyncRuntime redesign.
+
+`Task<T, E>::FromValue(value)`, `Task<void, E>::FromValue()`, and
+`Task<T, E>::FromCompletion(completion)` construct inline ready computations. They allocate no coroutine
+frame, continuation reservation, or runtime result storage; the payload may have its own allocations.
+Ready results can be sequentially awaited or synchronously consumed without scheduling.
+Scoped spawning still requires a tracked executor and bounded owner admission, including for ready inputs.
+Empty tasks remain invalid.
+Cancellation requested by a wait cannot replace an inline result already published before that wait.
+A successful coroutine child with outstanding frame leases temporarily transfers its result into the owning
+awaiter's inline storage and waits for frame retirement before resuming its parent. The ordinary success path
+without outstanding leases still returns directly.
+
+Task moves have a conditional exception specification because inline payload moves may
+throw. Operation moves are noexcept transfers of result interest. During a coroutine await, a throwing payload move becomes the awaiting task's exception fault;
+Scoped spawning reports a throwing ready-result transfer through the admitted child completion. Ordinary
+C++ construction and moves outside those boundaries may throw. Awaiting or spawning consumes the ready
+task using the same rules as a coroutine-backed task.
+
+`TaskContext(AsyncEnvironment)` validates and snapshots the starter's logical properties. Scoped admission snapshots
+the owner environment before starting the child; nested children inherit the active environment. Use
+`co_await CurrentEnvironment()` to obtain a value snapshot without scheduling. For example:
+
+```cpp
+NGIN::Async::Task<int> ReadLogicalMetadata()
+{
+    auto environment = co_await NGIN::Async::CurrentEnvironment();
+    NGIN::Async::TaskContext current(environment);
+    co_await current.YieldNow();
+    co_return *static_cast<const int*>(environment.metadata);
+}
+```
+
+The environment contains `executor`, `cancellation`, an optional monotonic `deadline`, a non-null PMR
+`resource`, borrowed `metadata`, and optional integer `priority`. Absent properties require no allocation.
+Copies retain the existing token; ordinary helper inheritance does not create a linked source or register
+a callback. Deadline enforcement and priority scheduling are separate policies; these fields currently carry
+the inherited properties. Explicit context-taking leaf operations still use their selected delivery binding.
+
+Execution-state allocation and pending TaskContext wait state use the inherited resource. The resource,
+executor, metadata, and owners of cancellation links must outlive work that borrows them. A context passed
+as a coroutine argument must also outlive that argument's use. Merely copying a token does not extend the
+lifetime of registrations owned by a separate linked source/context. A cold compiler frame is allocated
+before startup using the normal coroutine allocation policy; a later environment cannot retroactively
+choose its allocator. Resource rejection produces a scheduling fault before the root body runs. Backend
+and structured-owner allocation policy is being integrated in the later redesign stages.
+
+`co_await task.AsCompletion()` consumes a child and returns its full Completion to the awaiting body,
+including domain errors, cancellation, and faults. It also works when the parent's error type differs.
+Ready outcomes return immediately; a coroutine child with outstanding frame leases retires before the
+awaiting body continues. Empty or consumed tasks return an InvalidTaskUsage completion.
+
+Include `<NGIN/Async/ExecutorTransitions.hpp>` for explicit placement:
+
+- `StartsOn(executor, task)` admits target delivery before starting the child on that executor.
+- `ContinuesOn(executor, task)` preserves incoming startup and reserves terminal delivery before starting
+  the child. Value, domain-error, canceled, and fault outcomes all reach that executor, including when
+  admission closes after reservation or the child switches elsewhere.
+- `co_await SwitchTo(executor)` changes the active default while preserving cancellation, deadline,
+  resource, metadata, and priority. Same-executor transfers may remain inline within the chain budget.
+- `co_await YieldNow()` always defers using the active environment, subject to cooperative cancellation.
+
+Ordinary Task completion carries the child's current executor to its parent; it does not restore the prior
+executor. Use StartsOn for an explicit child startup override: merely passing a different TaskContext as a
+coroutine argument no longer overrides inherited startup. TaskContext yields/delays adopt their explicit
+delivery executor. Observing an independently spawned Operation still resumes on the observer's executor.
+Transitions acquire target capacity before releasing the prior delivery guarantee; rejected admission does
+not enter the inner task. ContinuesOn's retained terminal reservation is an explicit boundary cost, including
+when its target initially matches the caller.
+
+File and directory operations, socket operations, and asynchronous resolution explicitly switch to their
+TaskContext executor before validation and submission. This executor becomes the task chain's active
+executor for early errors, cancellation, and pending completion alike. File fallback workers, native I/O
+backends, and resolver workers perform their backend work on their own resources; they deliver task
+continuations through the selected context executor. Target admission failure starts no backend work.
+Stage 1 fairness and host-loop budget checks are recorded in the AsyncRuntime measurements.
 
 Root result inspection happens through `Operation::TakeResult()`, which returns
 a value-owned `Completion<T, E>`. A result can be taken once.
@@ -56,10 +142,7 @@ int main()
     NGIN::Execution::CooperativeScheduler scheduler;
     NGIN::Async::TaskContext ctx(scheduler);
 
-    auto operation = NGIN::Async::Spawn(ctx, Compute(ctx));
-    scheduler.RunUntilIdle();
-
-    auto result = operation.TakeResult();
+    auto result = NGIN::Async::SyncWait(ctx, Compute(ctx));
     if (!result)
     {
         return 1;
@@ -92,10 +175,7 @@ faults, that non-success propagates to `Parent`.
 At root boundaries:
 
 ```cpp
-auto operation = NGIN::Async::Spawn(ctx, Parent(ctx));
-scheduler.RunUntilIdle();
-
-auto result = operation.TakeResult();
+auto result = NGIN::Async::SyncWait(ctx, Parent(ctx));
 ```
 
 For blocking bridge code:
@@ -108,33 +188,35 @@ Do not use blocking waits inside normal coroutine control flow.
 
 ## Error Handling
 
-`Completion<T, E>` separates three non-success states:
-
-- domain error: expected typed failure from `E`
-- canceled: cooperative cancellation was requested
-- fault: async runtime or infrastructure failure
+`Completion<T, E>` has exactly three terminal channels: `Value`, `Error`, and `Stopped`.
+`AsyncError<E>` distinguishes a typed domain payload from an infrastructure `AsyncFault` inside the error
+channel. `StopReason` distinguishes requested cancellation, deadline, owner closure, and runtime shutdown.
+A stop request does not replace an already-published value or error.
 
 Typical root handling:
 
 ```cpp
 auto result = operation.TakeResult();
-if (result.Succeeded())
-{
+if (result.HasValue())
     Use(result.Value());
-}
-else if (result.IsDomainError())
-{
-    HandleDomainError(result.DomainError());
-}
-else if (result.IsCanceled())
-{
-    HandleCancellation();
-}
+else if (result.IsStopped())
+    HandleStop(result.StopReason());
+else if (result.Error().IsDomainError())
+    HandleDomainError(result.Error().DomainError());
 else
-{
-    HandleFault(result.Fault());
-}
+    HandleFault(result.Error().Fault());
 ```
+
+`TaskStatus` adds `Pending` to these three terminal states. Task and Operation expose `HasError()` and
+`IsStopped()`; inspect the consumed completion to discriminate error payloads. `DomainFailure` and `Faulted`
+construction helpers both create the same Error channel. Use `Completion::Failure(AsyncError<E>)` to forward
+an error without extracting or copying its payload, and `Completion::Stopped(reason)` to preserve a stop
+reason. For void coroutines, `co_await Stopped(reason)` records the stopped outcome.
+
+An AsyncError normally owns its payload inline. Explicit `AsyncError::Retain` accepts immutable shared
+error storage (including an alias into an externally owned concurrent state); lvalue inspection does not
+consume move-only payloads. Keep the whole AsyncError when forwarding a retained error. Never store an
+owning alias back into the state it retains, which would create a reference cycle.
 
 For value-returning tasks, return a completion for explicit non-success:
 
@@ -169,7 +251,14 @@ failures.
 ## Cancellation
 
 `TaskContext` carries the cancellation token. Cancellation-aware await points
-such as `YieldNow()` and `Delay(...)` observe it automatically.
+such as `YieldNow()` and `Delay(...)` observe it automatically. Ordinary sequential helpers copy the
+inherited token without linking sources or registering callbacks. Cannot-stop tokens have no cancellation
+state to allocate, register, lock, or update atomically.
+
+Token equality compares source identity. Linking a context to its own token or to an empty token preserves
+its existing cancellation boundary. Explicit linked sources register each distinct stoppable parent once;
+empty parents need no registration. `Race` owns one linked cancellation source per competitor and
+passes its token to descendants, so loser cancellation does not require an additional source/link pair.
 
 `CancellationSource` may be constructed with a
 `std::pmr::memory_resource*` when registrations must use a caller-controlled
@@ -201,7 +290,7 @@ NGIN::Async::Task<void, DemoError> Work(NGIN::Async::TaskContext& ctx)
     {
         if (ctx.CheckCancellation())
         {
-            co_await NGIN::Async::Canceled();
+            co_await NGIN::Async::Stopped();
             co_return;
         }
 
@@ -212,40 +301,54 @@ NGIN::Async::Task<void, DemoError> Work(NGIN::Async::TaskContext& ctx)
 
 ## Combinators
 
-`WhenAll` consumes child tasks. Pass freshly created tasks or move existing
-task objects into it.
+`WhenAll` consumes child tasks into an internal scope. Pass freshly created tasks or move existing
+task objects into it. It joins every admitted child before returning, including when later admission
+or value consumption fails. Child errors request sibling stop and outrank stopped children; errors
+are selected in argument order. Admission or value-consumption faults are reported after cleanup.
+Successful values remain in argument order.
 
 ```cpp
 auto both = co_await NGIN::Async::WhenAll(ctx, Child(ctx), Child(ctx));
 ```
 
 ```cpp
-auto firstIndex = co_await NGIN::Async::WhenAny(
+auto result = co_await NGIN::Async::Race(
         ctx,
         [](NGIN::Async::TaskContext& child) { return Child(child); },
-        [](NGIN::Async::TaskContext& child) { return Child(child); });
+        [](NGIN::Async::TaskContext& child) { return Child(child); }).AsCompletion();
+if (result.Succeeded()) {
+    const auto index = result.Value().index;
+    // result.Value().value is a variant indexed by the input position.
+}
 ```
 
-`WhenAny` accepts factories so it can construct every task with a distinct
-child context linked to the parent context. It records the first terminal
-child, requests cancellation through every losing child context, and drains
-every child before returning. A winning domain error, cancellation, or
-fault is propagated after the drain. A loser may safely reference state in the
-parent coroutine frame. This structured lifetime adds loser cancellation and
-drain time to observable completion latency; children should cooperate with
-cancellation or otherwise finish promptly.
+`Race` replaces `WhenAny`. Factories share their domain-error type E, while their successful value types
+may differ. The result is `Task<RaceWinner<Ts...>, RaceFailure<E, Ts...>>`. `RaceWinner` contains the
+input `index` and variant `value`; void uses `std::monostate`, and duplicate types remain separate
+index-addressed alternatives.
 
-Before invoking any factory, `WhenAny` reserves one terminal notification per
-child. Insufficient capacity or allocation failure reports a scheduling fault
-without starting a child. A factory exception, empty task, or child executor
-rejection contributes a terminal fault and still joins the other children.
-The combinator requires a tracked parent executor and resumes its join through
-that task's existing reservation, including after ordinary admission closes.
-It releases child frames and factory captures before returning, and waits for
-winner-triggered cancellation callbacks to finish publishing before the join.
-Terminal result publication can precede release of a resume callback's frame
-lease. The same notification slot is reused to report final frame retirement;
-loser locals are gone before the join completes, without another allocation.
+The owner prepares every child record, cancellation source, execution reservation, cleanup reservation,
+and retained winner slot before invoking any factory. Admission failure invokes no factories and releases
+all partial reservations. Startup then closes admission and invokes the factories with distinct owned
+child contexts linked to the parent. A factory exception or empty Task becomes that competitor's error.
+
+An atomic claim at producer terminal publication selects the winner, before queued observation or final
+frame retirement. Ready factory results use input order. The winner requests `OwnerClosed` stop through
+the losing contexts; all competitors must actually finish and retire before Race returns. A losing task
+may therefore borrow its enclosing caller's resources. Slow or noncooperative losers delay completion.
+The final join uses the awaiting task's reserved continuation even after ordinary executor admission closes.
+
+An error winner remains primary. Otherwise any loser error overrides a successful or stopped winner.
+`RaceFailure::winner` retains the selected index/kind, `value` retains a successful `RaceWinner` through
+an immutable shared reference, and `stopped` retains a stopped winner's reason. Its bounded `errors`
+array contains an optional immutable error for each input, including losers. `primaryIndex` and
+`Primary()` select the error winner or the lowest input index with an error. Moving this failure does
+not move the retained successful value or move-only child errors. The environment's allocation resource
+must outlive retained failure data. With no errors, the winner's value or stop reason is returned.
+
+The previous WhenAny header and symbol are removed; migrate includes to `<NGIN/Async/Race.hpp>`,
+read `RaceWinner::index` instead of a bare index, and inspect child failures through `RaceFailure`.
+Use `FirstCompleted` for non-consuming observation of independently owned operations.
 
 ## Frame Lifetime and Publication
 
@@ -253,16 +356,19 @@ Task frames use explicit owner, execution, queued-work, and continuation
 references. Resume callbacks release their temporary frame holds before
 publishing completion or invoking a parent continuation. Active execution keeps
 the task alive during its next resume; delivery does not keep a failed child's
-locals alive past destruction of parent locals they borrow. Dropping an `Operation` or calling `Detach` releases only the
-owner reference; a running task remains alive until execution and all retained
-continuations or executor work have released their references. The final
+locals alive past destruction of parent locals they borrow. Dropping a scoped `Operation`
+releases result interest; its scope or supervisor still owns execution through retirement.
+A running task remains alive until execution and all retained continuations or executor
+work have released their references. The final
 release is the only operation that destroys the frame.
 
-Continuation installation and terminal completion use a CAS-controlled state.
+Concurrent continuation installation and terminal completion use CAS-controlled state; sequential
+children install their continuation before starting.
 Completion release-publishes its payload before an awaiting reader observes the
 terminal state with acquire semantics. A child continuation retains its parent
-frame until the child completion handler has either resumed the parent or
-observed that the parent already completed. Cancellation-aware `YieldNow()` and
+frame until completion either transfers directly to the parent or delivers its queued continuation.
+Failure forwarding retires the child's retained frame before completing the parent, using the root slot;
+this keeps deep failed chains from recursively destroying all child frames during root destruction. Cancellation-aware `YieldNow()` and
 `Delay()` callbacks similarly retain the suspended frame and unregister
 cancellation before resuming it. Token-free waits on the task's own executor
 use its active execution reference and existing continuation slot. Their submission
@@ -295,7 +401,10 @@ outlive that advance. Each advance runs on the producer context's executor and
 delivers its result on the consumer task's executor. Both executors must support
 completion reservations and remain operational through the advance. Admission
 failure is reported before entering the producer; accepted delivery uses reserved
-storage, including while the executors are stopping.
+storage, including while the executors are stopping. At a yield or terminal
+boundary, delivery may resume the consumer inline when its executor is current
+and the shared dispatch budget permits it. Otherwise the reserved continuation
+queues delivery. Producer execution ownership is released before consumer code runs.
 
 Only one advance may produce or consume a result at a time. A competing `Next`
 reports `InvalidContinuationState` without interrupting the active advance.
@@ -309,12 +418,12 @@ releasing anything borrowed by the producer.
 
 ## Common Mistakes
 
-- Creating a root `Task` and never passing it to `Spawn`, `Detach`, or `SyncWait`.
+- Creating a root `Task` and never admitting it to a scope/supervisor or passing it to `SyncWait`.
 - Calling `TakeResult()` before an operation is complete.
 - Calling `TakeResult()` more than once.
 - Awaiting the same running operation from multiple consumers.
 - Passing lvalue tasks to `WhenAll` instead of moving/creating tasks.
-- Passing preconstructed tasks to `WhenAny`; use child-context factories so
+- Passing preconstructed tasks to `Race`; use child-context factories so
   loser cancellation reaches the task body.
 - Mixing incompatible error types across composed tasks.
 - Treating cancellation like a domain error.
@@ -323,11 +432,11 @@ releasing anything borrowed by the producer.
 ## Reference Notes
 
 - `Task<T, E>` is the coroutine return object.
-- `Operation<T, E>` is the owning handle for started root work.
+- `Operation<T, E>` singly consumes a scoped child result; the scope owns execution.
 - `Completion<T, E>` is the value-owned terminal-state type.
-- `Spawn` is the normal root-start API.
-- `Detach` is the explicit fire-and-forget API.
-- `SyncWait` is the explicit blocking bridge.
+- Use `TaskScope::Spawn` for concurrent children and `WithScope` for asynchronous closure.
+- `SyncWait` and `IO::RunTask` own and join root execution.
+- Global `Spawn` and naked `Detach` are removed. Use an explicit scope or supervisor for concurrency.
 
 
 ### Cancellation-aware child waits
@@ -350,21 +459,72 @@ remains unchanged if allocation fails.
 joining. `Spawn(factory)` uses the scope executor; `SpawnOn(executor, factory)`
 selects an independently driven executor. Factories receive a stable
 `TaskContext&` with the scope cancellation token. All children use the scope's
-error type; successful child values are discarded.
+error type. `Spawn(Task<T, E>)` also accepts a cold task directly. Both overloads return
+`std::expected<Operation<T, E>, ScheduleError>`. Rejected cold tasks are destroyed without starting.
 
-Admission reserves a terminal notification before invoking the factory. The
+The returned move-only handle singly consumes the child's `Completion<T, E>` through `co_await`
+or, after completion, `TakeResult()`. A second consumption reports `InvalidTaskUsage`. Dropping it
+leaves the scope responsible for execution, errors, and joining. Result readiness follows final child
+frame retirement, including outstanding frame leases. A pending consumer resumes on its own executor
+using its existing task continuation reservation. Pending awaits require a tracked NGIN task.
+
+Errors remain immutable and retained independently of consumption, so awaiting a move-only child error
+does not remove it from the scope report. A result handle may outlive a joined scope; its environment's
+allocation resource must outlive the handle and any retained error payloads.
+
+Admission reserves the child record, result state, terminal notification, and child execution
+continuation before invoking the factory. Startup uses that reserved continuation directly, so it
+requires no later admission to the executor's general work queue. The
 configurable child limit defaults to 256 and includes completed children retained
 before Join. Saturation returns `ScheduleError::ResourceExhausted`. A child
 factory or task fault after admission is reported by Join. Check Spawn's result:
 a rejected child is not part of the scope.
 
-`RequestCancel()` requests cancellation without waiting. The first observed
-child failure also requests sibling cancellation. `co_await scope.Join()` closes
-child admission, waits for every admitted child, releases their frames and factory
-captures, and returns a borrowed `const Completion<void, E>&`. It reports the
-first observed domain failure, fault, or cancellation, or success when all children
-succeed. Sequential joins may inspect the same result. `TakeResult()` moves the
-joined result once; borrowed outcome references must no longer be used afterward.
+`RequestStop()` requests cancellation without waiting; `Close()` only closes admission.
+`CancellationSource::Cancel(reason)` and `TaskScope::RequestStop(reason)` accept a `StopReason`,
+defaulting to Requested. The first request wins atomically. Tokens expose it through `GetStopReason()`;
+linked tokens, task checkpoints, and generator cancellation preserve it. WithScope closure and sibling
+failure request OwnerClosed. File, socket, and resolver adapters preserve the reason when delivering cancellation; file/socket
+runtime stop uses RuntimeShutdown, and socket close uses OwnerClosed. Automatic deadline policy and
+root ownership migration are still being integrated. A child error
+requests sibling cancellation promptly. A stopped child alone does not request sibling cancellation.
+`co_await scope.Join()` waits for every admitted child to retire and releases factory captures before
+returning an owning `ScopeReport<E>`. Errors are ordered by spawn index, regardless of completion order;
+errors outrank stopped outcomes. `Errors()` exposes immutable error payloads, `StoppedReason()` retains
+stopped information even when an error is primary, and `RetainError(index)` forwards an error without
+copying move-only payloads. Sequential joins inspect the same report. `TakeResult()` obtains it once.
+
+The scope also accepts `AsyncEnvironment` and a child capacity; child contexts retain its metadata,
+allocator, deadline, and priority while observing the scope-owned cancellation token. Scope state,
+child records, result storage, cancellation ownership, and the reserved child/report tables use that
+resource. It must outlive escaping handles, reports, errors, and cancellation tokens. Allocation failure
+while reserving child records returns ResourceExhausted before invoking the factory. Join builds its
+report within the capacity reserved at construction.
+
+Use `WithScope<E>(environment, capacity, body)` for asynchronous closure. The owned body receives
+`TaskScope<E>&` and returns `Task<T, E>`. The helper returns `Task<T, ScopeFailure<E>>`: it closes admission,
+requests stop on body exit, and joins all children before propagating the outcome. A body error is primary;
+otherwise the lowest-spawn-index child error is primary. ScopeFailure retains secondary child errors.
+If no error occurred, a stopped body/child yields Stopped; otherwise the body's value is returned.
+
+```cpp
+auto work = NGIN::Async::WithScope(ctx.GetEnvironment(), 4,
+    [](NGIN::Async::TaskScope<>& scope) -> NGIN::Async::Task<void> {
+        auto admitted = scope.Spawn([](NGIN::Async::TaskContext& child) -> NGIN::Async::Task<void> {
+            co_await child.YieldNow();
+        });
+        if (!admitted) throw std::runtime_error("child admission failed");
+        (void) co_await scope.Join();
+    });
+```
+
+Scope-owned result handles and the SyncWait/RunTask root entry points use structured ownership.
+Global Spawn and naked Detach are removed; public Operation handles cannot own producer frames.
+
+`SyncWait` admits a cold root through a scope and blocks until its frame leases retire and its owner
+notification ends resource access. It then joins and releases the scope before returning. Its executor
+must be driven independently; do not block an executor thread needed by the root. Ready inputs still
+require no executor or ownership allocation. A rejected cold input never starts.
 
 Join uses its awaiting task's existing continuation reservation, so it remains
 available during runtime shutdown. Canceling its context does not abandon the
@@ -377,12 +537,141 @@ In particular, children borrowing locals from a root coroutine must be joined
 before those locals leave scope. The root helper can join remaining children
 whose data belongs to their retained factories or the caller above RunTask.
 
-Started tasks on tracked executors reserve one reusable continuation slot for
-their lifetime. Child success, failure propagation, and Operation observation run
-on the parent's executor using that slot after ordinary admission closes. A new
+Running roots on tracked executors retain an active continuation slot, shared with sequential helpers.
+Transitions acquire a replacement before releasing that guarantee; ContinuesOn also holds its explicit
+terminal reservation. Sequential child delivery uses the active chain executor after ordinary admission
+closes. Independent Operation observation uses the observer's executor. A new
 cold task still requires admission. WhenAll joins already-started children without
 starting helper tasks between waits. Executors without reservation support can
 run standalone tasks, but a suspended child wait requires tracked delivery.
 
 For standalone I/O applications, `IO::RunTask` owns a root task, TaskScope, and
 runtime shutdown; see [I/O runtime](IORuntime.md).
+
+Runtime PollOnce now charges eligible sequential task entry/return transfers against its batch allowance,
+in addition to dequeued callbacks. An exhausted allowance queues the chain through its retained delivery
+slot. Eligible task, timer, I/O, generator, and final structured-join delivery uses the same dispatch
+check. Nested cooperative, thread-pool, and runtime dispatch shares a depth guard. Internal observer and
+frame-retirement notifications remain queued to serialize their lifetime protocol; their final user join
+may run inline. Stage 1 budget choices are recorded in the AsyncRuntime measurements; final performance acceptance remains open. This accounting cannot
+preempt arbitrary synchronous callback instructions.
+
+
+## Non-consuming completion observation
+
+Include `<NGIN/Async/FirstCompleted.hpp>` to observe scope-owned operations:
+
+```cpp
+std::array refs {first.Observe(), second.Observe()};
+auto notification = co_await FirstCompleted(refs, waitToken).AsCompletion();
+if (notification.Succeeded()) {
+    const auto index = notification.Value().index;
+    const auto kind = notification.Value().kind;
+    // The selected operation's value/error is still available to its consumer.
+}
+// The existing scopes still own their operations and must join them.
+```
+
+`OperationRef` is copyable and retains notification storage without owning execution. Creating or
+copying it does not allocate. `Kind()` returns an optional `CompletionKind`, available after final
+producer retirement and preserved after result consumption or scope destruction. The environment's
+allocation resource must outlive retained operation references, just as it must outlive result handles.
+Invalid or moved-from operations produce invalid references.
+Operation handles are produced only by scoped admission; use `TaskScope::Spawn` or `TaskSupervisor::Spawn`.
+
+`FirstCompleted` returns an input index and terminal kind without consuming any result or stopping any
+operation. Already-completed inputs use input order. Pending inputs arbitrate atomically when their
+notifications are published, before observer-executor dispatch. A supplied token cancels only this wait
+and preserves its stop reason. An already-completed input takes precedence over a pre-canceled token.
+Empty spans or invalid references fail with `InvalidTaskUsage`.
+
+Keep the span alive until the cold observation task starts. A pending wait retains its own references
+and allocates one bounded registration array and state from the observing environment's resource.
+Cancellation registration uses the token's resource. Allocation rejection returns a scheduling fault.
+Every registration is removed, including callbacks already running on another thread, before the caller
+resumes. The observing executor must remain driven through that delivery; cancellation never abandons
+cleanup. Ordinary sequential Tasks do not allocate this observer state.
+
+
+## Owned deadlines and timeouts
+
+Include `<NGIN/Async/WithDeadline.hpp>` for a monotonic absolute deadline, or
+`<NGIN/Async/WithTimeout.hpp>` for a relative duration:
+
+```cpp
+Task<void> Work() {
+    TaskContext current(co_await CurrentEnvironment());
+    co_await current.Delay(NGIN::Units::Seconds(60));
+}
+
+auto outcome = co_await WithTimeout(NGIN::Units::Seconds(2), Work()).AsCompletion();
+if (outcome.IsStopped()) {
+    const auto reason = outcome.StopReason(); // Deadline when expiry caused the stop.
+}
+```
+
+`WithTimeout(duration, task)` computes its monotonic deadline once when the cold wrapper starts.
+`WithDeadline(timePoint, task)` creates a local boundary only when the deadline is earlier than the
+inherited one. Equal/later deadlines share the existing owner's token and timer; helper depth does not
+multiply timers or extend the original deadline. A stricter boundary installs its deadline and linked
+stop token in the current environment while preserving executor, resource, and other properties.
+Inner Tasks use `CurrentEnvironment()` to observe those inherited properties; existing caller-owned
+TaskContext references are not rewritten by a wrapper.
+
+A boundary allocates its state and cancellation linkage from the environment resource and admits a
+removable executor timer before starting inner work. Unsupported timer removal or admission exhaustion
+returns a scheduling fault without starting that work. Already-completed inputs preserve their result
+without timer admission. Zero/negative durations request immediate deadline stop; non-finite durations
+fail admission, and large finite durations saturate at the latest representable monotonic tick.
+
+Expiry requests cooperative stop with `StopReason::Deadline`. It does not force the result to stopped:
+a value or domain error produced by the inner task is preserved. The wrapper awaits actual inner
+completion, including final frame retirement, removes pending timer work, and joins a timer callback
+already claimed by an executor. Cleanup may therefore finish after the deadline. Parent cancellation
+preserves its first reason; discarded timer delivery requests `RuntimeShutdown` stop. All timer cleanup
+uses the awaiting task's existing continuation reservation. Executors remain alive and driven through it.
+
+For a strict limit on how long an observer waits, use `FirstCompleted` with a separately owned operation
+and an observation-cancellation token; that operation's existing owner still joins its execution.
+
+
+## Application-lifetime supervision
+
+Include `<NGIN/Async/TaskSupervisor.hpp>` for an explicit owner of application work. The application
+keeps this owner and its executor alive until its asynchronous shutdown completes:
+
+```cpp
+TaskSupervisor<> background(co_await CurrentEnvironment(), 64);
+auto admitted = background.Transfer([](TaskContext& child) -> Task<void> {
+    co_await child.Delay(NGIN::Units::Seconds(1));
+});
+// Handle a rejected admission before assuming the work started.
+auto report = co_await background.Shutdown();
+```
+
+`Spawn`/`SpawnOn` return ordinary scope-owned Operation handles. `Transfer` admits a cold task or owned
+factory and relinquishes result interest while keeping execution and diagnostics supervised. The owner
+reuses retired successful/reported child slots; capacity bounds active or retained child records rather
+than the total number of tasks over the application's lifetime. Each child uses the same execution and
+cleanup admission as TaskScope. Result handles can survive slot reuse and owner destruction after join.
+
+The optional `TaskSupervisor<E>::ErrorSink` contains a noexcept function pointer and borrowed context.
+It receives a retained immutable `AsyncError<E>` by value after producer frame retirement and outside
+owner locks. Return true only after reporting succeeds or another error owner accepts it; return false
+when reporting fails or its bounded queue is full. The sink must be nonblocking and support concurrent
+calls when the owner uses a multithreaded executor. Move-only errors can be retained without copying.
+The sink context and allocation resource must outlive their uses and retained error references.
+
+A missing or rejecting sink retains the error, closes new admission, and requests `OwnerClosed` stop.
+The shutdown report exposes every unhandled error in admission order. Successfully reported errors do
+not force sibling cancellation and are not duplicated in that report. Retained errors cannot exceed
+admitted child capacity. A missing sink is therefore an observable fallback, not silent error loss.
+
+`TryJoin()` closes admission and returns an optional report only after cleanup finishes, without
+installing a pending waiter. Event-loop roots can poll it while continuing to drive work; do not combine
+it with an outstanding asynchronous join. `Join()` closes admission and waits for all admitted work. `Shutdown()` also requests
+`RuntimeShutdown` stop; the first stop reason is preserved. Callback reporting, factory release, and
+record deallocation finish before the owner publishes joined readiness. Destruction with live work
+fails fast instead of blocking or detaching. Transferred tasks must own their captures or borrow only
+resources that outlive the supervisor join. Remaining legacy UI detach callers are still being migrated;
+new application work should use explicit transfer to this owner.

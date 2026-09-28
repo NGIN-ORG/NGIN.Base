@@ -1,7 +1,8 @@
+#include <NGIN/Async/TaskSupervisor.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <NGIN/Async/Race.hpp>
 #include <NGIN/Async/Task.hpp>
-#include <NGIN/Async/WhenAny.hpp>
 #include <NGIN/Execution/ThreadPoolScheduler.hpp>
 
 #include <NGIN/Execution/CooperativeScheduler.hpp>
@@ -49,7 +50,11 @@ TEST_CASE("Canceling a task wait joins child work before publishing parent cance
         }
         parentContinued = true;
     };
-    auto operation = NGIN::Async::Spawn(childContext, parent(childContext));
+    auto operationTask = parent(childContext);
+
+    NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(childContext.GetEnvironment(), 1);
+
+    auto operation = operationRoot.Spawn(std::move(operationTask)).value();
     scheduler.RunUntilIdle();
     REQUIRE_FALSE(childFinished);
     cancellation.Cancel();
@@ -61,7 +66,8 @@ TEST_CASE("Canceling a task wait joins child work before publishing parent cance
     REQUIRE(childFinished);
     REQUIRE_FALSE(parentContinued);
     REQUIRE(operation.IsCompleted());
-    REQUIRE(operation.IsCanceled());
+    REQUIRE(operation.IsStopped());
+    REQUIRE(operationRoot.TryJoin());
 }
 
 TEST_CASE("An already canceled task wait does not start a cold child", "[Async][Lifetime]")
@@ -80,10 +86,15 @@ TEST_CASE("An already canceled task wait does not start a cold child", "[Async][
         auto work = child(context);
         co_return co_await work.WithCancellation(canceledContext);
     };
-    auto operation = NGIN::Async::Spawn(ctx, parent(ctx));
+    auto operationTask = parent(ctx);
+
+    NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(ctx.GetEnvironment(), 1);
+
+    auto operation = operationRoot.Spawn(std::move(operationTask)).value();
     scheduler.RunUntilIdle();
     REQUIRE_FALSE(started);
-    REQUIRE(operation.IsCanceled());
+    REQUIRE(operation.IsStopped());
+    REQUIRE(operationRoot.TryJoin());
 }
 
 TEST_CASE("Nested canceled tasks retire child locals before their borrowed parent locals", "[Async][Lifetime][Race]")
@@ -209,8 +220,8 @@ TEST_CASE("Nested canceled tasks retire child locals before their borrowed paren
             ParentGuard guard {state};
             co_await middle(ctx);
         };
-        auto result = NGIN::Async::SyncWait(context, NGIN::Async::WhenAny(context, std::move(parent)));
-        REQUIRE(result.IsCanceled());
+        auto result = NGIN::Async::SyncWait(context, NGIN::Async::Race(context, std::move(parent)));
+        REQUIRE(result.IsStopped());
         REQUIRE(retired.wait_for(std::chrono::seconds(2)) == std::future_status::ready);
         REQUIRE(middleRetired.wait_for(std::chrono::seconds(2)) == std::future_status::ready);
         REQUIRE_FALSE(state->orderViolation.load());
@@ -272,27 +283,34 @@ TEST_CASE("Operation awaits release canceled child locals before normal parent r
             co_return 42;
     };
     auto parent = [&](NGIN::Async::TaskContext&) -> NGIN::Async::Task<void> {
-        ParentGuard guard {parentAlive};
+        ParentGuard              guard {parentAlive};
+        NGIN::Async::TaskScope<> scope(childContext.GetEnvironment(), 1);
         if (useValue)
         {
-            auto operation = NGIN::Async::Spawn(childContext, child.template operator()<int>(childContext));
+            auto operation = scope.Spawn(child.template operator()<int>(childContext)).value();
             if (owning)
-                observedCancellation = (co_await std::move(operation)).IsCanceled();
+                observedCancellation = (co_await std::move(operation)).IsStopped();
             else
-                observedCancellation = (co_await operation).IsCanceled();
+                observedCancellation = (co_await operation).IsStopped();
         }
         else
         {
-            auto operation = NGIN::Async::Spawn(childContext, child.template operator()<void>(childContext));
+            auto operation = scope.Spawn(child.template operator()<void>(childContext)).value();
             if (owning)
-                observedCancellation = (co_await std::move(operation)).IsCanceled();
+                observedCancellation = (co_await std::move(operation)).IsStopped();
             else
-                observedCancellation = (co_await operation).IsCanceled();
+                observedCancellation = (co_await operation).IsStopped();
         }
+        (void) co_await scope.Join();
     };
-    auto operation = NGIN::Async::Spawn(context, parent(context));
+    auto operationTask = parent(context);
+
+    NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(context.GetEnvironment(), 1);
+
+    auto operation = operationRoot.Spawn(std::move(operationTask)).value();
     executor.RunUntilIdle();
     REQUIRE(operation.IsCompleted());
+    REQUIRE(operationRoot.TryJoin());
     REQUIRE(operation.TakeResult().Succeeded());
     REQUIRE(observedCancellation);
     REQUIRE(childDestroyed);

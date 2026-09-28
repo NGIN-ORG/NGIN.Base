@@ -86,7 +86,7 @@ int main()
             for (int write = 0; write != 2; ++write)
             {
                 samples.clear();
-                for (std::size_t index = 0; index < iterations; ++index)
+                for (std::size_t index = 0; index < iterations + 100; ++index)
                 {
                     const auto start  = Clock::now();
                     auto       result = write
@@ -95,7 +95,8 @@ int main()
                     RequireSuccess(result);
                     if (result.Value() != payloadSize)
                         throw std::runtime_error("file benchmark transferred fewer bytes than requested");
-                    samples.push_back(Microseconds(Clock::now() - start));
+                    if (index >= 100)
+                        samples.push_back(Microseconds(Clock::now() - start));
                 }
                 Report(name, write ? "write_at_64k" : "read_at_64k", samples);
             }

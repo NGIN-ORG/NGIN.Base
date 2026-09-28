@@ -120,12 +120,11 @@ namespace NGIN::Async
             std::coroutine_handle<>       consumer {};
             detail::PromiseRuntimeCommon* consumerTarget {};
             void (*resumeConsumer)(std::coroutine_handle<>) noexcept {};
-            std::optional<T>          current {};
-            std::optional<E>          domainError {};
-            std::optional<AsyncFault> fault {};
-            bool                      completed {false};
-            bool                      canceled {false};
-            bool                      consumerActive {false};
+            std::optional<T>                       current {};
+            std::optional<AsyncError<E>>           error {};
+            bool                                   completed {false};
+            std::optional<NGIN::Async::StopReason> stopped;
+            bool                                   consumerActive {false};
 
             promise_type() = default;
             explicit promise_type(TaskContext& ctx) noexcept : detail::PromiseRuntimeCommon(ctx) {}
@@ -180,21 +179,20 @@ namespace NGIN::Async
             }
             FinalAwaiter final_suspend() noexcept { return {}; }
 
-            void SetCanceled() noexcept
+            void SetStopped(NGIN::Async::StopReason reason = NGIN::Async::StopReason::Requested) noexcept
             {
                 NGIN::Sync::LockGuard guard(lock);
-                canceled = true;
+                if (!error && !stopped)
+                    stopped = reason;
             }
-            void SetDomainError(E error) noexcept
+            void SetError(AsyncError<E> failure)
             {
                 NGIN::Sync::LockGuard guard(lock);
-                domainError = std::move(error);
+                if (!error && !stopped)
+                    error.emplace(std::move(failure));
             }
-            void SetFault(AsyncFault asyncFault) noexcept
-            {
-                NGIN::Sync::LockGuard guard(lock);
-                fault = std::move(asyncFault);
-            }
+            void SetDomainError(E failure) { SetError(AsyncError<E>::FromDomain(std::move(failure))); }
+            void SetFault(AsyncFault failure) { SetError(AsyncError<E>::FromFault(std::move(failure))); }
             void MarkFinishedAndResume(std::coroutine_handle<promise_type> self) noexcept
             {
                 EndAdvance(self, true);
@@ -216,12 +214,15 @@ namespace NGIN::Async
                     resume   = std::exchange(resumeConsumer, nullptr);
                 }
                 assert(awaiting && target && resume);
-                m_taskContinuation.Reset();
+                ContinuationSlot().Reset();
                 const bool active = m_executionReferenceActive.exchange(false, std::memory_order_acq_rel);
                 assert(active);
                 (void) active;
                 ReleaseFrameReference(self);
-                target->QueueContinuation(NGIN::Execution::WorkItem([awaiting, resume] { resume(awaiting); }));
+                const auto                executor = target->ChainState().m_executor;
+                NGIN::Execution::WorkItem work([awaiting, resume] { resume(awaiting); });
+                if (!executor.TryDispatchInline(work))
+                    target->QueueContinuation(std::move(work));
             }
         };
 
@@ -313,24 +314,26 @@ namespace NGIN::Async
                     }
                     promise.consumerActive = true;
                     claimed                = true;
-                    if (promise.current || promise.domainError || promise.fault || promise.canceled || promise.completed)
+                    if (promise.current || promise.error || promise.stopped || promise.completed)
                         return awaiting;
                 }
-                if (!awaiting.promise().m_taskContinuation.IsValid())
+                if (!awaiting.promise().HasContinuation())
                 {
                     fault = detail::MakeSchedulingFault(AsyncFaultCode::SchedulerDispatchFailed,
                                                         NGIN::Execution::ScheduleError::Rejected);
                     return awaiting;
                 }
-                if (!promise.m_executor.IsValid())
-                    promise.m_executor = context.GetExecutor();
-                if (!promise.m_executor.IsValid())
+                if (!promise.m_environment.executor.IsValid())
+                    promise.m_environment = awaiting.promise().m_environment;
+                if (!promise.m_environment.executor.IsValid())
+                    promise.m_environment = context.GetEnvironment();
+                if (!promise.m_environment.executor.IsValid())
                 {
                     fault = MakeAsyncFault(AsyncFaultCode::InvalidTaskUsage);
                     return awaiting;
                 }
                 auto admission = promise.ReserveExecution();
-                if (!admission || !promise.m_taskContinuation.IsValid())
+                if (!admission || !promise.HasContinuation())
                 {
                     fault = detail::MakeSchedulingFault(AsyncFaultCode::SchedulerDispatchFailed,
                                                         admission ? NGIN::Execution::ScheduleError::Rejected : admission.error());
@@ -363,18 +366,20 @@ namespace NGIN::Async
             if (advance.fault)
                 co_return NextCompletion::Faulted(*advance.fault);
             if (ctx.IsCancellationRequested())
-                co_return NextCompletion::Canceled();
+                co_return NextCompletion::Stopped(ctx.GetCancellationToken().GetStopReason());
             if (!owner.Get())
                 co_return GeneratorNext<T>::End();
 
             promise_type&         promise = owner.Get().promise();
             NGIN::Sync::LockGuard guard(promise.lock);
-            if (promise.fault)
-                co_return NextCompletion::Faulted(*promise.fault);
-            if (promise.canceled)
-                co_return NextCompletion::Canceled();
-            if (promise.domainError)
-                co_return NextCompletion::DomainFailure(*promise.domainError);
+            if (promise.error)
+            {
+                auto error = std::move(*promise.error);
+                promise.error.reset();
+                co_return NextCompletion::Failure(std::move(error));
+            }
+            if (promise.stopped)
+                co_return NextCompletion::Stopped(*promise.stopped);
             if (promise.current)
             {
                 T value = std::move(*promise.current);

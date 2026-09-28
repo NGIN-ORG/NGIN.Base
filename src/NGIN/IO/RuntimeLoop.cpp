@@ -1,9 +1,12 @@
 #include "RuntimeLoop.hpp"
 
 #include <NGIN/Execution/detail/CompletionQueue.hpp>
+#include <NGIN/Execution/detail/WorkBudget.hpp>
 #include <NGIN/Time/MonotonicClock.hpp>
 
+#include <algorithm>
 #include <array>
+#include <chrono>
 #include <condition_variable>
 #include <limits>
 #include <map>
@@ -157,11 +160,14 @@ namespace NGIN::IO::detail
             }
             DispatchGuard context(loop);
             std::size_t   idleSources = 0;
-            std::size_t   dispatched  = 0;
+            NGIN::Execution::detail::WorkBudget budget(options.batchSize);
             // Persist the cursor between batches, including batchSize == 1.
             // A busy source cannot starve any other source across PollOnce calls.
-            while (dispatched != options.batchSize && idleSources != 6)
+            while (idleSources != 6)
             {
+                NGIN::Execution::detail::DispatchBudget dispatch;
+                if (!dispatch.Entered())
+                    break;
                 bool              progress = false;
                 const std::size_t source   = sourceCursor;
                 sourceCursor               = (sourceCursor + 1) % 6;
@@ -188,11 +194,13 @@ namespace NGIN::IO::detail
                 }
                 if (progress)
                 {
-                    ++dispatched;
+                    dispatch.Invoked();
                     idleSources = 0;
                 }
                 else
+                {
                     ++idleSources;
+                }
             }
             {
                 std::lock_guard lock(mutex);
@@ -214,10 +222,12 @@ namespace NGIN::IO::detail
             return HasReady();
         }
 
-        void Drive()
+        void Drive(std::optional<NGIN::Time::TimePoint> stopDeadline = {})
         {
             for (;;)
             {
+                if (stopDeadline && NGIN::Time::MonotonicClock::Now() >= *stopDeadline)
+                    return;
                 if (Batch())
                     continue;
                 std::optional<NGIN::Time::TimePoint> deadline;
@@ -228,6 +238,8 @@ namespace NGIN::IO::detail
                     if (!timers.empty())
                         deadline = timers.begin()->first.first;
                 }
+                if (stopDeadline && (!deadline || *stopDeadline < *deadline))
+                    deadline = stopDeadline;
                 // Submission after the readiness/deadline snapshots posts a
                 // persistent wake. After draining it Batch always rescans queues.
                 eventCount  = poller.Wait(events, deadline);
@@ -482,13 +494,38 @@ namespace NGIN::IO::detail
 
     void RuntimeLoop::Shutdown()
     {
+        (void) ShutdownImpl({});
+    }
+
+    bool RuntimeLoop::ShutdownUntil(NGIN::Time::TimePoint deadline)
+    {
+        return ShutdownImpl(deadline);
+    }
+
+    bool RuntimeLoop::ShutdownImpl(std::optional<NGIN::Time::TimePoint> deadline)
+    {
         {
             std::unique_lock lock(m_impl->mutex);
+            const auto       wait = [&](auto predicate) {
+                while (!predicate())
+                {
+                    if (!deadline)
+                        m_impl->changed.wait(lock);
+                    else
+                    {
+                        const auto now = NGIN::Time::MonotonicClock::Now();
+                        if (now >= *deadline)
+                            return false;
+                        const auto remaining = deadline->ToNanoseconds() - now.ToNanoseconds();
+                        // Bound relative waits so conversion to the platform clock cannot overflow.
+                        const auto bounded = std::min<NGIN::UInt64>(remaining, 60000000000ULL);
+                        m_impl->changed.wait_for(lock, std::chrono::nanoseconds(bounded));
+                    }
+                }
+                return true;
+            };
             if (m_impl->state == State::Stopped)
-            {
-                m_impl->changed.wait(lock, [this] { return !m_impl->driving; });
-                return;
-            }
+                return wait([this] { return !m_impl->driving; });
             if (IsCurrent())
                 throw std::logic_error("Runtime::Shutdown cannot block a runtime callback; use RequestStop");
             if (m_impl->owner != std::thread::id {} && m_impl->owner != std::this_thread::get_id())
@@ -498,15 +535,17 @@ namespace NGIN::IO::detail
                 lock.unlock();
                 RequestStop();
                 lock.lock();
-                m_impl->changed.wait(lock, [this] { return !m_impl->committed; });
+                if (!wait([this] { return !m_impl->committed; }))
+                    return false;
                 if (m_impl->state != State::Stopped)
                     throw std::runtime_error("Runtime driver exited before shutdown completed");
-                return;
+                return true;
             }
         }
         Impl::DriveGuard driving(*m_impl, true);
         RequestStop();
-        m_impl->Drive();
+        m_impl->Drive(deadline);
+        return GetState() == State::Stopped;
     }
 
     RuntimeLoop::State RuntimeLoop::GetState() const noexcept

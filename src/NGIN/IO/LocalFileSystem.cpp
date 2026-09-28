@@ -1,3 +1,4 @@
+#include <NGIN/Async/ExecutorTransitions.hpp>
 #include <NGIN/IO/LocalFileSystem.hpp>
 
 #include "AsyncDispatch.hpp"
@@ -51,6 +52,7 @@ namespace NGIN::IO
     AsyncTask<FileInfo> LocalFileSystem::GetInfoAsync(
             NGIN::Async::TaskContext& ctx, Path path, MetadataOptions options)
     {
+        co_await NGIN::Async::SwitchTo(ctx.GetExecutor());
         const std::shared_ptr<NGIN::IO::detail::FileSystemDriver> driver = AcquireDriver();
         if (!driver)
         {
@@ -64,9 +66,9 @@ namespace NGIN::IO
                     return GetInfo(path, options);
                 });
 
-        if (completion.IsCanceled())
+        if (completion.IsStopped())
         {
-            co_return NGIN::Async::Completion<FileInfo, IOError>::Canceled();
+            co_return NGIN::Async::Completion<FileInfo, IOError>::Stopped(completion.stopReason);
         }
 
         if (completion.IsFault())
@@ -85,6 +87,7 @@ namespace NGIN::IO
     AsyncTaskVoid LocalFileSystem::CopyFileAsync(
             NGIN::Async::TaskContext& ctx, Path from, Path to, CopyOptions options)
     {
+        co_await NGIN::Async::SwitchTo(ctx.GetExecutor());
         const std::shared_ptr<NGIN::IO::detail::FileSystemDriver> driver = AcquireDriver();
         if (!driver)
         {
@@ -101,9 +104,9 @@ namespace NGIN::IO
                     return CopyFile(from, to, options);
                 });
 
-        if (completion.IsCanceled())
+        if (completion.IsStopped())
         {
-            co_await NGIN::Async::Canceled();
+            co_await NGIN::Async::Stopped(completion.stopReason);
             co_return;
         }
 

@@ -1,3 +1,4 @@
+#include <NGIN/Async/TaskScope.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
@@ -72,7 +73,7 @@ namespace
             });
             if (token.IsCancellationRequested())
             {
-                co_return NGIN::Async::Completion<NGIN::UInt32, NGIN::Net::NetError>::Canceled();
+                co_return NGIN::Async::Completion<NGIN::UInt32, NGIN::Net::NetError>::Stopped();
             }
             if (m_state->incoming[m_side].empty())
             {
@@ -95,7 +96,7 @@ namespace
         {
             if (token.IsCancellationRequested())
             {
-                co_return NGIN::Async::Completion<NGIN::UInt32, NGIN::Net::NetError>::Canceled();
+                co_return NGIN::Async::Completion<NGIN::UInt32, NGIN::Net::NetError>::Stopped();
             }
             std::lock_guard lock(m_state->mutex);
             if (m_state->closed[m_side] || m_state->closed[1 - m_side])
@@ -150,7 +151,7 @@ namespace
             m_changed.wait(lock, [&] { return token.IsCancellationRequested() || m_closed; });
             if (token.IsCancellationRequested())
             {
-                co_return NGIN::Async::Completion<NGIN::UInt32, NGIN::Net::NetError>::Canceled();
+                co_return NGIN::Async::Completion<NGIN::UInt32, NGIN::Net::NetError>::Stopped();
             }
             co_return NGIN::UInt32 {0};
         }
@@ -162,7 +163,7 @@ namespace
         {
             if (token.IsCancellationRequested())
             {
-                co_return NGIN::Async::Completion<NGIN::UInt32, NGIN::Net::NetError>::Canceled();
+                co_return NGIN::Async::Completion<NGIN::UInt32, NGIN::Net::NetError>::Stopped();
             }
             co_return static_cast<NGIN::UInt32>(source.size());
         }
@@ -250,11 +251,15 @@ namespace
             NGIN::Net::TLS::TlsStream& server,
             HandshakeResults&          results)
     {
-        constexpr auto timeout         = std::chrono::seconds(2);
-        auto           clientOperation = NGIN::Async::Spawn(ctx, client.HandshakeAsync(ctx, {}, {.timeout = timeout}));
-        auto           serverOperation = NGIN::Async::Spawn(ctx, server.HandshakeAsync(ctx, {}, {.timeout = timeout}));
-        results.client                 = co_await clientOperation;
-        results.server                 = co_await serverOperation;
+        NGIN::Async::TaskScope<TlsError> clientScope(ctx.GetEnvironment(), 1);
+        NGIN::Async::TaskScope<TlsError> serverScope(ctx.GetEnvironment(), 1);
+        constexpr auto                   timeout         = std::chrono::seconds(2);
+        auto                             clientOperation = clientScope.Spawn(client.HandshakeAsync(ctx, {}, {.timeout = timeout})).value();
+        auto                             serverOperation = serverScope.Spawn(server.HandshakeAsync(ctx, {}, {.timeout = timeout})).value();
+        results.client                                   = co_await clientOperation;
+        results.server                                   = co_await serverOperation;
+        (void) co_await clientScope.Join();
+        (void) co_await serverScope.Join();
         co_return;
     }
 
@@ -376,11 +381,12 @@ TEST_CASE("TLS trusted handshake negotiates SNI ALPN and fragmented application 
     CHECK(streams.server->ServerName() == "localhost");
     REQUIRE(streams.client->PeerCertificate().has_value());
 
-    NGIN::Async::TaskContext   ctx(scheduler);
-    const std::string          payload = "fragmented TLS payload";
-    std::array<NGIN::Byte, 64> received {};
-    auto                       read  = NGIN::Async::Spawn(ctx, streams.server->ReadTlsAsync(ctx, received));
-    auto                       write = NGIN::Async::SyncWait(
+    NGIN::Async::TaskContext         ctx(scheduler);
+    const std::string                payload = "fragmented TLS payload";
+    std::array<NGIN::Byte, 64>       received {};
+    NGIN::Async::TaskScope<TlsError> readScope(ctx.GetEnvironment(), 1);
+    auto                             read  = readScope.Spawn(streams.server->ReadTlsAsync(ctx, received)).value();
+    auto                             write = NGIN::Async::SyncWait(
             ctx,
             streams.client->WriteTlsAsync(
                     ctx,
@@ -392,6 +398,7 @@ TEST_CASE("TLS trusted handshake negotiates SNI ALPN and fragmented application 
     NGIN::Async::Completion<NGIN::UInt32, TlsError> readCompletion;
     auto                                            waitForRead = [&]() -> NGIN::Async::Task<void> {
         readCompletion = co_await read;
+        (void) co_await readScope.Join();
         co_return;
     };
     REQUIRE(NGIN::Async::SyncWait(ctx, waitForRead()).Succeeded());
@@ -401,10 +408,14 @@ TEST_CASE("TLS trusted handshake negotiates SNI ALPN and fragmented application 
 
     HandshakeResults shutdown;
     auto             shutdownBoth = [&]() -> NGIN::Async::Task<void> {
-        auto client     = NGIN::Async::Spawn(ctx, streams.client->ShutdownAsync(ctx));
-        auto server     = NGIN::Async::Spawn(ctx, streams.server->ShutdownAsync(ctx));
-        shutdown.client = co_await client;
-        shutdown.server = co_await server;
+        NGIN::Async::TaskScope<TlsError> clientScope(ctx.GetEnvironment(), 1);
+        NGIN::Async::TaskScope<TlsError> serverScope(ctx.GetEnvironment(), 1);
+        auto                             client = clientScope.Spawn(streams.client->ShutdownAsync(ctx)).value();
+        auto                             server = serverScope.Spawn(streams.server->ShutdownAsync(ctx)).value();
+        shutdown.client                         = co_await client;
+        shutdown.server                         = co_await server;
+        (void) co_await clientScope.Join();
+        (void) co_await serverScope.Join();
         co_return;
     };
     REQUIRE(NGIN::Async::SyncWait(ctx, shutdownBoth()).Succeeded());
@@ -426,8 +437,8 @@ TEST_CASE("TLS verification rejects untrusted expired and mismatched certificate
         auto       serverContext = MakeServerContext(Credentials("server.pem", "server-key-pkcs8.pem"));
         auto       streams       = MakeStreams(clientContext, serverContext);
         const auto result        = RunHandshake(scheduler, *streams.client, *streams.server);
-        REQUIRE(result.client.IsDomainError());
-        CHECK(result.client.DomainError().category == NGIN::Net::TLS::TlsErrorCategory::Certificate);
+        REQUIRE((result.client.HasError() && result.client.Error().IsDomainError()));
+        CHECK(result.client.Error().DomainError().category == NGIN::Net::TLS::TlsErrorCategory::Certificate);
     }
 
     SECTION("expired certificate")
@@ -436,8 +447,8 @@ TEST_CASE("TLS verification rejects untrusted expired and mismatched certificate
         auto       serverContext = MakeServerContext(Credentials("expired-server.pem", "server-key-pkcs8.pem"));
         auto       streams       = MakeStreams(clientContext, serverContext);
         const auto result        = RunHandshake(scheduler, *streams.client, *streams.server);
-        REQUIRE(result.client.IsDomainError());
-        CHECK(result.client.DomainError().category == NGIN::Net::TLS::TlsErrorCategory::Certificate);
+        REQUIRE((result.client.HasError() && result.client.Error().IsDomainError()));
+        CHECK(result.client.Error().DomainError().category == NGIN::Net::TLS::TlsErrorCategory::Certificate);
     }
 
     SECTION("hostname mismatch")
@@ -446,9 +457,9 @@ TEST_CASE("TLS verification rejects untrusted expired and mismatched certificate
         auto       serverContext = MakeServerContext(Credentials("server.pem", "server-key-pkcs8.pem"));
         auto       streams       = MakeStreams(clientContext, serverContext, "wrong.example");
         const auto result        = RunHandshake(scheduler, *streams.client, *streams.server);
-        REQUIRE(result.client.IsDomainError());
-        CHECK(result.client.DomainError().category == NGIN::Net::TLS::TlsErrorCategory::Hostname);
-        CHECK(result.client.DomainError().code == NGIN::Net::TLS::TlsErrorCode::HostnameMismatch);
+        REQUIRE((result.client.HasError() && result.client.Error().IsDomainError()));
+        CHECK(result.client.Error().DomainError().category == NGIN::Net::TLS::TlsErrorCategory::Hostname);
+        CHECK(result.client.Error().DomainError().code == NGIN::Net::TLS::TlsErrorCode::HostnameMismatch);
     }
 }
 
@@ -481,7 +492,7 @@ TEST_CASE("TLS mutual authentication and required ALPN policies are enforced", "
                 NGIN::Net::TLS::TlsClientAuthentication::Required);
         auto       streams = MakeStreams(clientContext, serverContext);
         const auto result  = RunHandshake(scheduler, *streams.client, *streams.server);
-        CHECK(result.server.IsDomainError());
+        CHECK((result.server.HasError() && result.server.Error().IsDomainError()));
     }
 
     SECTION("required ALPN overlap fails")
@@ -494,7 +505,7 @@ TEST_CASE("TLS mutual authentication and required ALPN policies are enforced", "
                 true);
         auto       streams = MakeStreams(clientContext, serverContext);
         const auto result  = RunHandshake(scheduler, *streams.client, *streams.server);
-        CHECK((result.client.IsDomainError() || result.server.IsDomainError()));
+        CHECK(((result.client.HasError() && result.client.Error().IsDomainError()) || (result.server.HasError() && result.server.Error().IsDomainError())));
     }
 }
 
@@ -521,8 +532,8 @@ TEST_CASE("TLS handshake distinguishes caller cancellation and timeout", "[Net][
         NGIN::Async::CancellationSource source;
         source.Cancel();
         const auto result = NGIN::Async::SyncWait(ctx, stream.value()->HandshakeAsync(ctx, source.GetToken()));
-        REQUIRE(result.IsDomainError());
-        CHECK(result.DomainError().category == NGIN::Net::TLS::TlsErrorCategory::Cancellation);
+        REQUIRE((result.HasError() && result.Error().IsDomainError()));
+        CHECK(result.Error().DomainError().category == NGIN::Net::TLS::TlsErrorCategory::Cancellation);
     }
 
     SECTION("deadline")
@@ -538,9 +549,9 @@ TEST_CASE("TLS handshake distinguishes caller cancellation and timeout", "[Net][
                         ctx,
                         {},
                         {.timeout = std::chrono::milliseconds(20)}));
-        REQUIRE(result.IsDomainError());
-        CHECK(result.DomainError().category == NGIN::Net::TLS::TlsErrorCategory::Timeout);
-        CHECK(result.DomainError().code == NGIN::Net::TLS::TlsErrorCode::TimedOut);
+        REQUIRE((result.HasError() && result.Error().IsDomainError()));
+        CHECK(result.Error().DomainError().category == NGIN::Net::TLS::TlsErrorCategory::Timeout);
+        CHECK(result.Error().DomainError().code == NGIN::Net::TLS::TlsErrorCode::TimedOut);
     }
 }
 
@@ -562,6 +573,6 @@ TEST_CASE("TLS reports EOF without close_notify as truncation", "[Net][TLS]")
     NGIN::Async::TaskContext  ctx(scheduler);
     std::array<NGIN::Byte, 8> buffer {};
     const auto                result = NGIN::Async::SyncWait(ctx, streams.client->ReadTlsAsync(ctx, buffer));
-    REQUIRE(result.IsDomainError());
-    CHECK(result.DomainError().code == NGIN::Net::TLS::TlsErrorCode::TruncatedStream);
+    REQUIRE((result.HasError() && result.Error().IsDomainError()));
+    CHECK(result.Error().DomainError().code == NGIN::Net::TLS::TlsErrorCode::TruncatedStream);
 }

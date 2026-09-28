@@ -1,6 +1,7 @@
 #include "../../src/NGIN/IO/FileOperationGate.hpp"
 #include "../../src/NGIN/IO/FileSystemDriver.hpp"
 #include "../Support/FailureInjection.hpp"
+#include <NGIN/Async/TaskSupervisor.hpp>
 #include <limits>
 
 #include <NGIN/Execution/CooperativeScheduler.hpp>
@@ -68,12 +69,28 @@ TEST_CASE("File admission overlaps independent offsets and orders the shared pos
     FileFixture                           files;
     auto&                                 gate = files.gate;
     std::array<Pending, 4>                pending;
-    auto                                  first = NGIN::Async::Spawn(context, Hold(context, gate, Kind::Position, pending[0]));
+    auto                                  firstTask = Hold(context, gate, Kind::Position, pending[0]);
+
+    NGIN::Async::TaskSupervisor<typename decltype(firstTask)::ErrorType> firstRoot(context.GetEnvironment(), 1);
+
+    auto first = firstRoot.Spawn(std::move(firstTask)).value();
     scheduler.RunUntilIdle();
-    auto second = NGIN::Async::Spawn(context, Hold(context, gate, Kind::Position, pending[1]));
+    auto secondTask = Hold(context, gate, Kind::Position, pending[1]);
+
+    NGIN::Async::TaskSupervisor<typename decltype(secondTask)::ErrorType> secondRoot(context.GetEnvironment(), 1);
+
+    auto second = secondRoot.Spawn(std::move(secondTask)).value();
     scheduler.RunUntilIdle();
-    auto independent = NGIN::Async::Spawn(context, Hold(context, gate, Kind::Independent, pending[2]));
-    auto another     = NGIN::Async::Spawn(context, Hold(context, gate, Kind::Independent, pending[3]));
+    auto independentTask = Hold(context, gate, Kind::Independent, pending[2]);
+
+    NGIN::Async::TaskSupervisor<typename decltype(independentTask)::ErrorType> independentRoot(context.GetEnvironment(), 1);
+
+    auto independent = independentRoot.Spawn(std::move(independentTask)).value();
+    auto anotherTask = Hold(context, gate, Kind::Independent, pending[3]);
+
+    NGIN::Async::TaskSupervisor<typename decltype(anotherTask)::ErrorType> anotherRoot(context.GetEnvironment(), 1);
+
+    auto another = anotherRoot.Spawn(std::move(anotherTask)).value();
     scheduler.RunUntilIdle();
     REQUIRE(pending[0].entered);
     REQUIRE_FALSE(pending[1].entered);
@@ -86,9 +103,13 @@ TEST_CASE("File admission overlaps independent offsets and orders the shared pos
     pending[2].Finish();
     pending[3].Finish();
     scheduler.RunUntilIdle();
+    REQUIRE(firstRoot.TryJoin());
     REQUIRE(first.TakeResult().Value() == Status::Granted);
+    REQUIRE(secondRoot.TryJoin());
     REQUIRE(second.TakeResult().Value() == Status::Granted);
+    REQUIRE(independentRoot.TryJoin());
     REQUIRE(independent.TakeResult().Value() == Status::Granted);
+    REQUIRE(anotherRoot.TryJoin());
     REQUIRE(another.TakeResult().Value() == Status::Granted);
 }
 
@@ -100,10 +121,11 @@ TEST_CASE("File flush waits for earlier active and queued work and blocks later 
     auto&                                         gate = files.gate;
     std::array<Pending, 5>                        pending;
     std::array<NGIN::Async::Operation<Status>, 5> operations;
+    NGIN::Async::TaskSupervisor<>                 operationRoots(context.GetEnvironment(), pending.size());
     const std::array                              kinds {Kind::Position, Kind::Position, Kind::Independent, Kind::Flush, Kind::Independent};
     for (std::size_t i = 0; i < pending.size(); ++i)
     {
-        operations[i] = NGIN::Async::Spawn(context, Hold(context, gate, kinds[i], pending[i]));
+        operations[i] = operationRoots.Spawn(Hold(context, gate, kinds[i], pending[i])).value();
         scheduler.RunUntilIdle();
     }
     REQUIRE(pending[0].entered);
@@ -126,6 +148,7 @@ TEST_CASE("File flush waits for earlier active and queued work and blocks later 
     REQUIRE(pending[4].entered);
     pending[4].Finish();
     scheduler.RunUntilIdle();
+    REQUIRE(operationRoots.TryJoin());
     for (auto& operation: operations)
         REQUIRE(operation.TakeResult().Value() == Status::Granted);
 }
@@ -137,27 +160,52 @@ TEST_CASE("File close closes admission while draining earlier backend work", "[I
     FileFixture                           files;
     auto&                                 gate = files.gate;
     Pending                               read, closing, rejected, overlapping, repeated;
-    closing.close = true;
-    auto first    = NGIN::Async::Spawn(context, Hold(context, gate, Kind::Independent, read));
+    closing.close  = true;
+    auto firstTask = Hold(context, gate, Kind::Independent, read);
+
+    NGIN::Async::TaskSupervisor<typename decltype(firstTask)::ErrorType> firstRoot(context.GetEnvironment(), 1);
+
+    auto first = firstRoot.Spawn(std::move(firstTask)).value();
     scheduler.RunUntilIdle();
-    auto close = NGIN::Async::Spawn(context, Hold(context, gate, Kind::Close, closing));
+    auto closeTask = Hold(context, gate, Kind::Close, closing);
+
+    NGIN::Async::TaskSupervisor<typename decltype(closeTask)::ErrorType> closeRoot(context.GetEnvironment(), 1);
+
+    auto close = closeRoot.Spawn(std::move(closeTask)).value();
     scheduler.RunUntilIdle();
     REQUIRE(gate.IsClosing());
     REQUIRE_FALSE(closing.entered);
-    auto later     = NGIN::Async::Spawn(context, Hold(context, gate, Kind::Independent, rejected));
-    auto duplicate = NGIN::Async::Spawn(context, Hold(context, gate, Kind::Close, overlapping));
+    auto laterTask = Hold(context, gate, Kind::Independent, rejected);
+
+    NGIN::Async::TaskSupervisor<typename decltype(laterTask)::ErrorType> laterRoot(context.GetEnvironment(), 1);
+
+    auto later         = laterRoot.Spawn(std::move(laterTask)).value();
+    auto duplicateTask = Hold(context, gate, Kind::Close, overlapping);
+
+    NGIN::Async::TaskSupervisor<typename decltype(duplicateTask)::ErrorType> duplicateRoot(context.GetEnvironment(), 1);
+
+    auto duplicate = duplicateRoot.Spawn(std::move(duplicateTask)).value();
     scheduler.RunUntilIdle();
+    REQUIRE(laterRoot.TryJoin());
     REQUIRE(later.TakeResult().Value() == Status::Closing);
+    REQUIRE(duplicateRoot.TryJoin());
     REQUIRE(duplicate.TakeResult().Value() == Status::Closing);
     read.Finish();
     scheduler.RunUntilIdle();
     REQUIRE(closing.entered);
     closing.Finish();
     scheduler.RunUntilIdle();
-    auto closed = NGIN::Async::Spawn(context, Hold(context, gate, Kind::Close, repeated));
+    auto closedTask = Hold(context, gate, Kind::Close, repeated);
+
+    NGIN::Async::TaskSupervisor<typename decltype(closedTask)::ErrorType> closedRoot(context.GetEnvironment(), 1);
+
+    auto closed = closedRoot.Spawn(std::move(closedTask)).value();
     scheduler.RunUntilIdle();
+    REQUIRE(closedRoot.TryJoin());
     REQUIRE(closed.TakeResult().Value() == Status::Closed);
+    REQUIRE(firstRoot.TryJoin());
     REQUIRE(first.TakeResult().Value() == Status::Granted);
+    REQUIRE(closeRoot.TryJoin());
     REQUIRE(close.TakeResult().Value() == Status::Granted);
 }
 
@@ -171,22 +219,37 @@ TEST_CASE("Canceling queued file admission removes the waiter and releases barri
     FileFixture                           files;
     auto&                                 gate = files.gate;
     Pending                               active, waiting, later;
-    auto                                  first = NGIN::Async::Spawn(context, Hold(context, gate, Kind::Position, active));
+    auto                                  firstTask = Hold(context, gate, Kind::Position, active);
+
+    NGIN::Async::TaskSupervisor<typename decltype(firstTask)::ErrorType> firstRoot(context.GetEnvironment(), 1);
+
+    auto first = firstRoot.Spawn(std::move(firstTask)).value();
     scheduler.RunUntilIdle();
-    auto canceled = NGIN::Async::Spawn(canceledContext, Hold(canceledContext, gate, kind, waiting));
+    auto canceledTask = Hold(canceledContext, gate, kind, waiting);
+
+    NGIN::Async::TaskSupervisor<typename decltype(canceledTask)::ErrorType> canceledRoot(canceledContext.GetEnvironment(), 1);
+
+    auto canceled = canceledRoot.Spawn(std::move(canceledTask)).value();
     scheduler.RunUntilIdle();
     REQUIRE_FALSE(waiting.entered);
     cancellation.Cancel();
     scheduler.RunUntilIdle();
+    REQUIRE(canceledRoot.TryJoin());
     REQUIRE(canceled.TakeResult().Value() == Status::Canceled);
     REQUIRE_FALSE(gate.IsClosing());
-    auto next = NGIN::Async::Spawn(context, Hold(context, gate, Kind::Independent, later));
+    auto nextTask = Hold(context, gate, Kind::Independent, later);
+
+    NGIN::Async::TaskSupervisor<typename decltype(nextTask)::ErrorType> nextRoot(context.GetEnvironment(), 1);
+
+    auto next = nextRoot.Spawn(std::move(nextTask)).value();
     scheduler.RunUntilIdle();
     REQUIRE(later.entered);
     later.Finish();
     active.Finish();
     scheduler.RunUntilIdle();
+    REQUIRE(nextRoot.TryJoin());
     REQUIRE(next.TakeResult().Value() == Status::Granted);
+    REQUIRE(firstRoot.TryJoin());
     REQUIRE(first.TakeResult().Value() == Status::Granted);
 }
 
@@ -201,9 +264,17 @@ TEST_CASE("File admission cancellation racing release retains the waiting frame"
         FileFixture                           files;
         auto&                                 gate = files.gate;
         Pending                               active, waiting;
-        auto                                  first = NGIN::Async::Spawn(context, Hold(context, gate, Kind::Position, active));
+        auto                                  firstTask = Hold(context, gate, Kind::Position, active);
+
+        NGIN::Async::TaskSupervisor<typename decltype(firstTask)::ErrorType> firstRoot(context.GetEnvironment(), 1);
+
+        auto first = firstRoot.Spawn(std::move(firstTask)).value();
         scheduler.RunUntilIdle();
-        auto second = NGIN::Async::Spawn(canceledContext, Hold(canceledContext, gate, Kind::Position, waiting));
+        auto secondTask = Hold(canceledContext, gate, Kind::Position, waiting);
+
+        NGIN::Async::TaskSupervisor<typename decltype(secondTask)::ErrorType> secondRoot(canceledContext.GetEnvironment(), 1);
+
+        auto second = secondRoot.Spawn(std::move(secondTask)).value();
         scheduler.RunUntilIdle();
         std::thread cancel([&] { cancellation.Cancel(); });
         active.Finish();
@@ -213,7 +284,9 @@ TEST_CASE("File admission cancellation racing release retains the waiting frame"
         if (waiting.entered)
             waiting.Finish();
         scheduler.RunUntilIdle();
+        REQUIRE(secondRoot.TryJoin());
         REQUIRE(second.TakeResult().Value() == (waiting.entered ? Status::Granted : Status::Canceled));
+        REQUIRE(firstRoot.TryJoin());
         REQUIRE(first.TakeResult().Value() == Status::Granted);
     }
 }
@@ -233,9 +306,15 @@ namespace
         bool                                                NativeIsOpen() const noexcept { return nativeOpen; }
     };
 
-    NGIN::IO::AsyncTaskVoid CloseBackend(const std::shared_ptr<void>& raw, NGIN::Async::TaskContext&, int outcome)
+    NGIN::IO::AsyncTaskVoid CloseBackend(std::shared_ptr<void> raw, NGIN::Async::TaskContext& context, int outcome)
     {
         auto state = std::static_pointer_cast<BackendState>(raw);
+        NGIN::IO::detail::FileOperationLease lease(*state, context, Kind::Close);
+        if (auto rejected = co_await lease)
+        {
+            co_await NGIN::IO::AsyncTaskVoid::FromCompletion(std::move(*rejected));
+            co_return;
+        }
         struct Guard final
         {
             BackendState& state;
@@ -250,7 +329,7 @@ namespace
         ++state->calls;
         state->nativeOpen = false;
         if (outcome == 1)
-            co_await NGIN::Async::Canceled();
+            co_await NGIN::Async::Stopped();
         if (outcome == 2)
             co_await NGIN::Async::Faulted(NGIN::Async::MakeAsyncFault(NGIN::Async::AsyncFaultCode::InvalidTaskUsage));
         if (outcome == 3)
@@ -265,22 +344,30 @@ TEST_CASE("File close retires the backend rollback guard before releasing admiss
     NGIN::Execution::CooperativeScheduler scheduler;
     NGIN::Async::TaskContext              context(scheduler);
     FileFixture                           files(1);
-    auto                                  state = std::make_shared<BackendState>(files.driver);
-    auto                                  close = NGIN::Async::Spawn(context, NGIN::IO::detail::RunFileOperation<void, BackendState>(
-                                                     context, state, Kind::Close, &CloseBackend, outcome));
+    auto                                  state     = std::make_shared<BackendState>(files.driver);
+    auto                                  closeTask = CloseBackend(state, context, outcome);
+
+    NGIN::Async::TaskSupervisor<typename decltype(closeTask)::ErrorType> closeRoot(context.GetEnvironment(), 1);
+
+    auto close = closeRoot.Spawn(std::move(closeTask)).value();
     scheduler.RunUntilIdle();
     REQUIRE(close.IsCompleted());
+    REQUIRE(closeRoot.TryJoin());
     const auto result = close.TakeResult();
     REQUIRE(result.Succeeded() == (outcome == 0));
-    REQUIRE(result.IsCanceled() == (outcome == 1));
-    REQUIRE(result.IsFault() == (outcome == 2));
-    REQUIRE(result.IsDomainError() == (outcome == 3));
+    REQUIRE(result.IsStopped() == (outcome == 1));
+    REQUIRE((result.HasError() && result.Error().IsFault()) == (outcome == 2));
+    REQUIRE((result.HasError() && result.Error().IsDomainError()) == (outcome == 3));
     REQUIRE(state->frameRetired);
     REQUIRE(state->nativeOpen == (outcome != 0));
     REQUIRE(state->operations.IsClosing() == (outcome == 0));
-    auto next = NGIN::Async::Spawn(context, NGIN::IO::detail::RunFileOperation<void, BackendState>(
-                                                    context, state, Kind::Close, &CloseBackend, 0));
+    auto nextTask = CloseBackend(state, context, 0);
+
+    NGIN::Async::TaskSupervisor<typename decltype(nextTask)::ErrorType> nextRoot(context.GetEnvironment(), 1);
+
+    auto next = nextRoot.Spawn(std::move(nextTask)).value();
     scheduler.RunUntilIdle();
+    REQUIRE(nextRoot.TryJoin());
     REQUIRE(next.TakeResult());
     REQUIRE(state->calls == (outcome == 0 ? 1 : 2));
     REQUIRE_FALSE(state->nativeOpen);
@@ -321,11 +408,23 @@ TEST_CASE("File admission preserves accepted work when completion capacity is ex
     NGIN::Async::TaskContext              canceledContext(scheduler, cancellation.GetToken());
     FileFixture                           files;
     auto&                                 gate = files.gate;
+    NGIN::Execution::CooperativeScheduler ownerScheduler;
+    NGIN::Async::TaskContext              ownerContext(ownerScheduler);
     Pending                               active, waiting;
-    auto                                  first = NGIN::Async::Spawn(context, Hold(context, gate, Kind::Position, active));
+    auto                                  firstTask = Hold(context, gate, Kind::Position, active);
+
+    NGIN::Async::TaskSupervisor<typename decltype(firstTask)::ErrorType> firstRoot(ownerContext.GetEnvironment(), 1);
+
+    auto first = firstRoot.SpawnOn(context.GetExecutor(), std::move(firstTask)).value();
     scheduler.RunUntilIdle();
-    auto second = NGIN::Async::Spawn(canceledContext, Hold(canceledContext, gate, Kind::Position, waiting));
+    ownerScheduler.RunUntilIdle();
+    auto secondTask = Hold(canceledContext, gate, Kind::Position, waiting);
+
+    NGIN::Async::TaskSupervisor<typename decltype(secondTask)::ErrorType> secondRoot(ownerContext.GetEnvironment(), 1);
+
+    auto second = secondRoot.SpawnOn(context.GetExecutor(), std::move(secondTask)).value();
     scheduler.RunUntilIdle();
+    ownerScheduler.RunUntilIdle();
     auto unavailable = scheduler.ReserveCompletion(NGIN::Execution::WorkItem([] {}));
     REQUIRE_FALSE(unavailable);
     REQUIRE(unavailable.error() == NGIN::Execution::ScheduleError::ResourceExhausted);
@@ -333,13 +432,17 @@ TEST_CASE("File admission preserves accepted work when completion capacity is ex
         cancellation.Cancel();
     active.Finish();
     scheduler.RunUntilIdle();
+    ownerScheduler.RunUntilIdle();
     if (!cancelWaiting)
     {
         REQUIRE(waiting.entered);
         waiting.Finish();
     }
     scheduler.RunUntilIdle();
+    ownerScheduler.RunUntilIdle();
+    REQUIRE(firstRoot.TryJoin());
     REQUIRE(first.TakeResult().Value() == Status::Granted);
+    REQUIRE(secondRoot.TryJoin());
     REQUIRE(second.TakeResult().Value() == (cancelWaiting ? Status::Canceled : Status::Granted));
 }
 
@@ -352,10 +455,15 @@ TEST_CASE("File admission registration failure publishes no backend lease", "[IO
     FileFixture                           files;
     auto&                                 gate = files.gate;
     Pending                               pending;
-    auto                                  operation = NGIN::Async::Spawn(context, Hold(context, gate, Kind::Close, pending));
+    auto                                  operationTask = Hold(context, gate, Kind::Close, pending);
+
+    NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(context.GetEnvironment(), 1);
+
+    auto operation = operationRoot.Spawn(std::move(operationTask)).value();
     resource.FailNextAllocation();
     scheduler.RunUntilIdle();
     resource.DisableFailure();
+    REQUIRE(operationRoot.TryJoin());
     REQUIRE(operation.TakeResult().Value() == Status::Fault);
     REQUIRE_FALSE(pending.entered);
     REQUIRE_FALSE(gate.IsClosing());
@@ -371,13 +479,29 @@ TEST_CASE("File admission bounds all handles and executors and recovers canceled
     NGIN::Async::TaskContext              firstContext(firstScheduler), secondContext(secondScheduler, cancellation.GetToken()),
             thirdContext(thirdScheduler);
     std::array<Pending, 6> pending;
-    auto                   first = NGIN::Async::Spawn(firstContext, Hold(firstContext, files.gate, Kind::Position, pending[0]));
+    auto                   firstTask = Hold(firstContext, files.gate, Kind::Position, pending[0]);
+
+    NGIN::Async::TaskSupervisor<typename decltype(firstTask)::ErrorType> firstRoot(firstContext.GetEnvironment(), 1);
+
+    auto first = firstRoot.Spawn(std::move(firstTask)).value();
     firstScheduler.RunUntilIdle();
-    auto waiting = NGIN::Async::Spawn(secondContext, Hold(secondContext, files.gate, Kind::Position, pending[1]));
+    auto waitingTask = Hold(secondContext, files.gate, Kind::Position, pending[1]);
+
+    NGIN::Async::TaskSupervisor<typename decltype(waitingTask)::ErrorType> waitingRoot(secondContext.GetEnvironment(), 1);
+
+    auto waiting = waitingRoot.Spawn(std::move(waitingTask)).value();
     secondScheduler.RunUntilIdle();
-    auto independent = NGIN::Async::Spawn(thirdContext, Hold(thirdContext, other, Kind::Independent, pending[2]));
+    auto independentTask = Hold(thirdContext, other, Kind::Independent, pending[2]);
+
+    NGIN::Async::TaskSupervisor<typename decltype(independentTask)::ErrorType> independentRoot(thirdContext.GetEnvironment(), 1);
+
+    auto independent = independentRoot.Spawn(std::move(independentTask)).value();
     thirdScheduler.RunUntilIdle();
-    auto close = NGIN::Async::Spawn(secondContext, Hold(secondContext, other, Kind::Close, pending[3]));
+    auto closeTask = Hold(secondContext, other, Kind::Close, pending[3]);
+
+    NGIN::Async::TaskSupervisor<typename decltype(closeTask)::ErrorType> closeRoot(secondContext.GetEnvironment(), 1);
+
+    auto close = closeRoot.Spawn(std::move(closeTask)).value();
     secondScheduler.RunUntilIdle();
     REQUIRE(pending[0].entered);
     REQUIRE(pending[2].entered);
@@ -387,9 +511,14 @@ TEST_CASE("File admission bounds all handles and executors and recovers canceled
     for (int attempt = 0; attempt != 256; ++attempt)
     {
         Pending    rejected;
-        const Kind kind   = attempt % 2 == 0 ? Kind::Independent : Kind::Close;
-        auto       excess = NGIN::Async::Spawn(thirdContext, Hold(thirdContext, files.gate, kind, rejected));
+        const Kind kind       = attempt % 2 == 0 ? Kind::Independent : Kind::Close;
+        auto       excessTask = Hold(thirdContext, files.gate, kind, rejected);
+
+        NGIN::Async::TaskSupervisor<typename decltype(excessTask)::ErrorType> excessRoot(thirdContext.GetEnvironment(), 1);
+
+        auto excess = excessRoot.Spawn(std::move(excessTask)).value();
         thirdScheduler.RunUntilIdle();
+        REQUIRE(excessRoot.TryJoin());
         REQUIRE(excess.TakeResult().Value() == Status::Fault);
         REQUIRE(rejected.fault.code == NGIN::Async::AsyncFaultCode::SchedulerDispatchFailed);
         REQUIRE(rejected.fault.native == static_cast<int>(NGIN::Execution::ScheduleError::ResourceExhausted));
@@ -398,16 +527,31 @@ TEST_CASE("File admission bounds all handles and executors and recovers canceled
     }
     cancellation.Cancel();
     Pending awaitingCleanup;
-    auto    stillFull = NGIN::Async::Spawn(thirdContext, Hold(thirdContext, files.gate, Kind::Independent, awaitingCleanup));
+    auto    stillFullTask = Hold(thirdContext, files.gate, Kind::Independent, awaitingCleanup);
+
+    NGIN::Async::TaskSupervisor<typename decltype(stillFullTask)::ErrorType> stillFullRoot(thirdContext.GetEnvironment(), 1);
+
+    auto stillFull = stillFullRoot.Spawn(std::move(stillFullTask)).value();
     thirdScheduler.RunUntilIdle();
+    REQUIRE(stillFullRoot.TryJoin());
     REQUIRE(stillFull.TakeResult().Value() == Status::Fault);
     REQUIRE(awaitingCleanup.fault.native == static_cast<int>(NGIN::Execution::ScheduleError::ResourceExhausted));
     secondScheduler.RunUntilIdle();
+    REQUIRE(waitingRoot.TryJoin());
     REQUIRE(waiting.TakeResult().Value() == Status::Canceled);
+    REQUIRE(closeRoot.TryJoin());
     REQUIRE(close.TakeResult().Value() == Status::Canceled);
     REQUIRE_FALSE(other.IsClosing());
-    auto recoveredFirst = NGIN::Async::Spawn(firstContext, Hold(firstContext, files.gate, Kind::Independent, pending[4]));
-    auto recoveredOther = NGIN::Async::Spawn(thirdContext, Hold(thirdContext, other, Kind::Independent, pending[5]));
+    auto recoveredFirstTask = Hold(firstContext, files.gate, Kind::Independent, pending[4]);
+
+    NGIN::Async::TaskSupervisor<typename decltype(recoveredFirstTask)::ErrorType> recoveredFirstRoot(firstContext.GetEnvironment(), 1);
+
+    auto recoveredFirst     = recoveredFirstRoot.Spawn(std::move(recoveredFirstTask)).value();
+    auto recoveredOtherTask = Hold(thirdContext, other, Kind::Independent, pending[5]);
+
+    NGIN::Async::TaskSupervisor<typename decltype(recoveredOtherTask)::ErrorType> recoveredOtherRoot(thirdContext.GetEnvironment(), 1);
+
+    auto recoveredOther = recoveredOtherRoot.Spawn(std::move(recoveredOtherTask)).value();
     firstScheduler.RunUntilIdle();
     thirdScheduler.RunUntilIdle();
     REQUIRE(pending[4].entered);
@@ -416,14 +560,23 @@ TEST_CASE("File admission bounds all handles and executors and recovers canceled
         pending[index].Finish();
     firstScheduler.RunUntilIdle();
     thirdScheduler.RunUntilIdle();
+    REQUIRE(firstRoot.TryJoin());
     REQUIRE(first.TakeResult().Value() == Status::Granted);
+    REQUIRE(independentRoot.TryJoin());
     REQUIRE(independent.TakeResult().Value() == Status::Granted);
+    REQUIRE(recoveredFirstRoot.TryJoin());
     REQUIRE(recoveredFirst.TakeResult().Value() == Status::Granted);
+    REQUIRE(recoveredOtherRoot.TryJoin());
     REQUIRE(recoveredOther.TakeResult().Value() == Status::Granted);
     files.runtime.Shutdown();
     Pending stopped;
-    auto    afterStop = NGIN::Async::Spawn(firstContext, Hold(firstContext, files.gate, Kind::Independent, stopped));
+    auto    afterStopTask = Hold(firstContext, files.gate, Kind::Independent, stopped);
+
+    NGIN::Async::TaskSupervisor<typename decltype(afterStopTask)::ErrorType> afterStopRoot(firstContext.GetEnvironment(), 1);
+
+    auto afterStop = afterStopRoot.Spawn(std::move(afterStopTask)).value();
     firstScheduler.RunUntilIdle();
+    REQUIRE(afterStopRoot.TryJoin());
     REQUIRE(afterStop.TakeResult().Value() == Status::Canceled);
     REQUIRE_FALSE(stopped.entered);
 }
@@ -436,11 +589,12 @@ TEST_CASE("Concurrent file admission shares one bounded budget across producers"
     FileFixture            files(capacity);
     struct Producer final
     {
-        explicit Producer(NGIN::IO::detail::FileSystemDriver& driver) : gate(driver), context(scheduler) {}
+        explicit Producer(NGIN::IO::detail::FileSystemDriver& driver) : gate(driver), context(scheduler), roots(context.GetEnvironment(), requests) {}
         Gate                                                 gate;
         NGIN::Execution::CooperativeScheduler                scheduler;
         NGIN::Async::TaskContext                             context;
         std::array<Pending, requests>                        pending;
+        NGIN::Async::TaskSupervisor<>                        roots;
         std::array<NGIN::Async::Operation<Status>, requests> operations;
     };
     std::array<std::unique_ptr<Producer>, producerCount> producers;
@@ -456,8 +610,7 @@ TEST_CASE("Concurrent file admission shares one bounded budget across producers"
                 start.arrive_and_wait();
                 for (std::size_t request = 0; request != requests; ++request)
                 {
-                    producer.operations[request] = NGIN::Async::Spawn(producer.context,
-                                                                      Hold(producer.context, producer.gate, Kind::Independent, producer.pending[request]));
+                    producer.operations[request] = producer.roots.Spawn(Hold(producer.context, producer.gate, Kind::Independent, producer.pending[request])).value();
                     producer.scheduler.RunUntilIdle();
                 }
             });
@@ -488,4 +641,32 @@ TEST_CASE("Concurrent file admission shares one bounded budget across producers"
         REQUIRE(accepted == capacity);
         REQUIRE(rejected == producerCount * requests - capacity);
     }
+    for (auto& producer: producers)
+        REQUIRE(producer->roots.TryJoin());
+}
+
+
+TEST_CASE("File admission preserves runtime shutdown versus explicit cancellation", "[IO][Admission][Shutdown]")
+{
+    const bool userCanceled = GENERATE(false, true);
+    NGIN::Execution::CooperativeScheduler scheduler;
+    NGIN::Async::CancellationSource cancellation;
+    NGIN::Async::TaskContext leafContext(scheduler, cancellation.GetToken());
+    NGIN::Async::TaskContext ownerContext(scheduler);
+    FileFixture files(1);
+    auto state = std::make_shared<BackendState>(files.driver);
+    files.runtime.RequestStop();
+    if (userCanceled)
+        cancellation.Cancel(NGIN::Async::StopReason::Deadline);
+    NGIN::Async::TaskSupervisor<NGIN::IO::IOError> owner(ownerContext.GetEnvironment(), 1);
+    auto operation = owner.Spawn(CloseBackend(state, leafContext, 0)).value();
+    scheduler.RunUntilIdle();
+    REQUIRE(owner.TryJoin());
+    const auto result = operation.TakeResult();
+    REQUIRE(result.IsStopped());
+    REQUIRE(result.StopReason() == (userCanceled ? NGIN::Async::StopReason::Deadline
+                                                : NGIN::Async::StopReason::RuntimeShutdown));
+    REQUIRE(state->calls == 0);
+    REQUIRE(state->nativeOpen);
+    REQUIRE_FALSE(state->operations.IsClosing());
 }

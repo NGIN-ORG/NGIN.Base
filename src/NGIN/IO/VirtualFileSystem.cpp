@@ -1,3 +1,4 @@
+#include <NGIN/Async/ExecutorTransitions.hpp>
 #include <NGIN/IO/VirtualFileSystem.hpp>
 
 #include <NGIN/Utilities/Expected.hpp>
@@ -1082,6 +1083,7 @@ namespace NGIN::IO
     AsyncTask<AsyncFileHandle> VirtualFileSystem::OpenFileAsync(
             NGIN::Async::TaskContext& ctx, Path path, FileOpenOptions options)
     {
+        co_await NGIN::Async::SwitchTo(ctx.GetExecutor());
         auto resolved = ResolvePath(path);
         if (!resolved.has_value())
         {
@@ -1099,6 +1101,7 @@ namespace NGIN::IO
     AsyncTask<AsyncDirectoryHandle> VirtualFileSystem::OpenDirectoryAsync(
             NGIN::Async::TaskContext& ctx, Path path)
     {
+        co_await NGIN::Async::SwitchTo(ctx.GetExecutor());
         auto resolved = ResolvePath(path);
         if (!resolved.has_value())
         {
@@ -1115,6 +1118,7 @@ namespace NGIN::IO
     AsyncTask<FileInfo> VirtualFileSystem::GetInfoAsync(
             NGIN::Async::TaskContext& ctx, Path path, MetadataOptions options)
     {
+        co_await NGIN::Async::SwitchTo(ctx.GetExecutor());
         auto resolved = ResolvePath(path);
         if (!resolved.has_value())
         {
@@ -1134,6 +1138,7 @@ namespace NGIN::IO
     AsyncTaskVoid VirtualFileSystem::CopyFileAsync(
             NGIN::Async::TaskContext& ctx, Path from, Path to, CopyOptions options)
     {
+        co_await NGIN::Async::SwitchTo(ctx.GetExecutor());
         auto fromResolved = ResolvePath(from);
         if (!fromResolved.has_value())
         {
@@ -1191,7 +1196,7 @@ namespace NGIN::IO
         }
         if (ctx.IsCancellationRequested())
         {
-            co_await NGIN::Async::Canceled();
+            co_await NGIN::Async::Stopped(ctx.GetCancellationToken().GetStopReason());
             co_return;
         }
 
@@ -1271,7 +1276,7 @@ namespace NGIN::IO
             {
                 if (ctx.IsCancellationRequested())
                 {
-                    co_await NGIN::Async::Canceled();
+                    co_await NGIN::Async::Stopped(ctx.GetCancellationToken().GetStopReason());
                     co_return;
                 }
                 auto next = enumerator.value().Next();
@@ -1336,7 +1341,7 @@ namespace NGIN::IO
                 auto closeDestination = destination.CloseAsync(ioContext);
                 co_await closeSource;
                 co_await closeDestination;
-                co_await NGIN::Async::Canceled();
+                co_await NGIN::Async::Stopped(ctx.GetCancellationToken().GetStopReason());
                 co_return;
             }
 

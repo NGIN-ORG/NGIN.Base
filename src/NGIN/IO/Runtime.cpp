@@ -115,6 +115,12 @@ namespace NGIN::IO
     {
         m_impl->loop.Shutdown();
     }
+
+    Runtime::ShutdownStatus Runtime::ShutdownUntil(NGIN::Time::TimePoint deadline)
+    {
+        return m_impl->loop.ShutdownUntil(deadline) ? ShutdownStatus::Stopped : ShutdownStatus::Incomplete;
+    }
+
     std::optional<NGIN::Time::TimePoint> Runtime::NextDeadline() const noexcept
     {
         return m_impl->loop.NextDeadline();

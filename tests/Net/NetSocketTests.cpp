@@ -1,3 +1,4 @@
+#include <NGIN/Async/TaskSupervisor.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
@@ -258,23 +259,33 @@ namespace NGIN::Net
         const char                 payload[] = "udp-async";
         std::array<NGIN::Byte, 64> recvBuffer {};
 
-        auto recvTask = receiver.ReceiveFromAsync(ctx,
-                                                  ByteSpan {recvBuffer.data(), recvBuffer.size()},
-                                                  ctx.GetCancellationToken());
-        auto recvOp   = NGIN::Async::Spawn(ctx, std::move(recvTask));
+        auto recvTask   = receiver.ReceiveFromAsync(ctx,
+                                                    ByteSpan {recvBuffer.data(), recvBuffer.size()},
+                                                    ctx.GetCancellationToken());
+        auto recvOpTask = std::move(recvTask);
 
-        auto sendTask = sender.SendToAsync(ctx,
-                                           {IpAddress::LoopbackV4(), port},
-                                           ConstByteSpan {reinterpret_cast<const NGIN::Byte*>(payload),
+        NGIN::Async::TaskSupervisor<typename decltype(recvOpTask)::ErrorType> recvOpRoot(ctx.GetEnvironment(), 1);
+
+        auto recvOp = recvOpRoot.Spawn(std::move(recvOpTask)).value();
+
+        auto sendTask   = sender.SendToAsync(ctx,
+                                             {IpAddress::LoopbackV4(), port},
+                                             ConstByteSpan {reinterpret_cast<const NGIN::Byte*>(payload),
                                                           sizeof(payload)},
-                                           ctx.GetCancellationToken());
-        auto sendOp   = NGIN::Async::Spawn(ctx, std::move(sendTask));
+                                             ctx.GetCancellationToken());
+        auto sendOpTask = std::move(sendTask);
+
+        NGIN::Async::TaskSupervisor<typename decltype(sendOpTask)::ErrorType> sendOpRoot(ctx.GetEnvironment(), 1);
+
+        auto sendOp = sendOpRoot.Spawn(std::move(sendOpTask)).value();
 
         REQUIRE(PumpUntil(scheduler, runtime, [&]() { return recvOp.IsCompleted() && sendOp.IsCompleted(); }));
 
+        REQUIRE(sendOpRoot.TryJoin());
         auto sendResult = sendOp.TakeResult();
         REQUIRE(sendResult);
         REQUIRE(*sendResult == sizeof(payload));
+        REQUIRE(recvOpRoot.TryJoin());
         auto recvResult = recvOp.TakeResult();
         REQUIRE(recvResult);
         REQUIRE(recvResult->bytesReceived == sizeof(payload));
@@ -301,16 +312,26 @@ namespace NGIN::Net
         TcpSocket client(runtime);
         REQUIRE(client.Open(AddressFamily::V4));
 
-        auto acceptTask = listener.AcceptAsync(ctx, ctx.GetCancellationToken());
-        auto acceptOp   = NGIN::Async::Spawn(ctx, std::move(acceptTask));
+        auto acceptTask   = listener.AcceptAsync(ctx, ctx.GetCancellationToken());
+        auto acceptOpTask = std::move(acceptTask);
 
-        auto connectTask = client.ConnectAsync(ctx, {IpAddress::LoopbackV4(), port}, ctx.GetCancellationToken());
-        auto connectOp   = NGIN::Async::Spawn(ctx, std::move(connectTask));
+        NGIN::Async::TaskSupervisor<typename decltype(acceptOpTask)::ErrorType> acceptOpRoot(ctx.GetEnvironment(), 1);
+
+        auto acceptOp = acceptOpRoot.Spawn(std::move(acceptOpTask)).value();
+
+        auto connectTask   = client.ConnectAsync(ctx, {IpAddress::LoopbackV4(), port}, ctx.GetCancellationToken());
+        auto connectOpTask = std::move(connectTask);
+
+        NGIN::Async::TaskSupervisor<typename decltype(connectOpTask)::ErrorType> connectOpRoot(ctx.GetEnvironment(), 1);
+
+        auto connectOp = connectOpRoot.Spawn(std::move(connectOpTask)).value();
 
         REQUIRE(PumpUntil(scheduler, runtime, [&]() { return acceptOp.IsCompleted() && connectOp.IsCompleted(); }));
 
+        REQUIRE(connectOpRoot.TryJoin());
         auto connectResult = connectOp.TakeResult();
         REQUIRE(connectResult);
+        REQUIRE(acceptOpRoot.TryJoin());
         auto acceptResult = acceptOp.TakeResult();
         REQUIRE(acceptResult);
         TcpSocket server = std::move(*acceptResult);
@@ -319,22 +340,32 @@ namespace NGIN::Net
         const char                 payload[] = "tcp-async";
         std::array<NGIN::Byte, 64> recvBuffer {};
 
-        auto recvTask = server.ReceiveAsync(ctx,
-                                            ByteSpan {recvBuffer.data(), recvBuffer.size()},
-                                            ctx.GetCancellationToken());
-        auto recvOp   = NGIN::Async::Spawn(ctx, std::move(recvTask));
+        auto recvTask   = server.ReceiveAsync(ctx,
+                                              ByteSpan {recvBuffer.data(), recvBuffer.size()},
+                                              ctx.GetCancellationToken());
+        auto recvOpTask = std::move(recvTask);
 
-        auto sendTask = client.SendAsync(ctx,
-                                         ConstByteSpan {reinterpret_cast<const NGIN::Byte*>(payload),
+        NGIN::Async::TaskSupervisor<typename decltype(recvOpTask)::ErrorType> recvOpRoot(ctx.GetEnvironment(), 1);
+
+        auto recvOp = recvOpRoot.Spawn(std::move(recvOpTask)).value();
+
+        auto sendTask   = client.SendAsync(ctx,
+                                           ConstByteSpan {reinterpret_cast<const NGIN::Byte*>(payload),
                                                         sizeof(payload)},
-                                         ctx.GetCancellationToken());
-        auto sendOp   = NGIN::Async::Spawn(ctx, std::move(sendTask));
+                                           ctx.GetCancellationToken());
+        auto sendOpTask = std::move(sendTask);
+
+        NGIN::Async::TaskSupervisor<typename decltype(sendOpTask)::ErrorType> sendOpRoot(ctx.GetEnvironment(), 1);
+
+        auto sendOp = sendOpRoot.Spawn(std::move(sendOpTask)).value();
 
         REQUIRE(PumpUntil(scheduler, runtime, [&]() { return recvOp.IsCompleted() && sendOp.IsCompleted(); }));
 
+        REQUIRE(sendOpRoot.TryJoin());
         auto sendResult = sendOp.TakeResult();
         REQUIRE(sendResult);
         REQUIRE(*sendResult == sizeof(payload));
+        REQUIRE(recvOpRoot.TryJoin());
         auto recvResult = recvOp.TakeResult();
         REQUIRE(recvResult);
         REQUIRE(*recvResult == sizeof(payload));
@@ -498,22 +529,32 @@ namespace NGIN::Net
         const char                 payload[] = "stream-ping";
         std::array<NGIN::Byte, 64> recvBuffer {};
 
-        auto readTask = serverStream->ReadAsync(ctx,
-                                                ByteSpan {recvBuffer.data(), recvBuffer.size()},
-                                                ctx.GetCancellationToken());
-        auto readOp   = NGIN::Async::Spawn(ctx, std::move(readTask));
-
-        auto writeTask = clientStream->WriteAsync(ctx,
-                                                  ConstByteSpan {reinterpret_cast<const NGIN::Byte*>(payload),
-                                                                 sizeof(payload)},
+        auto readTask   = serverStream->ReadAsync(ctx,
+                                                  ByteSpan {recvBuffer.data(), recvBuffer.size()},
                                                   ctx.GetCancellationToken());
-        auto writeOp   = NGIN::Async::Spawn(ctx, std::move(writeTask));
+        auto readOpTask = std::move(readTask);
+
+        NGIN::Async::TaskSupervisor<typename decltype(readOpTask)::ErrorType> readOpRoot(ctx.GetEnvironment(), 1);
+
+        auto readOp = readOpRoot.Spawn(std::move(readOpTask)).value();
+
+        auto writeTask   = clientStream->WriteAsync(ctx,
+                                                    ConstByteSpan {reinterpret_cast<const NGIN::Byte*>(payload),
+                                                                 sizeof(payload)},
+                                                    ctx.GetCancellationToken());
+        auto writeOpTask = std::move(writeTask);
+
+        NGIN::Async::TaskSupervisor<typename decltype(writeOpTask)::ErrorType> writeOpRoot(ctx.GetEnvironment(), 1);
+
+        auto writeOp = writeOpRoot.Spawn(std::move(writeOpTask)).value();
 
         REQUIRE(PumpUntil(scheduler, runtime, [&]() { return readOp.IsCompleted() && writeOp.IsCompleted(); }));
 
+        REQUIRE(writeOpRoot.TryJoin());
         auto writeResult = writeOp.TakeResult();
         REQUIRE(writeResult);
         REQUIRE(*writeResult == sizeof(payload));
+        REQUIRE(readOpRoot.TryJoin());
         auto readResult = readOp.TakeResult();
         REQUIRE(readResult);
         REQUIRE(*readResult == sizeof(payload));
@@ -575,19 +616,29 @@ namespace NGIN::Net
 
         const char payload[] = "framed-ping";
 
-        auto readTask = serverStream->ReadMessageAsync(ctx, buffer, ctx.GetCancellationToken());
-        auto readOp   = NGIN::Async::Spawn(ctx, std::move(readTask));
+        auto readTask   = serverStream->ReadMessageAsync(ctx, buffer, ctx.GetCancellationToken());
+        auto readOpTask = std::move(readTask);
 
-        auto writeTask = clientStream->WriteMessageAsync(ctx,
-                                                         ConstByteSpan {reinterpret_cast<const NGIN::Byte*>(payload),
+        NGIN::Async::TaskSupervisor<typename decltype(readOpTask)::ErrorType> readOpRoot(ctx.GetEnvironment(), 1);
+
+        auto readOp = readOpRoot.Spawn(std::move(readOpTask)).value();
+
+        auto writeTask   = clientStream->WriteMessageAsync(ctx,
+                                                           ConstByteSpan {reinterpret_cast<const NGIN::Byte*>(payload),
                                                                         sizeof(payload)},
-                                                         ctx.GetCancellationToken());
-        auto writeOp   = NGIN::Async::Spawn(ctx, std::move(writeTask));
+                                                           ctx.GetCancellationToken());
+        auto writeOpTask = std::move(writeTask);
+
+        NGIN::Async::TaskSupervisor<typename decltype(writeOpTask)::ErrorType> writeOpRoot(ctx.GetEnvironment(), 1);
+
+        auto writeOp = writeOpRoot.Spawn(std::move(writeOpTask)).value();
 
         REQUIRE(PumpUntil(scheduler, runtime, [&]() { return readOp.IsCompleted() && writeOp.IsCompleted(); }));
 
+        REQUIRE(writeOpRoot.TryJoin());
         auto writeResult = writeOp.TakeResult();
         REQUIRE(writeResult);
+        REQUIRE(readOpRoot.TryJoin());
         auto messageResult = readOp.TakeResult();
         REQUIRE(messageResult);
         const auto message = *messageResult;
@@ -697,20 +748,30 @@ namespace NGIN::Net
 
         const char payload[] = "udp-channel";
 
-        auto recvTask = recvChannel->ReceiveAsync(ctx, buffer, ctx.GetCancellationToken());
-        auto recvOp   = NGIN::Async::Spawn(ctx, std::move(recvTask));
+        auto recvTask   = recvChannel->ReceiveAsync(ctx, buffer, ctx.GetCancellationToken());
+        auto recvOpTask = std::move(recvTask);
 
-        auto sendTask = sendChannel->SendAsync(ctx,
-                                               {IpAddress::LoopbackV4(), port},
-                                               ConstByteSpan {reinterpret_cast<const NGIN::Byte*>(payload),
+        NGIN::Async::TaskSupervisor<typename decltype(recvOpTask)::ErrorType> recvOpRoot(ctx.GetEnvironment(), 1);
+
+        auto recvOp = recvOpRoot.Spawn(std::move(recvOpTask)).value();
+
+        auto sendTask   = sendChannel->SendAsync(ctx,
+                                                 {IpAddress::LoopbackV4(), port},
+                                                 ConstByteSpan {reinterpret_cast<const NGIN::Byte*>(payload),
                                                               sizeof(payload)},
-                                               ctx.GetCancellationToken());
-        auto sendOp   = NGIN::Async::Spawn(ctx, std::move(sendTask));
+                                                 ctx.GetCancellationToken());
+        auto sendOpTask = std::move(sendTask);
+
+        NGIN::Async::TaskSupervisor<typename decltype(sendOpTask)::ErrorType> sendOpRoot(ctx.GetEnvironment(), 1);
+
+        auto sendOp = sendOpRoot.Spawn(std::move(sendOpTask)).value();
 
         REQUIRE(PumpUntil(scheduler, runtime, [&]() { return recvOp.IsCompleted(); }));
 
+        REQUIRE(sendOpRoot.TryJoin());
         auto sendResult = sendOp.TakeResult();
         REQUIRE(sendResult);
+        REQUIRE(recvOpRoot.TryJoin());
         auto recvResult = recvOp.TakeResult();
         REQUIRE(recvResult);
         const auto received = *recvResult;
@@ -736,10 +797,14 @@ namespace NGIN::Net
         std::array<NGIN::Byte, 64>      recvBuffer {};
         NGIN::Async::CancellationSource cancel;
 
-        auto recvTask = socket.ReceiveFromAsync(ctx,
-                                                ByteSpan {recvBuffer.data(), recvBuffer.size()},
-                                                cancel.GetToken());
-        auto recvOp   = NGIN::Async::Spawn(ctx, std::move(recvTask));
+        auto recvTask   = socket.ReceiveFromAsync(ctx,
+                                                  ByteSpan {recvBuffer.data(), recvBuffer.size()},
+                                                  cancel.GetToken());
+        auto recvOpTask = std::move(recvTask);
+
+        NGIN::Async::TaskSupervisor<typename decltype(recvOpTask)::ErrorType> recvOpRoot(ctx.GetEnvironment(), 1);
+
+        auto recvOp = recvOpRoot.Spawn(std::move(recvOpTask)).value();
 
         runtime.PollOnce();
         scheduler.RunUntilIdle();
@@ -747,9 +812,10 @@ namespace NGIN::Net
         cancel.Cancel();
 
         REQUIRE(PumpUntil(scheduler, runtime, [&]() { return recvOp.IsCompleted(); }));
+        REQUIRE(recvOpRoot.TryJoin());
         auto recvResult = recvOp.TakeResult();
         REQUIRE_FALSE(recvResult);
-        REQUIRE(recvResult.IsCanceled());
+        REQUIRE(recvResult.IsStopped());
 
         socket.Close();
     }
@@ -766,8 +832,12 @@ namespace NGIN::Net
         REQUIRE(listener.Listen(8));
 
         NGIN::Async::CancellationSource cancel;
-        auto                            acceptTask = listener.AcceptAsync(ctx, cancel.GetToken());
-        auto                            acceptOp   = NGIN::Async::Spawn(ctx, std::move(acceptTask));
+        auto                            acceptTask   = listener.AcceptAsync(ctx, cancel.GetToken());
+        auto                            acceptOpTask = std::move(acceptTask);
+
+        NGIN::Async::TaskSupervisor<typename decltype(acceptOpTask)::ErrorType> acceptOpRoot(ctx.GetEnvironment(), 1);
+
+        auto acceptOp = acceptOpRoot.Spawn(std::move(acceptOpTask)).value();
 
         runtime.PollOnce();
         scheduler.RunUntilIdle();
@@ -775,9 +845,10 @@ namespace NGIN::Net
         cancel.Cancel();
 
         REQUIRE(PumpUntil(scheduler, runtime, [&]() { return acceptOp.IsCompleted(); }));
+        REQUIRE(acceptOpRoot.TryJoin());
         auto acceptResult = acceptOp.TakeResult();
         REQUIRE_FALSE(acceptResult);
-        REQUIRE(acceptResult.IsCanceled());
+        REQUIRE(acceptResult.IsStopped());
 
         listener.Close();
     }
@@ -819,10 +890,14 @@ namespace NGIN::Net
         std::array<NGIN::Byte, 64>      recvBuffer {};
         NGIN::Async::CancellationSource cancel;
 
-        auto recvTask = server.ReceiveAsync(ctx,
-                                            ByteSpan {recvBuffer.data(), recvBuffer.size()},
-                                            cancel.GetToken());
-        auto recvOp   = NGIN::Async::Spawn(ctx, std::move(recvTask));
+        auto recvTask   = server.ReceiveAsync(ctx,
+                                              ByteSpan {recvBuffer.data(), recvBuffer.size()},
+                                              cancel.GetToken());
+        auto recvOpTask = std::move(recvTask);
+
+        NGIN::Async::TaskSupervisor<typename decltype(recvOpTask)::ErrorType> recvOpRoot(ctx.GetEnvironment(), 1);
+
+        auto recvOp = recvOpRoot.Spawn(std::move(recvOpTask)).value();
 
         runtime.PollOnce();
         scheduler.RunUntilIdle();
@@ -830,9 +905,10 @@ namespace NGIN::Net
         cancel.Cancel();
 
         REQUIRE(PumpUntil(scheduler, runtime, [&]() { return recvOp.IsCompleted(); }));
+        REQUIRE(recvOpRoot.TryJoin());
         auto recvResult = recvOp.TakeResult();
         REQUIRE_FALSE(recvResult);
-        REQUIRE(recvResult.IsCanceled());
+        REQUIRE(recvResult.IsStopped());
 
         client.Close();
         server.Close();
@@ -874,10 +950,14 @@ namespace NGIN::Net
         REQUIRE(accepted);
 
         std::array<NGIN::Byte, 64> recvBuffer {};
-        auto                       recvTask = client.ReceiveAsync(ctx,
-                                                                  ByteSpan {recvBuffer.data(), recvBuffer.size()},
-                                                                  ctx.GetCancellationToken());
-        auto                       recvOp   = NGIN::Async::Spawn(ctx, std::move(recvTask));
+        auto                       recvTask   = client.ReceiveAsync(ctx,
+                                                                    ByteSpan {recvBuffer.data(), recvBuffer.size()},
+                                                                    ctx.GetCancellationToken());
+        auto                       recvOpTask = std::move(recvTask);
+
+        NGIN::Async::TaskSupervisor<typename decltype(recvOpTask)::ErrorType> recvOpRoot(ctx.GetEnvironment(), 1);
+
+        auto recvOp = recvOpRoot.Spawn(std::move(recvOpTask)).value();
 
         runtime.PollOnce();
         scheduler.RunUntilIdle();
@@ -885,6 +965,7 @@ namespace NGIN::Net
         server.Close();
 
         REQUIRE(PumpUntil(scheduler, runtime, [&]() { return recvOp.IsCompleted(); }));
+        REQUIRE(recvOpRoot.TryJoin());
         auto recvResult = recvOp.TakeResult();
         REQUIRE(recvResult);
         REQUIRE(*recvResult == 0);
@@ -933,21 +1014,30 @@ namespace NGIN::Net
             payload[i] = static_cast<NGIN::Byte>(i & 0xFF);
         }
 
-        auto sendTask = client.SendAsync(ctx,
-                                         ConstByteSpan {payload.data(), payload.size()},
-                                         ctx.GetCancellationToken());
-        auto sendOp   = NGIN::Async::Spawn(ctx, std::move(sendTask));
+        auto sendTask   = client.SendAsync(ctx,
+                                           ConstByteSpan {payload.data(), payload.size()},
+                                           ctx.GetCancellationToken());
+        auto sendOpTask = std::move(sendTask);
+
+        NGIN::Async::TaskSupervisor<typename decltype(sendOpTask)::ErrorType> sendOpRoot(ctx.GetEnvironment(), 1);
+
+        auto sendOp = sendOpRoot.Spawn(std::move(sendOpTask)).value();
 
         std::array<NGIN::Byte, 256> recvBuffer {};
         std::size_t                 totalReceived = 0;
         while (totalReceived < payload.size())
         {
-            auto recvTask = server.ReceiveAsync(ctx,
-                                                ByteSpan {recvBuffer.data(), recvBuffer.size()},
-                                                ctx.GetCancellationToken());
-            auto recvOp   = NGIN::Async::Spawn(ctx, std::move(recvTask));
+            auto recvTask   = server.ReceiveAsync(ctx,
+                                                  ByteSpan {recvBuffer.data(), recvBuffer.size()},
+                                                  ctx.GetCancellationToken());
+            auto recvOpTask = std::move(recvTask);
+
+            NGIN::Async::TaskSupervisor<typename decltype(recvOpTask)::ErrorType> recvOpRoot(ctx.GetEnvironment(), 1);
+
+            auto recvOp = recvOpRoot.Spawn(std::move(recvOpTask)).value();
 
             REQUIRE(PumpUntil(scheduler, runtime, [&]() { return recvOp.IsCompleted(); }));
+            REQUIRE(recvOpRoot.TryJoin());
             auto bytesResult = recvOp.TakeResult();
             REQUIRE(bytesResult);
             const auto bytes = *bytesResult;
@@ -957,6 +1047,7 @@ namespace NGIN::Net
         }
 
         REQUIRE(PumpUntil(scheduler, runtime, [&]() { return sendOp.IsCompleted(); }));
+        REQUIRE(sendOpRoot.TryJoin());
         auto sendResult = sendOp.TakeResult();
         REQUIRE(sendResult);
         REQUIRE(*sendResult == payload.size());
@@ -1000,8 +1091,12 @@ namespace NGIN::Net
         REQUIRE(listener.Listen(8));
 
         NGIN::Async::CancellationSource cancel;
-        auto                            acceptTask = listener.AcceptAsync(ctx, cancel.GetToken());
-        auto                            acceptOp   = NGIN::Async::Spawn(ctx, std::move(acceptTask));
+        auto                            acceptTask   = listener.AcceptAsync(ctx, cancel.GetToken());
+        auto                            acceptOpTask = std::move(acceptTask);
+
+        NGIN::Async::TaskSupervisor<typename decltype(acceptOpTask)::ErrorType> acceptOpRoot(ctx.GetEnvironment(), 1);
+
+        auto acceptOp = acceptOpRoot.Spawn(std::move(acceptOpTask)).value();
 
         runtime.PollOnce();
         scheduler.RunUntilIdle();
@@ -1010,6 +1105,7 @@ namespace NGIN::Net
         cancel.Cancel();
 
         REQUIRE(PumpUntil(scheduler, runtime, [&]() { return acceptOp.IsCompleted(); }));
+        REQUIRE(acceptOpRoot.TryJoin());
         auto acceptResult = acceptOp.TakeResult();
         REQUIRE_FALSE(acceptResult);
     }
@@ -1051,10 +1147,14 @@ namespace NGIN::Net
         std::array<NGIN::Byte, 64>      recvBuffer {};
         NGIN::Async::CancellationSource cancel;
 
-        auto recvTask = server.ReceiveAsync(ctx,
-                                            ByteSpan {recvBuffer.data(), recvBuffer.size()},
-                                            cancel.GetToken());
-        auto recvOp   = NGIN::Async::Spawn(ctx, std::move(recvTask));
+        auto recvTask   = server.ReceiveAsync(ctx,
+                                              ByteSpan {recvBuffer.data(), recvBuffer.size()},
+                                              cancel.GetToken());
+        auto recvOpTask = std::move(recvTask);
+
+        NGIN::Async::TaskSupervisor<typename decltype(recvOpTask)::ErrorType> recvOpRoot(ctx.GetEnvironment(), 1);
+
+        auto recvOp = recvOpRoot.Spawn(std::move(recvOpTask)).value();
 
         runtime.PollOnce();
         scheduler.RunUntilIdle();
@@ -1063,6 +1163,7 @@ namespace NGIN::Net
         cancel.Cancel();
 
         REQUIRE(PumpUntil(scheduler, runtime, [&]() { return recvOp.IsCompleted(); }));
+        REQUIRE(recvOpRoot.TryJoin());
         auto recvResult = recvOp.TakeResult();
         REQUIRE_FALSE(recvResult);
 
@@ -1154,14 +1255,19 @@ namespace NGIN::Net
         TcpSocket client(runtime);
         REQUIRE(client.Open(AddressFamily::V4));
 
-        auto connectTask = client.ConnectAsync(ctx, {IpAddress::LoopbackV4(), port}, ctx.GetCancellationToken());
-        auto connectOp   = NGIN::Async::Spawn(ctx, std::move(connectTask));
+        auto connectTask   = client.ConnectAsync(ctx, {IpAddress::LoopbackV4(), port}, ctx.GetCancellationToken());
+        auto connectOpTask = std::move(connectTask);
+
+        NGIN::Async::TaskSupervisor<typename decltype(connectOpTask)::ErrorType> connectOpRoot(ctx.GetEnvironment(), 1);
+
+        auto connectOp = connectOpRoot.Spawn(std::move(connectOpTask)).value();
 
         REQUIRE(PumpUntil(scheduler, runtime, [&]() { return connectOp.IsCompleted(); }));
+        REQUIRE(connectOpRoot.TryJoin());
         auto connectResult = connectOp.TakeResult();
         REQUIRE_FALSE(connectResult);
-        REQUIRE(connectResult.IsDomainError());
-        const auto code = connectResult.DomainError().code;
+        REQUIRE((connectResult.HasError() && connectResult.Error().IsDomainError()));
+        const auto code = connectResult.Error().DomainError().code;
         REQUIRE((code == NetErrorCode::Disconnected || code == NetErrorCode::ConnectionReset));
 
         client.Close();

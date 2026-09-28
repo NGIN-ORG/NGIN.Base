@@ -7,12 +7,57 @@
 #include <type_traits>
 #include <utility>
 
-#include <NGIN/Async/Task.hpp>
+#include <NGIN/Async/TaskScope.hpp>
 
 namespace NGIN::Async
 {
     namespace detail::when_all
     {
+        template<typename T, typename E>
+        auto Admit(TaskScope<E>& scope, Task<T, E> task,
+                   std::optional<NGIN::Execution::ScheduleError>& rejected)
+                -> std::expected<Operation<T, E>, NGIN::Execution::ScheduleError>
+        {
+            if (rejected)
+                return std::unexpected(*rejected);
+            auto operation = scope.Spawn(std::move(task));
+            if (!operation)
+            {
+                rejected = operation.error();
+                scope.Close();
+                scope.RequestStop(StopReason::OwnerClosed);
+            }
+            return operation;
+        }
+
+        inline AsyncFault CurrentFault() noexcept
+        {
+            auto fault = MakeAsyncFault(AsyncFaultCode::UnhandledException);
+#if NGIN_ASYNC_CAPTURE_EXCEPTIONS
+            fault.capturedException = std::current_exception();
+#endif
+            return fault;
+        }
+
+        template<typename E>
+        std::optional<Completion<void, E>> FinalFailure(
+                const ScopeReport<E>& report, const std::optional<NGIN::Execution::ScheduleError>& rejected,
+                std::optional<AsyncFault> exception, CancellationToken cancellation)
+        {
+            using Result = Completion<void, E>;
+            if (exception)
+                return Result::Faulted(std::move(*exception));
+            if (rejected && *rejected != NGIN::Execution::ScheduleError::Stopped)
+                return Result::Faulted(MakeSchedulingFault(AsyncFaultCode::SchedulerDispatchFailed, *rejected));
+            if (report.HasError())
+                return Result::Failure(report.RetainError());
+            if (report.IsStopped())
+                return Result::Stopped(report.StopReason());
+            if (rejected)
+                return Result::Stopped(cancellation.GetStopReason());
+            return {};
+        }
+
         template<typename T, typename E>
         inline void CaptureFailure(Completion<T, E> completion, std::optional<Completion<void, E>>& failure)
         {
@@ -20,32 +65,18 @@ namespace NGIN::Async
             {
                 return;
             }
-            if (completion.IsDomainError())
-            {
-                failure.emplace(Completion<void, E>::DomainFailure(std::move(completion).DomainError()));
-            }
-            else if (completion.IsCanceled())
-            {
-                failure.emplace(Completion<void, E>::Canceled());
-            }
+            if (completion.IsStopped())
+                failure.emplace(Completion<void, E>::Stopped(completion.StopReason()));
             else
-            {
-                failure.emplace(Completion<void, E>::Faulted(std::move(completion).Fault()));
-            }
+                failure.emplace(Completion<void, E>::Failure(std::move(completion).Error()));
         }
 
         template<typename Out, typename E>
         [[nodiscard]] inline Completion<Out, E> ConvertFailure(Completion<void, E> failure)
         {
-            if (failure.IsDomainError())
-            {
-                return Completion<Out, E>::DomainFailure(std::move(failure).DomainError());
-            }
-            if (failure.IsCanceled())
-            {
-                return Completion<Out, E>::Canceled();
-            }
-            return Completion<Out, E>::Faulted(std::move(failure).Fault());
+            if (failure.IsStopped())
+                return Completion<Out, E>::Stopped(failure.StopReason());
+            return Completion<Out, E>::Failure(std::move(failure).Error());
         }
 
         template<typename... T, std::size_t... Indices>
@@ -60,22 +91,29 @@ namespace NGIN::Async
         {
             if (ctx.IsCancellationRequested())
             {
-                co_await Canceled();
+                co_await Stopped(ctx.GetCancellationToken().GetStopReason());
                 co_return;
             }
-            auto                               operations = std::tuple {Spawn(ctx, std::move(std::get<Indices>(tasks)))...};
-            std::optional<Completion<void, E>> failure;
-            // Each await uses this task's existing reservation. No new helper
-            // task is admitted between joins, including during shutdown.
-            (CaptureFailure(co_await std::get<Indices>(operations), failure), ...);
+            TaskScope<E>                                  scope(ctx.GetEnvironment(), sizeof...(Tasks));
+            std::optional<NGIN::Execution::ScheduleError> rejected;
+            std::optional<AsyncFault>                     exception;
+            try
+            {
+                ((void) Admit(scope, std::move(std::get<Indices>(tasks)), rejected), ...);
+            } catch (...)
+            {
+                exception = CurrentFault();
+                scope.RequestStop(StopReason::OwnerClosed);
+            }
+            scope.Close();
+            const auto report  = co_await scope.Join();
+            auto       failure = FinalFailure(report, rejected, std::move(exception), scope.GetCancellationToken());
             if (failure)
             {
-                if (failure->IsDomainError())
-                    co_await DomainFailure(std::move(*failure).DomainError());
-                else if (failure->IsCanceled())
-                    co_await Canceled();
+                if (failure->IsStopped())
+                    co_await Stopped(failure->StopReason());
                 else
-                    co_await Faulted(std::move(*failure).Fault());
+                    co_await Failure(std::move(*failure).Error());
             }
             co_return;
         }
@@ -94,18 +132,35 @@ namespace NGIN::Async
                                                    std::index_sequence<Indices...>)
         {
             if (ctx.IsCancellationRequested())
-                co_return Completion<std::tuple<T...>, E>::Canceled();
-            auto                               operations = std::tuple {Spawn(ctx, std::move(std::get<Indices>(tasks)))...};
-            std::tuple<std::optional<T>...>    values;
-            std::optional<Completion<void, E>> failure;
-            (CaptureValue<Indices>(co_await std::get<Indices>(operations), values, failure), ...);
+                co_return Completion<std::tuple<T...>, E>::Stopped(ctx.GetCancellationToken().GetStopReason());
+            TaskScope<E>                                  scope(ctx.GetEnvironment(), sizeof...(T));
+            std::tuple<std::optional<T>...>               values;
+            std::optional<Completion<void, E>>            failure;
+            std::optional<NGIN::Execution::ScheduleError> rejected;
+            std::optional<AsyncFault>                     exception;
+            try
+            {
+                auto operations = std::tuple {Admit(scope, std::move(std::get<Indices>(tasks)), rejected)...};
+                ((std::get<Indices>(operations)
+                          ? CaptureValue<Indices>(co_await *std::get<Indices>(operations), values, failure)
+                          : void()),
+                 ...);
+            } catch (...)
+            {
+                exception = CurrentFault();
+                scope.RequestStop(StopReason::OwnerClosed);
+            }
+            scope.Close();
+            const auto report = co_await scope.Join();
+            if (auto final = FinalFailure(report, rejected, std::move(exception), scope.GetCancellationToken()))
+                failure.emplace(std::move(*final));
             if (failure)
                 co_return ConvertFailure<std::tuple<T...>>(std::move(*failure));
             co_return TakeValues<T...>(values, std::index_sequence_for<T...> {});
         }
     }// namespace detail::when_all
 
-    /// @brief Awaits a non-empty set of `Task<void, E>` operations and propagates the first failure.
+    /// @brief Awaits a non-empty set of `Task<void, E>` operations and joins all admitted children and reports errors in argument order.
     template<typename... TTasks>
         requires(sizeof...(TTasks) > 0) && (detail::IsTaskTypeV<TTasks> && ...) &&
                 (std::is_same_v<typename TTasks::ErrorType, typename std::tuple_element_t<0, std::tuple<TTasks...>>::ErrorType> &&

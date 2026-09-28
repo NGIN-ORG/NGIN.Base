@@ -323,7 +323,7 @@ TEST_CASE("IO.LocalFileSystem async file operations use value handles", "[IO][Lo
 {
     NGIN::Execution::ThreadPoolScheduler scheduler {1};
     NGIN::IO::Runtime                    runtime;
-    NGIN::IO::RuntimeRunner runner(runtime);
+    NGIN::IO::RuntimeRunner              runner(runtime);
     NGIN::IO::LocalFileSystem            fs(runtime);
     const auto                           root     = MakeTempDir(fs);
     const auto                           filePath = root.Join("async.bin");
@@ -360,8 +360,8 @@ TEST_CASE("IO.LocalFileSystem async file operations use value handles", "[IO][Lo
     auto emptyHandle = NGIN::IO::AsyncFileHandle {};
     auto emptyRead   = emptyHandle.ReadAsync(ctx, std::span<NGIN::Byte>(buffer.data(), 1));
     auto emptyResult = RunAsyncTask(emptyRead, ctx);
-    REQUIRE(emptyResult.IsDomainError());
-    REQUIRE(emptyResult.DomainError().code == NGIN::IO::IOErrorCode::InvalidArgument);
+    REQUIRE((emptyResult.HasError() && emptyResult.Error().IsDomainError()));
+    REQUIRE(emptyResult.Error().DomainError().code == NGIN::IO::IOErrorCode::InvalidArgument);
 
     RemoveTempDir(fs, root);
 }
@@ -370,7 +370,7 @@ TEST_CASE("IO.LocalFileSystem async utility helpers work through IO::Runtime", "
 {
     NGIN::Execution::ThreadPoolScheduler scheduler {1};
     NGIN::IO::Runtime                    runtime;
-    NGIN::IO::RuntimeRunner runner(runtime);
+    NGIN::IO::RuntimeRunner              runner(runtime);
     NGIN::IO::LocalFileSystem            fs(runtime);
     const auto                           root    = MakeTempDir(fs);
     const auto                           source  = root.Join("source.bin");
@@ -414,7 +414,7 @@ TEST_CASE("IO.LocalFileSystem async directory handles scope relative operations"
 {
     NGIN::Execution::ThreadPoolScheduler scheduler {1};
     NGIN::IO::Runtime                    runtime;
-    NGIN::IO::RuntimeRunner runner(runtime);
+    NGIN::IO::RuntimeRunner              runner(runtime);
     NGIN::IO::LocalFileSystem            fs(runtime);
     const auto                           root      = MakeTempDir(fs);
     const auto                           nestedDir = root.Join("nested");
@@ -468,7 +468,7 @@ TEST_CASE("IO.LocalFileSystem async operations observe cancellation before dispa
 {
     NGIN::Execution::ThreadPoolScheduler scheduler {1};
     NGIN::IO::Runtime                    runtime;
-    NGIN::IO::RuntimeRunner runner(runtime);
+    NGIN::IO::RuntimeRunner              runner(runtime);
     NGIN::IO::LocalFileSystem            fs(runtime);
     const auto                           root     = MakeTempDir(fs);
     const auto                           filePath = root.Join("cancel.txt");
@@ -476,7 +476,7 @@ TEST_CASE("IO.LocalFileSystem async operations observe cancellation before dispa
     REQUIRE(NGIN::IO::WriteAllText(fs, filePath, "cancel me").has_value());
 
     NGIN::Async::CancellationSource cancellation;
-    cancellation.Cancel();
+    cancellation.Cancel(NGIN::Async::StopReason::Deadline);
     auto ctx = NGIN::Async::TaskContext(scheduler, cancellation.GetToken());
 
     NGIN::IO::FileOpenOptions options;
@@ -485,7 +485,8 @@ TEST_CASE("IO.LocalFileSystem async operations observe cancellation before dispa
 
     auto openTask = fs.OpenFileAsync(ctx, filePath, options);
     auto opened   = RunAsyncTask(openTask, ctx);
-    REQUIRE(opened.IsCanceled());
+    REQUIRE(opened.IsStopped());
+    REQUIRE(opened.StopReason() == NGIN::Async::StopReason::Deadline);
 
     RemoveTempDir(fs, root);
 }

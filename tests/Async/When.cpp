@@ -1,3 +1,4 @@
+#include <NGIN/Async/TaskSupervisor.hpp>
 #include <NGIN/Execution/detail/CompletionQueue.hpp>
 #include <catch2/catch_test_macros.hpp>
 
@@ -6,9 +7,9 @@
 #include <vector>
 
 #include <NGIN/Async/Cancellation.hpp>
+#include <NGIN/Async/Race.hpp>
 #include <NGIN/Async/Task.hpp>
 #include <NGIN/Async/WhenAll.hpp>
-#include <NGIN/Async/WhenAny.hpp>
 
 namespace
 {
@@ -64,8 +65,8 @@ namespace
 
     private:
         NGIN::Execution::detail::CompletionQueue m_completions;
-        std::vector<NGIN::Execution::WorkItem> m_queue;
-        std::size_t                            m_head {0};
+        std::vector<NGIN::Execution::WorkItem>   m_queue;
+        std::size_t                              m_head {0};
     };
 
     NGIN::Async::Task<int> YieldOnce(NGIN::Async::TaskContext& ctx, int value)
@@ -148,13 +149,16 @@ namespace
         co_return parentLocal;
     }
 
-    NGIN::Async::Task<NGIN::UIntSize> AwaitWhenAnyWithLocalLoser(NGIN::Async::TaskContext& ctx)
+    NGIN::Async::Task<NGIN::UIntSize> AwaitRaceWithLocalLoser(NGIN::Async::TaskContext& ctx)
     {
-        int                  local  = 0;
-        const NGIN::UIntSize winner = co_await NGIN::Async::WhenAny(
-                ctx,
-                [](NGIN::Async::TaskContext& child) { return YieldOnce(child, 1); },
-                [&local](NGIN::Async::TaskContext& child) { return LocalLoser(child, local); });
+        int        local  = 0;
+        const auto winner = (co_await NGIN::Async::Race(
+                                     ctx,
+                                     [](NGIN::Async::TaskContext& child) { return YieldOnce(child, 1); },
+                                     [&local](NGIN::Async::TaskContext& child) { return LocalLoser(child, local); })
+                                     .AsCompletion())
+                                    .Value()
+                                    .index;
         co_return local == 9 ? winner : winner + 100;
     }
 
@@ -189,9 +193,14 @@ TEST_CASE("WhenAll consumes tasks and returns tuple of results")
     ManualExecutor           exec;
     NGIN::Async::TaskContext ctx(exec);
 
-    auto operation = NGIN::Async::Spawn(ctx, NGIN::Async::WhenAll(ctx, YieldOnce(ctx, 1), YieldTwice(ctx, 2)));
+    auto operationTask = NGIN::Async::WhenAll(ctx, YieldOnce(ctx, 1), YieldTwice(ctx, 2));
+
+    NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(ctx.GetEnvironment(), 1);
+
+    auto operation = operationRoot.Spawn(std::move(operationTask)).value();
     exec.RunUntilIdle();
 
+    REQUIRE(operationRoot.TryJoin());
     REQUIRE(operation.IsCompleted());
     auto result = operation.TakeResult();
     REQUIRE(result);
@@ -204,9 +213,14 @@ TEST_CASE("WhenAll can be co_awaited directly")
     ManualExecutor           exec;
     NGIN::Async::TaskContext ctx(exec);
 
-    auto operation = NGIN::Async::Spawn(ctx, AwaitWhenAll(ctx));
+    auto operationTask = AwaitWhenAll(ctx);
+
+    NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(ctx.GetEnvironment(), 1);
+
+    auto operation = operationRoot.Spawn(std::move(operationTask)).value();
     exec.RunUntilIdle();
 
+    REQUIRE(operationRoot.TryJoin());
     REQUIRE(operation.IsCompleted());
     auto result = operation.TakeResult();
     REQUIRE(result);
@@ -220,10 +234,14 @@ TEST_CASE("WhenAll consumes void tasks")
     NGIN::Async::TaskContext ctx(exec);
     int                      value = 0;
 
-    auto operation =
-            NGIN::Async::Spawn(ctx, NGIN::Async::WhenAll(ctx, VoidYieldOnce(ctx, value), VoidYieldOnce(ctx, value)));
+    auto operationTask = NGIN::Async::WhenAll(ctx, VoidYieldOnce(ctx, value), VoidYieldOnce(ctx, value));
+
+    NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(ctx.GetEnvironment(), 1);
+
+    auto operation = operationRoot.Spawn(std::move(operationTask)).value();
     exec.RunUntilIdle();
 
+    REQUIRE(operationRoot.TryJoin());
     REQUIRE(operation.IsCompleted());
     auto result = operation.TakeResult();
     REQUIRE(result);
@@ -235,14 +253,18 @@ TEST_CASE("WhenAll propagates failures from void tasks")
     ManualExecutor           exec;
     NGIN::Async::TaskContext ctx(exec);
 
-    auto operation =
-            NGIN::Async::Spawn(ctx, NGIN::Async::WhenAll(ctx, VoidDomainFailure(ctx, 42), VoidSuccess(ctx)));
+    auto operationTask = NGIN::Async::WhenAll(ctx, VoidDomainFailure(ctx, 42), VoidSuccess(ctx));
+
+    NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(ctx.GetEnvironment(), 1);
+
+    auto operation = operationRoot.Spawn(std::move(operationTask)).value();
     exec.RunUntilIdle();
 
+    REQUIRE(operationRoot.TryJoin());
     REQUIRE(operation.IsCompleted());
     auto result = operation.TakeResult();
-    REQUIRE(result.IsDomainError());
-    REQUIRE(result.DomainError() == 42);
+    REQUIRE((result.HasError() && result.Error().IsDomainError()));
+    REQUIRE(result.Error().DomainError() == 42);
 }
 
 TEST_CASE("WhenAll starts every child before waiting for the first result")
@@ -251,58 +273,68 @@ TEST_CASE("WhenAll starts every child before waiting for the first result")
     NGIN::Async::TaskContext ctx(exec);
     int                      started = 0;
 
-    auto operation = NGIN::Async::Spawn(
-            ctx,
-            NGIN::Async::WhenAll(ctx, RecordParallelStart(ctx, started), RecordParallelStart(ctx, started)));
+    auto operationTask = NGIN::Async::WhenAll(ctx, RecordParallelStart(ctx, started), RecordParallelStart(ctx, started));
+
+    NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(ctx.GetEnvironment(), 1);
+
+    auto operation = operationRoot.Spawn(std::move(operationTask)).value();
 
     REQUIRE(exec.RunOne());
     REQUIRE(exec.RunOne());
     REQUIRE(exec.RunOne());
     CHECK(started == 2);
     exec.RunUntilIdle();
+    REQUIRE(operationRoot.TryJoin());
     CHECK(operation.IsCompleted());
 }
 
-TEST_CASE("WhenAny returns index of first completed task")
+TEST_CASE("Race returns index of first completed task")
 {
     ManualExecutor           exec;
     NGIN::Async::TaskContext ctx(exec);
 
-    auto operation = NGIN::Async::Spawn(
+    auto operationTask = NGIN::Async::Race(
             ctx,
-            NGIN::Async::WhenAny(
-                    ctx,
-                    [](NGIN::Async::TaskContext& child) { return YieldTwice(child, 1); },
-                    [](NGIN::Async::TaskContext& child) { return YieldOnce(child, 2); }));
+            [](NGIN::Async::TaskContext& child) { return YieldTwice(child, 1); },
+            [](NGIN::Async::TaskContext& child) { return YieldOnce(child, 2); });
+
+    NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(ctx.GetEnvironment(), 1);
+
+    auto operation = operationRoot.Spawn(std::move(operationTask)).value();
     exec.RunUntilIdle();
 
+    REQUIRE(operationRoot.TryJoin());
     REQUIRE(operation.IsCompleted());
     auto result = operation.TakeResult();
     REQUIRE(result);
-    REQUIRE(result.Value() == 1);
+    REQUIRE(result.Value().index == 1);
 }
 
-TEST_CASE("WhenAny returns canceled when context is already cancelled")
+TEST_CASE("Race observes cancellation before its cold body starts")
 {
     ManualExecutor                  exec;
     NGIN::Async::CancellationSource source;
-    source.Cancel();
 
     NGIN::Async::TaskContext ctx(exec, source.GetToken());
 
-    auto operation = NGIN::Async::Spawn(
+    auto operationTask = NGIN::Async::Race(
             ctx,
-            NGIN::Async::WhenAny(
-                    ctx,
-                    [](NGIN::Async::TaskContext& child) { return YieldOnce(child, 1); },
-                    [](NGIN::Async::TaskContext& child) { return YieldOnce(child, 2); }));
+            [](NGIN::Async::TaskContext& child) { return YieldOnce(child, 1); },
+            [](NGIN::Async::TaskContext& child) { return YieldOnce(child, 2); });
+
+    NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(ctx.GetEnvironment(), 1);
+
+    auto operation = operationRoot.Spawn(std::move(operationTask)).value();
+    // Admission precedes stop; the race itself has not executed yet.
+    source.Cancel();
     exec.RunUntilIdle();
 
+    REQUIRE(operationRoot.TryJoin());
     REQUIRE(operation.IsCompleted());
-    REQUIRE(operation.IsCanceled());
+    REQUIRE(operation.IsStopped());
     auto result = operation.TakeResult();
     REQUIRE_FALSE(result);
-    REQUIRE(result.IsCanceled());
+    REQUIRE(result.IsStopped());
 }
 
 TEST_CASE("WhenAll propagates child exception")
@@ -310,68 +342,84 @@ TEST_CASE("WhenAll propagates child exception")
     ManualExecutor           exec;
     NGIN::Async::TaskContext ctx(exec);
 
-    auto operation = NGIN::Async::Spawn(ctx, NGIN::Async::WhenAll(ctx, ThrowOnce(ctx), YieldOnce(ctx, 2)));
+    auto operationTask = NGIN::Async::WhenAll(ctx, ThrowOnce(ctx), YieldOnce(ctx, 2));
+
+    NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(ctx.GetEnvironment(), 1);
+
+    auto operation = operationRoot.Spawn(std::move(operationTask)).value();
     exec.RunUntilIdle();
 
+    REQUIRE(operationRoot.TryJoin());
     REQUIRE(operation.IsCompleted());
-    REQUIRE(operation.IsFaulted());
+    REQUIRE(operation.HasError());
     auto result = operation.TakeResult();
     REQUIRE_FALSE(result);
-    REQUIRE(result.IsFault());
+    REQUIRE((result.HasError() && result.Error().IsFault()));
 }
 
-TEST_CASE("WhenAny propagates a winning task fault after draining losers")
+TEST_CASE("Race propagates a winning task fault after draining losers")
 {
     ManualExecutor           exec;
     NGIN::Async::TaskContext ctx(exec);
 
-    auto operation = NGIN::Async::Spawn(
+    auto operationTask = NGIN::Async::Race(
             ctx,
-            NGIN::Async::WhenAny(
-                    ctx,
-                    [](NGIN::Async::TaskContext& child) { return ThrowOnce(child); },
-                    [](NGIN::Async::TaskContext& child) { return YieldTwice(child, 123); }));
+            [](NGIN::Async::TaskContext& child) { return ThrowOnce(child); },
+            [](NGIN::Async::TaskContext& child) { return YieldTwice(child, 123); });
+
+    NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(ctx.GetEnvironment(), 1);
+
+    auto operation = operationRoot.Spawn(std::move(operationTask)).value();
     exec.RunUntilIdle();
 
+    REQUIRE(operationRoot.TryJoin());
     REQUIRE(operation.IsCompleted());
     auto result = operation.TakeResult();
     REQUIRE_FALSE(result);
-    REQUIRE(result.IsFault());
+    REQUIRE((result.HasError() && result.Error().IsDomainError() && result.Error().DomainError().Primary().IsFault()));
 }
 
-TEST_CASE("WhenAny owns local loser task lifetime")
+TEST_CASE("Race owns local loser task lifetime")
 {
     ManualExecutor           exec;
     NGIN::Async::TaskContext ctx(exec);
 
-    auto operation = NGIN::Async::Spawn(ctx, AwaitWhenAnyWithLocalLoser(ctx));
+    auto operationTask = AwaitRaceWithLocalLoser(ctx);
+
+    NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(ctx.GetEnvironment(), 1);
+
+    auto operation = operationRoot.Spawn(std::move(operationTask)).value();
     exec.RunUntilIdle();
 
+    REQUIRE(operationRoot.TryJoin());
     REQUIRE(operation.IsCompleted());
     auto result = operation.TakeResult();
     REQUIRE(result);
     REQUIRE(result.Value() == 0);
 }
 
-TEST_CASE("WhenAny requests child-specific cancellation for losing tasks")
+TEST_CASE("Race requests child-specific cancellation for losing tasks")
 {
     ManualExecutor           exec;
     NGIN::Async::TaskContext ctx(exec);
     bool                     loserObservedCancellation = false;
 
-    auto operation = NGIN::Async::Spawn(
+    auto operationTask = NGIN::Async::Race(
             ctx,
-            NGIN::Async::WhenAny(
-                    ctx,
-                    [](NGIN::Async::TaskContext& child) { return YieldOnce(child, 1); },
-                    [&loserObservedCancellation](NGIN::Async::TaskContext& child) {
-                        return CancellationAwareLoser(child, loserObservedCancellation);
-                    }));
+            [](NGIN::Async::TaskContext& child) { return YieldOnce(child, 1); },
+            [&loserObservedCancellation](NGIN::Async::TaskContext& child) {
+                return CancellationAwareLoser(child, loserObservedCancellation);
+            });
+
+    NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(ctx.GetEnvironment(), 1);
+
+    auto operation = operationRoot.Spawn(std::move(operationTask)).value();
     exec.RunUntilIdle();
 
+    REQUIRE(operationRoot.TryJoin());
     REQUIRE(operation.IsCompleted());
     const auto result = operation.TakeResult();
     REQUIRE(result);
-    CHECK(result.Value() == 0);
+    CHECK(result.Value().index == 0);
     CHECK(loserObservedCancellation);
 }

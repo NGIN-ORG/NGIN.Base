@@ -1,5 +1,6 @@
 #pragma once
 
+#include <NGIN/Async/ExecutorTransitions.hpp>
 #include <NGIN/IO/AsyncFileHandle.hpp>
 #include <NGIN/IO/FileSystemTypes.hpp>
 
@@ -66,6 +67,7 @@ namespace NGIN::IO
         /// @brief Asynchronously checks whether a relative entry exists.
         AsyncTask<bool> ExistsAsync(NGIN::Async::TaskContext& ctx, Path path)
         {
+            co_await NGIN::Async::SwitchTo(ctx.GetExecutor());
             if (!IsValid() || m_operations->exists == nullptr)
                 co_return MakeInvalidHandleError("async directory handle is empty");
             co_return co_await m_operations->exists(m_state, ctx, path);
@@ -74,6 +76,7 @@ namespace NGIN::IO
         /// @brief Asynchronously queries metadata for a relative entry.
         AsyncTask<FileInfo> GetInfoAsync(NGIN::Async::TaskContext& ctx, Path path, MetadataOptions options = {})
         {
+            co_await NGIN::Async::SwitchTo(ctx.GetExecutor());
             if (!IsValid() || m_operations->getInfo == nullptr)
                 co_return MakeInvalidHandleError("async directory handle is empty");
             co_return co_await m_operations->getInfo(m_state, ctx, path, options);
@@ -82,6 +85,7 @@ namespace NGIN::IO
         /// @brief Asynchronously opens a file relative to this directory.
         AsyncTask<AsyncFileHandle> OpenFileAsync(NGIN::Async::TaskContext& ctx, Path path, FileOpenOptions options)
         {
+            co_await NGIN::Async::SwitchTo(ctx.GetExecutor());
             if (!IsValid() || m_operations->openFile == nullptr)
                 co_return MakeInvalidHandleError("async directory handle is empty");
             co_return co_await m_operations->openFile(m_state, ctx, path, options);
@@ -90,6 +94,7 @@ namespace NGIN::IO
         /// @brief Asynchronously opens a directory relative to this directory.
         AsyncTask<AsyncDirectoryHandle> OpenDirectoryAsync(NGIN::Async::TaskContext& ctx, Path path)
         {
+            co_await NGIN::Async::SwitchTo(ctx.GetExecutor());
             if (!IsValid() || m_operations->openDirectory == nullptr)
                 co_return MakeInvalidHandleError("async directory handle is empty");
             co_return co_await m_operations->openDirectory(m_state, ctx, path);
@@ -98,6 +103,7 @@ namespace NGIN::IO
         /// @brief Asynchronously reads the stored target of a relative symbolic link.
         AsyncTask<Path> ReadSymlinkAsync(NGIN::Async::TaskContext& ctx, Path path)
         {
+            co_await NGIN::Async::SwitchTo(ctx.GetExecutor());
             if (!IsValid() || m_operations->readSymlink == nullptr)
                 co_return MakeInvalidHandleError("async directory handle is empty");
             co_return co_await m_operations->readSymlink(m_state, ctx, path);

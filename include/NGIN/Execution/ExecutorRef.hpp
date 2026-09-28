@@ -13,6 +13,7 @@
 #include <NGIN/Execution/ScheduleResult.hpp>
 #include <NGIN/Execution/TimerRegistration.hpp>
 #include <NGIN/Execution/WorkItem.hpp>
+#include <NGIN/Execution/detail/WorkBudget.hpp>
 #include <NGIN/Primitives.hpp>
 #include <NGIN/Time/MonotonicClock.hpp>
 #include <NGIN/Time/TimePoint.hpp>
@@ -26,7 +27,7 @@ namespace NGIN::Execution
     class ExecutorRef final
     {
     public:
-        /// @brief Type-erased immediate-execution callback.
+        /// @brief Type-erased queued-submission callback; must not invoke work on the submitting stack.
         using ExecuteFn = ScheduleResult (*)(void*, WorkItem) noexcept;
         /// @brief Type-erased timed-execution callback.
         using ExecuteAtFn         = ScheduleResult (*)(void*, WorkItem, NGIN::Time::TimePoint) noexcept;
@@ -138,7 +139,24 @@ namespace NGIN::Execution
             return m_reserveCompletion(m_self, std::move(item));
         }
 
-        /// @brief Submits a work item for immediate execution.
+        /// @brief Invokes published, retired work inline only in this executor's current context.
+        /// @details The caller must publish the complete result, finish required retirement, and
+        /// release all internal locks before calling. A false result leaves work untouched; use
+        /// already-reserved deferred capacity when delivery must not reject. Never use for Yield.
+        [[nodiscard]] bool TryDispatchInline(WorkItem& work) const noexcept
+        {
+            if (work.IsEmpty() || !IsCurrent())
+                return false;
+            detail::DispatchBudget dispatch;
+            if (!dispatch.Entered())
+                return false;
+            dispatch.Invoked();
+            WorkItem ready = std::move(work);
+            ready.Invoke();
+            return true;
+        }
+
+        /// @brief Submits a work item to the executor queue, without inline invocation.
         /// @return Success, or `InvalidExecutor` when this reference is unbound.
         [[nodiscard]] ScheduleResult Execute(WorkItem item) const noexcept
         {
@@ -147,7 +165,7 @@ namespace NGIN::Execution
             return m_execute(m_self, std::move(item));
         }
 
-        /// @brief Wraps an invocable object and submits it for immediate execution.
+        /// @brief Wraps an invocable object and submits it to the executor queue.
         template<typename F>
             requires(!std::is_same_v<std::remove_cvref_t<F>, WorkItem>) &&
                     (!std::is_same_v<std::remove_cvref_t<F>, NGIN::Utilities::Callable<void()>>) &&

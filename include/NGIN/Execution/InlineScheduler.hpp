@@ -1,27 +1,26 @@
 /// @file InlineScheduler.hpp
-/// @brief Scheduler that runs coroutines inline.
+/// @brief Explicit synchronous invocation adapter without queued submission.
 #pragma once
 
 #include <NGIN/Execution/ScheduleResult.hpp>
 #include <NGIN/Execution/WorkItem.hpp>
 
-#include <NGIN/Time/MonotonicClock.hpp>
-#include <NGIN/Time/Sleep.hpp>
-#include <NGIN/Units.hpp>
+#include <NGIN/Time/TimePoint.hpp>
 #include <coroutine>
 #include <cstdint>
 
 namespace NGIN::Execution
 {
-    /// @brief Scheduler that resumes scheduled coroutines immediately on the calling thread.
+    /// @brief Synchronous invocation adapter; queued submission is unsupported.
     class InlineScheduler final
     {
     public:
         /// @brief Constructs a stateless inline scheduler.
         InlineScheduler() = default;
 
-        /// @brief Invokes a work item synchronously on the calling thread.
-        [[nodiscard]] ScheduleResult Execute(WorkItem item) noexcept
+        /// @brief Explicitly invokes a work item synchronously on the calling thread.
+        /// @note This is an ordinary call, not an executor dispatch context or a yield.
+        [[nodiscard]] ScheduleResult Invoke(WorkItem item) noexcept
         {
             if (item.IsEmpty())
                 return std::unexpected(ScheduleError::Rejected);
@@ -29,16 +28,16 @@ namespace NGIN::Execution
             return {};
         }
 
-        /// @brief Sleeps the calling thread until `resumeAt`, then invokes the item synchronously.
-        [[nodiscard]] ScheduleResult ExecuteAt(WorkItem item, NGIN::Time::TimePoint resumeAt) noexcept
+        /// @brief Rejects queued submission because this adapter owns no queue.
+        [[nodiscard]] ScheduleResult Execute(WorkItem) noexcept
         {
-            const NGIN::Time::TimePoint now = NGIN::Time::MonotonicClock::Now();
-            if (resumeAt > now)
-            {
-                const NGIN::UInt64 delayNs = resumeAt.ToNanoseconds() - now.ToNanoseconds();
-                NGIN::Time::SleepFor(NGIN::Units::Nanoseconds(static_cast<double>(delayNs)));
-            }
-            return Execute(std::move(item));
+            return std::unexpected(ScheduleError::Rejected);
+        }
+
+        /// @brief Rejects timed submission without sleeping or invoking the work.
+        [[nodiscard]] ScheduleResult ExecuteAt(WorkItem, NGIN::Time::TimePoint) noexcept
+        {
+            return std::unexpected(ScheduleError::Rejected);
         }
 
         /// @brief Returns `false` because inline work is never queued.

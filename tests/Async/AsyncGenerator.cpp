@@ -1,4 +1,6 @@
+#include <NGIN/Async/TaskSupervisor.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <atomic>
 #include <coroutine>
@@ -107,13 +109,18 @@ TEST_CASE("AsyncGenerator yields values via Next(TaskContext)")
     NGIN::Execution::CooperativeScheduler scheduler;
     NGIN::Async::TaskContext              ctx(scheduler);
 
-    auto gen  = ProduceValues(ctx);
-    auto task = SumAll(ctx, gen);
-    auto op   = NGIN::Async::Spawn(ctx, std::move(task));
+    auto gen    = ProduceValues(ctx);
+    auto task   = SumAll(ctx, gen);
+    auto opTask = std::move(task);
+
+    NGIN::Async::TaskSupervisor<typename decltype(opTask)::ErrorType> opRoot(ctx.GetEnvironment(), 1);
+
+    auto op = opRoot.Spawn(std::move(opTask)).value();
 
     scheduler.RunUntilIdle();
 
     REQUIRE(op.IsCompleted());
+    REQUIRE(opRoot.TryJoin());
     auto result = op.TakeResult();
     REQUIRE(result);
     REQUIRE(*result == 6);
@@ -125,16 +132,21 @@ TEST_CASE("AsyncGenerator propagates exceptions from producer")
     NGIN::Execution::CooperativeScheduler scheduler;
     NGIN::Async::TaskContext              ctx(scheduler);
 
-    auto gen  = YieldThenThrow(ctx);
-    auto task = SumAll(ctx, gen);
-    auto op   = NGIN::Async::Spawn(ctx, std::move(task));
+    auto gen    = YieldThenThrow(ctx);
+    auto task   = SumAll(ctx, gen);
+    auto opTask = std::move(task);
+
+    NGIN::Async::TaskSupervisor<typename decltype(opTask)::ErrorType> opRoot(ctx.GetEnvironment(), 1);
+
+    auto op = opRoot.Spawn(std::move(opTask)).value();
 
     scheduler.RunUntilIdle();
 
     REQUIRE(op.IsCompleted());
+    REQUIRE(opRoot.TryJoin());
     auto result = op.TakeResult();
     REQUIRE_FALSE(result);
-    REQUIRE(result.IsFault());
+    REQUIRE((result.HasError() && result.Error().IsFault()));
 }
 #endif
 
@@ -144,9 +156,13 @@ TEST_CASE("AsyncGenerator Next observes TaskContext cancellation")
     NGIN::Async::CancellationSource       source;
     NGIN::Async::TaskContext              ctx(scheduler, source.GetToken());
 
-    auto gen  = YieldOnceThenNever(ctx);
-    auto task = ConsumeThenCancel(ctx, gen);
-    auto op   = NGIN::Async::Spawn(ctx, std::move(task));
+    auto gen    = YieldOnceThenNever(ctx);
+    auto task   = ConsumeThenCancel(ctx, gen);
+    auto opTask = std::move(task);
+
+    NGIN::Async::TaskSupervisor<typename decltype(opTask)::ErrorType> opRoot(ctx.GetEnvironment(), 1);
+
+    auto op = opRoot.Spawn(std::move(opTask)).value();
 
     scheduler.RunUntilIdle();
     REQUIRE_FALSE(op.IsCompleted());
@@ -155,10 +171,11 @@ TEST_CASE("AsyncGenerator Next observes TaskContext cancellation")
     scheduler.RunUntilIdle();
 
     REQUIRE(op.IsCompleted());
-    REQUIRE(op.IsCanceled());
+    REQUIRE(op.IsStopped());
+    REQUIRE(opRoot.TryJoin());
     auto result = op.TakeResult();
     REQUIRE_FALSE(result);
-    REQUIRE(result.IsCanceled());
+    REQUIRE(result.IsStopped());
 }
 
 TEST_CASE("AsyncGenerator faults concurrent Next consumers")
@@ -171,19 +188,29 @@ TEST_CASE("AsyncGenerator faults concurrent Next consumers")
     auto                    first  = ReadOne(ctx, gen);
     auto                    second = ReadOne(ctx, gen);
 
-    auto firstOp  = NGIN::Async::Spawn(ctx, std::move(first));
-    auto secondOp = NGIN::Async::Spawn(ctx, std::move(second));
+    auto firstOpTask = std::move(first);
+
+    NGIN::Async::TaskSupervisor<typename decltype(firstOpTask)::ErrorType> firstOpRoot(ctx.GetEnvironment(), 1);
+
+    auto firstOp      = firstOpRoot.Spawn(std::move(firstOpTask)).value();
+    auto secondOpTask = std::move(second);
+
+    NGIN::Async::TaskSupervisor<typename decltype(secondOpTask)::ErrorType> secondOpRoot(ctx.GetEnvironment(), 1);
+
+    auto secondOp = secondOpRoot.Spawn(std::move(secondOpTask)).value();
     scheduler.RunUntilIdle();
 
     REQUIRE(suspended);
-    const bool firstRejected  = firstOp.IsCompleted() && firstOp.IsFaulted();
-    const bool secondRejected = secondOp.IsCompleted() && secondOp.IsFaulted();
+    const bool firstRejected  = firstOp.IsCompleted() && firstOp.HasError();
+    const bool secondRejected = secondOp.IsCompleted() && secondOp.HasError();
     REQUIRE(scheduler.Execute(NGIN::Execution::WorkItem(suspended)));
     scheduler.RunUntilIdle();
     REQUIRE(firstRejected != secondRejected);
     REQUIRE(firstOp.IsCompleted());
     REQUIRE(secondOp.IsCompleted());
-    REQUIRE((firstOp.IsFaulted() || secondOp.IsFaulted()));
+    REQUIRE((firstOp.HasError() || secondOp.HasError()));
+    REQUIRE(firstOpRoot.TryJoin());
+    REQUIRE(secondOpRoot.TryJoin());
 }
 
 TEST_CASE("AsyncGenerator cancellation joins queued producer access", "[Async][Lifetime]")
@@ -193,10 +220,14 @@ TEST_CASE("AsyncGenerator cancellation joins queued producer access", "[Async][L
     NGIN::Async::CancellationSource       source;
     NGIN::Async::TaskContext              producerContext(producerScheduler);
     NGIN::Async::TaskContext              consumerContext(consumerScheduler, source.GetToken());
-    bool                                  started   = false;
-    bool                                  continued = false;
-    auto                                  generator = QueuedProducer(producerContext, started, continued);
-    auto                                  operation = NGIN::Async::Spawn(consumerContext, generator.Next(consumerContext));
+    bool                                  started       = false;
+    bool                                  continued     = false;
+    auto                                  generator     = QueuedProducer(producerContext, started, continued);
+    auto                                  operationTask = generator.Next(consumerContext);
+
+    NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(consumerContext.GetEnvironment(), 1);
+
+    auto operation = operationRoot.Spawn(std::move(operationTask)).value();
     consumerScheduler.RunUntilIdle();
     while (!started)
         REQUIRE(producerScheduler.RunOne());
@@ -211,7 +242,8 @@ TEST_CASE("AsyncGenerator cancellation joins queued producer access", "[Async][L
     REQUIRE(continued);
     REQUIRE_FALSE(completedOnProducer);
     REQUIRE(operation.IsCompleted());
-    REQUIRE(operation.TakeResult().IsCanceled());
+    REQUIRE(operationRoot.TryJoin());
+    REQUIRE(operation.TakeResult().IsStopped());
 }
 
 namespace
@@ -296,7 +328,11 @@ TEST_CASE("AsyncGenerator Next retains producer ownership across moves and destr
     {
         destroyPending = true;
     }
-    auto operation = NGIN::Async::Spawn(consumerContext, std::move(next));
+    auto operationTask = std::move(next);
+
+    NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(consumerContext.GetEnvironment(), 1);
+
+    auto operation = operationRoot.Spawn(std::move(operationTask)).value();
     consumerScheduler.RunUntilIdle();
     REQUIRE_FALSE(started);
     REQUIRE(producerScheduler.RunOne());
@@ -307,6 +343,7 @@ TEST_CASE("AsyncGenerator Next retains producer ownership across moves and destr
     producerScheduler.RunUntilIdle();
     consumerScheduler.RunUntilIdle();
     REQUIRE(operation.IsCompleted());
+    REQUIRE(operationRoot.TryJoin());
     auto result = operation.TakeResult();
     REQUIRE(result);
     REQUIRE(result.Value().Value() == 42);
@@ -329,12 +366,17 @@ TEST_CASE("AsyncGenerator advances and resumes its consumer on their selected ex
         consumerCorrect = ctx.GetExecutor().IsCurrent();
         co_return next.Value();
     };
-    auto operation = NGIN::Async::Spawn(consumerContext, consume(consumerContext));
+    auto operationTask = consume(consumerContext);
+
+    NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(consumerContext.GetEnvironment(), 1);
+
+    auto operation = operationRoot.Spawn(std::move(operationTask)).value();
     consumerScheduler.RunUntilIdle();
     REQUIRE_FALSE(producerCorrect);
     producerScheduler.RunUntilIdle();
     REQUIRE_FALSE(operation.IsCompleted());
     consumerScheduler.RunUntilIdle();
+    REQUIRE(operationRoot.TryJoin());
     REQUIRE(operation.TakeResult().Value() == 42);
     REQUIRE(producerCorrect);
     REQUIRE(consumerCorrect);
@@ -346,11 +388,19 @@ TEST_CASE("AsyncGenerator preserves reserved consumer delivery after admission c
     GeneratorExecutor        consumerScheduler;
     NGIN::Async::TaskContext producerContext(producerScheduler);
     NGIN::Async::TaskContext consumerContext(consumerScheduler);
-    bool                     started   = false;
-    bool                     continued = false;
-    auto                     generator = QueuedProducer(producerContext, started, continued);
-    auto                     operation = NGIN::Async::Spawn(consumerContext, generator.Next(consumerContext));
+    bool                     started       = false;
+    bool                     continued     = false;
+    auto                     generator     = QueuedProducer(producerContext, started, continued);
+    auto                     operationTask = generator.Next(consumerContext);
+
+    NGIN::Execution::CooperativeScheduler rootScheduler;
+    NGIN::Async::TaskContext              rootContext(rootScheduler);
+
+    NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(rootContext.GetEnvironment(), 1);
+
+    auto operation = operationRoot.SpawnOn(consumerContext.GetExecutor(), std::move(operationTask)).value();
     consumerScheduler.RunUntilIdle();
+    rootScheduler.RunUntilIdle();
     REQUIRE(producerScheduler.RunOne());
     REQUIRE(started);
     REQUIRE_FALSE(continued);
@@ -361,7 +411,9 @@ TEST_CASE("AsyncGenerator preserves reserved consumer delivery after admission c
     producerScheduler.RunUntilIdle();
     REQUIRE_FALSE(operation.IsCompleted());
     consumerScheduler.RunUntilIdle();
+    rootScheduler.RunUntilIdle();
     REQUIRE(operation.IsCompleted());
+    REQUIRE(operationRoot.TryJoin());
     REQUIRE(operation.TakeResult().Value().Value() == 7);
     REQUIRE(producerScheduler.completions.Outstanding() == 0);
     REQUIRE(consumerScheduler.completions.Outstanding() == 0);
@@ -402,17 +454,22 @@ TEST_CASE("AsyncGenerator rejects failed producer admission before entering its 
         producerContext.BindExecutor(unsupportedScheduler);
         expected = NGIN::Execution::ScheduleError::Rejected;
     }
-    bool started   = false;
-    bool continued = false;
-    auto generator = QueuedProducer(producerContext, started, continued);
-    auto operation = NGIN::Async::Spawn(consumerContext, generator.Next(consumerContext));
+    bool started       = false;
+    bool continued     = false;
+    auto generator     = QueuedProducer(producerContext, started, continued);
+    auto operationTask = generator.Next(consumerContext);
+
+    NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(consumerContext.GetEnvironment(), 1);
+
+    auto operation = operationRoot.Spawn(std::move(operationTask)).value();
     consumerScheduler.RunUntilIdle();
     producerScheduler.RunUntilIdle();
     consumerScheduler.RunUntilIdle();
     REQUIRE(operation.IsCompleted());
+    REQUIRE(operationRoot.TryJoin());
     auto result = operation.TakeResult();
-    REQUIRE(result.IsFault());
-    REQUIRE(result.Fault().native == static_cast<int>(expected));
+    REQUIRE((result.HasError() && result.Error().IsFault()));
+    REQUIRE(result.Error().Fault().native == static_cast<int>(expected));
     REQUIRE_FALSE(started);
     REQUIRE_FALSE(continued);
     occupied.Reset();
@@ -425,8 +482,12 @@ TEST_CASE("AsyncGenerator cancellation waits for uncancelable producer suspensio
     NGIN::Async::CancellationSource       source;
     NGIN::Async::TaskContext              ctx(scheduler, source.GetToken());
     std::coroutine_handle<>               suspended;
-    auto                                  generator = SuspendsBeforeYield(ctx, suspended);
-    auto                                  operation = NGIN::Async::Spawn(ctx, generator.Next(ctx));
+    auto                                  generator     = SuspendsBeforeYield(ctx, suspended);
+    auto                                  operationTask = generator.Next(ctx);
+
+    NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(ctx.GetEnvironment(), 1);
+
+    auto operation = operationRoot.Spawn(std::move(operationTask)).value();
     scheduler.RunUntilIdle();
     REQUIRE(suspended);
     source.Cancel();
@@ -436,7 +497,8 @@ TEST_CASE("AsyncGenerator cancellation waits for uncancelable producer suspensio
     scheduler.RunUntilIdle();
     REQUIRE_FALSE(premature);
     REQUIRE(operation.IsCompleted());
-    REQUIRE(operation.TakeResult().IsCanceled());
+    REQUIRE(operationRoot.TryJoin());
+    REQUIRE(operation.TakeResult().IsStopped());
 }
 
 TEST_CASE("AsyncGenerator supports concurrent executor delivery across repeated advances", "[Async][Lifetime]")
@@ -482,9 +544,17 @@ TEST_CASE("AsyncGenerator joins Operation delivery on its reserved producer cont
     {
         owned = true;
     }
-    auto child     = NGIN::Async::Spawn(childContext, ExternalValue(childContext));
+    auto childTask = ExternalValue(childContext);
+
+    NGIN::Async::TaskSupervisor<typename decltype(childTask)::ErrorType> childRoot(childContext.GetEnvironment(), 1);
+
+    auto child     = childRoot.Spawn(std::move(childTask)).value();
     auto generator = ObserveExternal(producerContext, child, owned);
-    auto next      = NGIN::Async::Spawn(consumerContext, generator.Next(consumerContext));
+    auto nextTask  = generator.Next(consumerContext);
+
+    NGIN::Async::TaskSupervisor<typename decltype(nextTask)::ErrorType> nextRoot(consumerContext.GetEnvironment(), 1);
+
+    auto next = nextRoot.Spawn(std::move(nextTask)).value();
     consumerScheduler.RunUntilIdle();
     producerScheduler.RunUntilIdle();
     REQUIRE_FALSE(next.IsCompleted());
@@ -494,7 +564,9 @@ TEST_CASE("AsyncGenerator joins Operation delivery on its reserved producer cont
     REQUIRE_FALSE(next.IsCompleted());
     consumerScheduler.RunUntilIdle();
     REQUIRE(next.IsCompleted());
+    REQUIRE(nextRoot.TryJoin());
     REQUIRE(next.TakeResult().Value().Value() == 42);
+    REQUIRE(childRoot.TryJoin());
 }
 
 TEST_CASE("AsyncGenerator empty and abandoned cold advances need no execution lifetime", "[Async][Lifetime]")
@@ -504,8 +576,13 @@ TEST_CASE("AsyncGenerator empty and abandoned cold advances need no execution li
     SECTION("empty generator")
     {
         NGIN::Async::AsyncGenerator<int> generator;
-        auto                             next = NGIN::Async::Spawn(ctx, generator.Next(ctx));
+        auto                             nextTask = generator.Next(ctx);
+
+        NGIN::Async::TaskSupervisor<typename decltype(nextTask)::ErrorType> nextRoot(ctx.GetEnvironment(), 1);
+
+        auto next = nextRoot.Spawn(std::move(nextTask)).value();
         scheduler.RunUntilIdle();
+        REQUIRE(nextRoot.TryJoin());
         REQUIRE(next.TakeResult().Value().IsEnd());
     }
     SECTION("cold advance abandoned after its generator is destroyed")
@@ -525,13 +602,18 @@ TEST_CASE("AsyncGenerator empty and abandoned cold advances need no execution li
     {
         NGIN::Async::CancellationSource source;
         auto                            canceledContext = ctx.WithCancellationToken(source.GetToken());
+        bool                            started         = false;
+        bool                            continued       = false;
+        auto                            generator       = QueuedProducer(ctx, started, continued);
+        auto                            nextTask        = generator.Next(canceledContext);
+
+        NGIN::Async::TaskSupervisor<typename decltype(nextTask)::ErrorType> nextRoot(canceledContext.GetEnvironment(), 1);
+
+        auto next = nextRoot.Spawn(std::move(nextTask)).value();
         source.Cancel();
-        bool started   = false;
-        bool continued = false;
-        auto generator = QueuedProducer(ctx, started, continued);
-        auto next      = NGIN::Async::Spawn(canceledContext, generator.Next(canceledContext));
         scheduler.RunUntilIdle();
-        REQUIRE(next.TakeResult().IsCanceled());
+        REQUIRE(nextRoot.TryJoin());
+        REQUIRE(next.TakeResult().IsStopped());
         REQUIRE_FALSE(started);
     }
 }
@@ -572,7 +654,62 @@ TEST_CASE("AsyncGenerator retires owned canceled producers under concurrent deli
         auto                            retired    = std::make_shared<std::promise<void>>();
         auto                            retirement = retired->get_future();
         auto                            result     = NGIN::Async::SyncWait(ctx, ConsumeOwnedCanceledProducer(ctx, source, std::move(retired)));
-        REQUIRE(result.IsCanceled());
+        REQUIRE(result.IsStopped());
         REQUIRE(retirement.wait_for(std::chrono::seconds(2)) == std::future_status::ready);
     }
+}
+
+TEST_CASE("AsyncGenerator delivers published boundaries inline or through its reserved fallback", "[Async][Lifetime]")
+{
+    NGIN::Execution::CooperativeScheduler scheduler;
+    NGIN::Async::TaskContext              ctx(scheduler);
+    const bool                            yieldValue = GENERATE(true, false);
+    const bool                            limitWork  = GENERATE(false, true);
+
+    std::coroutine_handle<> suspended;
+    auto                    lifetime = std::make_shared<int>(42);
+    std::weak_ptr<int>      weak     = lifetime;
+    auto                    produce  = [](NGIN::Async::TaskContext&, std::coroutine_handle<>& handle,
+                      std::shared_ptr<int> owned, bool yield) -> NGIN::Async::AsyncGenerator<int> {
+        co_await CaptureSuspension {handle};
+        if (yield)
+            co_yield *owned;
+    };
+    auto generator = produce(ctx, suspended, std::move(lifetime), yieldValue);
+    bool resumed   = false;
+    auto observe   = [&]() -> NGIN::Async::Task<NGIN::Async::GeneratorNext<int>> {
+        auto result = co_await generator.Next(ctx);
+        resumed     = true;
+        co_return result;
+    };
+    auto nextTask = observe();
+
+    NGIN::Async::TaskSupervisor<typename decltype(nextTask)::ErrorType> nextRoot(ctx.GetEnvironment(), 1);
+
+    auto next = nextRoot.Spawn(std::move(nextTask)).value();
+    scheduler.RunUntilIdle();
+    REQUIRE(suspended);
+    REQUIRE_FALSE(next.IsCompleted());
+    generator = {};
+    REQUIRE_FALSE(weak.expired());
+    bool deliveredInCallback = false;
+    REQUIRE(scheduler.Execute(NGIN::Execution::WorkItem([&] {
+        suspended.resume();
+        deliveredInCallback = resumed;
+    })));
+    {
+        NGIN::Execution::detail::WorkBudget budget(limitWork ? 1 : 64);
+        REQUIRE(scheduler.RunOne());
+    }
+    REQUIRE(deliveredInCallback == !limitWork);
+    scheduler.RunUntilIdle();
+    REQUIRE(next.IsCompleted());
+    REQUIRE(nextRoot.TryJoin());
+    auto result = next.TakeResult();
+    REQUIRE(result);
+    REQUIRE(result.Value().IsEnd() == !yieldValue);
+    if (yieldValue)
+        REQUIRE(result.Value().Value() == 42);
+    next = {};
+    REQUIRE(weak.expired());
 }

@@ -1,5 +1,7 @@
+#include <NGIN/Async/TaskSupervisor.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <NGIN/Async/ExecutorTransitions.hpp>
 #include <NGIN/Async/Task.hpp>
 #include <NGIN/Execution/CooperativeScheduler.hpp>
 
@@ -16,7 +18,7 @@ namespace
     }
 }// namespace
 
-TEST_CASE("Task resumes its parent on the parent executor after external work", "[Async][Affinity]")
+TEST_CASE("StartsOn transfers the child placement to its parent", "[Async][Affinity]")
 {
     NGIN::Execution::CooperativeScheduler parentScheduler;
     NGIN::Execution::CooperativeScheduler childScheduler;
@@ -31,22 +33,27 @@ TEST_CASE("Task resumes its parent on the parent executor after external work", 
     }
     auto parent = [&](NGIN::Async::TaskContext&) -> NGIN::Async::Task<int> {
         if (useVoid)
-            co_await VoidChild(childContext);
+            co_await NGIN::Async::StartsOn(NGIN::Execution::ExecutorRef::From(childScheduler), VoidChild(childContext));
         else
-            (void) co_await ValueChild(childContext);
+            (void) co_await NGIN::Async::StartsOn(NGIN::Execution::ExecutorRef::From(childScheduler), ValueChild(childContext));
         continued = true;
         co_return 42;
     };
-    auto operation = NGIN::Async::Spawn(parentContext, parent(parentContext));
+    auto operationTask = parent(parentContext);
+
+    NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(parentContext.GetEnvironment(), 1);
+
+    auto operation = operationRoot.Spawn(std::move(operationTask)).value();
     parentScheduler.RunUntilIdle();
     REQUIRE_FALSE(operation.IsCompleted());
-    REQUIRE_FALSE(operation.IsCanceled());
-    REQUIRE_FALSE(operation.IsFaulted());
+    REQUIRE_FALSE(operation.IsStopped());
+    REQUIRE_FALSE(operation.HasError());
     childScheduler.RunUntilIdle();
     const bool resumedOnChildExecutor = continued;
     parentScheduler.RunUntilIdle();
-    REQUIRE_FALSE(resumedOnChildExecutor);
+    REQUIRE(resumedOnChildExecutor);
     REQUIRE(continued);
+    REQUIRE(operationRoot.TryJoin());
     REQUIRE(operation.TakeResult().Value() == 42);
 }
 
@@ -64,20 +71,27 @@ TEST_CASE("Operation resumes its observer on the observer executor", "[Async][Af
         useVoid = true;
     }
     auto parent = [&](NGIN::Async::TaskContext&) -> NGIN::Async::Task<int> {
+        NGIN::Async::TaskScope<> scope(parentContext.GetEnvironment(), 1);
         if (useVoid)
         {
-            auto child = NGIN::Async::Spawn(childContext, VoidChild(childContext));
+            auto child = scope.SpawnOn(NGIN::Execution::ExecutorRef::From(childScheduler), VoidChild(childContext)).value();
             (void) co_await child;
+            (void) co_await scope.Join();
         }
         else
         {
-            auto child = NGIN::Async::Spawn(childContext, ValueChild(childContext));
+            auto child = scope.SpawnOn(NGIN::Execution::ExecutorRef::From(childScheduler), ValueChild(childContext)).value();
             (void) co_await child;
+            (void) co_await scope.Join();
         }
         continued = true;
         co_return 42;
     };
-    auto operation = NGIN::Async::Spawn(parentContext, parent(parentContext));
+    auto operationTask = parent(parentContext);
+
+    NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(parentContext.GetEnvironment(), 1);
+
+    auto operation = operationRoot.Spawn(std::move(operationTask)).value();
     parentScheduler.RunUntilIdle();
     REQUIRE_FALSE(operation.IsCompleted());
     childScheduler.RunUntilIdle();
@@ -85,6 +99,7 @@ TEST_CASE("Operation resumes its observer on the observer executor", "[Async][Af
     parentScheduler.RunUntilIdle();
     REQUIRE_FALSE(resumedOnChildExecutor);
     REQUIRE(continued);
+    REQUIRE(operationRoot.TryJoin());
     REQUIRE(operation.TakeResult().Value() == 42);
 }
 
@@ -101,25 +116,33 @@ TEST_CASE("Moving an owned Operation awaiter preserves its child and selected ex
         useVoid = true;
     }
     auto parent = [&](NGIN::Async::TaskContext&) -> NGIN::Async::Task<bool> {
+        NGIN::Async::TaskScope<> scope(parentContext.GetEnvironment(), 1);
         if (useVoid)
         {
-            auto child  = NGIN::Async::Spawn(childContext, VoidChild(childContext));
+            auto child  = scope.SpawnOn(NGIN::Execution::ExecutorRef::From(childScheduler), VoidChild(childContext)).value();
             auto owned  = std::move(child).operator co_await();
             auto moved  = std::move(owned);
             auto result = co_await moved;
+            (void) co_await scope.Join();
             co_return result.Succeeded();
         }
-        auto child  = NGIN::Async::Spawn(childContext, ValueChild(childContext));
+        auto child  = scope.SpawnOn(NGIN::Execution::ExecutorRef::From(childScheduler), ValueChild(childContext)).value();
         auto owned  = std::move(child).operator co_await();
         auto moved  = std::move(owned);
         auto result = co_await moved;
+        (void) co_await scope.Join();
         co_return result.Succeeded() && result.Value() == 42;
     };
-    auto operation = NGIN::Async::Spawn(parentContext, parent(parentContext));
+    auto operationTask = parent(parentContext);
+
+    NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(parentContext.GetEnvironment(), 1);
+
+    auto operation = operationRoot.Spawn(std::move(operationTask)).value();
     parentScheduler.RunUntilIdle();
     REQUIRE_FALSE(operation.IsCompleted());
     childScheduler.RunUntilIdle();
     REQUIRE_FALSE(operation.IsCompleted());
     parentScheduler.RunUntilIdle();
+    REQUIRE(operationRoot.TryJoin());
     REQUIRE(operation.TakeResult().Value());
 }

@@ -1,6 +1,7 @@
 #include <NGIN/Async/Cancellation.hpp>
+#include <NGIN/Async/Race.hpp>
 #include <NGIN/Async/Task.hpp>
-#include <NGIN/Async/WhenAny.hpp>
+#include <NGIN/Async/TaskSupervisor.hpp>
 #include <NGIN/Benchmark.hpp>
 #include <NGIN/Execution/CooperativeScheduler.hpp>
 #include <NGIN/Execution/WorkItem.hpp>
@@ -47,7 +48,7 @@ namespace
         {
             if (context.CheckCancellation())
             {
-                co_await NGIN::Async::Canceled();
+                co_await NGIN::Async::Stopped();
                 co_return 0;
             }
             co_await context.YieldNow();
@@ -80,7 +81,8 @@ int main()
         }
         context.stop();
         context.doNotOptimize(invoked);
-    }, "WorkItem inline construct/invoke x10k");
+    },
+                              "WorkItem inline construct/invoke x10k");
 
     NGIN::Benchmark::Register([](NGIN::BenchmarkContext& context) {
         std::size_t invoked = 0;
@@ -92,7 +94,8 @@ int main()
         }
         context.stop();
         context.doNotOptimize(invoked);
-    }, "WorkItem heap construct/invoke x10k");
+    },
+                              "WorkItem heap construct/invoke x10k");
 
     NGIN::Benchmark::Register([](NGIN::BenchmarkContext& context) {
         NGIN::Async::CancellationSource       source;
@@ -109,13 +112,14 @@ int main()
         }
         context.stop();
         context.doNotOptimize(callbacks);
-    }, "Cancellation register/reset x10k");
+    },
+                              "Cancellation register/reset x10k");
 
     NGIN::Benchmark::Register([](NGIN::BenchmarkContext& context) {
-        constexpr std::size_t CallbackCount = 256;
-        NGIN::Async::CancellationSource source;
+        constexpr std::size_t                              CallbackCount = 256;
+        NGIN::Async::CancellationSource                    source;
         std::vector<NGIN::Async::CancellationRegistration> registrations(CallbackCount);
-        std::size_t callbacks = 0;
+        std::size_t                                        callbacks = 0;
         for (NGIN::Async::CancellationRegistration& registration: registrations)
         {
             const NGIN::Async::CancellationRegistrationResult result =
@@ -127,63 +131,74 @@ int main()
         source.Cancel();
         context.stop();
         context.doNotOptimize(callbacks);
-    }, "Cancellation fire 256 callbacks");
+    },
+                              "Cancellation fire 256 callbacks");
 
     NGIN::Benchmark::Register([](NGIN::BenchmarkContext& context) {
         context.start();
         for (std::size_t index = 0; index < OperationCount; ++index)
         {
-            NGIN::Memory::Shared<int> owner = NGIN::Memory::MakeShared<int>(42);
-            NGIN::Memory::Ticket<int, NGIN::Memory::SystemAllocator> weak = NGIN::Memory::MakeTicket(owner);
-            NGIN::Memory::Shared<int> copy   = owner;
-            NGIN::Memory::Shared<int> locked = weak.Lock();
+            NGIN::Memory::Shared<int>                                owner  = NGIN::Memory::MakeShared<int>(42);
+            NGIN::Memory::Ticket<int, NGIN::Memory::SystemAllocator> weak   = NGIN::Memory::MakeTicket(owner);
+            NGIN::Memory::Shared<int>                                copy   = owner;
+            NGIN::Memory::Shared<int>                                locked = weak.Lock();
             context.doNotOptimize(locked);
         }
         context.stop();
-    }, "Shared create/copy/weak-lock/release x10k");
+    },
+                              "Shared create/copy/weak-lock/release x10k");
 
     NGIN::Benchmark::Register([](NGIN::BenchmarkContext& context) {
         NGIN::Execution::CooperativeScheduler scheduler;
         NGIN::Async::TaskContext              taskContext(scheduler);
         context.start();
-        // CooperativeScheduler services the newest item first. Put the winner
-        // last so an indefinitely yielding loser cannot starve it.
-        NGIN::Async::Operation<NGIN::UIntSize, NGIN::Async::NoError> operation = NGIN::Async::Spawn(
+        // The cooperative loser yields while the admitted winner completes.
+        auto operationTask = NGIN::Async::Race(
                 taskContext,
-                NGIN::Async::WhenAny(
-                        taskContext,
-                        [](NGIN::Async::TaskContext& child) { return CooperativeLoser(child); },
-                        [](NGIN::Async::TaskContext& child) { return ImmediateWinner(child); }));
+                [](NGIN::Async::TaskContext& child) { return CooperativeLoser(child); },
+                [](NGIN::Async::TaskContext& child) { return ImmediateWinner(child); });
+
+        NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(taskContext.GetEnvironment(), 1);
+
+        auto operation = operationRoot.Spawn(std::move(operationTask)).value();
         while (!operation.IsCompleted())
         {
             if (!scheduler.RunOne())
-                throw std::runtime_error("WhenAny became idle before completing");
+                throw std::runtime_error("Race became idle before completing");
         }
-        NGIN::Async::Completion<NGIN::UIntSize, NGIN::Async::NoError> result = operation.TakeResult();
+        if (!operationRoot.TryJoin())
+            throw std::runtime_error("benchmark root did not retire");
+        auto result = operation.TakeResult();
         context.stop();
         context.doNotOptimize(result);
-    }, "WhenAny responsive loser cancel+drain");
+    },
+                              "Race responsive loser cancel+drain");
 
     NGIN::Benchmark::Register([](NGIN::BenchmarkContext& context) {
         NGIN::Execution::CooperativeScheduler scheduler;
         NGIN::Async::TaskContext              taskContext(scheduler);
         context.start();
-        // As above, the last child is intentionally the promptly selected winner.
-        NGIN::Async::Operation<NGIN::UIntSize, NGIN::Async::NoError> operation = NGIN::Async::Spawn(
+        // The loser continues for a fixed number of yields after winner selection.
+        auto operationTask = NGIN::Async::Race(
                 taskContext,
-                NGIN::Async::WhenAny(
-                        taskContext,
-                        [&taskContext](NGIN::Async::TaskContext&) { return SlowLoser(taskContext); },
-                        [](NGIN::Async::TaskContext& child) { return ImmediateWinner(child); }));
+                [&taskContext](NGIN::Async::TaskContext&) { return SlowLoser(taskContext); },
+                [](NGIN::Async::TaskContext& child) { return ImmediateWinner(child); });
+
+        NGIN::Async::TaskSupervisor<typename decltype(operationTask)::ErrorType> operationRoot(taskContext.GetEnvironment(), 1);
+
+        auto operation = operationRoot.Spawn(std::move(operationTask)).value();
         while (!operation.IsCompleted())
         {
             if (!scheduler.RunOne())
-                throw std::runtime_error("WhenAny became idle before completing");
+                throw std::runtime_error("Race became idle before completing");
         }
-        NGIN::Async::Completion<NGIN::UIntSize, NGIN::Async::NoError> result = operation.TakeResult();
+        if (!operationRoot.TryJoin())
+            throw std::runtime_error("benchmark root did not retire");
+        auto result = operation.TakeResult();
         context.stop();
         context.doNotOptimize(result);
-    }, "WhenAny slow loser drain (16 yields)");
+    },
+                              "Race slow loser drain (16 yields)");
 
     const std::vector<NGIN::BenchmarkResult<NGIN::Units::Nanoseconds>> results =
             NGIN::Benchmark::RunAll<NGIN::Units::Nanoseconds>();

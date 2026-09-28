@@ -1,3 +1,4 @@
+#include <NGIN/Async/TaskSupervisor.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
@@ -113,9 +114,10 @@ TEST_CASE("Async file data operations retain their original backend across handl
     state.reset();
     auto                                                      task = SelectData(file, ctx, kind, bytes);
     NGIN::Async::Operation<NGIN::UIntSize, NGIN::IO::IOError> operation;
+    NGIN::Async::TaskSupervisor<NGIN::IO::IOError>            operationRoot(ctx.GetEnvironment(), 1);
     if (pending)
     {
-        operation = NGIN::Async::Spawn(ctx, std::move(task));
+        operation = operationRoot.Spawn(std::move(task)).value();
         REQUIRE(scheduler.RunOne());
     }
     auto moved            = std::move(file);
@@ -124,9 +126,10 @@ TEST_CASE("Async file data operations retain their original backend across handl
     REQUIRE_FALSE(file.IsValid());
     REQUIRE(stats->destroyed == 0);
     if (!pending)
-        operation = NGIN::Async::Spawn(ctx, std::move(task));
+        operation = operationRoot.Spawn(std::move(task)).value();
     scheduler.RunUntilIdle();
     REQUIRE(operation.IsCompleted());
+    REQUIRE(operationRoot.TryJoin());
     auto result = operation.TakeResult();
     REQUIRE(result);
     REQUIRE(result.Value() == 100 + kind + (kind >= 2 ? 11 : 0) + bytes.size());
@@ -146,17 +149,19 @@ TEST_CASE("Async file control operations retain their backend when the handle is
     NGIN::IO::AsyncFileHandle                       file(std::make_shared<State>(stats, 100), &Operations);
     auto                                            task = close ? file.CloseAsync(ctx) : file.FlushAsync(ctx);
     NGIN::Async::Operation<void, NGIN::IO::IOError> operation;
+    NGIN::Async::TaskSupervisor<NGIN::IO::IOError>  operationRoot(ctx.GetEnvironment(), 1);
     if (pending)
     {
-        operation = NGIN::Async::Spawn(ctx, std::move(task));
+        operation = operationRoot.Spawn(std::move(task)).value();
         REQUIRE(scheduler.RunOne());
     }
     file = {};
     REQUIRE(stats->destroyed == 0);
     if (!pending)
-        operation = NGIN::Async::Spawn(ctx, std::move(task));
+        operation = operationRoot.Spawn(std::move(task)).value();
     scheduler.RunUntilIdle();
     REQUIRE(operation.IsCompleted());
+    REQUIRE(operationRoot.TryJoin());
     REQUIRE(operation.TakeResult());
     REQUIRE(stats->calls == 1);
     REQUIRE(stats->closed == close);
@@ -174,15 +179,25 @@ TEST_CASE("Cold async file calls keep their original invalid binding", "[IO][Lif
     auto                                  close = file.CloseAsync(ctx);
     auto                                  stats = std::make_shared<Statistics>();
     file                                        = NGIN::IO::AsyncFileHandle(std::make_shared<State>(stats, 100), &Operations);
-    auto readOperation                          = NGIN::Async::Spawn(ctx, std::move(read));
-    auto closeOperation                         = NGIN::Async::Spawn(ctx, std::move(close));
+    auto readOperationTask                      = std::move(read);
+
+    NGIN::Async::TaskSupervisor<typename decltype(readOperationTask)::ErrorType> readOperationRoot(ctx.GetEnvironment(), 1);
+
+    auto readOperation      = readOperationRoot.Spawn(std::move(readOperationTask)).value();
+    auto closeOperationTask = std::move(close);
+
+    NGIN::Async::TaskSupervisor<typename decltype(closeOperationTask)::ErrorType> closeOperationRoot(ctx.GetEnvironment(), 1);
+
+    auto closeOperation = closeOperationRoot.Spawn(std::move(closeOperationTask)).value();
     scheduler.RunUntilIdle();
-    auto readResult  = readOperation.TakeResult();
+    REQUIRE(readOperationRoot.TryJoin());
+    auto readResult = readOperation.TakeResult();
+    REQUIRE(closeOperationRoot.TryJoin());
     auto closeResult = closeOperation.TakeResult();
-    REQUIRE(readResult.IsDomainError());
-    REQUIRE(closeResult.IsDomainError());
-    REQUIRE(readResult.DomainError().code == NGIN::IO::IOErrorCode::InvalidArgument);
-    REQUIRE(closeResult.DomainError().code == NGIN::IO::IOErrorCode::InvalidArgument);
+    REQUIRE((readResult.HasError() && readResult.Error().IsDomainError()));
+    REQUIRE((closeResult.HasError() && closeResult.Error().IsDomainError()));
+    REQUIRE(readResult.Error().DomainError().code == NGIN::IO::IOErrorCode::InvalidArgument);
+    REQUIRE(closeResult.Error().DomainError().code == NGIN::IO::IOErrorCode::InvalidArgument);
     REQUIRE(stats->calls == 0);
     REQUIRE(file.IsOpen());
 }
