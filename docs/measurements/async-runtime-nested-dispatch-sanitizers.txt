@@ -1,0 +1,21 @@
+Internal ctest changing into directory: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/tests-asan
+Test project /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/tests-asan
+    Start 391: Base.Execution.CooperativeScheduler.CooperativeScheduler executes ready work
+1/6 Test #391: Base.Execution.CooperativeScheduler.CooperativeScheduler executes ready work ................................................   Passed    0.01 sec
+    Start 392: Base.Execution.CooperativeScheduler.CooperativeScheduler executes timers up to a given timepoint
+2/6 Test #392: Base.Execution.CooperativeScheduler.CooperativeScheduler executes timers up to a given timepoint ............................   Passed    0.01 sec
+    Start 393: Base.Execution.CooperativeScheduler.CooperativeScheduler rotates continuously runnable completion timer and ready sources
+3/6 Test #393: Base.Execution.CooperativeScheduler.CooperativeScheduler rotates continuously runnable completion timer and ready sources ...   Passed    0.01 sec
+    Start 394: Base.Execution.CooperativeScheduler.CooperativeScheduler preserves FIFO order across consumed prefix reuse
+4/6 Test #394: Base.Execution.CooperativeScheduler.CooperativeScheduler preserves FIFO order across consumed prefix reuse ..................   Passed    0.01 sec
+    Start 395: Base.Execution.CooperativeScheduler.CooperativeScheduler bounds recursive pumps and leaves deferred work runnable
+5/6 Test #395: Base.Execution.CooperativeScheduler.CooperativeScheduler bounds recursive pumps and leaves deferred work runnable ...........   Passed    0.01 sec
+    Start 396: Base.Execution.CooperativeScheduler.CooperativeScheduler nested dispatch shares the enclosing work allowance
+6/6 Test #396: Base.Execution.CooperativeScheduler.CooperativeScheduler nested dispatch shares the enclosing work allowance ................   Passed    0.01 sec
+
+100% tests passed, 0 tests failed out of 6
+
+Label Time Summary:
+Execution    =   0.06 sec*proc (6 tests)
+
+Total Test time (real) =   0.09 sec

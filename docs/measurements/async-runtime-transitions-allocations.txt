@@ -1,0 +1,109 @@
+promise_bytes=296 execution_state_bytes=240 task_bytes=88 context_bytes=112 environment_bytes=96 frame_bytes=unavailable (promise size excludes compiler frame storage)
+environment-copy-empty samples=1000 mean_us=0.015537 p50_us=0.015 p95_us=0.016 p99_us=0.016 allocations_per_sample=0 bytes_per_sample=0
+ready-value-run samples=1000 mean_us=0.021658 p50_us=0.022 p95_us=0.022 p99_us=0.023 allocations_per_sample=0 bytes_per_sample=0
+ready-void-run samples=1000 mean_us=0.019164 p50_us=0.018 p95_us=0.024 p99_us=0.028 allocations_per_sample=0 bytes_per_sample=0
+ready-error-run samples=1000 mean_us=0.038137 p50_us=0.035 p95_us=0.051 p99_us=0.061 allocations_per_sample=0 bytes_per_sample=0
+ready-domain-run samples=1000 mean_us=0.019742 p50_us=0.018 p95_us=0.027 p99_us=0.03 allocations_per_sample=0 bytes_per_sample=0
+ready-stopped-run samples=1000 mean_us=0.017977 p50_us=0.018 p95_us=0.019 p99_us=0.019 allocations_per_sample=0 bytes_per_sample=0
+construction workers=1 cancellation=0 depth=1 samples=1000 mean_us=0.054808 p50_us=0.054 p95_us=0.057 p99_us=0.064 allocations_per_sample=1 bytes_per_sample=584
+child workers=1 cancellation=0 depth=1 samples=1000 mean_us=27.4924 p50_us=23.901 p95_us=52.392 p99_us=72.546 allocations_per_sample=3 bytes_per_sample=936
+yield workers=1 cancellation=0 depth=1 samples=1000 mean_us=31.4138 p50_us=26.257 p95_us=60.447 p99_us=116.246 allocations_per_sample=3 bytes_per_sample=936
+construction workers=1 cancellation=0 depth=8 samples=1000 mean_us=0.054623 p50_us=0.054 p95_us=0.056 p99_us=0.063 allocations_per_sample=1 bytes_per_sample=584
+child workers=1 cancellation=0 depth=8 samples=1000 mean_us=35.125 p50_us=28.469 p95_us=67.509 p99_us=116.505 allocations_per_sample=10 bytes_per_sample=5024
+yield workers=1 cancellation=0 depth=8 samples=1000 mean_us=37.4793 p50_us=29.679 p95_us=69.638 p99_us=118.11 allocations_per_sample=10 bytes_per_sample=5024
+construction workers=1 cancellation=0 depth=64 samples=1000 mean_us=0.054674 p50_us=0.054 p95_us=0.057 p99_us=0.064 allocations_per_sample=1 bytes_per_sample=584
+child workers=1 cancellation=0 depth=64 samples=1000 mean_us=47.9416 p50_us=42.928 p95_us=74.456 p99_us=136.11 allocations_per_sample=66 bytes_per_sample=37728
+yield workers=1 cancellation=0 depth=64 samples=1000 mean_us=52.4692 p50_us=47.707 p95_us=80.246 p99_us=121.899 allocations_per_sample=66 bytes_per_sample=37728
+context-copy workers=1 cancellation=0 samples=1000 mean_us=0.014883 p50_us=0.015 p95_us=0.015 p99_us=0.016 allocations_per_sample=0 bytes_per_sample=0
+construction workers=1 cancellation=1 depth=1 samples=1000 mean_us=0.053899 p50_us=0.054 p95_us=0.055 p99_us=0.063 allocations_per_sample=1 bytes_per_sample=584
+child workers=1 cancellation=1 depth=1 samples=1000 mean_us=34.1063 p50_us=27.938 p95_us=61.352 p99_us=81.9 allocations_per_sample=3 bytes_per_sample=936
+yield workers=1 cancellation=1 depth=1 samples=1000 mean_us=41.0096 p50_us=38.022 p95_us=69.063 p99_us=90.468 allocations_per_sample=6 bytes_per_sample=1480
+construction workers=1 cancellation=1 depth=8 samples=1000 mean_us=0.054057 p50_us=0.054 p95_us=0.055 p99_us=0.064 allocations_per_sample=1 bytes_per_sample=584
+child workers=1 cancellation=1 depth=8 samples=1000 mean_us=39.8078 p50_us=32.981 p95_us=66.875 p99_us=102.022 allocations_per_sample=10 bytes_per_sample=5024
+yield workers=1 cancellation=1 depth=8 samples=1000 mean_us=39.8862 p50_us=34.387 p95_us=66.013 p99_us=97.846 allocations_per_sample=13 bytes_per_sample=5568
+construction workers=1 cancellation=1 depth=64 samples=1000 mean_us=0.054114 p50_us=0.054 p95_us=0.055 p99_us=0.063 allocations_per_sample=1 bytes_per_sample=584
+child workers=1 cancellation=1 depth=64 samples=1000 mean_us=48.7715 p50_us=44.7 p95_us=74.289 p99_us=101.552 allocations_per_sample=66 bytes_per_sample=37728
+yield workers=1 cancellation=1 depth=64 samples=1000 mean_us=50.0647 p50_us=46.192 p95_us=75.007 p99_us=114.372 allocations_per_sample=69 bytes_per_sample=38272
+context-copy workers=1 cancellation=1 samples=1000 mean_us=0.035696 p50_us=0.036 p95_us=0.037 p99_us=0.038 allocations_per_sample=0 bytes_per_sample=0
+construction workers=1 cancellation=2 depth=1 samples=1000 mean_us=0.100735 p50_us=0.096 p95_us=0.116 p99_us=0.124 allocations_per_sample=1 bytes_per_sample=584
+child workers=1 cancellation=2 depth=1 samples=1000 mean_us=36.1495 p50_us=27.97 p95_us=66.049 p99_us=98.952 allocations_per_sample=3 bytes_per_sample=936
+yield workers=1 cancellation=2 depth=1 samples=1000 mean_us=36.1645 p50_us=28.625 p95_us=65.457 p99_us=92.965 allocations_per_sample=3 bytes_per_sample=936
+construction workers=1 cancellation=2 depth=8 samples=1000 mean_us=0.057023 p50_us=0.054 p95_us=0.056 p99_us=0.064 allocations_per_sample=1 bytes_per_sample=584
+child workers=1 cancellation=2 depth=8 samples=1000 mean_us=33.5018 p50_us=27.815 p95_us=65.239 p99_us=86.54 allocations_per_sample=10 bytes_per_sample=5024
+yield workers=1 cancellation=2 depth=8 samples=1000 mean_us=39.7127 p50_us=33.285 p95_us=66.736 p99_us=122.725 allocations_per_sample=10 bytes_per_sample=5024
+construction workers=1 cancellation=2 depth=64 samples=1000 mean_us=0.102764 p50_us=0.101 p95_us=0.111 p99_us=0.114 allocations_per_sample=1 bytes_per_sample=584
+child workers=1 cancellation=2 depth=64 samples=1000 mean_us=50.9759 p50_us=45.357 p95_us=80.384 p99_us=139.623 allocations_per_sample=66 bytes_per_sample=37728
+yield workers=1 cancellation=2 depth=64 samples=1000 mean_us=79.1367 p50_us=73.991 p95_us=112.541 p99_us=152.88 allocations_per_sample=66 bytes_per_sample=37728
+context-copy workers=1 cancellation=2 samples=1000 mean_us=0.03566 p50_us=0.036 p95_us=0.037 p99_us=0.038 allocations_per_sample=0 bytes_per_sample=0
+construction workers=4 cancellation=0 depth=1 samples=1000 mean_us=0.058228 p50_us=0.058 p95_us=0.06 p99_us=0.069 allocations_per_sample=1 bytes_per_sample=584
+child workers=4 cancellation=0 depth=1 samples=1000 mean_us=44.2715 p50_us=37.271 p95_us=104.818 p99_us=141.411 allocations_per_sample=3 bytes_per_sample=936
+yield workers=4 cancellation=0 depth=1 samples=1000 mean_us=62.2336 p50_us=54.419 p95_us=119.464 p99_us=160.868 allocations_per_sample=3 bytes_per_sample=936
+construction workers=4 cancellation=0 depth=8 samples=1000 mean_us=0.098593 p50_us=0.097 p95_us=0.106 p99_us=0.109 allocations_per_sample=1 bytes_per_sample=584
+child workers=4 cancellation=0 depth=8 samples=1000 mean_us=45.4917 p50_us=38.333 p95_us=100.403 p99_us=140.517 allocations_per_sample=10 bytes_per_sample=5024
+yield workers=4 cancellation=0 depth=8 samples=1000 mean_us=67.5828 p50_us=59.739 p95_us=121.39 p99_us=158.682 allocations_per_sample=10 bytes_per_sample=5024
+construction workers=4 cancellation=0 depth=64 samples=1000 mean_us=0.079435 p50_us=0.071 p95_us=0.088 p99_us=0.161 allocations_per_sample=1 bytes_per_sample=584
+child workers=4 cancellation=0 depth=64 samples=1000 mean_us=62.2265 p50_us=58.895 p95_us=105.702 p99_us=152.736 allocations_per_sample=66 bytes_per_sample=37728
+yield workers=4 cancellation=0 depth=64 samples=1000 mean_us=75.3469 p50_us=66.785 p95_us=140.092 p99_us=182.866 allocations_per_sample=66 bytes_per_sample=37728
+context-copy workers=4 cancellation=0 samples=1000 mean_us=0.022625 p50_us=0.023 p95_us=0.023 p99_us=0.024 allocations_per_sample=0 bytes_per_sample=0
+construction workers=4 cancellation=1 depth=1 samples=1000 mean_us=0.100314 p50_us=0.098 p95_us=0.102 p99_us=0.105 allocations_per_sample=1 bytes_per_sample=584
+child workers=4 cancellation=1 depth=1 samples=1000 mean_us=52.4131 p50_us=45.25 p95_us=116.243 p99_us=149.672 allocations_per_sample=3 bytes_per_sample=936
+yield workers=4 cancellation=1 depth=1 samples=1000 mean_us=68.9143 p50_us=62.937 p95_us=124.618 p99_us=159.632 allocations_per_sample=6 bytes_per_sample=1480
+construction workers=4 cancellation=1 depth=8 samples=1000 mean_us=0.097673 p50_us=0.097 p95_us=0.101 p99_us=0.104 allocations_per_sample=1 bytes_per_sample=584
+child workers=4 cancellation=1 depth=8 samples=1000 mean_us=48.9538 p50_us=40.137 p95_us=114.592 p99_us=150.846 allocations_per_sample=10 bytes_per_sample=5024
+yield workers=4 cancellation=1 depth=8 samples=1000 mean_us=73.9925 p50_us=66.697 p95_us=132.259 p99_us=182.013 allocations_per_sample=13 bytes_per_sample=5568
+construction workers=4 cancellation=1 depth=64 samples=1000 mean_us=0.061316 p50_us=0.055 p95_us=0.076 p99_us=0.113 allocations_per_sample=1 bytes_per_sample=584
+child workers=4 cancellation=1 depth=64 samples=1000 mean_us=55.429 p50_us=48.161 p95_us=101.644 p99_us=156.458 allocations_per_sample=66 bytes_per_sample=37728
+yield workers=4 cancellation=1 depth=64 samples=1000 mean_us=88.1895 p50_us=79.397 p95_us=145.764 p99_us=178.329 allocations_per_sample=69 bytes_per_sample=38272
+context-copy workers=4 cancellation=1 samples=1000 mean_us=0.035581 p50_us=0.036 p95_us=0.036 p99_us=0.038 allocations_per_sample=0 bytes_per_sample=0
+construction workers=4 cancellation=2 depth=1 samples=1000 mean_us=0.097304 p50_us=0.097 p95_us=0.1 p99_us=0.102 allocations_per_sample=1 bytes_per_sample=584
+child workers=4 cancellation=2 depth=1 samples=1000 mean_us=42.568 p50_us=31.25 p95_us=100.161 p99_us=144.636 allocations_per_sample=3 bytes_per_sample=936
+yield workers=4 cancellation=2 depth=1 samples=1000 mean_us=43.3066 p50_us=35.843 p95_us=96.619 p99_us=128.642 allocations_per_sample=3 bytes_per_sample=936
+construction workers=4 cancellation=2 depth=8 samples=1000 mean_us=0.055412 p50_us=0.054 p95_us=0.055 p99_us=0.063 allocations_per_sample=1 bytes_per_sample=584
+child workers=4 cancellation=2 depth=8 samples=1000 mean_us=50.4724 p50_us=43.241 p95_us=111.189 p99_us=124.315 allocations_per_sample=10 bytes_per_sample=5024
+yield workers=4 cancellation=2 depth=8 samples=1000 mean_us=85.7819 p50_us=79.88 p95_us=147.553 p99_us=181.201 allocations_per_sample=10 bytes_per_sample=5024
+construction workers=4 cancellation=2 depth=64 samples=1000 mean_us=0.111509 p50_us=0.102 p95_us=0.108 p99_us=0.111 allocations_per_sample=1 bytes_per_sample=584
+child workers=4 cancellation=2 depth=64 samples=1000 mean_us=61.8308 p50_us=58.369 p95_us=94.137 p99_us=160.938 allocations_per_sample=66 bytes_per_sample=37728
+yield workers=4 cancellation=2 depth=64 samples=1000 mean_us=218.206 p50_us=206.902 p95_us=357.382 p99_us=440.388 allocations_per_sample=66 bytes_per_sample=37728
+context-copy workers=4 cancellation=2 samples=1000 mean_us=0.021706 p50_us=0.021 p95_us=0.022 p99_us=0.023 allocations_per_sample=0 bytes_per_sample=0
+registration cancellation=0 samples=1000 mean_us=0.033405 p50_us=0.032 p95_us=0.033 p99_us=0.033 allocations_per_sample=0 bytes_per_sample=0
+link cancellation=0 samples=1000 mean_us=0.187583 p50_us=0.187 p95_us=0.192 p99_us=0.195 allocations_per_sample=2 bytes_per_sample=152
+registration cancellation=1 samples=1000 mean_us=0.179067 p50_us=0.177 p95_us=0.183 p99_us=0.187 allocations_per_sample=1 bytes_per_sample=176
+link cancellation=1 samples=1000 mean_us=0.340687 p50_us=0.339 p95_us=0.347 p99_us=0.351 allocations_per_sample=3 bytes_per_sample=328
+registration cancellation=2 samples=1000 mean_us=0.198395 p50_us=0.196 p95_us=0.202 p99_us=0.206 allocations_per_sample=1 bytes_per_sample=176
+link cancellation=2 samples=1000 mean_us=0.20251 p50_us=0.2 p95_us=0.206 p99_us=0.211 allocations_per_sample=2 bytes_per_sample=152
+runtime child depth=1 cancellation=0 samples=1000 mean_us=1.31231 p50_us=1.207 p95_us=1.64 p99_us=2.283 allocations_per_sample=4 bytes_per_sample=1048
+runtime yield depth=1 cancellation=0 samples=1000 mean_us=1.74704 p50_us=1.695 p95_us=1.827 p99_us=2.349 allocations_per_sample=5 bytes_per_sample=1160
+runtime child depth=8 cancellation=0 samples=1000 mean_us=1.87057 p50_us=1.798 p95_us=1.975 p99_us=3.525 allocations_per_sample=11 bytes_per_sample=5136
+runtime yield depth=8 cancellation=0 samples=1000 mean_us=2.54481 p50_us=2.307 p95_us=4.333 p99_us=4.664 allocations_per_sample=12 bytes_per_sample=5248
+runtime child depth=64 cancellation=0 samples=1000 mean_us=7.92407 p50_us=7.59 p95_us=9.608 p99_us=14.087 allocations_per_sample=67 bytes_per_sample=37840
+runtime yield depth=64 cancellation=0 samples=1000 mean_us=8.48418 p50_us=8.175 p95_us=10.404 p99_us=13.422 allocations_per_sample=68 bytes_per_sample=37952
+runtime child depth=1 cancellation=1 samples=1000 mean_us=1.21754 p50_us=1.204 p95_us=1.234 p99_us=1.293 allocations_per_sample=4 bytes_per_sample=1048
+runtime yield depth=1 cancellation=1 samples=1000 mean_us=2.22464 p50_us=1.958 p95_us=2.577 p99_us=5.05 allocations_per_sample=8 bytes_per_sample=1704
+runtime child depth=8 cancellation=1 samples=1000 mean_us=1.88715 p50_us=1.848 p95_us=1.95 p99_us=3.206 allocations_per_sample=11 bytes_per_sample=5136
+runtime yield depth=8 cancellation=1 samples=1000 mean_us=2.77557 p50_us=2.605 p95_us=3.034 p99_us=4.794 allocations_per_sample=15 bytes_per_sample=5792
+runtime child depth=64 cancellation=1 samples=1000 mean_us=8.47922 p50_us=8.076 p95_us=10.22 p99_us=13.205 allocations_per_sample=67 bytes_per_sample=37840
+runtime yield depth=64 cancellation=1 samples=1000 mean_us=10.5622 p50_us=8.986 p95_us=11.487 p99_us=76.381 allocations_per_sample=71 bytes_per_sample=38496
+runtime child depth=1 cancellation=2 samples=1000 mean_us=1.25322 p50_us=1.205 p95_us=1.233 p99_us=1.963 allocations_per_sample=4 bytes_per_sample=1048
+runtime yield depth=1 cancellation=2 samples=1000 mean_us=1.3063 p50_us=1.249 p95_us=1.473 p99_us=2.101 allocations_per_sample=4 bytes_per_sample=1048
+runtime child depth=8 cancellation=2 samples=1000 mean_us=2.11125 p50_us=1.865 p95_us=3.137 p99_us=3.781 allocations_per_sample=11 bytes_per_sample=5136
+runtime yield depth=8 cancellation=2 samples=1000 mean_us=3.42904 p50_us=3.337 p95_us=3.576 p99_us=5.499 allocations_per_sample=11 bytes_per_sample=5136
+runtime child depth=64 cancellation=2 samples=1000 mean_us=9.49339 p50_us=8.072 p95_us=12.083 p99_us=37.043 allocations_per_sample=67 bytes_per_sample=37840
+runtime yield depth=64 cancellation=2 samples=1000 mean_us=20.7825 p50_us=19.921 p95_us=23.56 p99_us=39.585 allocations_per_sample=67 bytes_per_sample=37840
+structural depth=1 submissions=1 reservations=1 deliveries=1
+structural depth=8 submissions=1 reservations=1 deliveries=1
+structural depth=64 submissions=1 reservations=1 deliveries=1
+file-synthetic workers=0 layer=0 samples=1000 mean_us=1.44577 p50_us=1.434 p95_us=1.716 p99_us=1.896 allocations_per_sample=4 bytes_per_sample=960
+file-synthetic workers=0 layer=1 samples=1000 mean_us=3.18138 p50_us=2.195 p95_us=4.013 p99_us=15.167 allocations_per_sample=8 bytes_per_sample=3136
+file-synthetic workers=0 layer=2 samples=1000 mean_us=4.50274 p50_us=3.162 p95_us=7.04 p99_us=43.985 allocations_per_sample=9 bytes_per_sample=4120
+file-synthetic workers=1 layer=0 samples=1000 mean_us=36.0473 p50_us=28.239 p95_us=63.702 p99_us=105.315 allocations_per_sample=3 bytes_per_sample=848
+file-synthetic workers=1 layer=1 samples=1000 mean_us=37.0366 p50_us=30.627 p95_us=65.127 p99_us=111.504 allocations_per_sample=6 bytes_per_sample=2912
+file-synthetic workers=1 layer=2 samples=1000 mean_us=35.0528 p50_us=30.054 p95_us=58.965 p99_us=92.862 allocations_per_sample=7 bytes_per_sample=3896
+file-synthetic workers=4 layer=0 samples=1000 mean_us=43.1237 p50_us=28.993 p95_us=112.604 p99_us=138.577 allocations_per_sample=3 bytes_per_sample=848
+file-synthetic workers=4 layer=1 samples=1000 mean_us=66.9755 p50_us=58.913 p95_us=133.03 p99_us=164.014 allocations_per_sample=6 bytes_per_sample=2912
+file-synthetic workers=4 layer=2 samples=1000 mean_us=65.4884 p50_us=57.838 p95_us=127.361 p99_us=165.658 allocations_per_sample=7 bytes_per_sample=3896
+active-cancel depth=1 samples=1000 mean_us=0.977617 p50_us=0.846 p95_us=1.702 p99_us=1.991 allocations_per_sample=7.003 bytes_per_sample=1968.06
+scope-spawn-join depth=1 samples=1000 mean_us=1.51235 p50_us=1.436 p95_us=1.761 p99_us=1.844 allocations_per_sample=12 bytes_per_sample=2616
+active-cancel depth=8 samples=1000 mean_us=2.89072 p50_us=2.927 p95_us=3.289 p99_us=4.814 allocations_per_sample=14.003 bytes_per_sample=6168.06
+scope-spawn-join depth=8 samples=1000 mean_us=2.05018 p50_us=1.899 p95_us=2.001 p99_us=2.738 allocations_per_sample=19 bytes_per_sample=6704
+active-cancel depth=64 samples=1000 mean_us=18.1689 p50_us=14.874 p95_us=25.247 p99_us=83.509 allocations_per_sample=70.003 bytes_per_sample=39768.1
+scope-spawn-join depth=64 samples=1000 mean_us=9.05635 p50_us=8.486 p95_us=10.884 p99_us=18.567 allocations_per_sample=75 bytes_per_sample=39408

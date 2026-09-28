@@ -1,0 +1,190 @@
+cmake --build build/async-runtime-shared --config Release --target install -j4
+[0/2] Re-checking globbed directories...
+-- GLOB mismatch!
+-- GLOB mismatch!
+[1/2] Re-running CMake...
+-- NGIN.Base component closure: Foundation, Execution
+-- NGIN.Base header ownership validated: 343 installed, 334 public contract headers
+-- NGIN.Base targets enabled: NGIN.Base.Foundation.Shared, NGIN.Base.Execution.Shared
+-- Configuring done (0.1s)
+-- Generating done (0.0s)
+-- Build files have been written to: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared
+[0/2] Re-checking globbed directories...
+[1/4] Building CXX object CMakeFiles/NGIN.Base.Execution.Shared.dir/Release/src/NGIN/Async/TaskExecutionState.cpp.o
+[2/4] Linking CXX shared library Release/libNGINBaseExecution.so.0.1.0
+[3/4] Creating library symlink Release/libNGINBaseExecution.so.0 Release/libNGINBaseExecution.so
+[3/4] Install the project...
+-- Install configuration: "Release"
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/BaseVersion.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Benchmark.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Containers.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Containers/ConcurrentHashMap.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Containers/FlatHashMap.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Containers/Vector.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Containers/detail/ConcurrentHashMapDetail.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Defines.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Exceptions.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Exceptions/Exception.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Exceptions/NotSupportedException.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Hashing.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Hashing/CRC.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Hashing/Checksum.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Hashing/FNV.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Math.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Math/AffineMatrix.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Math/BigFloat.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Math/BigInt.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Math/Decomposition.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Math/Geometry.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Math/Interpolation.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Math/Matrix.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Math/Projection.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Math/Quaternion.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Math/Ratio.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Math/Transform.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Math/Vector.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Math/detail/BinaryBigUInt.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Memory.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Memory/AllocationHelpers.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Memory/AllocationStats.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Memory/AllocatorConcept.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Memory/AllocatorRef.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Memory/DebugAllocator.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Memory/EpochReclaimer.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Memory/FallbackAllocator.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Memory/FixedBlockAllocator.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Memory/HalfPointer.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Memory/LinearAllocator.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Memory/ObjectPool.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Memory/PolyAllocatorRef.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Memory/SegregatedPoolAllocator.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Memory/SmartPointers.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Memory/StorageFor.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Memory/SystemAllocator.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Memory/ThreadSafeAllocator.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Memory/TrackingAllocator.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Memory/UnionStorageFor.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Memory/detail/CheckedArithmetic.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Memory/detail/ConstructionGuard.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Meta.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Meta/EnumTraits.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Meta/FunctionTraits.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Meta/ReflectionIdentity.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Meta/SymbolId.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Meta/TypeId.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Meta/TypeName.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Meta/TypeTraits.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/NGIN.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Primitives.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/SIMD.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/SIMD/Config.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/SIMD/Runtime.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/SIMD/Scan.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/SIMD/Tags.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/SIMD/Vec.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/SIMD/detail/BackendTraits.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/SIMD/detail/BackendTraitsAVX512.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Sync.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Sync/AtomicCondition.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Sync/Concepts.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Sync/LockGuard.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Sync/Mutex.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Sync/ReadWriteLock.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Sync/RecursiveMutex.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Sync/Semaphore.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Sync/SharedMutex.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Sync/SpinLock.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Sync/TicketLock.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Text.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Text/BasicString.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Text/String.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Text/Unicode.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Text/Unicode/Convert.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Text/Unicode/Detail.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Text/Unicode/ErrorPolicy.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Text/Unicode/Types.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Text/Unicode/Utf16.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Text/Unicode/Utf32.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Text/Unicode/Utf8.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Text/Unicode/Utf8View.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Text/Unicode/Validation.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Time.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Time/MonotonicClock.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Time/Sleep.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Time/TimePoint.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Timer.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Units.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Utilities.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Utilities/Any.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Utilities/Callable.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Utilities/Error.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Utilities/Expected.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Utilities/LSBFlag.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Utilities/MSBFlag.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Utilities/Optional.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Utilities/StringInterner.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Utilities/SymbolTable.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Utilities/Tags.hpp
+-- Installing: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Async.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Async/AsyncCanceledException.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Async/AsyncConfig.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Async/AsyncDomainErrorException.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Async/AsyncEnvironment.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Async/AsyncExceptionTraits.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Async/AsyncFault.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Async/AsyncFaultException.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Async/AsyncGenerator.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Async/Cancellation.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Async/Completion.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Async/CurrentEnvironment.hpp
+-- Installing: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Async/ExecutorTransitions.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Async/Generator.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Async/NoError.hpp
+-- Installing: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Async/Task.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Async/TaskCanceled.hpp
+-- Installing: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Async/TaskContext.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Async/TaskScope.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Async/WhenAll.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Async/WhenAny.hpp
+-- Installing: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Async/detail/TaskExecutionState.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Execution.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Execution/CompletionReservation.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Execution/Concepts.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Execution/Config.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Execution/CooperativeScheduler.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Execution/ExecutorRef.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Execution/Fiber.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Execution/FiberScheduler.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Execution/InlineScheduler.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Execution/ScheduleResult.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Execution/ThisFiber.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Execution/ThisThread.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Execution/Thread.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Execution/ThreadName.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Execution/ThreadPoolScheduler.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Execution/TimerRegistration.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Execution/WorkItem.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/include/NGIN/Execution/detail/CompletionQueue.hpp
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/lib/libNGINBaseFoundation.so.0.1.0
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/lib/libNGINBaseFoundation.so.0
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/lib/libNGINBaseFoundation.so
+-- Installing: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/lib/libNGINBaseExecution.so.0.1.0
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/lib/libNGINBaseExecution.so.0
+-- Set non-toolchain portion of runtime path of "/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/lib/libNGINBaseExecution.so.0.1.0" to ""
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/lib/libNGINBaseExecution.so
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/lib/cmake/NGINBase/NGINBaseTargets.cmake
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/lib/cmake/NGINBase/NGINBaseTargets-release.cmake
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/lib/cmake/NGINBase/NGINBaseConfig.cmake
+-- Up-to-date: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/install/lib/cmake/NGINBase/NGINBaseConfigVersion.cmake
+cmake --build build/async-runtime-shared/consumer --config Release -j4
+[1/2] Building CXX object CMakeFiles/NGINBasePackageConsumer.dir/Release/main.cc.o
+[2/2] Linking CXX executable Release/NGINBasePackageConsumer
+ctest --test-dir build/async-runtime-shared/consumer -C Release --output-on-failure
+Internal ctest changing into directory: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/consumer
+Test project /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/consumer
+    Start 1: NGINBasePackageConsumer.Run
+1/1 Test #1: NGINBasePackageConsumer.Run ......   Passed    0.00 sec
+
+100% tests passed, 0 tests failed out of 1
+
+Total Test time (real) =   0.00 sec

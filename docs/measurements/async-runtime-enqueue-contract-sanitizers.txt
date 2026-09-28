@@ -1,0 +1,65 @@
+Internal ctest changing into directory: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/tests-asan
+Test project /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/tests-asan
+      Start  59: Base.Async.ContinueWith.Operation co_await exposes child fault as completion
+ 1/27 Test  #59: Base.Async.ContinueWith.Operation co_await exposes child fault as completion .............................................   Passed    0.01 sec
+      Start  60: Base.Async.ContinueWith.Operation co_await exposes child success
+ 2/27 Test  #60: Base.Async.ContinueWith.Operation co_await exposes child success .........................................................   Passed    0.01 sec
+      Start  61: Base.Async.ContinueWith.Operation co_await is woken by cancellation
+ 3/27 Test  #61: Base.Async.ContinueWith.Operation co_await is woken by cancellation ......................................................   Passed    0.01 sec
+      Start 122: Base.Async.TaskContext.Discarded token-free submissions deliver a terminal fault
+ 4/27 Test #122: Base.Async.TaskContext.Discarded token-free submissions deliver a terminal fault .........................................   Passed    0.01 sec
+      Start 123: Base.Async.TaskContext.TaskContext WithLinkedCancellationToken cancels when parent token cancels
+ 5/27 Test #123: Base.Async.TaskContext.TaskContext WithLinkedCancellationToken cancels when parent token cancels .........................   Passed    0.01 sec
+      Start 124: Base.Async.TaskContext.TaskContext WithLinkedCancellationToken supports chaining without losing root linkage
+ 6/27 Test #124: Base.Async.TaskContext.TaskContext WithLinkedCancellationToken supports chaining without losing root linkage .............   Passed    0.01 sec
+      Start 125: Base.Async.TaskContext.TaskContext rejects nonfinite delays without creating timers
+ 7/27 Test #125: Base.Async.TaskContext.TaskContext rejects nonfinite delays without creating timers ......................................   Passed    0.01 sec
+      Start 126: Base.Async.TaskContext.Discarded cancellation-aware timers deliver a terminal fault
+ 8/27 Test #126: Base.Async.TaskContext.Discarded cancellation-aware timers deliver a terminal fault ......................................   Passed    0.01 sec
+      Start 127: Base.Async.TaskContext.Submission handoff joins dispatch before admission returns
+ 9/27 Test #127: Base.Async.TaskContext.Submission handoff joins dispatch before admission returns ........................................   Passed    0.01 sec
+      Start 128: Base.Async.TaskContext.Token-free yields reuse a single admitted continuation without recursive dispatch
+10/27 Test #128: Base.Async.TaskContext.Token-free yields reuse a single admitted continuation without recursive dispatch .................   Passed    0.02 sec
+      Start 129: Base.Async.TaskContext.Discarded concurrent child and producer submissions complete their admitted parents
+11/27 Test #129: Base.Async.TaskContext.Discarded concurrent child and producer submissions complete their admitted parents ...............   Passed    0.01 sec
+      Start 130: Base.Async.TaskContext.TaskContext preserves a different executor's discard delivery
+12/27 Test #130: Base.Async.TaskContext.TaskContext preserves a different executor's discard delivery .....................................   Passed    0.01 sec
+      Start 131: Base.Async.TaskContext.TaskContext rejects token-free suspension without a completion path
+13/27 Test #131: Base.Async.TaskContext.TaskContext rejects token-free suspension without a completion path ...............................   Passed    0.01 sec
+      Start 132: Base.Async.TaskContext.Thread-pool shutdown retires an initial task while its worker is occupied
+14/27 Test #132: Base.Async.TaskContext.Thread-pool shutdown retires an initial task while its worker is occupied .........................   Passed    0.01 sec
+      Start 133: Base.Async.TaskContext.Thread-pool shutdown retires token-free suspended timers
+15/27 Test #133: Base.Async.TaskContext.Thread-pool shutdown retires token-free suspended timers ..........................................   Passed    0.01 sec
+      Start 134: Base.Async.TaskContext.Executor references compare dispatch bindings for continuation reuse
+16/27 Test #134: Base.Async.TaskContext.Executor references compare dispatch bindings for continuation reuse ..............................   Passed    0.01 sec
+      Start 399: Base.Execution.InlineDispatch.Inline dispatch requires executor context and preserves work on refusal
+17/27 Test #399: Base.Execution.InlineDispatch.Inline dispatch requires executor context and preserves work on refusal ....................   Passed    0.01 sec
+      Start 400: Base.Execution.InlineDispatch.Recursive inline dispatch falls back to reserved delivery without losing work
+18/27 Test #400: Base.Execution.InlineDispatch.Recursive inline dispatch falls back to reserved delivery without losing work ..............   Passed    0.01 sec
+      Start 401: Base.Execution.InlineDispatch.InlineScheduler requires explicit invocation and rejects queued submissions
+19/27 Test #401: Base.Execution.InlineDispatch.InlineScheduler requires explicit invocation and rejects queued submissions ................   Passed    0.01 sec
+      Start 422: Base.IO.AsyncDispatch.IO worker cancellation waits for the final access to borrowed memory
+20/27 Test #422: Base.IO.AsyncDispatch.IO worker cancellation waits for the final access to borrowed memory ...............................   Passed    0.01 sec
+      Start 423: Base.IO.AsyncDispatch.IO cancellation before a queued worker starts skips its side effects
+21/27 Test #423: Base.IO.AsyncDispatch.IO cancellation before a queued worker starts skips its side effects ...............................   Passed    0.01 sec
+      Start 424: Base.IO.AsyncDispatch.IO worker success publishes its result on the selected executor
+22/27 Test #424: Base.IO.AsyncDispatch.IO worker success publishes its result on the selected executor ....................................   Passed    0.01 sec
+      Start 425: Base.IO.AsyncDispatch.IO rejects an unsupported completion executor before running worker code
+23/27 Test #425: Base.IO.AsyncDispatch.IO rejects an unsupported completion executor before running worker code ...........................   Passed    0.01 sec
+      Start 426: Base.IO.AsyncDispatch.IO rejects exhausted completion capacity before running worker code
+24/27 Test #426: Base.IO.AsyncDispatch.IO rejects exhausted completion capacity before running worker code ................................   Passed    0.01 sec
+      Start 427: Base.IO.AsyncDispatch.File workers start lazily and reject jobs beyond their budget
+25/27 Test #427: Base.IO.AsyncDispatch.File workers start lazily and reject jobs beyond their budget ......................................   Passed    0.01 sec
+      Start 428: Base.IO.AsyncDispatch.Runtime shutdown waits for a worker then transfers an external completion
+26/27 Test #428: Base.IO.AsyncDispatch.Runtime shutdown waits for a worker then transfers an external completion ..........................   Passed    0.01 sec
+      Start 429: Base.IO.AsyncDispatch.File completion uses eligible inline delivery and its reserved fallback when budget is exhausted
+27/27 Test #429: Base.IO.AsyncDispatch.File completion uses eligible inline delivery and its reserved fallback when budget is exhausted ...   Passed    0.01 sec
+
+100% tests passed, 0 tests failed out of 27
+
+Label Time Summary:
+Async        =   0.18 sec*proc (16 tests)
+Execution    =   0.03 sec*proc (3 tests)
+IO           =   0.10 sec*proc (8 tests)
+
+Total Test time (real) =   0.34 sec

@@ -1,0 +1,11 @@
+Internal ctest changing into directory: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/tests
+Test project /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/tests
+    Start 913: Base.Package.Execution.InstalledConsumer
+1/1 Test #913: Base.Package.Execution.InstalledConsumer ...   Passed   15.44 sec
+
+100% tests passed, 0 tests failed out of 1
+
+Label Time Summary:
+Base.Package    =  15.44 sec*proc (1 test)
+
+Total Test time (real) =  15.49 sec

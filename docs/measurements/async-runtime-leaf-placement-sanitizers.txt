@@ -1,0 +1,38 @@
+Internal ctest changing into directory: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/tests-asan
+Test project /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/tests-asan
+      Start 426: Base.IO.ExecutorPlacement.File leaves transfer both pending and early outcomes to their context executor
+ 1/14 Test #426: Base.IO.ExecutorPlacement.File leaves transfer both pending and early outcomes to their context executor .......   Passed    0.02 sec
+      Start 628: Base.Net.ExecutorPlacement.Network leaves transfer early and pending outcomes to their context executor
+ 2/14 Test #628: Base.Net.ExecutorPlacement.Network leaves transfer early and pending outcomes to their context executor ........   Passed    0.01 sec
+      Start 664: Base.Net.SocketOperation.Net socket tasks retain their resource across cold and pending moves
+ 3/14 Test #664: Base.Net.SocketOperation.Net socket tasks retain their resource across cold and pending moves ..................   Passed    0.01 sec
+      Start 665: Base.Net.SocketOperation.Net destroying a pending socket cancels without retaining its wrapper
+ 4/14 Test #665: Base.Net.SocketOperation.Net destroying a pending socket cancels without retaining its wrapper .................   Passed    0.01 sec
+      Start 666: Base.Net.SocketOperation.Net a ready datagram cannot bypass same-direction admission
+ 5/14 Test #666: Base.Net.SocketOperation.Net a ready datagram cannot bypass same-direction admission ...........................   Passed    0.01 sec
+      Start 667: Base.Net.SocketOperation.Net operation and registration saturation reject before sending and recover
+ 6/14 Test #667: Base.Net.SocketOperation.Net operation and registration saturation reject before sending and recover ...........   Passed    0.01 sec
+      Start 668: Base.Net.SocketOperation.Net fast sends require reserved completion storage
+ 7/14 Test #668: Base.Net.SocketOperation.Net fast sends require reserved completion storage ....................................   Passed    0.01 sec
+      Start 669: Base.Net.SocketOperation.Net async admission rejects blocking sockets
+ 8/14 Test #669: Base.Net.SocketOperation.Net async admission rejects blocking sockets ..........................................   Passed    0.01 sec
+      Start 670: Base.Net.SocketOperation.Net moved listeners and clients complete on the selected external executor
+ 9/14 Test #670: Base.Net.SocketOperation.Net moved listeners and clients complete on the selected external executor ............   Passed    0.01 sec
+      Start 671: Base.Net.SocketOperation.Net pending connects reserve both directions and cancellation closes the connection
+10/14 Test #671: Base.Net.SocketOperation.Net pending connects reserve both directions and cancellation closes the connection ...   Passed    0.01 sec
+      Start 672: Base.Net.SocketOperation.Net close and ready cancellation races retire before descriptor reuse
+11/14 Test #672: Base.Net.SocketOperation.Net close and ready cancellation races retire before descriptor reuse .................   Passed    0.04 sec
+      Start 673: Base.Net.SocketOperation.Net a cold task cannot switch to a reopened socket
+12/14 Test #673: Base.Net.SocketOperation.Net a cold task cannot switch to a reopened socket ....................................   Passed    0.01 sec
+      Start 674: Base.Net.SocketOperation.Net a pending TCP read permits a write on the same socket
+13/14 Test #674: Base.Net.SocketOperation.Net a pending TCP read permits a write on the same socket .............................   Passed    0.01 sec
+      Start 675: Base.Net.SocketOperation.Net pending socket completion transfers the task chain to its leaf executor
+14/14 Test #675: Base.Net.SocketOperation.Net pending socket completion transfers the task chain to its leaf executor ...........   Passed    0.01 sec
+
+100% tests passed, 0 tests failed out of 14
+
+Label Time Summary:
+IO     =   0.02 sec*proc (1 test)
+Net    =   0.18 sec*proc (13 tests)
+
+Total Test time (real) =   0.22 sec

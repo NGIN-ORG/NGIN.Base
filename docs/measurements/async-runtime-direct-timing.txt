@@ -1,0 +1,103 @@
+promise_bytes=400 task_bytes=64 context_bytes=72 frame_bytes=unavailable (promise size excludes compiler frame storage)
+construction workers=1 cancellation=0 depth=1 samples=1000 mean_us=0.031412 p50_us=0.031 p95_us=0.032 p99_us=0.041
+child workers=1 cancellation=0 depth=1 samples=1000 mean_us=25.4419 p50_us=23.631 p95_us=33.532 p99_us=58.78
+yield workers=1 cancellation=0 depth=1 samples=1000 mean_us=27.2297 p50_us=24.224 p95_us=38.658 p99_us=72.228
+construction workers=1 cancellation=0 depth=8 samples=1000 mean_us=0.030948 p50_us=0.031 p95_us=0.032 p99_us=0.041
+child workers=1 cancellation=0 depth=8 samples=1000 mean_us=29.3336 p50_us=26.8 p95_us=47.736 p99_us=69.661
+yield workers=1 cancellation=0 depth=8 samples=1000 mean_us=29.453 p50_us=27.156 p95_us=46.104 p99_us=70.654
+construction workers=1 cancellation=0 depth=64 samples=1000 mean_us=0.03108 p50_us=0.031 p95_us=0.032 p99_us=0.039
+child workers=1 cancellation=0 depth=64 samples=1000 mean_us=36.5159 p50_us=32.862 p95_us=62.213 p99_us=81.236
+yield workers=1 cancellation=0 depth=64 samples=1000 mean_us=37.6833 p50_us=33.763 p95_us=61.783 p99_us=90.351
+context-copy workers=1 cancellation=0 samples=1000 mean_us=0.014611 p50_us=0.015 p95_us=0.015 p99_us=0.016
+construction workers=1 cancellation=1 depth=1 samples=1000 mean_us=0.031095 p50_us=0.031 p95_us=0.032 p99_us=0.038
+child workers=1 cancellation=1 depth=1 samples=1000 mean_us=27.4127 p50_us=25.525 p95_us=41.907 p99_us=61.513
+yield workers=1 cancellation=1 depth=1 samples=1000 mean_us=28.1586 p50_us=25.564 p95_us=42.275 p99_us=65.792
+construction workers=1 cancellation=1 depth=8 samples=1000 mean_us=0.031107 p50_us=0.031 p95_us=0.032 p99_us=0.039
+child workers=1 cancellation=1 depth=8 samples=1000 mean_us=26.6724 p50_us=24.514 p95_us=35.1 p99_us=64.611
+yield workers=1 cancellation=1 depth=8 samples=1000 mean_us=29.8528 p50_us=25.29 p95_us=55.24 p99_us=95.665
+construction workers=1 cancellation=1 depth=64 samples=1000 mean_us=0.031081 p50_us=0.031 p95_us=0.032 p99_us=0.038
+child workers=1 cancellation=1 depth=64 samples=1000 mean_us=35.2745 p50_us=30.56 p95_us=57.055 p99_us=100.44
+yield workers=1 cancellation=1 depth=64 samples=1000 mean_us=37.0481 p50_us=32.252 p95_us=63.895 p99_us=97.524
+context-copy workers=1 cancellation=1 samples=1000 mean_us=0.022206 p50_us=0.022 p95_us=0.026 p99_us=0.03
+construction workers=1 cancellation=2 depth=1 samples=1000 mean_us=0.031132 p50_us=0.031 p95_us=0.032 p99_us=0.038
+child workers=1 cancellation=2 depth=1 samples=1000 mean_us=28.3431 p50_us=25.117 p95_us=48.757 p99_us=78.632
+yield workers=1 cancellation=2 depth=1 samples=1000 mean_us=30.1683 p50_us=24.782 p95_us=60.732 p99_us=94.326
+construction workers=1 cancellation=2 depth=8 samples=1000 mean_us=0.031242 p50_us=0.031 p95_us=0.032 p99_us=0.04
+child workers=1 cancellation=2 depth=8 samples=1000 mean_us=28.5486 p50_us=24.865 p95_us=45.816 p99_us=79.418
+yield workers=1 cancellation=2 depth=8 samples=1000 mean_us=31.2558 p50_us=28.277 p95_us=44.14 p99_us=75.766
+construction workers=1 cancellation=2 depth=64 samples=1000 mean_us=0.031098 p50_us=0.031 p95_us=0.032 p99_us=0.036
+child workers=1 cancellation=2 depth=64 samples=1000 mean_us=35.5628 p50_us=30.557 p95_us=62.666 p99_us=92.815
+yield workers=1 cancellation=2 depth=64 samples=1000 mean_us=64.4284 p50_us=57.512 p95_us=102.726 p99_us=128.245
+context-copy workers=1 cancellation=2 samples=1000 mean_us=0.021599 p50_us=0.022 p95_us=0.022 p99_us=0.023
+construction workers=4 cancellation=0 depth=1 samples=1000 mean_us=0.034943 p50_us=0.035 p95_us=0.036 p99_us=0.042
+child workers=4 cancellation=0 depth=1 samples=1000 mean_us=30.5485 p50_us=25.564 p95_us=58.722 p99_us=101.413
+yield workers=4 cancellation=0 depth=1 samples=1000 mean_us=37.8193 p50_us=33.879 p95_us=70.126 p99_us=120.824
+construction workers=4 cancellation=0 depth=8 samples=1000 mean_us=0.030652 p50_us=0.03 p95_us=0.031 p99_us=0.04
+child workers=4 cancellation=0 depth=8 samples=1000 mean_us=29.8034 p50_us=26.025 p95_us=43.67 p99_us=101.374
+yield workers=4 cancellation=0 depth=8 samples=1000 mean_us=37.7772 p50_us=34.46 p95_us=57.693 p99_us=105.293
+construction workers=4 cancellation=0 depth=64 samples=1000 mean_us=0.031244 p50_us=0.031 p95_us=0.032 p99_us=0.041
+child workers=4 cancellation=0 depth=64 samples=1000 mean_us=34.0908 p50_us=31.212 p95_us=49.169 p99_us=79.983
+yield workers=4 cancellation=0 depth=64 samples=1000 mean_us=46.0714 p50_us=40.509 p95_us=77.652 p99_us=130.251
+context-copy workers=4 cancellation=0 samples=1000 mean_us=0.01465 p50_us=0.015 p95_us=0.015 p99_us=0.016
+construction workers=4 cancellation=1 depth=1 samples=1000 mean_us=0.031021 p50_us=0.031 p95_us=0.032 p99_us=0.038
+child workers=4 cancellation=1 depth=1 samples=1000 mean_us=29.1332 p50_us=24.944 p95_us=47.674 p99_us=93.97
+yield workers=4 cancellation=1 depth=1 samples=1000 mean_us=45.378 p50_us=37.281 p95_us=95.771 p99_us=143.145
+construction workers=4 cancellation=1 depth=8 samples=1000 mean_us=0.03115 p50_us=0.031 p95_us=0.032 p99_us=0.037
+child workers=4 cancellation=1 depth=8 samples=1000 mean_us=29.6061 p50_us=26.353 p95_us=46.798 p99_us=84.696
+yield workers=4 cancellation=1 depth=8 samples=1000 mean_us=47.5742 p50_us=40.502 p95_us=95.345 p99_us=134.788
+construction workers=4 cancellation=1 depth=64 samples=1000 mean_us=0.031227 p50_us=0.031 p95_us=0.032 p99_us=0.037
+child workers=4 cancellation=1 depth=64 samples=1000 mean_us=36.4447 p50_us=32.608 p95_us=59.468 p99_us=106.425
+yield workers=4 cancellation=1 depth=64 samples=1000 mean_us=61.617 p50_us=55.919 p95_us=107.835 p99_us=154.4
+context-copy workers=4 cancellation=1 samples=1000 mean_us=0.021597 p50_us=0.022 p95_us=0.022 p99_us=0.023
+construction workers=4 cancellation=2 depth=1 samples=1000 mean_us=0.031169 p50_us=0.031 p95_us=0.032 p99_us=0.037
+child workers=4 cancellation=2 depth=1 samples=1000 mean_us=30.2428 p50_us=25.854 p95_us=53.52 p99_us=102.745
+yield workers=4 cancellation=2 depth=1 samples=1000 mean_us=29.0984 p50_us=25.312 p95_us=45.227 p99_us=114.391
+construction workers=4 cancellation=2 depth=8 samples=1000 mean_us=0.031183 p50_us=0.031 p95_us=0.032 p99_us=0.037
+child workers=4 cancellation=2 depth=8 samples=1000 mean_us=29.6745 p50_us=26.155 p95_us=45.799 p99_us=100.622
+yield workers=4 cancellation=2 depth=8 samples=1000 mean_us=61.7617 p50_us=56.45 p95_us=100.497 p99_us=133.568
+construction workers=4 cancellation=2 depth=64 samples=1000 mean_us=0.03121 p50_us=0.031 p95_us=0.032 p99_us=0.037
+child workers=4 cancellation=2 depth=64 samples=1000 mean_us=34.2975 p50_us=31.574 p95_us=49.422 p99_us=76.921
+yield workers=4 cancellation=2 depth=64 samples=1000 mean_us=233.927 p50_us=226.946 p95_us=338.11 p99_us=415.551
+context-copy workers=4 cancellation=2 samples=1000 mean_us=0.021542 p50_us=0.022 p95_us=0.022 p99_us=0.022
+registration cancellation=0 samples=1000 mean_us=0.022721 p50_us=0.021 p95_us=0.022 p99_us=0.034
+link cancellation=0 samples=1000 mean_us=0.070136 p50_us=0.07 p95_us=0.072 p99_us=0.083
+registration cancellation=1 samples=1000 mean_us=0.089381 p50_us=0.089 p95_us=0.091 p99_us=0.093
+link cancellation=1 samples=1000 mean_us=0.149055 p50_us=0.142 p95_us=0.19 p99_us=0.216
+registration cancellation=2 samples=1000 mean_us=0.102732 p50_us=0.102 p95_us=0.104 p99_us=0.106
+link cancellation=2 samples=1000 mean_us=0.08246 p50_us=0.078 p95_us=0.082 p99_us=0.091
+runtime child depth=1 cancellation=0 samples=1000 mean_us=1.14308 p50_us=1.08 p95_us=1.147 p99_us=2.876
+runtime yield depth=1 cancellation=0 samples=1000 mean_us=1.60633 p50_us=1.54 p95_us=1.702 p99_us=3.53
+runtime child depth=8 cancellation=0 samples=1000 mean_us=1.74064 p50_us=1.59 p95_us=3.012 p99_us=3.882
+runtime yield depth=8 cancellation=0 samples=1000 mean_us=2.17658 p50_us=2.047 p95_us=2.78 p99_us=4.197
+runtime child depth=64 cancellation=0 samples=1000 mean_us=7.28555 p50_us=6.782 p95_us=9.199 p99_us=14.642
+runtime yield depth=64 cancellation=0 samples=1000 mean_us=7.83478 p50_us=7.24 p95_us=9.954 p99_us=16.355
+runtime child depth=1 cancellation=1 samples=1000 mean_us=1.23069 p50_us=1.075 p95_us=1.304 p99_us=2.954
+runtime yield depth=1 cancellation=1 samples=1000 mean_us=1.85857 p50_us=1.736 p95_us=1.985 p99_us=4.062
+runtime child depth=8 cancellation=1 samples=1000 mean_us=1.65043 p50_us=1.581 p95_us=1.797 p99_us=3.492
+runtime yield depth=8 cancellation=1 samples=1000 mean_us=2.40423 p50_us=2.241 p95_us=3.17 p99_us=4.505
+runtime child depth=64 cancellation=1 samples=1000 mean_us=7.21087 p50_us=6.773 p95_us=9.027 p99_us=11.719
+runtime yield depth=64 cancellation=1 samples=1000 mean_us=7.90763 p50_us=7.476 p95_us=9.982 p99_us=12.494
+runtime child depth=1 cancellation=2 samples=1000 mean_us=1.10683 p50_us=1.072 p95_us=1.159 p99_us=2.56
+runtime yield depth=1 cancellation=2 samples=1000 mean_us=1.16335 p50_us=1.099 p95_us=1.225 p99_us=2.678
+runtime child depth=8 cancellation=2 samples=1000 mean_us=1.63875 p50_us=1.576 p95_us=1.725 p99_us=3.362
+runtime yield depth=8 cancellation=2 samples=1000 mean_us=4.06765 p50_us=3.667 p95_us=5.625 p99_us=12.439
+runtime child depth=64 cancellation=2 samples=1000 mean_us=7.42662 p50_us=6.792 p95_us=9.451 p99_us=15.372
+runtime yield depth=64 cancellation=2 samples=1000 mean_us=26.5145 p50_us=24.249 p95_us=33.38 p99_us=48.905
+structural depth=1 submissions=1 reservations=1 deliveries=1
+structural depth=8 submissions=1 reservations=1 deliveries=1
+structural depth=64 submissions=1 reservations=1 deliveries=1
+file-synthetic workers=0 layer=0 samples=1000 mean_us=1.14417 p50_us=1.099 p95_us=1.206 p99_us=2.881
+file-synthetic workers=0 layer=1 samples=1000 mean_us=2.10994 p50_us=1.926 p95_us=2.279 p99_us=4.714
+file-synthetic workers=0 layer=2 samples=1000 mean_us=2.09547 p50_us=2.009 p95_us=2.065 p99_us=4.048
+file-synthetic workers=1 layer=0 samples=1000 mean_us=27.9206 p50_us=25.374 p95_us=41.474 p99_us=73.97
+file-synthetic workers=1 layer=1 samples=1000 mean_us=29.9112 p50_us=27.232 p95_us=47.141 p99_us=76.187
+file-synthetic workers=1 layer=2 samples=1000 mean_us=30.1733 p50_us=27.232 p95_us=46.774 p99_us=91.943
+file-synthetic workers=4 layer=0 samples=1000 mean_us=31.7289 p50_us=26.652 p95_us=57.51 p99_us=121.987
+file-synthetic workers=4 layer=1 samples=1000 mean_us=59.1298 p50_us=52.76 p95_us=135.027 p99_us=174.82
+file-synthetic workers=4 layer=2 samples=1000 mean_us=66.6994 p50_us=58.537 p95_us=138.328 p99_us=191.396
+active-cancel depth=1 samples=1000 mean_us=0.784046 p50_us=0.642 p95_us=1.548 p99_us=1.928
+scope-spawn-join depth=1 samples=1000 mean_us=0.974319 p50_us=0.917 p95_us=1.041 p99_us=2.739
+active-cancel depth=8 samples=1000 mean_us=2.70447 p50_us=2.523 p95_us=3.989 p99_us=4.626
+scope-spawn-join depth=8 samples=1000 mean_us=1.77482 p50_us=1.436 p95_us=2.336 p99_us=5.026
+active-cancel depth=64 samples=1000 mean_us=20.7823 p50_us=19.152 p95_us=26.893 p99_us=48.77
+scope-spawn-join depth=64 samples=1000 mean_us=7.35302 p50_us=6.918 p95_us=8.999 p99_us=15.507

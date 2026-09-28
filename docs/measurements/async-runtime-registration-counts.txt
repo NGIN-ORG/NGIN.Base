@@ -1,0 +1,103 @@
+promise_bytes=384 task_bytes=64 context_bytes=72 frame_bytes=unavailable (promise size excludes compiler frame storage)
+construction workers=1 cancellation=0 depth=1 samples=1000 mean_us=0.052902 p50_us=0.053 p95_us=0.054 p99_us=0.061 allocations_per_sample=1 bytes_per_sample=624 registration_nodes_per_sample=0
+child workers=1 cancellation=0 depth=1 samples=1000 mean_us=29.2638 p50_us=26.135 p95_us=43.397 p99_us=73.796 allocations_per_sample=2 bytes_per_sample=736 registration_nodes_per_sample=0
+yield workers=1 cancellation=0 depth=1 samples=1000 mean_us=30.243 p50_us=26.33 p95_us=51.121 p99_us=69.137 allocations_per_sample=2 bytes_per_sample=736 registration_nodes_per_sample=0
+construction workers=1 cancellation=0 depth=8 samples=1000 mean_us=0.053493 p50_us=0.053 p95_us=0.054 p99_us=0.064 allocations_per_sample=1 bytes_per_sample=624 registration_nodes_per_sample=0
+child workers=1 cancellation=0 depth=8 samples=1000 mean_us=35.3529 p50_us=31.245 p95_us=54.738 p99_us=88.606 allocations_per_sample=16 bytes_per_sample=5888 registration_nodes_per_sample=0
+yield workers=1 cancellation=0 depth=8 samples=1000 mean_us=36.0879 p50_us=31.389 p95_us=59.73 p99_us=115.068 allocations_per_sample=16 bytes_per_sample=5888 registration_nodes_per_sample=0
+construction workers=1 cancellation=0 depth=64 samples=1000 mean_us=0.052896 p50_us=0.053 p95_us=0.054 p99_us=0.063 allocations_per_sample=1 bytes_per_sample=624 registration_nodes_per_sample=0
+child workers=1 cancellation=0 depth=64 samples=1000 mean_us=72.8721 p50_us=66.503 p95_us=105.629 p99_us=147.159 allocations_per_sample=128 bytes_per_sample=47104 registration_nodes_per_sample=0
+yield workers=1 cancellation=0 depth=64 samples=1000 mean_us=73.138 p50_us=67.174 p95_us=102.399 p99_us=150.338 allocations_per_sample=128 bytes_per_sample=47104 registration_nodes_per_sample=0
+context-copy workers=1 cancellation=0 samples=1000 mean_us=0.014884 p50_us=0.015 p95_us=0.016 p99_us=0.016 allocations_per_sample=0 bytes_per_sample=0 registration_nodes_per_sample=0
+construction workers=1 cancellation=1 depth=1 samples=1000 mean_us=0.052979 p50_us=0.053 p95_us=0.054 p99_us=0.063 allocations_per_sample=1 bytes_per_sample=624 registration_nodes_per_sample=0
+child workers=1 cancellation=1 depth=1 samples=1000 mean_us=28.8277 p50_us=25.765 p95_us=41.482 p99_us=75.718 allocations_per_sample=2 bytes_per_sample=736 registration_nodes_per_sample=0
+yield workers=1 cancellation=1 depth=1 samples=1000 mean_us=29.9861 p50_us=26.834 p95_us=45.739 p99_us=90.789 allocations_per_sample=5 bytes_per_sample=1272 registration_nodes_per_sample=1
+construction workers=1 cancellation=1 depth=8 samples=1000 mean_us=0.053136 p50_us=0.053 p95_us=0.054 p99_us=0.065 allocations_per_sample=1 bytes_per_sample=624 registration_nodes_per_sample=0
+child workers=1 cancellation=1 depth=8 samples=1000 mean_us=34.5314 p50_us=31.083 p95_us=51.375 p99_us=77.131 allocations_per_sample=16 bytes_per_sample=5888 registration_nodes_per_sample=0
+yield workers=1 cancellation=1 depth=8 samples=1000 mean_us=36.9854 p50_us=32.202 p95_us=59.844 p99_us=102.324 allocations_per_sample=19 bytes_per_sample=6424 registration_nodes_per_sample=1
+construction workers=1 cancellation=1 depth=64 samples=1000 mean_us=0.052954 p50_us=0.053 p95_us=0.054 p99_us=0.063 allocations_per_sample=1 bytes_per_sample=624 registration_nodes_per_sample=0
+child workers=1 cancellation=1 depth=64 samples=1000 mean_us=73.2942 p50_us=66.941 p95_us=109.149 p99_us=149.728 allocations_per_sample=128 bytes_per_sample=47104 registration_nodes_per_sample=0
+yield workers=1 cancellation=1 depth=64 samples=1000 mean_us=74.4861 p50_us=67.809 p95_us=108.34 p99_us=177.062 allocations_per_sample=131 bytes_per_sample=47640 registration_nodes_per_sample=1
+context-copy workers=1 cancellation=1 samples=1000 mean_us=0.021472 p50_us=0.021 p95_us=0.022 p99_us=0.022 allocations_per_sample=0 bytes_per_sample=0 registration_nodes_per_sample=0
+construction workers=1 cancellation=2 depth=1 samples=1000 mean_us=0.052906 p50_us=0.053 p95_us=0.054 p99_us=0.065 allocations_per_sample=1 bytes_per_sample=624 registration_nodes_per_sample=0
+child workers=1 cancellation=2 depth=1 samples=1000 mean_us=29.7897 p50_us=25.905 p95_us=48.24 p99_us=95.588 allocations_per_sample=2 bytes_per_sample=736 registration_nodes_per_sample=0
+yield workers=1 cancellation=2 depth=1 samples=1000 mean_us=29.1125 p50_us=25.907 p95_us=44.623 p99_us=89.04 allocations_per_sample=2 bytes_per_sample=736 registration_nodes_per_sample=0
+construction workers=1 cancellation=2 depth=8 samples=1000 mean_us=0.05322 p50_us=0.053 p95_us=0.054 p99_us=0.064 allocations_per_sample=1 bytes_per_sample=624 registration_nodes_per_sample=0
+child workers=1 cancellation=2 depth=8 samples=1000 mean_us=35.2321 p50_us=31.226 p95_us=53.545 p99_us=99.792 allocations_per_sample=16 bytes_per_sample=5888 registration_nodes_per_sample=0
+yield workers=1 cancellation=2 depth=8 samples=1000 mean_us=36.2953 p50_us=32.245 p95_us=55.039 p99_us=94.804 allocations_per_sample=16 bytes_per_sample=5888 registration_nodes_per_sample=0
+construction workers=1 cancellation=2 depth=64 samples=1000 mean_us=0.053059 p50_us=0.053 p95_us=0.054 p99_us=0.063 allocations_per_sample=1 bytes_per_sample=624 registration_nodes_per_sample=0
+child workers=1 cancellation=2 depth=64 samples=1000 mean_us=76.1699 p50_us=67.991 p95_us=118.348 p99_us=169.949 allocations_per_sample=128 bytes_per_sample=47104 registration_nodes_per_sample=0
+yield workers=1 cancellation=2 depth=64 samples=1000 mean_us=79.4383 p50_us=72.916 p95_us=116.942 p99_us=166.976 allocations_per_sample=128 bytes_per_sample=47104 registration_nodes_per_sample=0
+context-copy workers=1 cancellation=2 samples=1000 mean_us=0.021376 p50_us=0.021 p95_us=0.022 p99_us=0.022 allocations_per_sample=0 bytes_per_sample=0 registration_nodes_per_sample=0
+construction workers=4 cancellation=0 depth=1 samples=1000 mean_us=0.053256 p50_us=0.053 p95_us=0.054 p99_us=0.056 allocations_per_sample=1 bytes_per_sample=624 registration_nodes_per_sample=0
+child workers=4 cancellation=0 depth=1 samples=1000 mean_us=31.0821 p50_us=27.854 p95_us=49.002 p99_us=77.179 allocations_per_sample=2 bytes_per_sample=736 registration_nodes_per_sample=0
+yield workers=4 cancellation=0 depth=1 samples=1000 mean_us=40.3158 p50_us=35.784 p95_us=67.221 p99_us=118.652 allocations_per_sample=2 bytes_per_sample=736 registration_nodes_per_sample=0
+construction workers=4 cancellation=0 depth=8 samples=1000 mean_us=0.053944 p50_us=0.054 p95_us=0.054 p99_us=0.063 allocations_per_sample=1 bytes_per_sample=624 registration_nodes_per_sample=0
+child workers=4 cancellation=0 depth=8 samples=1000 mean_us=85.0946 p50_us=75.315 p95_us=150.612 p99_us=213.872 allocations_per_sample=16 bytes_per_sample=5888 registration_nodes_per_sample=0
+yield workers=4 cancellation=0 depth=8 samples=1000 mean_us=88.5132 p50_us=80.362 p95_us=157.861 p99_us=196.986 allocations_per_sample=16 bytes_per_sample=5888 registration_nodes_per_sample=0
+construction workers=4 cancellation=0 depth=64 samples=1000 mean_us=0.053581 p50_us=0.053 p95_us=0.054 p99_us=0.065 allocations_per_sample=1 bytes_per_sample=624 registration_nodes_per_sample=0
+child workers=4 cancellation=0 depth=64 samples=1000 mean_us=338.351 p50_us=332.573 p95_us=481.257 p99_us=543.905 allocations_per_sample=128 bytes_per_sample=47104 registration_nodes_per_sample=0
+yield workers=4 cancellation=0 depth=64 samples=1000 mean_us=335.722 p50_us=331.304 p95_us=483.221 p99_us=566.92 allocations_per_sample=128 bytes_per_sample=47104 registration_nodes_per_sample=0
+context-copy workers=4 cancellation=0 samples=1000 mean_us=0.014904 p50_us=0.015 p95_us=0.016 p99_us=0.016 allocations_per_sample=0 bytes_per_sample=0 registration_nodes_per_sample=0
+construction workers=4 cancellation=1 depth=1 samples=1000 mean_us=0.052907 p50_us=0.053 p95_us=0.054 p99_us=0.063 allocations_per_sample=1 bytes_per_sample=624 registration_nodes_per_sample=0
+child workers=4 cancellation=1 depth=1 samples=1000 mean_us=30.4822 p50_us=26.981 p95_us=48.732 p99_us=76.748 allocations_per_sample=2 bytes_per_sample=736 registration_nodes_per_sample=0
+yield workers=4 cancellation=1 depth=1 samples=1000 mean_us=48.8419 p50_us=46.162 p95_us=80.829 p99_us=114.36 allocations_per_sample=5 bytes_per_sample=1272 registration_nodes_per_sample=1
+construction workers=4 cancellation=1 depth=8 samples=1000 mean_us=0.053182 p50_us=0.053 p95_us=0.054 p99_us=0.066 allocations_per_sample=1 bytes_per_sample=624 registration_nodes_per_sample=0
+child workers=4 cancellation=1 depth=8 samples=1000 mean_us=89.6752 p50_us=81.099 p95_us=149.914 p99_us=198.726 allocations_per_sample=16 bytes_per_sample=5888 registration_nodes_per_sample=0
+yield workers=4 cancellation=1 depth=8 samples=1000 mean_us=92.5334 p50_us=84.054 p95_us=161.394 p99_us=207.197 allocations_per_sample=19 bytes_per_sample=6424 registration_nodes_per_sample=1
+construction workers=4 cancellation=1 depth=64 samples=1000 mean_us=0.052886 p50_us=0.053 p95_us=0.054 p99_us=0.064 allocations_per_sample=1 bytes_per_sample=624 registration_nodes_per_sample=0
+child workers=4 cancellation=1 depth=64 samples=1000 mean_us=349.793 p50_us=346.029 p95_us=501.342 p99_us=592.933 allocations_per_sample=128 bytes_per_sample=47104 registration_nodes_per_sample=0
+yield workers=4 cancellation=1 depth=64 samples=1000 mean_us=359.309 p50_us=354.502 p95_us=513.611 p99_us=609.398 allocations_per_sample=131 bytes_per_sample=47640 registration_nodes_per_sample=1
+context-copy workers=4 cancellation=1 samples=1000 mean_us=0.021337 p50_us=0.021 p95_us=0.022 p99_us=0.022 allocations_per_sample=0 bytes_per_sample=0 registration_nodes_per_sample=0
+construction workers=4 cancellation=2 depth=1 samples=1000 mean_us=0.052603 p50_us=0.052 p95_us=0.054 p99_us=0.063 allocations_per_sample=1 bytes_per_sample=624 registration_nodes_per_sample=0
+child workers=4 cancellation=2 depth=1 samples=1000 mean_us=31.0323 p50_us=27.436 p95_us=50.962 p99_us=95.514 allocations_per_sample=2 bytes_per_sample=736 registration_nodes_per_sample=0
+yield workers=4 cancellation=2 depth=1 samples=1000 mean_us=30.1904 p50_us=27.151 p95_us=44.945 p99_us=79.921 allocations_per_sample=2 bytes_per_sample=736 registration_nodes_per_sample=0
+construction workers=4 cancellation=2 depth=8 samples=1000 mean_us=0.0533 p50_us=0.053 p95_us=0.054 p99_us=0.064 allocations_per_sample=1 bytes_per_sample=624 registration_nodes_per_sample=0
+child workers=4 cancellation=2 depth=8 samples=1000 mean_us=90.2157 p50_us=81.347 p95_us=157.846 p99_us=199.537 allocations_per_sample=16 bytes_per_sample=5888 registration_nodes_per_sample=0
+yield workers=4 cancellation=2 depth=8 samples=1000 mean_us=89.5344 p50_us=81.026 p95_us=148.285 p99_us=197.444 allocations_per_sample=16 bytes_per_sample=5888 registration_nodes_per_sample=0
+construction workers=4 cancellation=2 depth=64 samples=1000 mean_us=0.052569 p50_us=0.052 p95_us=0.053 p99_us=0.063 allocations_per_sample=1 bytes_per_sample=624 registration_nodes_per_sample=0
+child workers=4 cancellation=2 depth=64 samples=1000 mean_us=354.998 p50_us=352.214 p95_us=501.584 p99_us=582.651 allocations_per_sample=128 bytes_per_sample=47104 registration_nodes_per_sample=0
+yield workers=4 cancellation=2 depth=64 samples=1000 mean_us=354.595 p50_us=350.714 p95_us=501.563 p99_us=576.32 allocations_per_sample=128 bytes_per_sample=47104 registration_nodes_per_sample=0
+context-copy workers=4 cancellation=2 samples=1000 mean_us=0.021156 p50_us=0.021 p95_us=0.022 p99_us=0.022 allocations_per_sample=0 bytes_per_sample=0 registration_nodes_per_sample=0
+registration cancellation=0 samples=1000 mean_us=0.021812 p50_us=0.022 p95_us=0.022 p99_us=0.023 allocations_per_sample=0 bytes_per_sample=0 registration_nodes_per_sample=0
+link cancellation=0 samples=1000 mean_us=0.105956 p50_us=0.106 p95_us=0.107 p99_us=0.108 allocations_per_sample=2 bytes_per_sample=152 registration_nodes_per_sample=0
+registration cancellation=1 samples=1000 mean_us=0.11376 p50_us=0.113 p95_us=0.116 p99_us=0.125 allocations_per_sample=1 bytes_per_sample=176 registration_nodes_per_sample=1
+link cancellation=1 samples=1000 mean_us=0.20752 p50_us=0.201 p95_us=0.204 p99_us=0.209 allocations_per_sample=3 bytes_per_sample=328 registration_nodes_per_sample=1
+registration cancellation=2 samples=1000 mean_us=0.126412 p50_us=0.126 p95_us=0.128 p99_us=0.13 allocations_per_sample=1 bytes_per_sample=176 registration_nodes_per_sample=1
+link cancellation=2 samples=1000 mean_us=0.118863 p50_us=0.119 p95_us=0.121 p99_us=0.124 allocations_per_sample=2 bytes_per_sample=152 registration_nodes_per_sample=0
+runtime child depth=1 cancellation=0 samples=1000 mean_us=1.1694 p50_us=1.156 p95_us=1.183 p99_us=1.245 allocations_per_sample=3 bytes_per_sample=848 registration_nodes_per_sample=0
+runtime yield depth=1 cancellation=0 samples=1000 mean_us=1.65014 p50_us=1.632 p95_us=1.709 p99_us=1.798 allocations_per_sample=4 bytes_per_sample=960 registration_nodes_per_sample=0
+runtime child depth=8 cancellation=0 samples=1000 mean_us=4.95414 p50_us=4.912 p95_us=5.028 p99_us=5.257 allocations_per_sample=24 bytes_per_sample=6784 registration_nodes_per_sample=0
+runtime yield depth=8 cancellation=0 samples=1000 mean_us=5.27267 p50_us=5.076 p95_us=5.201 p99_us=6.79 allocations_per_sample=25 bytes_per_sample=6896 registration_nodes_per_sample=0
+runtime child depth=64 cancellation=0 samples=1000 mean_us=37.2574 p50_us=35.743 p95_us=43.045 p99_us=67.166 allocations_per_sample=192 bytes_per_sample=54272 registration_nodes_per_sample=0
+runtime yield depth=64 cancellation=0 samples=1000 mean_us=38.4565 p50_us=35.894 p95_us=46.211 p99_us=115.494 allocations_per_sample=193 bytes_per_sample=54384 registration_nodes_per_sample=0
+runtime child depth=1 cancellation=1 samples=1000 mean_us=1.17829 p50_us=1.147 p95_us=1.179 p99_us=1.508 allocations_per_sample=3 bytes_per_sample=848 registration_nodes_per_sample=0
+runtime yield depth=1 cancellation=1 samples=1000 mean_us=1.89328 p50_us=1.878 p95_us=1.924 p99_us=2.006 allocations_per_sample=7 bytes_per_sample=1496 registration_nodes_per_sample=1
+runtime child depth=8 cancellation=1 samples=1000 mean_us=5.53832 p50_us=4.935 p95_us=6.782 p99_us=15.49 allocations_per_sample=24 bytes_per_sample=6784 registration_nodes_per_sample=0
+runtime yield depth=8 cancellation=1 samples=1000 mean_us=5.56802 p50_us=5.412 p95_us=5.532 p99_us=5.971 allocations_per_sample=28 bytes_per_sample=7432 registration_nodes_per_sample=1
+runtime child depth=64 cancellation=1 samples=1000 mean_us=36.5386 p50_us=35.654 p95_us=39.883 p99_us=52.342 allocations_per_sample=192 bytes_per_sample=54272 registration_nodes_per_sample=0
+runtime yield depth=64 cancellation=1 samples=1000 mean_us=38.0325 p50_us=36.55 p95_us=44.949 p99_us=68.586 allocations_per_sample=196 bytes_per_sample=54920 registration_nodes_per_sample=1
+runtime child depth=1 cancellation=2 samples=1000 mean_us=1.49584 p50_us=1.157 p95_us=2.109 p99_us=2.297 allocations_per_sample=3 bytes_per_sample=848 registration_nodes_per_sample=0
+runtime yield depth=1 cancellation=2 samples=1000 mean_us=1.34133 p50_us=1.178 p95_us=2.119 p99_us=2.215 allocations_per_sample=3 bytes_per_sample=848 registration_nodes_per_sample=0
+runtime child depth=8 cancellation=2 samples=1000 mean_us=5.00896 p50_us=4.928 p95_us=5.171 p99_us=5.388 allocations_per_sample=24 bytes_per_sample=6784 registration_nodes_per_sample=0
+runtime yield depth=8 cancellation=2 samples=1000 mean_us=4.97605 p50_us=4.934 p95_us=5.033 p99_us=5.226 allocations_per_sample=24 bytes_per_sample=6784 registration_nodes_per_sample=0
+runtime child depth=64 cancellation=2 samples=1000 mean_us=37.2136 p50_us=35.75 p95_us=44.327 p99_us=59.047 allocations_per_sample=192 bytes_per_sample=54272 registration_nodes_per_sample=0
+runtime yield depth=64 cancellation=2 samples=1000 mean_us=38.4215 p50_us=36.359 p95_us=43.811 p99_us=82.817 allocations_per_sample=192 bytes_per_sample=54272 registration_nodes_per_sample=0
+structural depth=1 submissions=1 reservations=1 deliveries=1
+structural depth=8 submissions=8 reservations=8 deliveries=15
+structural depth=64 submissions=64 reservations=64 deliveries=127
+file-synthetic workers=0 layer=0 samples=1000 mean_us=1.15405 p50_us=1.142 p95_us=1.229 p99_us=1.312 allocations_per_sample=3 bytes_per_sample=816 registration_nodes_per_sample=0
+file-synthetic workers=0 layer=1 samples=1000 mean_us=2.18277 p50_us=2.009 p95_us=2.105 p99_us=2.404 allocations_per_sample=6 bytes_per_sample=2608 registration_nodes_per_sample=0
+file-synthetic workers=0 layer=2 samples=1000 mean_us=2.75961 p50_us=2.517 p95_us=2.593 p99_us=4.519 allocations_per_sample=9 bytes_per_sample=3568 registration_nodes_per_sample=0
+file-synthetic workers=1 layer=0 samples=1000 mean_us=30.086 p50_us=26.046 p95_us=54.623 p99_us=87.974 allocations_per_sample=2 bytes_per_sample=704 registration_nodes_per_sample=0
+file-synthetic workers=1 layer=1 samples=1000 mean_us=31.0885 p50_us=27.054 p95_us=52.897 p99_us=79.464 allocations_per_sample=4 bytes_per_sample=2384 registration_nodes_per_sample=0
+file-synthetic workers=1 layer=2 samples=1000 mean_us=32.2806 p50_us=27.883 p95_us=55.299 p99_us=86.541 allocations_per_sample=6 bytes_per_sample=3232 registration_nodes_per_sample=0
+file-synthetic workers=4 layer=0 samples=1000 mean_us=30.7777 p50_us=27.114 p95_us=50.473 p99_us=110.396 allocations_per_sample=2 bytes_per_sample=704 registration_nodes_per_sample=0
+file-synthetic workers=4 layer=1 samples=1000 mean_us=54.2194 p50_us=52.768 p95_us=110.825 p99_us=151.878 allocations_per_sample=4 bytes_per_sample=2384 registration_nodes_per_sample=0
+file-synthetic workers=4 layer=2 samples=1000 mean_us=62.0554 p50_us=55.599 p95_us=109.529 p99_us=157.903 allocations_per_sample=6 bytes_per_sample=3232 registration_nodes_per_sample=0
+active-cancel depth=1 samples=1000 mean_us=0.892299 p50_us=0.778 p95_us=1.564 p99_us=2.057 allocations_per_sample=6.003 bytes_per_sample=1760.06 registration_nodes_per_sample=1
+scope-spawn-join depth=1 samples=1000 mean_us=1.19042 p50_us=1.122 p95_us=1.147 p99_us=1.218 allocations_per_sample=10 bytes_per_sample=2152 registration_nodes_per_sample=0
+active-cancel depth=8 samples=1000 mean_us=3.51922 p50_us=3.353 p95_us=4.184 p99_us=5.154 allocations_per_sample=20.003 bytes_per_sample=7024.06 registration_nodes_per_sample=1
+scope-spawn-join depth=8 samples=1000 mean_us=3.87208 p50_us=3.704 p95_us=3.929 p99_us=5.351 allocations_per_sample=24 bytes_per_sample=7304 registration_nodes_per_sample=0
+active-cancel depth=64 samples=1000 mean_us=27.6077 p50_us=26.9 p95_us=28.576 p99_us=45.781 allocations_per_sample=132.003 bytes_per_sample=49136.1 registration_nodes_per_sample=1
+scope-spawn-join depth=64 samples=1000 mean_us=28.8499 p50_us=26.875 p95_us=36.319 p99_us=58.399 allocations_per_sample=136 bytes_per_sample=48520 registration_nodes_per_sample=0

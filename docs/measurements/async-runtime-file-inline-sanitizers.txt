@@ -1,0 +1,41 @@
+Internal ctest changing into directory: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/tests-asan
+Test project /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/tests-asan
+      Start 418: Base.IO.AsyncDispatch.IO worker cancellation waits for the final access to borrowed memory
+ 1/16 Test #418: Base.IO.AsyncDispatch.IO worker cancellation waits for the final access to borrowed memory ...............................   Passed    0.01 sec
+      Start 419: Base.IO.AsyncDispatch.IO cancellation before a queued worker starts skips its side effects
+ 2/16 Test #419: Base.IO.AsyncDispatch.IO cancellation before a queued worker starts skips its side effects ...............................   Passed    0.01 sec
+      Start 420: Base.IO.AsyncDispatch.IO worker success publishes its result on the selected executor
+ 3/16 Test #420: Base.IO.AsyncDispatch.IO worker success publishes its result on the selected executor ....................................   Passed    0.01 sec
+      Start 421: Base.IO.AsyncDispatch.IO rejects an unsupported completion executor before running worker code
+ 4/16 Test #421: Base.IO.AsyncDispatch.IO rejects an unsupported completion executor before running worker code ...........................   Passed    0.01 sec
+      Start 422: Base.IO.AsyncDispatch.IO rejects exhausted completion capacity before running worker code
+ 5/16 Test #422: Base.IO.AsyncDispatch.IO rejects exhausted completion capacity before running worker code ................................   Passed    0.01 sec
+      Start 423: Base.IO.AsyncDispatch.File workers start lazily and reject jobs beyond their budget
+ 6/16 Test #423: Base.IO.AsyncDispatch.File workers start lazily and reject jobs beyond their budget ......................................   Passed    0.01 sec
+      Start 424: Base.IO.AsyncDispatch.Runtime shutdown waits for a worker then transfers an external completion
+ 7/16 Test #424: Base.IO.AsyncDispatch.Runtime shutdown waits for a worker then transfers an external completion ..........................   Passed    0.01 sec
+      Start 425: Base.IO.AsyncDispatch.File completion uses eligible inline delivery and its reserved fallback when budget is exhausted
+ 8/16 Test #425: Base.IO.AsyncDispatch.File completion uses eligible inline delivery and its reserved fallback when budget is exhausted ...   Passed    0.01 sec
+      Start 437: Base.IO.ExecutorPlacement.File leaves transfer both pending and early outcomes to their context executor
+ 9/16 Test #437: Base.IO.ExecutorPlacement.File leaves transfer both pending and early outcomes to their context executor .................   Passed    0.02 sec
+      Start 466: Base.IO.NativeRuntime.Native file completions progress through one-callback runtime batches
+10/16 Test #466: Base.IO.NativeRuntime.Native file completions progress through one-callback runtime batches ..............................   Passed    0.02 sec
+      Start 467: Base.IO.NativeRuntime.Async file native ownership survives a cold read and retires with its last owner
+11/16 Test #467: Base.IO.NativeRuntime.Async file native ownership survives a cold read and retires with its last owner ...................   Passed    0.02 sec
+      Start 468: Base.IO.NativeRuntime.Canceling delivery of an opened async file releases its unclaimed descriptor
+12/16 Test #468: Base.IO.NativeRuntime.Canceling delivery of an opened async file releases its unclaimed descriptor .......................   Passed    0.02 sec
+      Start 469: Base.IO.NativeRuntime.Async file position ordering and close drain work on native and fallback backends
+13/16 Test #469: Base.IO.NativeRuntime.Async file position ordering and close drain work on native and fallback backends ..................   Passed    0.02 sec
+      Start 470: Base.IO.NativeRuntime.Async file explicit offsets and access modes are validated consistently
+14/16 Test #470: Base.IO.NativeRuntime.Async file explicit offsets and access modes are validated consistently ............................   Passed    0.02 sec
+      Start 471: Base.IO.NativeRuntime.Canceling queued file close reopens admission without closing an active handle
+15/16 Test #471: Base.IO.NativeRuntime.Canceling queued file close reopens admission without closing an active handle .....................   Passed    0.02 sec
+      Start 472: Base.IO.NativeRuntime.Runtime stop cancels queued file leases without admitting new backend work
+16/16 Test #472: Base.IO.NativeRuntime.Runtime stop cancels queued file leases without admitting new backend work .........................   Passed    0.02 sec
+
+100% tests passed, 0 tests failed out of 16
+
+Label Time Summary:
+IO    =   0.24 sec*proc (16 tests)
+
+Total Test time (real) =   0.27 sec

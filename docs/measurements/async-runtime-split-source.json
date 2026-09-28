@@ -1,0 +1,21 @@
+{
+  "date_utc": "2026-09-12T22:32:22.662281+00:00",
+  "base_revision": "b44612eb896ab013463876e22a40e221a4fd8c5f",
+  "inputs": {
+    "include/NGIN/Async/Task.hpp": "acbf21e702baee6a00f581b12d52794d5d88b1c6af56142aa324d71e2c0eada9",
+    "include/NGIN/Async/TaskContext.hpp": "77e5743b8fbdbb97abec3583bcbf4e4337c0650d1ce1b6da1483129879b0261f",
+    "include/NGIN/Async/TaskScope.hpp": "ccaee576fc10b7872d02ee7c7652965a7ac8c389245ce99445e73610f5aa2759",
+    "include/NGIN/Async/WhenAny.hpp": "90e916dd947890ae0a5b8d80d5d2657e19af74e82d56d5bb0161ffcbd9d73c46",
+    "include/NGIN/Async/AsyncGenerator.hpp": "207acf4db90edada90243d22f533bc97f5de1dac2f758f52eb53e5bbe799bcb9",
+    "include/NGIN/Execution/CooperativeScheduler.hpp": "f21173f04cf2c4982db5dfe51a0ce7a017267e83a2fc8de9f653ec797c59eea7",
+    "include/NGIN/Execution/ThreadPoolScheduler.hpp": "ec9eb5d3db5dcbaea7be89b337ff03f41bb0f4258f4ebd510a23f9f44312aeb5",
+    "src/NGIN/IO/FileOperationGate.hpp": "613d229b66de44a12fc7562cc32b802915ba471b63ce68c67fd4872903949fc5",
+    "tests/Async/Sequential.cpp": "26b50fb30405b16ade78821101db7bb50bc04fcf74ca70a9c31c10cd3de5f501",
+    "tests/Async/TaskContext.cpp": "2a52796572a0e5b40742f883b305ef236c7c4493ed3a256fe5d19c740da209fe",
+    "benchmarks/AsyncRuntimeBenchmarks.cpp": "99b551af976bac25cbeb2a288bbf5652aeb860ec95e9e549164557f483972722",
+    "benchmarks/CMakeLists.txt": "0af6bbcfc8665d8c1833698c16f4e447a366dced0d57fc026667d83b8ae11330",
+    "tests/Async/Ready.cpp": "4adc8bf4205669bd00e7f977c98f86fd696b1aa885a8c76ac00d6b3653790de1"
+  },
+  "archive_sha256": "bf12b60599886816b77d74c54f6eef69942f054e45abd8f5bdd2c22773a54b91",
+  "status": "T05 compact-state checkpoint with successful child lease retirement; compiled state extraction and final T05 review remain"
+}

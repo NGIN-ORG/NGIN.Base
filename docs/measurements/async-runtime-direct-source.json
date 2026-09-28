@@ -1,0 +1,20 @@
+{
+  "date_utc": "2026-09-12T22:08:39.503585+00:00",
+  "base_revision": "b44612eb896ab013463876e22a40e221a4fd8c5f",
+  "inputs": {
+    "include/NGIN/Async/Task.hpp": "a43ed0a335db5d7e30f59a4b0d0ee4c49ff5a167578839a620afddbf6ef2d5e3",
+    "include/NGIN/Async/TaskContext.hpp": "77e5743b8fbdbb97abec3583bcbf4e4337c0650d1ce1b6da1483129879b0261f",
+    "include/NGIN/Async/TaskScope.hpp": "ccaee576fc10b7872d02ee7c7652965a7ac8c389245ce99445e73610f5aa2759",
+    "include/NGIN/Async/WhenAny.hpp": "90e916dd947890ae0a5b8d80d5d2657e19af74e82d56d5bb0161ffcbd9d73c46",
+    "include/NGIN/Async/AsyncGenerator.hpp": "55a65da3a2e50ccdeed7896fa441e3fcc1a30d72d4b55e313b6b53e8c820a3a0",
+    "include/NGIN/Execution/CooperativeScheduler.hpp": "f21173f04cf2c4982db5dfe51a0ce7a017267e83a2fc8de9f653ec797c59eea7",
+    "include/NGIN/Execution/ThreadPoolScheduler.hpp": "ec9eb5d3db5dcbaea7be89b337ff03f41bb0f4258f4ebd510a23f9f44312aeb5",
+    "src/NGIN/IO/FileOperationGate.hpp": "613d229b66de44a12fc7562cc32b802915ba471b63ce68c67fd4872903949fc5",
+    "tests/Async/Sequential.cpp": "026c6b3fbc8a3ba060426986145c3da3ae7f9ac06f11a35505a41ff4239f2fc8",
+    "tests/Async/TaskContext.cpp": "2a52796572a0e5b40742f883b305ef236c7c4493ed3a256fe5d19c740da209fe",
+    "benchmarks/AsyncRuntimeBenchmarks.cpp": "ea68698ed313e5c1cf69d8d366e587661cd61b1c2b17cb7b2df8d725a8358a32",
+    "benchmarks/CMakeLists.txt": "0af6bbcfc8665d8c1833698c16f4e447a366dced0d57fc026667d83b8ae11330"
+  },
+  "archive_sha256": "0c0f443100e9ac16b0a85e0c6c2d42fadd9a66b1ba2d330c260e407dd2c7e023",
+  "status": "T05 partial direct-transfer checkpoint; ready storage, compact ownership state, and the remainder of Stage 1 are incomplete"
+}

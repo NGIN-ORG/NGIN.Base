@@ -1,0 +1,69 @@
+Internal ctest changing into directory: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/tests-asan
+Test project /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/tests-asan
+      Start 492: Base.IO.RunTask.RunTask returns a root value and completes runtime shutdown
+ 1/30 Test #492: Base.IO.RunTask.RunTask returns a root value and completes runtime shutdown ....................................   Passed    0.01 sec
+      Start 493: Base.IO.RunTask.RunTask cancels and joins children before returning a root failure
+ 2/30 Test #493: Base.IO.RunTask.RunTask cancels and joins children before returning a root failure .............................   Passed    0.01 sec
+      Start 494: Base.IO.RunTask.RunTask preserves a child failure when the root succeeds
+ 3/30 Test #494: Base.IO.RunTask.RunTask preserves a child failure when the root succeeds .......................................   Passed    0.01 sec
+      Start 495: Base.IO.RunTask.RunTask joins external children after stop without new admission
+ 4/30 Test #495: Base.IO.RunTask.RunTask joins external children after stop without new admission ...............................   Passed    0.01 sec
+      Start 496: Base.IO.RunTask.RunTask converts factory exceptions and admission exhaustion into root faults
+ 5/30 Test #496: Base.IO.RunTask.RunTask converts factory exceptions and admission exhaustion into root faults ..................   Passed    0.01 sec
+      Start 497: Base.IO.RunTask.RunTask returns cancellation and does not take over another runtime owner
+ 6/30 Test #497: Base.IO.RunTask.RunTask returns cancellation and does not take over another runtime owner ......................   Passed    0.01 sec
+      Start 498: Base.IO.RuntimeLoop.Runtime loop queues submissions and preserves bounded backlog
+ 7/30 Test #498: Base.IO.RuntimeLoop.Runtime loop queues submissions and preserves bounded backlog ..............................   Passed    0.01 sec
+      Start 499: Base.IO.RuntimeLoop.Runtime loop rotates submissions completions and timers across tiny batches
+ 8/30 Test #499: Base.IO.RuntimeLoop.Runtime loop rotates submissions completions and timers across tiny batches ................   Passed    0.01 sec
+      Start 500: Base.IO.RuntimeLoop.Runtime loop binds first drive ownership and rejects reentrancy
+ 9/30 Test #500: Base.IO.RuntimeLoop.Runtime loop binds first drive ownership and rejects reentrancy ............................   Passed    0.01 sec
+      Start 501: Base.IO.RuntimeLoop.Runtime loop accepts reserved completion after stop and drains on its owner
+10/30 Test #501: Base.IO.RuntimeLoop.Runtime loop accepts reserved completion after stop and drains on its owner ................   Passed    0.01 sec
+      Start 502: Base.IO.RuntimeLoop.Runtime loop shutdown waits for the committed driver without taking ownership
+11/30 Test #502: Base.IO.RuntimeLoop.Runtime loop shutdown waits for the committed driver without taking ownership ..............   Passed    0.03 sec
+      Start 503: Base.IO.RuntimeLoop.Runtime loop removes canceled timer storage and recovers capacity immediately
+12/30 Test #503: Base.IO.RuntimeLoop.Runtime loop removes canceled timer storage and recovers capacity immediately ..............   Passed    0.01 sec
+      Start 504: Base.IO.RuntimeLoop.Runtime timer ownership moves and removes undispatched work on destruction
+13/30 Test #504: Base.IO.RuntimeLoop.Runtime timer ownership moves and removes undispatched work on destruction .................   Passed    0.01 sec
+      Start 505: Base.IO.RuntimeLoop.Runtime loop wakes for an earlier timer deadline
+14/30 Test #505: Base.IO.RuntimeLoop.Runtime loop wakes for an earlier timer deadline ...........................................   Passed    0.02 sec
+      Start 506: Base.IO.RuntimeLoop.Runtime delay cancellation removes its long-duration timer immediately
+15/30 Test #506: Base.IO.RuntimeLoop.Runtime delay cancellation removes its long-duration timer immediately .....................   Passed    0.01 sec
+      Start 507: Base.IO.RuntimeLoop.Runtime shutdown terminates a pending delay without an explicit cancellation token
+16/30 Test #507: Base.IO.RuntimeLoop.Runtime shutdown terminates a pending delay without an explicit cancellation token .........   Passed    0.01 sec
+      Start 508: Base.IO.RuntimeLoop.Runtime timer installation racing cancellation reaches one terminal outcome
+17/30 Test #508: Base.IO.RuntimeLoop.Runtime timer installation racing cancellation reaches one terminal outcome ................   Passed    0.02 sec
+      Start 509: Base.IO.RuntimeLoop.Runtime loop does not lose submissions racing entry into platform wait
+18/30 Test #509: Base.IO.RuntimeLoop.Runtime loop does not lose submissions racing entry into platform wait .....................   Passed    0.03 sec
+      Start 510: Base.IO.RuntimeLoop.Runtime loop rejects invalid capacities and empty submissions
+19/30 Test #510: Base.IO.RuntimeLoop.Runtime loop rejects invalid capacities and empty submissions ..............................   Passed    0.01 sec
+      Start 511: Base.IO.RuntimeLoop.Runtime loop ignores cached readiness from a retired generation
+20/30 Test #511: Base.IO.RuntimeLoop.Runtime loop ignores cached readiness from a retired generation ............................   Passed    0.01 sec
+      Start 512: Base.IO.RuntimeLoop.Runtime loop retains readiness beyond a full native event batch
+21/30 Test #512: Base.IO.RuntimeLoop.Runtime loop retains readiness beyond a full native event batch ............................   Passed    0.01 sec
+      Start 513: Base.IO.RuntimeLoop.Runtime loop rejects duplicate and excess registrations and retires them on stop
+22/30 Test #513: Base.IO.RuntimeLoop.Runtime loop rejects duplicate and excess registrations and retires them on stop ...........   Passed    0.01 sec
+      Start 514: Base.IO.RuntimeLoop.Runtime loop reserves admission without native monitoring and arms on demand
+23/30 Test #514: Base.IO.RuntimeLoop.Runtime loop reserves admission without native monitoring and arms on demand ...............   Passed    0.01 sec
+      Start 515: Base.IO.RuntimeLoop.Runtime host wakes when the final unarmed registration retires off owner
+24/30 Test #515: Base.IO.RuntimeLoop.Runtime host wakes when the final unarmed registration retires off owner ...................   Passed    0.01 sec
+      Start 516: Base.IO.RuntimeLoop.Runtime loop host descriptor signals submissions and changed timer deadlines
+25/30 Test #516: Base.IO.RuntimeLoop.Runtime loop host descriptor signals submissions and changed timer deadlines ...............   Passed    0.03 sec
+      Start 517: Base.IO.RuntimeLoop.Runtime host snapshots include native readiness and refresh after registration changes
+26/30 Test #517: Base.IO.RuntimeLoop.Runtime host snapshots include native readiness and refresh after registration changes .....   Passed    0.01 sec
+      Start 518: Base.IO.RuntimeLoop.Runtime host snapshot rejects unsupported or insufficient storage without partial output
+27/30 Test #518: Base.IO.RuntimeLoop.Runtime host snapshot rejects unsupported or insufficient storage without partial output ...   Passed    0.01 sec
+      Start 519: Base.IO.RuntimeLoop.Runtime loop rejects IOCP requests without retaining registration capacity
+28/30 Test #519: Base.IO.RuntimeLoop.Runtime loop rejects IOCP requests without retaining registration capacity .................   Passed    0.01 sec
+      Start 520: Base.IO.RuntimeLoop.Runtime PollOnce charges sequential task transfers to the batch budget
+29/30 Test #520: Base.IO.RuntimeLoop.Runtime PollOnce charges sequential task transfers to the batch budget .....................   Passed    0.01 sec
+      Start 521: Base.IO.RuntimeLoop.Nested runtime polls share dispatch depth and preserve ready backlog
+30/30 Test #521: Base.IO.RuntimeLoop.Nested runtime polls share dispatch depth and preserve ready backlog .......................   Passed    0.01 sec
+
+100% tests passed, 0 tests failed out of 30
+
+Label Time Summary:
+IO    =   0.38 sec*proc (30 tests)
+
+Total Test time (real) =   0.41 sec

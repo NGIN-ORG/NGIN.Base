@@ -1,0 +1,63 @@
+Internal ctest changing into directory: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/tests-asan
+Test project /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/tests-asan
+      Start 122: Base.Async.TaskContext.Discarded token-free submissions deliver a terminal fault
+ 1/26 Test #122: Base.Async.TaskContext.Discarded token-free submissions deliver a terminal fault .....................................   Passed    0.01 sec
+      Start 123: Base.Async.TaskContext.TaskContext WithLinkedCancellationToken cancels when parent token cancels
+ 2/26 Test #123: Base.Async.TaskContext.TaskContext WithLinkedCancellationToken cancels when parent token cancels .....................   Passed    0.01 sec
+      Start 124: Base.Async.TaskContext.TaskContext WithLinkedCancellationToken supports chaining without losing root linkage
+ 3/26 Test #124: Base.Async.TaskContext.TaskContext WithLinkedCancellationToken supports chaining without losing root linkage .........   Passed    0.01 sec
+      Start 125: Base.Async.TaskContext.TaskContext rejects nonfinite delays without creating timers
+ 4/26 Test #125: Base.Async.TaskContext.TaskContext rejects nonfinite delays without creating timers ..................................   Passed    0.01 sec
+      Start 126: Base.Async.TaskContext.Discarded cancellation-aware timers deliver a terminal fault
+ 5/26 Test #126: Base.Async.TaskContext.Discarded cancellation-aware timers deliver a terminal fault ..................................   Passed    0.01 sec
+      Start 127: Base.Async.TaskContext.Submission handoff joins dispatch before admission returns
+ 6/26 Test #127: Base.Async.TaskContext.Submission handoff joins dispatch before admission returns ....................................   Passed    0.01 sec
+      Start 128: Base.Async.TaskContext.Token-free yields reuse a single admitted continuation without recursive dispatch
+ 7/26 Test #128: Base.Async.TaskContext.Token-free yields reuse a single admitted continuation without recursive dispatch .............   Passed    0.02 sec
+      Start 129: Base.Async.TaskContext.Discarded concurrent child and producer submissions complete their admitted parents
+ 8/26 Test #129: Base.Async.TaskContext.Discarded concurrent child and producer submissions complete their admitted parents ...........   Passed    0.01 sec
+      Start 130: Base.Async.TaskContext.TaskContext preserves a different executor's discard delivery
+ 9/26 Test #130: Base.Async.TaskContext.TaskContext preserves a different executor's discard delivery .................................   Passed    0.01 sec
+      Start 131: Base.Async.TaskContext.TaskContext rejects token-free suspension without a completion path
+10/26 Test #131: Base.Async.TaskContext.TaskContext rejects token-free suspension without a completion path ...........................   Passed    0.01 sec
+      Start 132: Base.Async.TaskContext.Thread-pool shutdown retires an initial task while its worker is occupied
+11/26 Test #132: Base.Async.TaskContext.Thread-pool shutdown retires an initial task while its worker is occupied .....................   Passed    0.01 sec
+      Start 133: Base.Async.TaskContext.Thread-pool shutdown retires token-free suspended timers
+12/26 Test #133: Base.Async.TaskContext.Thread-pool shutdown retires token-free suspended timers ......................................   Passed    0.01 sec
+      Start 134: Base.Async.TaskContext.Executor references compare dispatch bindings for continuation reuse
+13/26 Test #134: Base.Async.TaskContext.Executor references compare dispatch bindings for continuation reuse ..........................   Passed    0.01 sec
+      Start 402: Base.Execution.ThreadPoolFairness.Thread pool makes bounded progress across completion injected and local work
+14/26 Test #402: Base.Execution.ThreadPoolFairness.Thread pool makes bounded progress across completion injected and local work .......   Passed    0.01 sec
+      Start 403: Base.Execution.ThreadPoolFairness.Thread pool RunOne can help the sole worker's local queue
+15/26 Test #403: Base.Execution.ThreadPoolFairness.Thread pool RunOne can help the sole worker's local queue ..........................   Passed    0.01 sec
+      Start 404: Base.Execution.ThreadPoolFairness.Thread pool recursive helping defers beyond the dispatch depth limit
+16/26 Test #404: Base.Execution.ThreadPoolFairness.Thread pool recursive helping defers beyond the dispatch depth limit ...............   Passed    0.01 sec
+      Start 405: Base.Execution.ThreadPoolFairness.Thread pool helping charges reserved and ordinary work to its caller budget
+17/26 Test #405: Base.Execution.ThreadPoolFairness.Thread pool helping charges reserved and ordinary work to its caller budget ........   Passed    0.01 sec
+      Start 406: Base.Execution.ThreadPoolFairness.Thread pool timer registration removes queued work and preserves detached timers
+18/26 Test #406: Base.Execution.ThreadPoolFairness.Thread pool timer registration removes queued work and preserves detached timers ...   Passed    0.01 sec
+      Start 641: Base.Net.ExecutorPlacement.Network leaves transfer early and pending outcomes to their context executor
+19/26 Test #641: Base.Net.ExecutorPlacement.Network leaves transfer early and pending outcomes to their context executor ..............   Passed    0.01 sec
+      Start 664: Base.Net.Resolve.Net.Resolve resolves numeric loopback without external network access
+20/26 Test #664: Base.Net.Resolve.Net.Resolve resolves numeric loopback without external network access ...............................   Passed    0.01 sec
+      Start 665: Base.Net.Resolve.Net.Resolve applies address-family filters and preserves resolver diagnostics
+21/26 Test #665: Base.Net.Resolve.Net.Resolve applies address-family filters and preserves resolver diagnostics .......................   Passed    0.01 sec
+      Start 666: Base.Net.Resolve.Net.Resolve async work uses its explicit driver and caller executor
+22/26 Test #666: Base.Net.Resolve.Net.Resolve async work uses its explicit driver and caller executor .................................   Passed    0.01 sec
+      Start 667: Base.Net.Resolve.Net.Resolve async cancellation and timeout complete without waiting for lookup
+23/26 Test #667: Base.Net.Resolve.Net.Resolve async cancellation and timeout complete without waiting for lookup ......................   Passed    0.01 sec
+      Start 668: Base.Net.Resolve.Net.Resolve retires timeout capacity before delivering successful results
+24/26 Test #668: Base.Net.Resolve.Net.Resolve retires timeout capacity before delivering successful results ...........................   Passed    0.01 sec
+      Start 669: Base.Net.Resolve.Net.Resolve uses reserved delivery after ordinary executor admission closes
+25/26 Test #669: Base.Net.Resolve.Net.Resolve uses reserved delivery after ordinary executor admission closes .........................   Passed    0.01 sec
+      Start 670: Base.Net.Resolve.Net.Resolve cancellation racing setup publishes once on the selected executor
+26/26 Test #670: Base.Net.Resolve.Net.Resolve cancellation racing setup publishes once on the selected executor .......................   Passed    0.03 sec
+
+100% tests passed, 0 tests failed out of 26
+
+Label Time Summary:
+Async        =   0.14 sec*proc (13 tests)
+Execution    =   0.05 sec*proc (5 tests)
+Net          =   0.11 sec*proc (8 tests)
+
+Total Test time (real) =   0.32 sec

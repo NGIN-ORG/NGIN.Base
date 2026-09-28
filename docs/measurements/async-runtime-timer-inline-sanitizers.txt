@@ -1,0 +1,102 @@
+Internal ctest changing into directory: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/tests-asan
+Test project /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/tests-asan
+      Start  53: Base.Async.ChildLifetime.Canceling a task wait joins child work before publishing parent cancellation
+ 1/46 Test  #53: Base.Async.ChildLifetime.Canceling a task wait joins child work before publishing parent cancellation ..........   Passed    0.01 sec
+      Start  54: Base.Async.ChildLifetime.An already canceled task wait does not start a cold child
+ 2/46 Test  #54: Base.Async.ChildLifetime.An already canceled task wait does not start a cold child .............................   Passed    0.01 sec
+      Start  55: Base.Async.ChildLifetime.Nested canceled tasks retire child locals before their borrowed parent locals
+ 3/46 Test  #55: Base.Async.ChildLifetime.Nested canceled tasks retire child locals before their borrowed parent locals .........   Passed    1.35 sec
+      Start  56: Base.Async.ChildLifetime.Operation awaits release canceled child locals before normal parent return
+ 4/46 Test  #56: Base.Async.ChildLifetime.Operation awaits release canceled child locals before normal parent return ............   Passed    0.01 sec
+      Start  62: Base.Async.Environment.Nested tasks preserve an environment across suspension
+ 5/46 Test  #62: Base.Async.Environment.Nested tasks preserve an environment across suspension ..................................   Passed    0.01 sec
+      Start  63: Base.Async.Environment.Environment construction rejects a null resource
+ 6/46 Test  #63: Base.Async.Environment.Environment construction rejects a null resource ........................................   Passed    0.01 sec
+      Start  64: Base.Async.Environment.Rejected environment allocation never starts a task
+ 7/46 Test  #64: Base.Async.Environment.Rejected environment allocation never starts a task .....................................   Passed    0.01 sec
+      Start  65: Base.Async.Environment.Startup snapshots context properties before queued execution
+ 8/46 Test  #65: Base.Async.Environment.Startup snapshots context properties before queued execution ............................   Passed    0.01 sec
+      Start  66: Base.Async.Environment.Context cancellation replacement preserves other environment properties
+ 9/46 Test  #66: Base.Async.Environment.Context cancellation replacement preserves other environment properties .................   Passed    0.01 sec
+      Start 122: Base.Async.TaskContext.Discarded token-free submissions deliver a terminal fault
+10/46 Test #122: Base.Async.TaskContext.Discarded token-free submissions deliver a terminal fault ...............................   Passed    0.01 sec
+      Start 123: Base.Async.TaskContext.TaskContext WithLinkedCancellationToken cancels when parent token cancels
+11/46 Test #123: Base.Async.TaskContext.TaskContext WithLinkedCancellationToken cancels when parent token cancels ...............   Passed    0.01 sec
+      Start 124: Base.Async.TaskContext.TaskContext WithLinkedCancellationToken supports chaining without losing root linkage
+12/46 Test #124: Base.Async.TaskContext.TaskContext WithLinkedCancellationToken supports chaining without losing root linkage ...   Passed    0.01 sec
+      Start 125: Base.Async.TaskContext.TaskContext rejects nonfinite delays without creating timers
+13/46 Test #125: Base.Async.TaskContext.TaskContext rejects nonfinite delays without creating timers ............................   Passed    0.01 sec
+      Start 126: Base.Async.TaskContext.Discarded cancellation-aware timers deliver a terminal fault
+14/46 Test #126: Base.Async.TaskContext.Discarded cancellation-aware timers deliver a terminal fault ............................   Passed    0.01 sec
+      Start 127: Base.Async.TaskContext.Submission handoff joins dispatch before admission returns
+15/46 Test #127: Base.Async.TaskContext.Submission handoff joins dispatch before admission returns ..............................   Passed    0.01 sec
+      Start 128: Base.Async.TaskContext.Token-free yields reuse a single admitted continuation without recursive dispatch
+16/46 Test #128: Base.Async.TaskContext.Token-free yields reuse a single admitted continuation without recursive dispatch .......   Passed    0.02 sec
+      Start 129: Base.Async.TaskContext.Discarded concurrent child and producer submissions complete their admitted parents
+17/46 Test #129: Base.Async.TaskContext.Discarded concurrent child and producer submissions complete their admitted parents .....   Passed    0.01 sec
+      Start 130: Base.Async.TaskContext.TaskContext preserves a different executor's discard delivery
+18/46 Test #130: Base.Async.TaskContext.TaskContext preserves a different executor's discard delivery ...........................   Passed    0.01 sec
+      Start 131: Base.Async.TaskContext.TaskContext rejects token-free suspension without a completion path
+19/46 Test #131: Base.Async.TaskContext.TaskContext rejects token-free suspension without a completion path .....................   Passed    0.01 sec
+      Start 132: Base.Async.TaskContext.Thread-pool shutdown retires an initial task while its worker is occupied
+20/46 Test #132: Base.Async.TaskContext.Thread-pool shutdown retires an initial task while its worker is occupied ...............   Passed    0.01 sec
+      Start 133: Base.Async.TaskContext.Thread-pool shutdown retires token-free suspended timers
+21/46 Test #133: Base.Async.TaskContext.Thread-pool shutdown retires token-free suspended timers ................................   Passed    0.01 sec
+      Start 134: Base.Async.TaskContext.Executor references compare dispatch bindings for continuation reuse
+22/46 Test #134: Base.Async.TaskContext.Executor references compare dispatch bindings for continuation reuse ....................   Passed    0.01 sec
+      Start 135: Base.Async.TaskContext.TaskContext timer delivery inlines when eligible and yields retain deferred delivery
+23/46 Test #135: Base.Async.TaskContext.TaskContext timer delivery inlines when eligible and yields retain deferred delivery ....   Passed    0.01 sec
+      Start 498: Base.IO.RuntimeLoop.Runtime loop queues submissions and preserves bounded backlog
+24/46 Test #498: Base.IO.RuntimeLoop.Runtime loop queues submissions and preserves bounded backlog ..............................   Passed    0.01 sec
+      Start 499: Base.IO.RuntimeLoop.Runtime loop rotates submissions completions and timers across tiny batches
+25/46 Test #499: Base.IO.RuntimeLoop.Runtime loop rotates submissions completions and timers across tiny batches ................   Passed    0.01 sec
+      Start 500: Base.IO.RuntimeLoop.Runtime loop binds first drive ownership and rejects reentrancy
+26/46 Test #500: Base.IO.RuntimeLoop.Runtime loop binds first drive ownership and rejects reentrancy ............................   Passed    0.01 sec
+      Start 501: Base.IO.RuntimeLoop.Runtime loop accepts reserved completion after stop and drains on its owner
+27/46 Test #501: Base.IO.RuntimeLoop.Runtime loop accepts reserved completion after stop and drains on its owner ................   Passed    0.01 sec
+      Start 502: Base.IO.RuntimeLoop.Runtime loop shutdown waits for the committed driver without taking ownership
+28/46 Test #502: Base.IO.RuntimeLoop.Runtime loop shutdown waits for the committed driver without taking ownership ..............   Passed    0.03 sec
+      Start 503: Base.IO.RuntimeLoop.Runtime loop removes canceled timer storage and recovers capacity immediately
+29/46 Test #503: Base.IO.RuntimeLoop.Runtime loop removes canceled timer storage and recovers capacity immediately ..............   Passed    0.01 sec
+      Start 504: Base.IO.RuntimeLoop.Runtime timer ownership moves and removes undispatched work on destruction
+30/46 Test #504: Base.IO.RuntimeLoop.Runtime timer ownership moves and removes undispatched work on destruction .................   Passed    0.01 sec
+      Start 505: Base.IO.RuntimeLoop.Runtime loop wakes for an earlier timer deadline
+31/46 Test #505: Base.IO.RuntimeLoop.Runtime loop wakes for an earlier timer deadline ...........................................   Passed    0.02 sec
+      Start 506: Base.IO.RuntimeLoop.Runtime delay cancellation removes its long-duration timer immediately
+32/46 Test #506: Base.IO.RuntimeLoop.Runtime delay cancellation removes its long-duration timer immediately .....................   Passed    0.01 sec
+      Start 507: Base.IO.RuntimeLoop.Runtime shutdown terminates a pending delay without an explicit cancellation token
+33/46 Test #507: Base.IO.RuntimeLoop.Runtime shutdown terminates a pending delay without an explicit cancellation token .........   Passed    0.01 sec
+      Start 508: Base.IO.RuntimeLoop.Runtime timer installation racing cancellation reaches one terminal outcome
+34/46 Test #508: Base.IO.RuntimeLoop.Runtime timer installation racing cancellation reaches one terminal outcome ................   Passed    0.02 sec
+      Start 509: Base.IO.RuntimeLoop.Runtime loop does not lose submissions racing entry into platform wait
+35/46 Test #509: Base.IO.RuntimeLoop.Runtime loop does not lose submissions racing entry into platform wait .....................   Passed    0.02 sec
+      Start 510: Base.IO.RuntimeLoop.Runtime loop rejects invalid capacities and empty submissions
+36/46 Test #510: Base.IO.RuntimeLoop.Runtime loop rejects invalid capacities and empty submissions ..............................   Passed    0.01 sec
+      Start 511: Base.IO.RuntimeLoop.Runtime loop ignores cached readiness from a retired generation
+37/46 Test #511: Base.IO.RuntimeLoop.Runtime loop ignores cached readiness from a retired generation ............................   Passed    0.01 sec
+      Start 512: Base.IO.RuntimeLoop.Runtime loop retains readiness beyond a full native event batch
+38/46 Test #512: Base.IO.RuntimeLoop.Runtime loop retains readiness beyond a full native event batch ............................   Passed    0.01 sec
+      Start 513: Base.IO.RuntimeLoop.Runtime loop rejects duplicate and excess registrations and retires them on stop
+39/46 Test #513: Base.IO.RuntimeLoop.Runtime loop rejects duplicate and excess registrations and retires them on stop ...........   Passed    0.01 sec
+      Start 514: Base.IO.RuntimeLoop.Runtime loop reserves admission without native monitoring and arms on demand
+40/46 Test #514: Base.IO.RuntimeLoop.Runtime loop reserves admission without native monitoring and arms on demand ...............   Passed    0.01 sec
+      Start 515: Base.IO.RuntimeLoop.Runtime host wakes when the final unarmed registration retires off owner
+41/46 Test #515: Base.IO.RuntimeLoop.Runtime host wakes when the final unarmed registration retires off owner ...................   Passed    0.01 sec
+      Start 516: Base.IO.RuntimeLoop.Runtime loop host descriptor signals submissions and changed timer deadlines
+42/46 Test #516: Base.IO.RuntimeLoop.Runtime loop host descriptor signals submissions and changed timer deadlines ...............   Passed    0.03 sec
+      Start 517: Base.IO.RuntimeLoop.Runtime host snapshots include native readiness and refresh after registration changes
+43/46 Test #517: Base.IO.RuntimeLoop.Runtime host snapshots include native readiness and refresh after registration changes .....   Passed    0.01 sec
+      Start 518: Base.IO.RuntimeLoop.Runtime host snapshot rejects unsupported or insufficient storage without partial output
+44/46 Test #518: Base.IO.RuntimeLoop.Runtime host snapshot rejects unsupported or insufficient storage without partial output ...   Passed    0.01 sec
+      Start 519: Base.IO.RuntimeLoop.Runtime loop rejects IOCP requests without retaining registration capacity
+45/46 Test #519: Base.IO.RuntimeLoop.Runtime loop rejects IOCP requests without retaining registration capacity .................   Passed    0.01 sec
+      Start 520: Base.IO.RuntimeLoop.Runtime PollOnce charges sequential task transfers to the batch budget
+46/46 Test #520: Base.IO.RuntimeLoop.Runtime PollOnce charges sequential task transfers to the batch budget .....................   Passed    0.01 sec
+
+100% tests passed, 0 tests failed out of 46
+
+Label Time Summary:
+Async    =   1.57 sec*proc (23 tests)
+IO       =   0.31 sec*proc (23 tests)
+
+Total Test time (real) =   1.91 sec

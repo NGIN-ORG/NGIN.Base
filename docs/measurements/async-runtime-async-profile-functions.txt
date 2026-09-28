@@ -1,0 +1,111 @@
+Functions sorted by metric: Exclusive Total CPU Time
+
+Excl. Total   Incl. Total   Incl.      Incl.       Name
+CPU           CPU           Sync Wait  Sync Wait
+ sec.      %   sec.      %    sec.     Count
+2.644 100.00  2.644 100.00  16.228     306810      <Total>
+0.806  30.47  0.806  30.47   0.             0      <static>@0x99099 (<libc.so.6>)
+0.659  24.92  0.795  30.05   0.             0      <static>@0x68305 (<libgp-collector.so>)
+0.553  20.93  0.553  20.93   0.             0      syscall
+0.100   3.77  0.100   3.77   0.             0      <static>@0x99011 (<libc.so.6>)
+0.063   2.38  0.071   2.68   0.             0      <static>@0x63fb5 (<libgp-collector.so>)
+0.059   2.22  0.059   2.22   0.             0      __vdso_clock_gettime
+0.025   0.94  0.036   1.36   0.             0      __collector_check_segment_internal
+0.021   0.79  0.021   0.79   0.             0      __collector_memcpy
+0.020   0.75  0.020   0.75   0.             0      __collector_write_packet
+0.019   0.72  0.825  31.18   0.             0      pthread_mutex_unlock
+0.017   0.64  1.828  69.12  12.174     230608      NGIN::Execution::ThreadPoolScheduler::TryRunOne(unsigned long, unsigned long&)
+0.015   0.57  0.016   0.60   0.             0      NGIN::Sync::SpinLock::Lock()
+0.015   0.57  0.115   4.34   0.             0      pthread_mutex_lock
+0.014   0.53  0.067   2.53   0.             0      clock_gettime
+0.013   0.49  0.014   0.53   0.             0      <static>@0xaab1b (<libc.so.6>)
+0.012   0.45  0.012   0.45   0.             0      <static>@0x188341 (<libc.so.6>)
+0.012   0.45  1.030  38.95   0.000         17      <static>@0x2070 (<libgp-sync.so>)
+0.012   0.45  0.015   0.57   0.             0      malloc
+0.011   0.41  0.011   0.41   0.             0      __collector_strncmp
+0.010   0.38  1.905  72.06  12.174     230609      NGIN::Utilities::Callable<void ()>::VTableFor<NGIN::Execution::ThreadPoolScheduler::ThreadPoolScheduler(unsigned long, unsigned long)::{lambda()#1}, false>::Invoke(void*)
+0.009   0.34  0.455  17.19   0.165       5491      (anonymous namespace)::Chain((anonymous namespace)::_ZN12_GLOBAL__N_1L5ChainEiRN4NGIN5Async11TaskContextEb.Frame*) [clone .actor]
+0.009   0.34  0.010   0.38   0.             0      NGIN::Execution::WorkItem::WorkItem(NGIN::Execution::WorkItem&&)
+0.009   0.34  0.358  13.54   1.807      38204      NGIN::Execution::detail::CompletionQueue::Schedule(void*)
+0.009   0.34  0.404  15.27   0.157       5349      std::__n4861::coroutine_handle<void> NGIN::Async::Task<int, NGIN::Async::NoError>::AwaitSuspend<NGIN::Async::Task<int, NGIN::Async::NoError>::promise_type>(std::__n4861::coroutine_handle<NGIN::Async::Task<int, NGIN::Async::NoError>::promise_type>)
+0.008   0.30  0.020   0.75   0.             0      (anonymous namespace)::Chain(int, NGIN::Async::TaskContext&, bool)
+0.007   0.26  0.007   0.26   0.             0      <static>@0x48a60 (<libgp-collector.so>)
+0.007   0.26  0.074   2.79   0.             0      <static>@0x49a45 (<libgp-collector.so>)
+0.007   0.26  0.801  30.28   0.             0      __collector_get_frame_info
+0.007   0.26  0.013   0.49   0.             0      __collector_tsd_get_by_key
+0.006   0.23  0.160   6.03   0.             0      NGIN::Execution::ExecutorRef::From<NGIN::Execution::ThreadPoolScheduler>(NGIN::Execution::ThreadPoolScheduler&)::{lambda(void*, NGIN::Execution::WorkItem)#1}::_FUN(void*, NGIN::Execution::WorkItem)
+0.006   0.23  1.756  66.40  12.124     229718      NGIN::Execution::detail::CompletionQueue::RunOne()
+0.006   0.23  0.584  22.10   1.630      32440      bool NGIN::Async::detail::PromiseRuntimeCommon::MarkFinishedAndResume<std::__n4861::coroutine_handle<NGIN::Async::Task<int, NGIN::Async::NoError>::promise_type> >(std::__n4861::coroutine_handle<NGIN::Async::Task<int, NGIN::Async::NoError>::promise_type>) [clone .isra.0]
+0.006   0.23  0.017   0.64   0.             0      free
+0.006   0.23  0.006   0.23   0.             0      pthread_getspecific
+0.005   0.19  0.007   0.26   0.             0      NGIN::Execution::WorkItem::operator=(NGIN::Execution::WorkItem&&) [clone .isra.0]
+0.005   0.19  0.005   0.19   0.             0      pthread_mutex_lock
+0.005   0.19  0.005   0.19   0.             0      pwrite
+0.005   0.19  0.316  11.95   0.178       5793      std::expected<void, NGIN::Execution::ScheduleError> NGIN::Async::detail::PromiseRuntimeCommon::SubmitTracked<std::__n4861::coroutine_handle<NGIN::Async::Task<int, NGIN::Async::NoError>::promise_type> >(std::__n4861::coroutine_handle<NGIN::Async::Task<int, NGIN::Async::NoError>::promise_type>, bool, NGIN::Time::TimePoint)
+0.004   0.15  0.004   0.15   0.             0      <static>@0x6ef4d (<libgp-collector.so>)
+0.004   0.15  0.013   0.49   0.             0      NGIN::Execution::ThreadPoolScheduler::WorkerQueue::TrySteal()
+0.004   0.15  0.023   0.87   0.030        555      NGIN::Execution::WorkItem::JobStorage::GetVTable<NGIN::Async::detail::PromiseRuntimeCommon::SubmissionWork<std::__n4861::coroutine_handle<NGIN::Async::Task<int, NGIN::Async::NoError>::promise_type> >, false>()::{lambda(void*)#1}::_FUN(void*)
+0.004   0.15  0.339  12.82   0.             0      NGIN::Sync::detail::AtomicConditionNotifyAll(unsigned int&)
+0.004   0.15  0.070   2.64   0.             0      NGIN::Sync::detail::AtomicConditionWait(unsigned int&, unsigned int)
+0.004   0.15  0.017   0.64   0.             0      void NGIN::Async::detail::PromiseRuntimeCommon::ReleaseFrameReference<std::__n4861::coroutine_handle<NGIN::Async::Task<int, NGIN::Async::NoError>::promise_type> >(std::__n4861::coroutine_handle<NGIN::Async::Task<int, NGIN::Async::NoError>::promise_type>)
+0.003   0.11  0.166   6.26   1.891      35013      NGIN::Execution::ExecutorRef::From<NGIN::Execution::ThreadPoolScheduler>(NGIN::Execution::ThreadPoolScheduler&)::{lambda()#1}::operator()() const::{lambda(void*, NGIN::Execution::WorkItem)#1}::_FUN(void*, NGIN::Execution::WorkItem)
+0.003   0.11  0.003   0.11   0.             0      NGIN::Execution::WorkItem::JobStorage::GetVTable<NGIN::Async::detail::PromiseRuntimeCommon::MarkFinishedAndResume<std::__n4861::coroutine_handle<NGIN::Async::Task<int, NGIN::Async::NoError>::promise_type> >(std::__n4861::coroutine_handle<NGIN::Async::Task<int, NGIN::Async::NoError>::promise_type>)::{lambda()#1}, false>()::{lambda(void*)#2}::_FUN(void*)
+0.003   0.11  0.006   0.23   0.             0      __collector_write_record
+0.002   0.08  0.002   0.08   0.             0      <static>@0x64a1e (<libgp-collector.so>)
+0.002   0.08  0.002   0.08   0.             0      <static>@0x6d3f6 (<libgp-collector.so>)
+0.002   0.08  0.233   8.82   1.977      35200      NGIN::Execution::detail::CompletionQueue::Release(void*)
+0.002   0.08  0.002   0.08   0.             0      operator delete(void*, unsigned long)
+0.002   0.08  0.013   0.49   0.             0      operator new(unsigned long)
+0.002   0.08  0.007   0.26   0.             0      operator new(unsigned long, std::align_val_t)
+0.002   0.08  0.002   0.08   0.             0      sched_yield
+0.002   0.08  0.087   3.28   0.006         97      std::expected<void, NGIN::Execution::ScheduleError> NGIN::Async::detail::PromiseRuntimeCommon::StartExecution<std::__n4861::coroutine_handle<NGIN::Async::Task<int, NGIN::Async::NoError>::promise_type> >(std::__n4861::coroutine_handle<NGIN::Async::Task<int, NGIN::Async::NoError>::promise_type>) [clone .isra.0]
+0.001   0.04  0.001   0.04   0.             0      <static>@0x1acb46 (<libstdc++.so.6.0.34>)
+0.001   0.04  0.001   0.04   0.             0      <static>@0xa8e24 (<libc.so.6>)
+0.001   0.04  0.001   0.04   0.             0      <static>@0xae180 (<libstdc++.so.6.0.34>)
+0.001   0.04  0.001   0.04   0.             0      NGIN::Execution::ThreadPoolScheduler::ThreadPoolScheduler(unsigned long, unsigned long)::{lambda(void*)#1}::_FUN(void*)
+0.001   0.04  0.001   0.04   0.             0      NGIN::Execution::WorkItem::Invoke()
+0.001   0.04  0.531  20.10   1.578      31515      NGIN::Execution::WorkItem::JobStorage::GetVTable<NGIN::Async::detail::PromiseRuntimeCommon::MarkFinishedAndResume<std::__n4861::coroutine_handle<NGIN::Async::Task<int, NGIN::Async::NoError>::promise_type> >(std::__n4861::coroutine_handle<NGIN::Async::Task<int, NGIN::Async::NoError>::promise_type>)::{lambda()#1}, false>()::{lambda(void*)#1}::_FUN(void*)
+0.001   0.04  0.537  20.32   1.579      31525      NGIN::Execution::WorkItem::JobStorage::GetVTable<NGIN::Async::detail::PromiseRuntimeCommon::ReserveExecution()::{lambda()#1}, false>()::{lambda(void*)#1}::_FUN(void*)
+0.001   0.04  0.001   0.04   0.             0      NGIN::Execution::WorkItem::JobStorage::GetVTable<NGIN::Async::detail::PromiseRuntimeCommon::ReserveExecution()::{lambda()#1}, false>()::{lambda(void*, void*)#1}::_FUN(void*, void*)
+0.001   0.04  0.001   0.04   0.             0      NGIN::Execution::WorkItem::JobStorage::GetVTable<NGIN::Async::detail::PromiseRuntimeCommon::SubmissionWork<std::__n4861::coroutine_handle<NGIN::Async::Task<int, NGIN::Async::NoError>::promise_type> >, false>()::{lambda(void*)#2}::_FUN(void*)
+0.001   0.04  0.001   0.04   0.             0      NGIN::Execution::WorkItem::JobStorage::GetVTable<NGIN::Async::detail::PromiseRuntimeCommon::SubmissionWork<std::__n4861::coroutine_handle<NGIN::Async::Task<int, NGIN::Async::NoError>::promise_type> >, false>()::{lambda(void*, void*)#1}::_FUN(void*, void*)
+0.001   0.04  0.001   0.04   0.             0      NGIN::Execution::WorkItem::~WorkItem()
+0.001   0.04  0.001   0.04   0.             0      NGIN::Memory::Shared<NGIN::Async::detail::CancellationState, NGIN::Memory::SystemAllocator>::Release()
+0.001   0.04  0.001   0.04   0.             0      __collector_gettid
+0.001   0.04  0.001   0.04   0.             0      mmap
+0.001   0.04  0.001   0.04   0.             0      operator delete(void*)
+0.001   0.04  0.005   0.19   0.             0      posix_memalign
+0.001   0.04  0.001   0.04   0.             0      sched_getcpu
+0.001   0.04  0.001   0.04   0.             0      std::_Sp_counted_ptr_inplace<NGIN::Async::TaskContext::PendingResume<NGIN::Async::Task<int, NGIN::Async::NoError>::promise_type>, std::allocator<void>, (__gnu_cxx::_Lock_policy)2>::_M_destroy()
+0.001   0.04  0.452  17.08   1.337      26779      void NGIN::Async::Task<int, NGIN::Async::NoError>::PropagateChildCompletion<NGIN::Async::Task<int, NGIN::Async::NoError>::promise_type>(std::__n4861::coroutine_handle<void>, std::__n4861::coroutine_handle<void>)
+0.      0.    0.003   0.11   0.028        555      <static>@0x2a145 (<libc.so.6>)
+0.      0.    0.006   0.23   0.             0      <static>@0x4d4db (<libgp-collector.so>)
+0.      0.    0.474  17.91   1.703      30080      <static>@0x5115c (<libgp-collector.so>)
+0.      0.    0.474  17.91   1.703      30080      <static>@0x9c526 (<libc.so.6>)
+0.      0.    0.001   0.04   0.             0      NGIN::Async::CancellationRegistration::Reset()
+0.      0.    0.003   0.11   0.027        534      NGIN::Async::Completion<int, NGIN::Async::NoError> NGIN::Async::SyncWait<int, NGIN::Async::NoError>(NGIN::Async::TaskContext&, NGIN::Async::Task<int, NGIN::Async::NoError>&&)
+0.      0.    0.003   0.11   0.027        534      NGIN::Async::Operation<int, NGIN::Async::NoError> NGIN::Async::Spawn<int, NGIN::Async::NoError>(NGIN::Async::TaskContext&, NGIN::Async::Task<int, NGIN::Async::NoError>&&)
+0.      0.    0.474  17.91   1.703      30080      NGIN::Execution::(anonymous namespace)::ThreadProc(void*)
+0.      0.    0.002   0.08   0.             0      NGIN::Execution::ExecutorRef::Execute(NGIN::Execution::WorkItem) const
+0.      0.    0.      0.     0.000          2      NGIN::Execution::ExecutorRef::From<NGIN::IO::detail::RuntimeLoop>(NGIN::IO::detail::RuntimeLoop&)::{lambda()#1}::operator()() const::{lambda(void*, NGIN::Execution::WorkItem)#1}::_FUN(void*, NGIN::Execution::WorkItem)
+0.      0.    0.001   0.04   0.000         13      NGIN::Execution::ExecutorRef::From<NGIN::IO::detail::RuntimeLoop>(NGIN::IO::detail::RuntimeLoop&)::{lambda(void*, NGIN::Execution::WorkItem)#1}::_FUN(void*, NGIN::Execution::WorkItem)
+0.      0.    0.      0.     0.000          3      NGIN::Execution::Thread::Join()
+0.      0.    0.001   0.04   0.             0      NGIN::Execution::ThreadPoolScheduler::WorkerQueue::Push(NGIN::Execution::WorkItem&&)
+0.      0.    0.      0.     0.000          3      NGIN::Execution::ThreadPoolScheduler::~ThreadPoolScheduler()
+0.      0.    0.008   0.30   0.019        335      NGIN::Execution::WorkItem::JobStorage::GetVTable<NGIN::Async::TaskContext::ScheduleAwait<NGIN::Async::Task<int, NGIN::Async::NoError>::promise_type>(std::__n4861::coroutine_handle<NGIN::Async::Task<int, NGIN::Async::NoError>::promise_type>, NGIN::Execution::ExecutorRef, NGIN::Async::CancellationToken, bool, NGIN::Time::TimePoint)::ReadySignal, false>()::{lambda(void*)#1}::_FUN(void*)
+0.      0.    0.010   0.38   0.013        225      NGIN::Execution::WorkItem::JobStorage::GetVTable<NGIN::Async::TaskContext::ScheduleAwait<NGIN::Async::Task<int, NGIN::Async::NoError>::promise_type>(std::__n4861::coroutine_handle<NGIN::Async::Task<int, NGIN::Async::NoError>::promise_type>, NGIN::Execution::ExecutorRef, NGIN::Async::CancellationToken, bool, NGIN::Time::TimePoint)::{lambda()#1}, false>()::{lambda(void*)#1}::_FUN(void*)
+0.      0.    0.      0.     0.000         10      NGIN::Execution::WorkItem::JobStorage::GetVTable<NGIN::Async::detail::PromiseRuntimeCommon::QueueSubmissionResult<std::__n4861::coroutine_handle<NGIN::Async::Task<int, NGIN::Async::NoError>::promise_type> >(std::__n4861::coroutine_handle<NGIN::Async::Task<int, NGIN::Async::NoError>::promise_type>, bool)::{lambda()#1}, false>()::{lambda(void*)#1}::_FUN(void*)
+0.      0.    0.005   0.19   0.019        342      NGIN::Execution::detail::CompletionQueue::Publish(void*)
+0.      0.    0.001   0.04   0.001         70      NGIN::IO::detail::RuntimeLoop::Impl::Batch()
+0.      0.    0.      0.     0.000         18      NGIN::IO::detail::RuntimeLoop::PollOnce()
+0.      0.    0.153   5.77   0.             0      NGIN::Sync::detail::AtomicConditionNotifyOne(unsigned int&)
+0.      0.    0.003   0.11   0.             0      __collector_allocCSize
+0.      0.    0.001   0.04   0.             0      __collector_ext_hwc_lwp_init
+0.      0.    0.001   0.04   0.             0      __collector_get_hwcdrv
+0.      0.    0.003   0.11   0.028        555      __libc_start_main
+0.      0.    0.003   0.11   0.028        555      main
+0.      0.    0.003   0.11   0.027        534      main::{lambda()#2}::operator()() const
+0.      0.    0.      0.     0.000          1      main::{lambda()#9}::operator()() const
+0.      0.    0.013   0.49   0.008        142      std::__n4861::coroutine_handle<void> NGIN::Async::TaskContext::ScheduleAwait<NGIN::Async::Task<int, NGIN::Async::NoError>::promise_type>(std::__n4861::coroutine_handle<NGIN::Async::Task<int, NGIN::Async::NoError>::promise_type>, NGIN::Execution::ExecutorRef, NGIN::Async::CancellationToken, bool, NGIN::Time::TimePoint)
+0.      0.    0.      0.     0.000         17      void (anonymous namespace)::Measure<main::{lambda()#7}>(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, main::{lambda()#7}&&)
+

@@ -1,0 +1,21 @@
+Internal ctest changing into directory: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/tests
+Test project /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/tests
+    Start 71: Base.Async.ExecutorTransitions.Executor transitions deliver every outcome without restoring the original executor
+1/6 Test #71: Base.Async.ExecutorTransitions.Executor transitions deliver every outcome without restoring the original executor ...   Passed    0.00 sec
+    Start 72: Base.Async.ExecutorTransitions.Rejected transition admission never enters the child
+2/6 Test #72: Base.Async.ExecutorTransitions.Rejected transition admission never enters the child .................................   Passed    0.00 sec
+    Start 73: Base.Async.ExecutorTransitions.Ready void transitions preserve all terminal outcomes
+3/6 Test #73: Base.Async.ExecutorTransitions.Ready void transitions preserve all terminal outcomes ................................   Passed    0.00 sec
+    Start 74: Base.Async.ExecutorTransitions.ContinuesOn uses its admitted terminal slot after admission closes
+4/6 Test #74: Base.Async.ExecutorTransitions.ContinuesOn uses its admitted terminal slot after admission closes ...................   Passed    0.00 sec
+    Start 75: Base.Async.ExecutorTransitions.Executor transitions retain placement across concurrent worker deliveries
+5/6 Test #75: Base.Async.ExecutorTransitions.Executor transitions retain placement across concurrent worker deliveries ............   Passed    0.18 sec
+    Start 76: Base.Async.ExecutorTransitions.ContinuesOn delivers a throwing terminal result move as a fault on its target
+6/6 Test #76: Base.Async.ExecutorTransitions.ContinuesOn delivers a throwing terminal result move as a fault on its target ........   Passed    0.00 sec
+
+100% tests passed, 0 tests failed out of 6
+
+Label Time Summary:
+Async    =   0.19 sec*proc (6 tests)
+
+Total Test time (real) =   0.22 sec

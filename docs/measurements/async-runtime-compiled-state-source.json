@@ -1,0 +1,26 @@
+{
+  "date_utc": "2026-09-12T22:38:53.861057+00:00",
+  "base_revision": "b44612eb896ab013463876e22a40e221a4fd8c5f",
+  "inputs": {
+    "include/NGIN/Async/Task.hpp": "ea875da1d5aaf89c7474290c5884b80e6d161c9ef45dce54484af2cc8d3e55d5",
+    "include/NGIN/Async/TaskContext.hpp": "77e5743b8fbdbb97abec3583bcbf4e4337c0650d1ce1b6da1483129879b0261f",
+    "include/NGIN/Async/TaskScope.hpp": "ccaee576fc10b7872d02ee7c7652965a7ac8c389245ce99445e73610f5aa2759",
+    "include/NGIN/Async/WhenAny.hpp": "90e916dd947890ae0a5b8d80d5d2657e19af74e82d56d5bb0161ffcbd9d73c46",
+    "include/NGIN/Async/AsyncGenerator.hpp": "207acf4db90edada90243d22f533bc97f5de1dac2f758f52eb53e5bbe799bcb9",
+    "include/NGIN/Execution/CooperativeScheduler.hpp": "f21173f04cf2c4982db5dfe51a0ce7a017267e83a2fc8de9f653ec797c59eea7",
+    "include/NGIN/Execution/ThreadPoolScheduler.hpp": "ec9eb5d3db5dcbaea7be89b337ff03f41bb0f4258f4ebd510a23f9f44312aeb5",
+    "src/NGIN/IO/FileOperationGate.hpp": "613d229b66de44a12fc7562cc32b802915ba471b63ce68c67fd4872903949fc5",
+    "tests/Async/Sequential.cpp": "26b50fb30405b16ade78821101db7bb50bc04fcf74ca70a9c31c10cd3de5f501",
+    "tests/Async/TaskContext.cpp": "2a52796572a0e5b40742f883b305ef236c7c4493ed3a256fe5d19c740da209fe",
+    "benchmarks/AsyncRuntimeBenchmarks.cpp": "99b551af976bac25cbeb2a288bbf5652aeb860ec95e9e549164557f483972722",
+    "benchmarks/CMakeLists.txt": "0af6bbcfc8665d8c1833698c16f4e447a366dced0d57fc026667d83b8ae11330",
+    "tests/Async/Ready.cpp": "4adc8bf4205669bd00e7f977c98f86fd696b1aa885a8c76ac00d6b3653790de1",
+    "include/NGIN/Async/detail/TaskExecutionState.hpp": "ecc8f33697cde7814f1c80f6819425a72e6933553a150a0f403b716e1401e4d5",
+    "src/NGIN/Async/TaskExecutionState.cpp": "101510900b4f8c0312bb21b27735ed9592c71ea69f9ffeb382c15c6b161247ab",
+    "cmake/NGINBaseSources.cmake": "24fae35277d199b5f8ca4dd2ce8d1bb90ff4192b1d00e1d7448dacf4aa40690c",
+    "tests/PackageConsumer/main.cc": "1c2075376ef0f317e1c7a4a20b2b899784cf6eec495867ce8ef468445df8b36f",
+    "tests/Async/Task.cpp": "9c5bab614a808b875a48918f21dab829a7fb43e22f148d66b94c3426d27de20d"
+  },
+  "archive_sha256": "df1a6d8ed50fe9efa316ebababcc569c41317139dd090142c7342ef691e5e9ab",
+  "status": "T05 compiled sequential/concurrent state and inline ready results; Stage 1 environment, transitions, and fairness work remain"
+}

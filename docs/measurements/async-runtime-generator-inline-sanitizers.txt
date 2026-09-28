@@ -1,0 +1,39 @@
+Internal ctest changing into directory: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/tests-asan
+Test project /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/tests-asan
+      Start 24: Base.Async.AsyncGenerator.AsyncGenerator yields values via Next(TaskContext)
+ 1/15 Test #24: Base.Async.AsyncGenerator.AsyncGenerator yields values via Next(TaskContext) .....................................   Passed    0.01 sec
+      Start 25: Base.Async.AsyncGenerator.AsyncGenerator propagates exceptions from producer
+ 2/15 Test #25: Base.Async.AsyncGenerator.AsyncGenerator propagates exceptions from producer .....................................   Passed    0.01 sec
+      Start 26: Base.Async.AsyncGenerator.AsyncGenerator Next observes TaskContext cancellation
+ 3/15 Test #26: Base.Async.AsyncGenerator.AsyncGenerator Next observes TaskContext cancellation ..................................   Passed    0.01 sec
+      Start 27: Base.Async.AsyncGenerator.AsyncGenerator faults concurrent Next consumers
+ 4/15 Test #27: Base.Async.AsyncGenerator.AsyncGenerator faults concurrent Next consumers ........................................   Passed    0.01 sec
+      Start 28: Base.Async.AsyncGenerator.AsyncGenerator cancellation joins queued producer access
+ 5/15 Test #28: Base.Async.AsyncGenerator.AsyncGenerator cancellation joins queued producer access ...............................   Passed    0.01 sec
+      Start 29: Base.Async.AsyncGenerator.AsyncGenerator Next retains producer ownership across moves and destruction
+ 6/15 Test #29: Base.Async.AsyncGenerator.AsyncGenerator Next retains producer ownership across moves and destruction ............   Passed    0.01 sec
+      Start 30: Base.Async.AsyncGenerator.AsyncGenerator advances and resumes its consumer on their selected executors
+ 7/15 Test #30: Base.Async.AsyncGenerator.AsyncGenerator advances and resumes its consumer on their selected executors ...........   Passed    0.01 sec
+      Start 31: Base.Async.AsyncGenerator.AsyncGenerator preserves reserved consumer delivery after admission closes
+ 8/15 Test #31: Base.Async.AsyncGenerator.AsyncGenerator preserves reserved consumer delivery after admission closes .............   Passed    0.01 sec
+      Start 32: Base.Async.AsyncGenerator.AsyncGenerator rejects failed producer admission before entering its body
+ 9/15 Test #32: Base.Async.AsyncGenerator.AsyncGenerator rejects failed producer admission before entering its body ..............   Passed    0.01 sec
+      Start 33: Base.Async.AsyncGenerator.AsyncGenerator cancellation waits for uncancelable producer suspension
+10/15 Test #33: Base.Async.AsyncGenerator.AsyncGenerator cancellation waits for uncancelable producer suspension .................   Passed    0.01 sec
+      Start 34: Base.Async.AsyncGenerator.AsyncGenerator supports concurrent executor delivery across repeated advances
+11/15 Test #34: Base.Async.AsyncGenerator.AsyncGenerator supports concurrent executor delivery across repeated advances ..........   Passed    0.39 sec
+      Start 35: Base.Async.AsyncGenerator.AsyncGenerator joins Operation delivery on its reserved producer continuation
+12/15 Test #35: Base.Async.AsyncGenerator.AsyncGenerator joins Operation delivery on its reserved producer continuation ..........   Passed    0.01 sec
+      Start 36: Base.Async.AsyncGenerator.AsyncGenerator empty and abandoned cold advances need no execution lifetime
+13/15 Test #36: Base.Async.AsyncGenerator.AsyncGenerator empty and abandoned cold advances need no execution lifetime ............   Passed    0.01 sec
+      Start 37: Base.Async.AsyncGenerator.AsyncGenerator retires owned canceled producers under concurrent delivery
+14/15 Test #37: Base.Async.AsyncGenerator.AsyncGenerator retires owned canceled producers under concurrent delivery ..............   Passed    0.33 sec
+      Start 38: Base.Async.AsyncGenerator.AsyncGenerator delivers published boundaries inline or through its reserved fallback
+15/15 Test #38: Base.Async.AsyncGenerator.AsyncGenerator delivers published boundaries inline or through its reserved fallback ...   Passed    0.01 sec
+
+100% tests passed, 0 tests failed out of 15
+
+Label Time Summary:
+Async    =   0.85 sec*proc (15 tests)
+
+Total Test time (real) =   0.88 sec

@@ -1,0 +1,54 @@
+--- a/include/NGIN/Async/Cancellation.hpp
++++ b/include/NGIN/Async/Cancellation.hpp
+@@ -32,6 +32,9 @@
+     {
+         struct CancellationState;
+         struct CancellationNode;
++#ifdef NGIN_ASYNC_MEASURE_REGISTRATIONS
++        inline std::atomic<std::size_t> s_registrationNodes {0};
++#endif
+     }// namespace detail
+ 
+     /// @brief Callback invoked once when a cancellation registration fires.
+@@ -395,6 +398,9 @@
+         {
+             node = std::allocate_shared<detail::CancellationNode>(
+                     std::pmr::polymorphic_allocator<detail::CancellationNode> {state->resource});
++#ifdef NGIN_ASYNC_MEASURE_REGISTRATIONS
++            detail::s_registrationNodes.fetch_add(1, std::memory_order_relaxed);
++#endif
+             node->callback        = callback;
+             node->callbackContext = callbackCtx;
+             if (wantsResume)
+--- a/benchmarks/AsyncRuntimeBenchmarks.cpp
++++ b/benchmarks/AsyncRuntimeBenchmarks.cpp
+@@ -117,6 +117,9 @@
+ #ifdef NGIN_ASYNC_MEASURE_ALLOCATIONS
+         const auto before = Benchmarks::Allocations::Snapshot();
+ #endif
++#ifdef NGIN_ASYNC_MEASURE_REGISTRATIONS
++        const std::size_t registrationsBefore = Async::detail::s_registrationNodes.load();
++#endif
+         for (int i = 0; i < samples; ++i)
+         {
+             const auto start = Clock::now();
+@@ -125,6 +128,9 @@
+         }
+ #ifdef NGIN_ASYNC_MEASURE_ALLOCATIONS
+         const auto after = Benchmarks::Allocations::Snapshot();
++#endif
++#ifdef NGIN_ASYNC_MEASURE_REGISTRATIONS
++        const std::size_t registrationsAfter = Async::detail::s_registrationNodes.load();
+ #endif
+         double total = 0;
+         for (double time: times)
+@@ -136,6 +142,9 @@
+ #ifdef NGIN_ASYNC_MEASURE_ALLOCATIONS
+         std::cout << " allocations_per_sample=" << double(after.totalCount - before.totalCount) / samples
+                   << " bytes_per_sample=" << double(after.totalBytes - before.totalBytes) / samples;
++#endif
++#ifdef NGIN_ASYNC_MEASURE_REGISTRATIONS
++        std::cout << " registration_nodes_per_sample=" << double(registrationsAfter - registrationsBefore) / samples;
+ #endif
+         std::cout << '\n';
+     }

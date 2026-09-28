@@ -1,0 +1,69 @@
+Internal ctest changing into directory: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/tests-asan
+Test project /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/tests-asan
+      Start 122: Base.Async.TaskContext.Discarded token-free submissions deliver a terminal fault
+ 1/29 Test #122: Base.Async.TaskContext.Discarded token-free submissions deliver a terminal fault ............................................   Passed    0.01 sec
+      Start 123: Base.Async.TaskContext.TaskContext WithLinkedCancellationToken cancels when parent token cancels
+ 2/29 Test #123: Base.Async.TaskContext.TaskContext WithLinkedCancellationToken cancels when parent token cancels ............................   Passed    0.01 sec
+      Start 124: Base.Async.TaskContext.TaskContext WithLinkedCancellationToken supports chaining without losing root linkage
+ 3/29 Test #124: Base.Async.TaskContext.TaskContext WithLinkedCancellationToken supports chaining without losing root linkage ................   Passed    0.01 sec
+      Start 125: Base.Async.TaskContext.TaskContext rejects nonfinite delays without creating timers
+ 4/29 Test #125: Base.Async.TaskContext.TaskContext rejects nonfinite delays without creating timers .........................................   Passed    0.01 sec
+      Start 126: Base.Async.TaskContext.Discarded cancellation-aware timers deliver a terminal fault
+ 5/29 Test #126: Base.Async.TaskContext.Discarded cancellation-aware timers deliver a terminal fault .........................................   Passed    0.01 sec
+      Start 127: Base.Async.TaskContext.Submission handoff joins dispatch before admission returns
+ 6/29 Test #127: Base.Async.TaskContext.Submission handoff joins dispatch before admission returns ...........................................   Passed    0.01 sec
+      Start 128: Base.Async.TaskContext.Token-free yields reuse a single admitted continuation without recursive dispatch
+ 7/29 Test #128: Base.Async.TaskContext.Token-free yields reuse a single admitted continuation without recursive dispatch ....................   Passed    0.02 sec
+      Start 129: Base.Async.TaskContext.Discarded concurrent child and producer submissions complete their admitted parents
+ 8/29 Test #129: Base.Async.TaskContext.Discarded concurrent child and producer submissions complete their admitted parents ..................   Passed    0.01 sec
+      Start 130: Base.Async.TaskContext.TaskContext preserves a different executor's discard delivery
+ 9/29 Test #130: Base.Async.TaskContext.TaskContext preserves a different executor's discard delivery ........................................   Passed    0.01 sec
+      Start 131: Base.Async.TaskContext.TaskContext rejects token-free suspension without a completion path
+10/29 Test #131: Base.Async.TaskContext.TaskContext rejects token-free suspension without a completion path ..................................   Passed    0.01 sec
+      Start 132: Base.Async.TaskContext.Thread-pool shutdown retires an initial task while its worker is occupied
+11/29 Test #132: Base.Async.TaskContext.Thread-pool shutdown retires an initial task while its worker is occupied ............................   Passed    0.01 sec
+      Start 133: Base.Async.TaskContext.Thread-pool shutdown retires token-free suspended timers
+12/29 Test #133: Base.Async.TaskContext.Thread-pool shutdown retires token-free suspended timers .............................................   Passed    0.01 sec
+      Start 134: Base.Async.TaskContext.Executor references compare dispatch bindings for continuation reuse
+13/29 Test #134: Base.Async.TaskContext.Executor references compare dispatch bindings for continuation reuse .................................   Passed    0.01 sec
+      Start 391: Base.Execution.CooperativeScheduler.CooperativeScheduler executes ready work
+14/29 Test #391: Base.Execution.CooperativeScheduler.CooperativeScheduler executes ready work ................................................   Passed    0.01 sec
+      Start 392: Base.Execution.CooperativeScheduler.CooperativeScheduler executes timers up to a given timepoint
+15/29 Test #392: Base.Execution.CooperativeScheduler.CooperativeScheduler executes timers up to a given timepoint ............................   Passed    0.01 sec
+      Start 393: Base.Execution.CooperativeScheduler.CooperativeScheduler rotates continuously runnable completion timer and ready sources
+16/29 Test #393: Base.Execution.CooperativeScheduler.CooperativeScheduler rotates continuously runnable completion timer and ready sources ...   Passed    0.01 sec
+      Start 394: Base.Execution.CooperativeScheduler.CooperativeScheduler preserves FIFO order across consumed prefix reuse
+17/29 Test #394: Base.Execution.CooperativeScheduler.CooperativeScheduler preserves FIFO order across consumed prefix reuse ..................   Passed    0.01 sec
+      Start 395: Base.Execution.CooperativeScheduler.CooperativeScheduler bounds recursive pumps and leaves deferred work runnable
+18/29 Test #395: Base.Execution.CooperativeScheduler.CooperativeScheduler bounds recursive pumps and leaves deferred work runnable ...........   Passed    0.01 sec
+      Start 396: Base.Execution.CooperativeScheduler.CooperativeScheduler nested dispatch shares the enclosing work allowance
+19/29 Test #396: Base.Execution.CooperativeScheduler.CooperativeScheduler nested dispatch shares the enclosing work allowance ................   Passed    0.01 sec
+      Start 397: Base.Execution.CooperativeScheduler.Cooperative timer cancellation releases captures outside the timer lock
+20/29 Test #397: Base.Execution.CooperativeScheduler.Cooperative timer cancellation releases captures outside the timer lock .................   Passed    0.01 sec
+      Start 398: Base.Execution.CooperativeScheduler.Cooperative timer registration preserves other deadlines when removed
+21/29 Test #398: Base.Execution.CooperativeScheduler.Cooperative timer registration preserves other deadlines when removed ...................   Passed    0.01 sec
+      Start 666: Base.Net.Resolve.Net.Resolve resolves numeric loopback without external network access
+22/29 Test #666: Base.Net.Resolve.Net.Resolve resolves numeric loopback without external network access ......................................   Passed    0.01 sec
+      Start 667: Base.Net.Resolve.Net.Resolve applies address-family filters and preserves resolver diagnostics
+23/29 Test #667: Base.Net.Resolve.Net.Resolve applies address-family filters and preserves resolver diagnostics ..............................   Passed    0.01 sec
+      Start 668: Base.Net.Resolve.Net.Resolve async work uses its explicit driver and caller executor
+24/29 Test #668: Base.Net.Resolve.Net.Resolve async work uses its explicit driver and caller executor ........................................   Passed    0.01 sec
+      Start 669: Base.Net.Resolve.Net.Resolve async cancellation and timeout complete without waiting for lookup
+25/29 Test #669: Base.Net.Resolve.Net.Resolve async cancellation and timeout complete without waiting for lookup .............................   Passed    0.01 sec
+      Start 670: Base.Net.Resolve.Net.Resolve retires timeout capacity before delivering successful results
+26/29 Test #670: Base.Net.Resolve.Net.Resolve retires timeout capacity before delivering successful results ..................................   Passed    0.02 sec
+      Start 671: Base.Net.Resolve.Net.Resolve uses reserved delivery after ordinary executor admission closes
+27/29 Test #671: Base.Net.Resolve.Net.Resolve uses reserved delivery after ordinary executor admission closes ................................   Passed    0.01 sec
+      Start 672: Base.Net.Resolve.Net.Resolve cancellation racing setup publishes once on the selected executor
+28/29 Test #672: Base.Net.Resolve.Net.Resolve cancellation racing setup publishes once on the selected executor ..............................   Passed    0.04 sec
+      Start 673: Base.Net.Resolve.Net.Resolve supports cooperative timed delivery and retires its timer
+29/29 Test #673: Base.Net.Resolve.Net.Resolve supports cooperative timed delivery and retires its timer ......................................   Passed    0.01 sec
+
+100% tests passed, 0 tests failed out of 29
+
+Label Time Summary:
+Async        =   0.15 sec*proc (13 tests)
+Execution    =   0.08 sec*proc (8 tests)
+Net          =   0.12 sec*proc (8 tests)
+
+Total Test time (real) =   0.39 sec

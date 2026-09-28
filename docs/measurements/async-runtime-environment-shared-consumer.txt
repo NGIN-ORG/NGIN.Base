@@ -1,0 +1,8 @@
+Internal ctest changing into directory: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/consumer
+Test project /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/async-runtime-shared/consumer
+    Start 1: NGINBasePackageConsumer.Run
+1/1 Test #1: NGINBasePackageConsumer.Run ......   Passed    0.00 sec
+
+100% tests passed, 0 tests failed out of 1
+
+Total Test time (real) =   0.00 sec

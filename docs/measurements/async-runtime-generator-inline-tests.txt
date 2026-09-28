@@ -1,0 +1,796 @@
+Internal ctest changing into directory: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/tests
+Test project /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/tests
+        Start  25: Base.Async.AsyncGenerator.AsyncGenerator yields values via Next(TaskContext)
+  1/388 Test  #25: Base.Async.AsyncGenerator.AsyncGenerator yields values via Next(TaskContext) ................................................   Passed    0.00 sec
+        Start  26: Base.Async.AsyncGenerator.AsyncGenerator propagates exceptions from producer
+  2/388 Test  #26: Base.Async.AsyncGenerator.AsyncGenerator propagates exceptions from producer ................................................   Passed    0.00 sec
+        Start  27: Base.Async.AsyncGenerator.AsyncGenerator Next observes TaskContext cancellation
+  3/388 Test  #27: Base.Async.AsyncGenerator.AsyncGenerator Next observes TaskContext cancellation .............................................   Passed    0.00 sec
+        Start  28: Base.Async.AsyncGenerator.AsyncGenerator faults concurrent Next consumers
+  4/388 Test  #28: Base.Async.AsyncGenerator.AsyncGenerator faults concurrent Next consumers ...................................................   Passed    0.00 sec
+        Start  29: Base.Async.AsyncGenerator.AsyncGenerator cancellation joins queued producer access
+  5/388 Test  #29: Base.Async.AsyncGenerator.AsyncGenerator cancellation joins queued producer access ..........................................   Passed    0.00 sec
+        Start  30: Base.Async.AsyncGenerator.AsyncGenerator Next retains producer ownership across moves and destruction
+  6/388 Test  #30: Base.Async.AsyncGenerator.AsyncGenerator Next retains producer ownership across moves and destruction .......................   Passed    0.00 sec
+        Start  31: Base.Async.AsyncGenerator.AsyncGenerator advances and resumes its consumer on their selected executors
+  7/388 Test  #31: Base.Async.AsyncGenerator.AsyncGenerator advances and resumes its consumer on their selected executors ......................   Passed    0.00 sec
+        Start  32: Base.Async.AsyncGenerator.AsyncGenerator preserves reserved consumer delivery after admission closes
+  8/388 Test  #32: Base.Async.AsyncGenerator.AsyncGenerator preserves reserved consumer delivery after admission closes ........................   Passed    0.00 sec
+        Start  33: Base.Async.AsyncGenerator.AsyncGenerator rejects failed producer admission before entering its body
+  9/388 Test  #33: Base.Async.AsyncGenerator.AsyncGenerator rejects failed producer admission before entering its body .........................   Passed    0.00 sec
+        Start  34: Base.Async.AsyncGenerator.AsyncGenerator cancellation waits for uncancelable producer suspension
+ 10/388 Test  #34: Base.Async.AsyncGenerator.AsyncGenerator cancellation waits for uncancelable producer suspension ............................   Passed    0.00 sec
+        Start  35: Base.Async.AsyncGenerator.AsyncGenerator supports concurrent executor delivery across repeated advances
+ 11/388 Test  #35: Base.Async.AsyncGenerator.AsyncGenerator supports concurrent executor delivery across repeated advances .....................   Passed    0.22 sec
+        Start  36: Base.Async.AsyncGenerator.AsyncGenerator joins Operation delivery on its reserved producer continuation
+ 12/388 Test  #36: Base.Async.AsyncGenerator.AsyncGenerator joins Operation delivery on its reserved producer continuation .....................   Passed    0.00 sec
+        Start  37: Base.Async.AsyncGenerator.AsyncGenerator empty and abandoned cold advances need no execution lifetime
+ 13/388 Test  #37: Base.Async.AsyncGenerator.AsyncGenerator empty and abandoned cold advances need no execution lifetime .......................   Passed    0.00 sec
+        Start  38: Base.Async.AsyncGenerator.AsyncGenerator retires owned canceled producers under concurrent delivery
+ 14/388 Test  #38: Base.Async.AsyncGenerator.AsyncGenerator retires owned canceled producers under concurrent delivery .........................   Passed    0.17 sec
+        Start  39: Base.Async.AsyncGenerator.AsyncGenerator delivers published boundaries inline or through its reserved fallback
+ 15/388 Test  #39: Base.Async.AsyncGenerator.AsyncGenerator delivers published boundaries inline or through its reserved fallback ..............   Passed    0.00 sec
+        Start  40: Base.Async.Cancellation.CreateLinkedCancellationSource cancels when any input cancels
+ 16/388 Test  #40: Base.Async.Cancellation.CreateLinkedCancellationSource cancels when any input cancels .......................................   Passed    0.00 sec
+        Start  41: Base.Async.Cancellation.Linked cancellation token wakes Delay
+ 17/388 Test  #41: Base.Async.Cancellation.Linked cancellation token wakes Delay ...............................................................   Passed    0.00 sec
+        Start  42: Base.Async.Cancellation.CancelAfter schedules cancellation via executor
+ 18/388 Test  #42: Base.Async.Cancellation.CancelAfter schedules cancellation via executor .....................................................   Passed    0.00 sec
+        Start  43: Base.Async.Cancellation.Cancellation registration remains stable when its handle moves
+ 19/388 Test  #43: Base.Async.Cancellation.Cancellation registration remains stable when its handle moves ......................................   Passed    0.00 sec
+        Start  44: Base.Async.Cancellation.Cancellation callback can reset its own registration
+ 20/388 Test  #44: Base.Async.Cancellation.Cancellation callback can reset its own registration ................................................   Passed    0.00 sec
+        Start  45: Base.Async.Cancellation.Cancellation reset waits for an in-flight callback on another thread
+ 21/388 Test  #45: Base.Async.Cancellation.Cancellation reset waits for an in-flight callback on another thread ................................   Passed    0.00 sec
+        Start  46: Base.Async.Cancellation.Cancellation reset before firing prevents callback invocation
+ 22/388 Test  #46: Base.Async.Cancellation.Cancellation reset before firing prevents callback invocation .......................................   Passed    0.00 sec
+        Start  47: Base.Async.Cancellation.Cancellation registration reports node allocation failure
+ 23/388 Test  #47: Base.Async.Cancellation.Cancellation registration reports node allocation failure ...........................................   Passed    0.00 sec
+        Start  48: Base.Async.Cancellation.Cancellation can destroy a registration owner while registration returns
+ 24/388 Test  #48: Base.Async.Cancellation.Cancellation can destroy a registration owner while registration returns ............................   Passed    0.03 sec
+        Start  49: Base.Async.Cancellation.Cancellation reserves continuation delivery before firing
+ 25/388 Test  #49: Base.Async.Cancellation.Cancellation reserves continuation delivery before firing ...........................................   Passed    0.00 sec
+        Start  50: Base.Async.Cancellation.Cancellation releases unused continuation reservations
+ 26/388 Test  #50: Base.Async.Cancellation.Cancellation releases unused continuation reservations ..............................................   Passed    0.00 sec
+        Start  51: Base.Async.Cancellation.Cancellation rejects unavailable continuation storage before publishing callbacks
+ 27/388 Test  #51: Base.Async.Cancellation.Cancellation rejects unavailable continuation storage before publishing callbacks ...................   Passed    0.00 sec
+        Start  52: Base.Async.Cancellation.Cancellation continuation admission is inert for an empty token
+ 28/388 Test  #52: Base.Async.Cancellation.Cancellation continuation admission is inert for an empty token .....................................   Passed    0.00 sec
+        Start  53: Base.Async.Cancellation.Concurrent cancellation and reset retire continuation storage exactly once
+ 29/388 Test  #53: Base.Async.Cancellation.Concurrent cancellation and reset retire continuation storage exactly once ..........................   Passed    0.03 sec
+        Start  54: Base.Async.Cancellation.Cancellation delivers an admitted continuation while its thread pool drains
+ 30/388 Test  #54: Base.Async.Cancellation.Cancellation delivers an admitted continuation while its thread pool drains .........................   Passed    0.00 sec
+        Start  55: Base.Async.ChildLifetime.Canceling a task wait joins child work before publishing parent cancellation
+ 31/388 Test  #55: Base.Async.ChildLifetime.Canceling a task wait joins child work before publishing parent cancellation .......................   Passed    0.00 sec
+        Start  56: Base.Async.ChildLifetime.An already canceled task wait does not start a cold child
+ 32/388 Test  #56: Base.Async.ChildLifetime.An already canceled task wait does not start a cold child ..........................................   Passed    0.00 sec
+        Start  57: Base.Async.ChildLifetime.Nested canceled tasks retire child locals before their borrowed parent locals
+ 33/388 Test  #57: Base.Async.ChildLifetime.Nested canceled tasks retire child locals before their borrowed parent locals ......................   Passed    0.90 sec
+        Start  58: Base.Async.ChildLifetime.Operation awaits release canceled child locals before normal parent return
+ 34/388 Test  #58: Base.Async.ChildLifetime.Operation awaits release canceled child locals before normal parent return .........................   Passed    0.00 sec
+        Start  59: Base.Async.CompletionAwait.AsCompletion returns every terminal outcome without failing its parent
+ 35/388 Test  #59: Base.Async.CompletionAwait.AsCompletion returns every terminal outcome without failing its parent ...........................   Passed    0.00 sec
+        Start  60: Base.Async.CompletionAwait.AsCompletion waits for frame retirement before returning any outcome
+ 36/388 Test  #60: Base.Async.CompletionAwait.AsCompletion waits for frame retirement before returning any outcome .............................   Passed    0.00 sec
+        Start  61: Base.Async.ContinueWith.Operation co_await exposes child fault as completion
+ 37/388 Test  #61: Base.Async.ContinueWith.Operation co_await exposes child fault as completion ................................................   Passed    0.00 sec
+        Start  62: Base.Async.ContinueWith.Operation co_await exposes child success
+ 38/388 Test  #62: Base.Async.ContinueWith.Operation co_await exposes child success ............................................................   Passed    0.00 sec
+        Start  63: Base.Async.ContinueWith.Operation co_await is woken by cancellation
+ 39/388 Test  #63: Base.Async.ContinueWith.Operation co_await is woken by cancellation .........................................................   Passed    0.00 sec
+        Start  64: Base.Async.Environment.Nested tasks preserve an environment across suspension
+ 40/388 Test  #64: Base.Async.Environment.Nested tasks preserve an environment across suspension ...............................................   Passed    0.00 sec
+        Start  65: Base.Async.Environment.Environment construction rejects a null resource
+ 41/388 Test  #65: Base.Async.Environment.Environment construction rejects a null resource .....................................................   Passed    0.00 sec
+        Start  66: Base.Async.Environment.Rejected environment allocation never starts a task
+ 42/388 Test  #66: Base.Async.Environment.Rejected environment allocation never starts a task ..................................................   Passed    0.00 sec
+        Start  67: Base.Async.Environment.Startup snapshots context properties before queued execution
+ 43/388 Test  #67: Base.Async.Environment.Startup snapshots context properties before queued execution .........................................   Passed    0.00 sec
+        Start  68: Base.Async.Environment.Context cancellation replacement preserves other environment properties
+ 44/388 Test  #68: Base.Async.Environment.Context cancellation replacement preserves other environment properties ..............................   Passed    0.00 sec
+        Start  69: Base.Async.ExecutorAffinity.StartsOn transfers the child placement to its parent
+ 45/388 Test  #69: Base.Async.ExecutorAffinity.StartsOn transfers the child placement to its parent ............................................   Passed    0.00 sec
+        Start  70: Base.Async.ExecutorAffinity.Operation resumes its observer on the observer executor
+ 46/388 Test  #70: Base.Async.ExecutorAffinity.Operation resumes its observer on the observer executor .........................................   Passed    0.00 sec
+        Start  71: Base.Async.ExecutorAffinity.Moving an owned Operation awaiter preserves its child and selected executor
+ 47/388 Test  #71: Base.Async.ExecutorAffinity.Moving an owned Operation awaiter preserves its child and selected executor .....................   Passed    0.00 sec
+        Start  72: Base.Async.ExecutorTransitions.Executor transitions deliver every outcome without restoring the original executor
+ 48/388 Test  #72: Base.Async.ExecutorTransitions.Executor transitions deliver every outcome without restoring the original executor ...........   Passed    0.00 sec
+        Start  73: Base.Async.ExecutorTransitions.Rejected transition admission never enters the child
+ 49/388 Test  #73: Base.Async.ExecutorTransitions.Rejected transition admission never enters the child .........................................   Passed    0.00 sec
+        Start  74: Base.Async.ExecutorTransitions.Ready void transitions preserve all terminal outcomes
+ 50/388 Test  #74: Base.Async.ExecutorTransitions.Ready void transitions preserve all terminal outcomes ........................................   Passed    0.00 sec
+        Start  75: Base.Async.ExecutorTransitions.ContinuesOn uses its admitted terminal slot after admission closes
+ 51/388 Test  #75: Base.Async.ExecutorTransitions.ContinuesOn uses its admitted terminal slot after admission closes ...........................   Passed    0.00 sec
+        Start  76: Base.Async.ExecutorTransitions.Executor transitions retain placement across concurrent worker deliveries
+ 52/388 Test  #76: Base.Async.ExecutorTransitions.Executor transitions retain placement across concurrent worker deliveries ....................   Passed    0.12 sec
+        Start  77: Base.Async.ExecutorTransitions.ContinuesOn delivers a throwing terminal result move as a fault on its target
+ 53/388 Test  #77: Base.Async.ExecutorTransitions.ContinuesOn delivers a throwing terminal result move as a fault on its target ................   Passed    0.00 sec
+        Start  78: Base.Async.Fiber.Fiber constructs with default behavior
+ 54/388 Test  #78: Base.Async.Fiber.Fiber constructs with default behavior .....................................................................   Passed    0.00 sec
+        Start  79: Base.Async.Fiber.Fiber yields and resumes
+ 55/388 Test  #79: Base.Async.Fiber.Fiber yields and resumes ...................................................................................   Passed    0.00 sec
+        Start  80: Base.Async.Fiber.Fiber supports multiple yield/resume cycles
+ 56/388 Test  #80: Base.Async.Fiber.Fiber supports multiple yield/resume cycles ................................................................   Passed    0.00 sec
+        Start  81: Base.Async.Fiber.Fiber TryAssign only succeeds when idle
+ 57/388 Test  #81: Base.Async.Fiber.Fiber TryAssign only succeeds when idle ....................................................................   Passed    0.00 sec
+        Start  82: Base.Async.Fiber.Fiber yields back to resumer (nested resume)
+ 58/388 Test  #82: Base.Async.Fiber.Fiber yields back to resumer (nested resume) ...............................................................   Passed    0.00 sec
+        Start  83: Base.Async.Fiber.Fiber completes once
+ 59/388 Test  #83: Base.Async.Fiber.Fiber completes once .......................................................................................   Passed    0.00 sec
+        Start  84: Base.Async.Fiber.Fiber respects configured stack size
+ 60/388 Test  #84: Base.Async.Fiber.Fiber respects configured stack size .......................................................................   Passed    0.00 sec
+        Start  85: Base.Async.Fiber.Fiber forwards exceptions
+ 61/388 Test  #85: Base.Async.Fiber.Fiber forwards exceptions ..................................................................................   Passed    0.00 sec
+        Start  86: Base.Async.Fiber.Fiber CUSTOM_ASM preserves mxcsr and x87 control word across Yield/Resume
+ 62/388 Test  #86: Base.Async.Fiber.Fiber CUSTOM_ASM preserves mxcsr and x87 control word across Yield/Resume ..................................   Passed    0.00 sec
+        Start  87: Base.Async.Fiber.Fiber cleans up derived resources
+ 63/388 Test  #87: Base.Async.Fiber.Fiber cleans up derived resources ..........................................................................   Passed    0.00 sec
+        Start  88: Base.Async.Fiber.Concurrent fibers run independently
+ 64/388 Test  #88: Base.Async.Fiber.Concurrent fibers run independently ........................................................................   Passed    0.00 sec
+        Start  89: Base.Async.Fiber.Resuming a completed fiber is harmless
+ 65/388 Test  #89: Base.Async.Fiber.Resuming a completed fiber is harmless .....................................................................   Passed    0.00 sec
+        Start  90: Base.Async.Generator.Generator yields a sequence of values
+ 66/388 Test  #90: Base.Async.Generator.Generator yields a sequence of values ..................................................................   Passed    0.00 sec
+        Start  91: Base.Async.Generator.Generator propagates exceptions on resume
+ 67/388 Test  #91: Base.Async.Generator.Generator propagates exceptions on resume ..............................................................   Passed    0.00 sec
+        Start  92: Base.Async.Ready.Ready tasks can be run without an executor
+ 68/388 Test  #92: Base.Async.Ready.Ready tasks can be run without an executor .................................................................   Passed    0.00 sec
+        Start  93: Base.Async.Ready.Ready child values compose and are consumed
+ 69/388 Test  #93: Base.Async.Ready.Ready child values compose and are consumed ................................................................   Passed    0.00 sec
+        Start  94: Base.Async.Ready.Ready terminal outcomes propagate through both task specializations
+ 70/388 Test  #94: Base.Async.Ready.Ready terminal outcomes propagate through both task specializations ........................................   Passed    0.00 sec
+        Start  95: Base.Async.Ready.Throwing ready payload moves become observable faults
+ 71/388 Test  #95: Base.Async.Ready.Throwing ready payload moves become observable faults ......................................................   Passed    0.00 sec
+        Start  96: Base.Async.Ready.A canceled wait cannot replace an inline published result
+ 72/388 Test  #96: Base.Async.Ready.A canceled wait cannot replace an inline published result ..................................................   Passed    0.00 sec
+        Start  97: Base.Async.Ready.Ready Task move assignment replaces and consumes payload ownership
+ 73/388 Test  #97: Base.Async.Ready.Ready Task move assignment replaces and consumes payload ownership .........................................   Passed    0.00 sec
+        Start  98: Base.Async.Ready.Scopes observe and retire ready children
+ 74/388 Test  #98: Base.Async.Ready.Scopes observe and retire ready children ...................................................................   Passed    0.00 sec
+        Start  99: Base.Async.Sequential.Sequential children reuse one admitted completion slot
+ 75/388 Test  #99: Base.Async.Sequential.Sequential children reuse one admitted completion slot ................................................   Passed    0.00 sec
+        Start 100: Base.Async.Sequential.Sequential void children reuse one admitted completion slot
+ 76/388 Test #100: Base.Async.Sequential.Sequential void children reuse one admitted completion slot ...........................................   Passed    0.00 sec
+        Start 101: Base.Async.Sequential.Long direct chains defer so unrelated work progresses
+ 77/388 Test #101: Base.Async.Sequential.Long direct chains defer so unrelated work progresses .................................................   Passed    0.01 sec
+        Start 102: Base.Async.Sequential.Sequential child failure remains observable with one completion slot
+ 78/388 Test #102: Base.Async.Sequential.Sequential child failure remains observable with one completion slot ..................................   Passed    0.02 sec
+        Start 103: Base.Async.Sequential.A throwing sequential result move becomes an observable parent fault
+ 79/388 Test #103: Base.Async.Sequential.A throwing sequential result move becomes an observable parent fault ..................................   Passed    0.00 sec
+        Start 104: Base.Async.Sequential.Sequential failure waits for child frame borrowers before completing its parent
+ 80/388 Test #104: Base.Async.Sequential.Sequential failure waits for child frame borrowers before completing its parent .......................   Passed    0.00 sec
+        Start 105: Base.Async.Sequential.Awaiting an lvalue task consumes it once
+ 81/388 Test #105: Base.Async.Sequential.Awaiting an lvalue task consumes it once ..............................................................   Passed    0.00 sec
+        Start 106: Base.Async.Sequential.Consuming a pending task again cannot replace its first parent
+ 82/388 Test #106: Base.Async.Sequential.Consuming a pending task again cannot replace its first parent ........................................   Passed    0.00 sec
+        Start 107: Base.Async.Sequential.Sequential success waits for frame borrowers before resuming its parent
+ 83/388 Test #107: Base.Async.Sequential.Sequential success waits for frame borrowers before resuming its parent ...............................   Passed    0.00 sec
+        Start 108: Base.Async.Task.Destroying or replacing cold tasks never starts their bodies
+ 84/388 Test #108: Base.Async.Task.Destroying or replacing cold tasks never starts their bodies ................................................   Passed    0.00 sec
+        Start 109: Base.Async.Task.Spawn consumes a cold task and returns a running operation
+ 85/388 Test #109: Base.Async.Task.Spawn consumes a cold task and returns a running operation ..................................................   Passed    0.00 sec
+        Start 110: Base.Async.Task.Spawn converts scheduler rejection into an async fault
+ 86/388 Test #110: Base.Async.Task.Spawn converts scheduler rejection into an async fault ......................................................   Passed    0.00 sec
+        Start 111: Base.Async.Task.Task continuation publication racing completion has no lost wakeup
+ 87/388 Test #111: Base.Async.Task.Task continuation publication racing completion has no lost wakeup ..........................................   Passed    0.03 sec
+        Start 112: Base.Async.Task.Operation reports invalid result access before completion
+ 88/388 Test #112: Base.Async.Task.Operation reports invalid result access before completion ...................................................   Passed    0.00 sec
+        Start 113: Base.Async.Task.Operation result can be taken only once
+ 89/388 Test #113: Base.Async.Task.Operation result can be taken only once .....................................................................   Passed    0.00 sec
+        Start 114: Base.Async.Task.Detach explicitly runs fire-and-forget work
+ 90/388 Test #114: Base.Async.Task.Detach explicitly runs fire-and-forget work .................................................................   Passed    0.00 sec
+        Start 115: Base.Async.Task.Detached task destroys its frame exactly once after completion
+ 91/388 Test #115: Base.Async.Task.Detached task destroys its frame exactly once after completion ..............................................   Passed    0.00 sec
+        Start 116: Base.Async.Task.Detached canceled task destroys its suspended frame exactly once
+ 92/388 Test #116: Base.Async.Task.Detached canceled task destroys its suspended frame exactly once ............................................   Passed    0.00 sec
+        Start 117: Base.Async.Task.Operation ownership release racing completion destroys each frame exactly once
+ 93/388 Test #117: Base.Async.Task.Operation ownership release racing completion destroys each frame exactly once ..............................   Passed    0.01 sec
+        Start 118: Base.Async.Task.Detach racing immediate completion destroys each frame exactly once
+ 94/388 Test #118: Base.Async.Task.Detach racing immediate completion destroys each frame exactly once .........................................   Passed    0.01 sec
+        Start 119: Base.Async.Task.Task can be awaited without spawning the child explicitly
+ 95/388 Test #119: Base.Async.Task.Task can be awaited without spawning the child explicitly ...................................................   Passed    0.00 sec
+        Start 120: Base.Async.Task.Task domain errors propagate through co_await
+ 96/388 Test #120: Base.Async.Task.Task domain errors propagate through co_await ...............................................................   Passed    0.00 sec
+        Start 121: Base.Async.Task.Task cancellation: Delay is woken by cancellation
+ 97/388 Test #121: Base.Async.Task.Task cancellation: Delay is woken by cancellation ...........................................................   Passed    0.00 sec
+        Start 122: Base.Async.Task.Task cancellation: CancelAt wakes Delay without firing timers
+ 98/388 Test #122: Base.Async.Task.Task cancellation: CancelAt wakes Delay without firing timers ...............................................   Passed    0.00 sec
+        Start 123: Base.Async.Task.Task propagates exceptions through co_await
+ 99/388 Test #123: Base.Async.Task.Task propagates exceptions through co_await .................................................................   Passed    0.00 sec
+        Start 124: Base.Async.TaskContext.Discarded token-free submissions deliver a terminal fault
+100/388 Test #124: Base.Async.TaskContext.Discarded token-free submissions deliver a terminal fault ............................................   Passed    0.00 sec
+        Start 125: Base.Async.TaskContext.TaskContext WithLinkedCancellationToken cancels when parent token cancels
+101/388 Test #125: Base.Async.TaskContext.TaskContext WithLinkedCancellationToken cancels when parent token cancels ............................   Passed    0.00 sec
+        Start 126: Base.Async.TaskContext.TaskContext WithLinkedCancellationToken supports chaining without losing root linkage
+102/388 Test #126: Base.Async.TaskContext.TaskContext WithLinkedCancellationToken supports chaining without losing root linkage ................   Passed    0.00 sec
+        Start 127: Base.Async.TaskContext.TaskContext rejects nonfinite delays without creating timers
+103/388 Test #127: Base.Async.TaskContext.TaskContext rejects nonfinite delays without creating timers .........................................   Passed    0.00 sec
+        Start 128: Base.Async.TaskContext.Discarded cancellation-aware timers deliver a terminal fault
+104/388 Test #128: Base.Async.TaskContext.Discarded cancellation-aware timers deliver a terminal fault .........................................   Passed    0.00 sec
+        Start 129: Base.Async.TaskContext.Submission handoff joins dispatch before admission returns
+105/388 Test #129: Base.Async.TaskContext.Submission handoff joins dispatch before admission returns ...........................................   Passed    0.00 sec
+        Start 130: Base.Async.TaskContext.Token-free yields reuse a single admitted continuation without recursive dispatch
+106/388 Test #130: Base.Async.TaskContext.Token-free yields reuse a single admitted continuation without recursive dispatch ....................   Passed    0.01 sec
+        Start 131: Base.Async.TaskContext.Discarded concurrent child and producer submissions complete their admitted parents
+107/388 Test #131: Base.Async.TaskContext.Discarded concurrent child and producer submissions complete their admitted parents ..................   Passed    0.00 sec
+        Start 132: Base.Async.TaskContext.TaskContext preserves a different executor's discard delivery
+108/388 Test #132: Base.Async.TaskContext.TaskContext preserves a different executor's discard delivery ........................................   Passed    0.00 sec
+        Start 133: Base.Async.TaskContext.TaskContext rejects token-free suspension without a completion path
+109/388 Test #133: Base.Async.TaskContext.TaskContext rejects token-free suspension without a completion path ..................................   Passed    0.00 sec
+        Start 134: Base.Async.TaskContext.Thread-pool shutdown retires an initial task while its worker is occupied
+110/388 Test #134: Base.Async.TaskContext.Thread-pool shutdown retires an initial task while its worker is occupied ............................   Passed    0.00 sec
+        Start 135: Base.Async.TaskContext.Thread-pool shutdown retires token-free suspended timers
+111/388 Test #135: Base.Async.TaskContext.Thread-pool shutdown retires token-free suspended timers .............................................   Passed    0.00 sec
+        Start 136: Base.Async.TaskContext.Executor references compare dispatch bindings for continuation reuse
+112/388 Test #136: Base.Async.TaskContext.Executor references compare dispatch bindings for continuation reuse .................................   Passed    0.00 sec
+        Start 137: Base.Async.TaskContext.TaskContext timer delivery inlines when eligible and yields retain deferred delivery
+113/388 Test #137: Base.Async.TaskContext.TaskContext timer delivery inlines when eligible and yields retain deferred delivery .................   Passed    0.00 sec
+        Start 138: Base.Async.TaskScope.TaskScope joins child values and releases owned coroutine factories
+114/388 Test #138: Base.Async.TaskScope.TaskScope joins child values and releases owned coroutine factories ....................................   Passed    0.00 sec
+        Start 139: Base.Async.TaskScope.TaskScope records the first failure and joins canceled siblings
+115/388 Test #139: Base.Async.TaskScope.TaskScope records the first failure and joins canceled siblings ........................................   Passed    0.00 sec
+        Start 140: Base.Async.TaskScope.TaskScope rejects capacity before invoking another child factory
+116/388 Test #140: Base.Async.TaskScope.TaskScope rejects capacity before invoking another child factory .......................................   Passed    0.00 sec
+        Start 141: Base.Async.TaskScope.TaskScope reports a throwing factory and joins existing children
+117/388 Test #141: Base.Async.TaskScope.TaskScope reports a throwing factory and joins existing children .......................................   Passed    0.00 sec
+        Start 142: Base.Async.TaskScope.TaskScope can join independently executed children more than once
+118/388 Test #142: Base.Async.TaskScope.TaskScope can join independently executed children more than once ......................................   Passed    0.00 sec
+        Start 143: Base.Async.TaskScope.TaskScope joining waits for the last canceled child frame lease
+119/388 Test #143: Base.Async.TaskScope.TaskScope joining waits for the last canceled child frame lease ........................................   Passed    0.00 sec
+        Start 144: Base.Async.When.WhenAll consumes tasks and returns tuple of results
+120/388 Test #144: Base.Async.When.WhenAll consumes tasks and returns tuple of results .........................................................   Passed    0.00 sec
+        Start 145: Base.Async.When.WhenAll can be co_awaited directly
+121/388 Test #145: Base.Async.When.WhenAll can be co_awaited directly ..........................................................................   Passed    0.00 sec
+        Start 146: Base.Async.When.WhenAll consumes void tasks
+122/388 Test #146: Base.Async.When.WhenAll consumes void tasks .................................................................................   Passed    0.00 sec
+        Start 147: Base.Async.When.WhenAll propagates failures from void tasks
+123/388 Test #147: Base.Async.When.WhenAll propagates failures from void tasks .................................................................   Passed    0.00 sec
+        Start 148: Base.Async.When.WhenAll starts every child before waiting for the first result
+124/388 Test #148: Base.Async.When.WhenAll starts every child before waiting for the first result ..............................................   Passed    0.00 sec
+        Start 149: Base.Async.When.WhenAny returns index of first completed task
+125/388 Test #149: Base.Async.When.WhenAny returns index of first completed task ...............................................................   Passed    0.00 sec
+        Start 150: Base.Async.When.WhenAny returns canceled when context is already cancelled
+126/388 Test #150: Base.Async.When.WhenAny returns canceled when context is already cancelled ..................................................   Passed    0.00 sec
+        Start 151: Base.Async.When.WhenAll propagates child exception
+127/388 Test #151: Base.Async.When.WhenAll propagates child exception ..........................................................................   Passed    0.00 sec
+        Start 152: Base.Async.When.WhenAny propagates a winning task fault after draining losers
+128/388 Test #152: Base.Async.When.WhenAny propagates a winning task fault after draining losers ...............................................   Passed    0.00 sec
+        Start 153: Base.Async.When.WhenAny owns local loser task lifetime
+129/388 Test #153: Base.Async.When.WhenAny owns local loser task lifetime ......................................................................   Passed    0.00 sec
+        Start 154: Base.Async.When.WhenAny requests child-specific cancellation for losing tasks
+130/388 Test #154: Base.Async.When.WhenAny requests child-specific cancellation for losing tasks ...............................................   Passed    0.00 sec
+        Start 155: Base.Async.WhenAny.WhenAny reserves every notification before invoking a factory
+131/388 Test #155: Base.Async.WhenAny.WhenAny reserves every notification before invoking a factory ............................................   Passed    0.00 sec
+        Start 156: Base.Async.WhenAny.WhenAny joins children rejected after notification admission
+132/388 Test #156: Base.Async.WhenAny.WhenAny joins children rejected after notification admission .............................................   Passed    0.00 sec
+        Start 157: Base.Async.WhenAny.WhenAny joins existing children when another factory fails
+133/388 Test #157: Base.Async.WhenAny.WhenAny joins existing children when another factory fails ...............................................   Passed    0.00 sec
+        Start 158: Base.Async.WhenAny.WhenAny releases coroutine factory captures before parent completion
+134/388 Test #158: Base.Async.WhenAny.WhenAny releases coroutine factory captures before parent completion .....................................   Passed    0.00 sec
+        Start 159: Base.Async.WhenAny.WhenAny reports mixed value and void child domain failures
+135/388 Test #159: Base.Async.WhenAny.WhenAny reports mixed value and void child domain failures ...............................................   Passed    0.00 sec
+        Start 160: Base.Async.WhenAny.WhenAny joins simultaneous completions and releases factory captures
+136/388 Test #160: Base.Async.WhenAny.WhenAny joins simultaneous completions and releases factory captures .....................................   Passed    0.02 sec
+        Start 161: Base.Async.WhenAny.WhenAny rejects an untracked parent before starting children
+137/388 Test #161: Base.Async.WhenAny.WhenAny rejects an untracked parent before starting children .............................................   Passed    0.00 sec
+        Start 383: Base.Execution.CompletionReservation.Completion reservations queue exactly once and recover capacity
+138/388 Test #383: Base.Execution.CompletionReservation.Completion reservations queue exactly once and recover capacity ........................   Passed    0.00 sec
+        Start 384: Base.Execution.CompletionReservation.Completion storage is reserved before admission and survives shutdown
+139/388 Test #384: Base.Execution.CompletionReservation.Completion storage is reserved before admission and survives shutdown ..................   Passed    0.00 sec
+        Start 385: Base.Execution.CompletionReservation.Completion retirement wakes only a closed queue's final drain
+140/388 Test #385: Base.Execution.CompletionReservation.Completion retirement wakes only a closed queue's final drain ..........................   Passed    0.00 sec
+        Start 386: Base.Execution.CompletionReservation.Completion reservation allocation failure rejects admission without leaking capacity
+141/388 Test #386: Base.Execution.CompletionReservation.Completion reservation allocation failure rejects admission without leaking capacity ...   Passed    0.00 sec
+        Start 387: Base.Execution.CompletionReservation.ExecutorRef rejects unsupported completion reservations before execution
+142/388 Test #387: Base.Execution.CompletionReservation.ExecutorRef rejects unsupported completion reservations before execution ...............   Passed    0.00 sec
+        Start 388: Base.Execution.CompletionReservation.Reserved completion dispatch preserves cooperative executor context
+143/388 Test #388: Base.Execution.CompletionReservation.Reserved completion dispatch preserves cooperative executor context ....................   Passed    0.00 sec
+        Start 389: Base.Execution.CompletionReservation.Thread pool destruction drains reserved delivery on its worker
+144/388 Test #389: Base.Execution.CompletionReservation.Thread pool destruction drains reserved delivery on its worker .........................   Passed    0.00 sec
+        Start 390: Base.Execution.CompletionReservation.Thread pool destruction drains an unpublished reservation released off worker
+145/388 Test #390: Base.Execution.CompletionReservation.Thread pool destruction drains an unpublished reservation released off worker ..........   Passed    0.00 sec
+        Start 391: Base.Execution.CompletionReservation.An admitted continuation reuses its reservation after admission closes
+146/388 Test #391: Base.Execution.CompletionReservation.An admitted continuation reuses its reservation after admission closes .................   Passed    0.00 sec
+        Start 392: Base.Execution.CompletionReservation.Releasing a reusable continuation preserves its already queued invocation
+147/388 Test #392: Base.Execution.CompletionReservation.Releasing a reusable continuation preserves its already queued invocation ..............   Passed    0.00 sec
+        Start 393: Base.Execution.CompletionReservation.A foreign completion can reschedule a reservation during its current invocation
+148/388 Test #393: Base.Execution.CompletionReservation.A foreign completion can reschedule a reservation during its current invocation ........   Passed    0.00 sec
+        Start 394: Base.Execution.CooperativeScheduler.CooperativeScheduler executes ready work
+149/388 Test #394: Base.Execution.CooperativeScheduler.CooperativeScheduler executes ready work ................................................   Passed    0.00 sec
+        Start 395: Base.Execution.CooperativeScheduler.CooperativeScheduler executes timers up to a given timepoint
+150/388 Test #395: Base.Execution.CooperativeScheduler.CooperativeScheduler executes timers up to a given timepoint ............................   Passed    0.00 sec
+        Start 396: Base.Execution.CooperativeScheduler.CooperativeScheduler rotates continuously runnable completion timer and ready sources
+151/388 Test #396: Base.Execution.CooperativeScheduler.CooperativeScheduler rotates continuously runnable completion timer and ready sources ...   Passed    0.00 sec
+        Start 397: Base.Execution.CooperativeScheduler.CooperativeScheduler preserves FIFO order across consumed prefix reuse
+152/388 Test #397: Base.Execution.CooperativeScheduler.CooperativeScheduler preserves FIFO order across consumed prefix reuse ..................   Passed    0.00 sec
+        Start 398: Base.Execution.CooperativeScheduler.CooperativeScheduler bounds recursive pumps and leaves deferred work runnable
+153/388 Test #398: Base.Execution.CooperativeScheduler.CooperativeScheduler bounds recursive pumps and leaves deferred work runnable ...........   Passed    0.00 sec
+        Start 399: Base.Execution.CooperativeScheduler.CooperativeScheduler nested dispatch shares the enclosing work allowance
+154/388 Test #399: Base.Execution.CooperativeScheduler.CooperativeScheduler nested dispatch shares the enclosing work allowance ................   Passed    0.00 sec
+        Start 400: Base.Execution.CooperativeScheduler.Cooperative timer cancellation releases captures outside the timer lock
+155/388 Test #400: Base.Execution.CooperativeScheduler.Cooperative timer cancellation releases captures outside the timer lock .................   Passed    0.00 sec
+        Start 401: Base.Execution.CooperativeScheduler.Cooperative timer registration preserves other deadlines when removed
+156/388 Test #401: Base.Execution.CooperativeScheduler.Cooperative timer registration preserves other deadlines when removed ...................   Passed    0.00 sec
+        Start 402: Base.Execution.InlineDispatch.Inline dispatch requires executor context and preserves work on refusal
+157/388 Test #402: Base.Execution.InlineDispatch.Inline dispatch requires executor context and preserves work on refusal .......................   Passed    0.00 sec
+        Start 403: Base.Execution.InlineDispatch.Recursive inline dispatch falls back to reserved delivery without losing work
+158/388 Test #403: Base.Execution.InlineDispatch.Recursive inline dispatch falls back to reserved delivery without losing work .................   Passed    0.00 sec
+        Start 404: Base.Execution.InlineDispatch.InlineScheduler requires explicit invocation and rejects queued submissions
+159/388 Test #404: Base.Execution.InlineDispatch.InlineScheduler requires explicit invocation and rejects queued submissions ...................   Passed    0.00 sec
+        Start 405: Base.Execution.Thread.ThisThread basic utilities
+160/388 Test #405: Base.Execution.Thread.ThisThread basic utilities ............................................................................   Passed    0.00 sec
+        Start 406: Base.Execution.Thread.Thread starts and joins
+161/388 Test #406: Base.Execution.Thread.Thread starts and joins ...............................................................................   Passed    0.00 sec
+        Start 407: Base.Execution.Thread.WorkerThread joins on destruction
+162/388 Test #407: Base.Execution.Thread.WorkerThread joins on destruction .....................................................................   Passed    0.00 sec
+        Start 408: Base.Execution.ThreadPoolFairness.Thread pool makes bounded progress across completion injected and local work
+163/388 Test #408: Base.Execution.ThreadPoolFairness.Thread pool makes bounded progress across completion injected and local work ..............   Passed    0.00 sec
+        Start 409: Base.Execution.ThreadPoolFairness.Thread pool RunOne can help the sole worker's local queue
+164/388 Test #409: Base.Execution.ThreadPoolFairness.Thread pool RunOne can help the sole worker's local queue .................................   Passed    0.00 sec
+        Start 410: Base.Execution.ThreadPoolFairness.Thread pool recursive helping defers beyond the dispatch depth limit
+165/388 Test #410: Base.Execution.ThreadPoolFairness.Thread pool recursive helping defers beyond the dispatch depth limit ......................   Passed    0.00 sec
+        Start 411: Base.Execution.ThreadPoolFairness.Thread pool helping charges reserved and ordinary work to its caller budget
+166/388 Test #411: Base.Execution.ThreadPoolFairness.Thread pool helping charges reserved and ordinary work to its caller budget ...............   Passed    0.00 sec
+        Start 412: Base.Execution.ThreadPoolFairness.Thread pool timer registration removes queued work and preserves detached timers
+167/388 Test #412: Base.Execution.ThreadPoolFairness.Thread pool timer registration removes queued work and preserves detached timers ..........   Passed    0.00 sec
+        Start 413: Base.Execution.WorkItem.WorkItem executes a large lambda job through direct heap storage
+168/388 Test #413: Base.Execution.WorkItem.WorkItem executes a large lambda job through direct heap storage ....................................   Passed    0.00 sec
+        Start 414: Base.Execution.WorkItem.WorkItem executes an inline lambda job
+169/388 Test #414: Base.Execution.WorkItem.WorkItem executes an inline lambda job ..............................................................   Passed    0.00 sec
+        Start 415: Base.Execution.WorkItem.WorkItem releases heap storage when callable construction throws
+170/388 Test #415: Base.Execution.WorkItem.WorkItem releases heap storage when callable construction throws ....................................   Passed    0.00 sec
+        Start 416: Base.Execution.WorkItem.WorkItem destroys each heap callable exactly once
+171/388 Test #416: Base.Execution.WorkItem.WorkItem destroys each heap callable exactly once ...................................................   Passed    0.00 sec
+        Start 417: Base.Execution.WorkItem.WorkItem heap construction and destruction is independent across threads
+172/388 Test #417: Base.Execution.WorkItem.WorkItem heap construction and destruction is independent across threads ............................   Passed    0.00 sec
+        Start 418: Base.Execution.WorkItem.ThreadPoolScheduler executes a WorkItem job
+173/388 Test #418: Base.Execution.WorkItem.ThreadPoolScheduler executes a WorkItem job .........................................................   Passed    0.00 sec
+        Start 419: Base.Execution.WorkItem.ExecutorRef schedules a job on a scheduler
+174/388 Test #419: Base.Execution.WorkItem.ExecutorRef schedules a job on a scheduler ..........................................................   Passed    0.00 sec
+        Start 420: Base.Execution.WorkItem.ExecutorRef ExecuteAfter(0) schedules a job immediately
+175/388 Test #420: Base.Execution.WorkItem.ExecutorRef ExecuteAfter(0) schedules a job immediately .............................................   Passed    0.00 sec
+        Start 421: Base.Execution.WorkItem.WorkItem rejects an empty job
+176/388 Test #421: Base.Execution.WorkItem.WorkItem rejects an empty job .......................................................................   Passed    0.00 sec
+        Start 422: Base.Execution.WorkItem.WorkItem resumes a coroutine handle
+177/388 Test #422: Base.Execution.WorkItem.WorkItem resumes a coroutine handle .................................................................   Passed    0.00 sec
+        Start 423: Base.Execution.WorkItem.ExecutorRef ExecuteAt schedules a job for a specific timepoint
+178/388 Test #423: Base.Execution.WorkItem.ExecutorRef ExecuteAt schedules a job for a specific timepoint ......................................   Passed    0.00 sec
+        Start 424: Base.Execution.WorkItem.ExecutorRef reports invalid and rejected submissions
+179/388 Test #424: Base.Execution.WorkItem.ExecutorRef reports invalid and rejected submissions ................................................   Passed    0.00 sec
+        Start 425: Base.IO.AsyncDispatch.IO worker cancellation waits for the final access to borrowed memory
+180/388 Test #425: Base.IO.AsyncDispatch.IO worker cancellation waits for the final access to borrowed memory ..................................   Passed    0.00 sec
+        Start 426: Base.IO.AsyncDispatch.IO cancellation before a queued worker starts skips its side effects
+181/388 Test #426: Base.IO.AsyncDispatch.IO cancellation before a queued worker starts skips its side effects ..................................   Passed    0.00 sec
+        Start 427: Base.IO.AsyncDispatch.IO worker success publishes its result on the selected executor
+182/388 Test #427: Base.IO.AsyncDispatch.IO worker success publishes its result on the selected executor .......................................   Passed    0.00 sec
+        Start 428: Base.IO.AsyncDispatch.IO rejects an unsupported completion executor before running worker code
+183/388 Test #428: Base.IO.AsyncDispatch.IO rejects an unsupported completion executor before running worker code ..............................   Passed    0.00 sec
+        Start 429: Base.IO.AsyncDispatch.IO rejects exhausted completion capacity before running worker code
+184/388 Test #429: Base.IO.AsyncDispatch.IO rejects exhausted completion capacity before running worker code ...................................   Passed    0.00 sec
+        Start 430: Base.IO.AsyncDispatch.File workers start lazily and reject jobs beyond their budget
+185/388 Test #430: Base.IO.AsyncDispatch.File workers start lazily and reject jobs beyond their budget .........................................   Passed    0.00 sec
+        Start 431: Base.IO.AsyncDispatch.Runtime shutdown waits for a worker then transfers an external completion
+186/388 Test #431: Base.IO.AsyncDispatch.Runtime shutdown waits for a worker then transfers an external completion .............................   Passed    0.00 sec
+        Start 432: Base.IO.AsyncDispatch.File completion uses eligible inline delivery and its reserved fallback when budget is exhausted
+187/388 Test #432: Base.IO.AsyncDispatch.File completion uses eligible inline delivery and its reserved fallback when budget is exhausted ......   Passed    0.00 sec
+        Start 433: Base.IO.AsyncFileHandle.Async file data operations retain their original backend across handle moves
+188/388 Test #433: Base.IO.AsyncFileHandle.Async file data operations retain their original backend across handle moves ........................   Passed    0.00 sec
+        Start 434: Base.IO.AsyncFileHandle.Async file control operations retain their backend when the handle is destroyed
+189/388 Test #434: Base.IO.AsyncFileHandle.Async file control operations retain their backend when the handle is destroyed .....................   Passed    0.00 sec
+        Start 435: Base.IO.AsyncFileHandle.Cold async file calls keep their original invalid binding
+190/388 Test #435: Base.IO.AsyncFileHandle.Cold async file calls keep their original invalid binding ...........................................   Passed    0.00 sec
+        Start 436: Base.IO.AsyncFileHandle.Abandoning a cold async file task releases its backend ownership
+191/388 Test #436: Base.IO.AsyncFileHandle.Abandoning a cold async file task releases its backend ownership ....................................   Passed    0.00 sec
+        Start 437: Base.IO.DynamicLibrary.IO.DynamicLibrary rejects an empty path
+192/388 Test #437: Base.IO.DynamicLibrary.IO.DynamicLibrary rejects an empty path ..............................................................   Passed    0.00 sec
+        Start 438: Base.IO.DynamicLibrary.IO.DynamicLibrary reports missing libraries
+193/388 Test #438: Base.IO.DynamicLibrary.IO.DynamicLibrary reports missing libraries ..........................................................   Passed    0.00 sec
+        Start 439: Base.IO.DynamicLibrary.IO.DynamicLibrary supports deferred loading when explicitly requested
+194/388 Test #439: Base.IO.DynamicLibrary.IO.DynamicLibrary supports deferred loading when explicitly requested ................................   Passed    0.00 sec
+        Start 440: Base.IO.DynamicLibrary.IO.DynamicLibrary loads and resolves required symbols
+195/388 Test #440: Base.IO.DynamicLibrary.IO.DynamicLibrary loads and resolves required symbols ................................................   Passed    0.00 sec
+        Start 441: Base.IO.DynamicLibrary.IO.DynamicLibrary TryResolve supports optional symbols
+196/388 Test #441: Base.IO.DynamicLibrary.IO.DynamicLibrary TryResolve supports optional symbols ...............................................   Passed    0.00 sec
+        Start 442: Base.IO.DynamicLibrary.IO.DynamicLibrary move semantics transfer ownership
+197/388 Test #442: Base.IO.DynamicLibrary.IO.DynamicLibrary move semantics transfer ownership ..................................................   Passed    0.00 sec
+        Start 443: Base.IO.DynamicLibrary.IO.DynamicLibrary Unload is idempotent and invalidates the loaded state
+198/388 Test #443: Base.IO.DynamicLibrary.IO.DynamicLibrary Unload is idempotent and invalidates the loaded state ..............................   Passed    0.00 sec
+        Start 444: Base.IO.ExecutorPlacement.File leaves transfer both pending and early outcomes to their context executor
+199/388 Test #444: Base.IO.ExecutorPlacement.File leaves transfer both pending and early outcomes to their context executor ....................   Passed    0.00 sec
+        Start 445: Base.IO.FileOperationGate.File admission overlaps independent offsets and orders the shared position
+200/388 Test #445: Base.IO.FileOperationGate.File admission overlaps independent offsets and orders the shared position ........................   Passed    0.00 sec
+        Start 446: Base.IO.FileOperationGate.File flush waits for earlier active and queued work and blocks later offsets
+201/388 Test #446: Base.IO.FileOperationGate.File flush waits for earlier active and queued work and blocks later offsets ......................   Passed    0.00 sec
+        Start 447: Base.IO.FileOperationGate.File close closes admission while draining earlier backend work
+202/388 Test #447: Base.IO.FileOperationGate.File close closes admission while draining earlier backend work ...................................   Passed    0.00 sec
+        Start 448: Base.IO.FileOperationGate.Canceling queued file admission removes the waiter and releases barriers
+203/388 Test #448: Base.IO.FileOperationGate.Canceling queued file admission removes the waiter and releases barriers ..........................   Passed    0.00 sec
+        Start 449: Base.IO.FileOperationGate.File admission cancellation racing release retains the waiting frame
+204/388 Test #449: Base.IO.FileOperationGate.File admission cancellation racing release retains the waiting frame ..............................   Passed    0.02 sec
+        Start 450: Base.IO.FileOperationGate.File close retires the backend rollback guard before releasing admission
+205/388 Test #450: Base.IO.FileOperationGate.File close retires the backend rollback guard before releasing admission ..........................   Passed    0.00 sec
+        Start 451: Base.IO.FileOperationGate.File transfer validation rejects lengths and offsets before backend truncation
+206/388 Test #451: Base.IO.FileOperationGate.File transfer validation rejects lengths and offsets before backend truncation ....................   Passed    0.00 sec
+        Start 452: Base.IO.FileOperationGate.File admission preserves accepted work when completion capacity is exhausted
+207/388 Test #452: Base.IO.FileOperationGate.File admission preserves accepted work when completion capacity is exhausted ......................   Passed    0.00 sec
+        Start 453: Base.IO.FileOperationGate.File admission registration failure publishes no backend lease
+208/388 Test #453: Base.IO.FileOperationGate.File admission registration failure publishes no backend lease ....................................   Passed    0.01 sec
+        Start 454: Base.IO.FileOperationGate.File admission bounds all handles and executors and recovers canceled capacity
+209/388 Test #454: Base.IO.FileOperationGate.File admission bounds all handles and executors and recovers canceled capacity ....................   Passed    0.00 sec
+        Start 455: Base.IO.FileOperationGate.Concurrent file admission shares one bounded budget across producers
+210/388 Test #455: Base.IO.FileOperationGate.Concurrent file admission shares one bounded budget across producers ..............................   Passed    0.01 sec
+        Start 456: Base.IO.FilePrimitives.IO.FileView maps or buffers an existing file
+211/388 Test #456: Base.IO.FilePrimitives.IO.FileView maps or buffers an existing file .........................................................   Passed    0.00 sec
+        Start 457: Base.IO.FilePrimitives.IO.FileView buffers a readable sysfs file that cannot be mapped
+212/388 Test #457: Base.IO.FilePrimitives.IO.FileView buffers a readable sysfs file that cannot be mapped ......................................   Passed    0.00 sec
+        Start 458: Base.IO.IocpFileBackend.Windows native file IOCP requires Windows
+213/388 Test #458: Base.IO.IocpFileBackend.Windows native file IOCP requires Windows ...........................................................***Skipped   0.00 sec
+        Start 459: Base.IO.LocalFileSystem.IO.LocalFileSystem basic read write enumerate
+214/388 Test #459: Base.IO.LocalFileSystem.IO.LocalFileSystem basic read write enumerate .......................................................   Passed    0.01 sec
+        Start 460: Base.IO.LocalFileSystem.IO.LocalFileSystem no-replace rename preserves conflicts
+215/388 Test #460: Base.IO.LocalFileSystem.IO.LocalFileSystem no-replace rename preserves conflicts ............................................   Passed    0.01 sec
+        Start 461: Base.IO.LocalFileSystem.IO.LocalFileSystem reports and applies replacement durability
+216/388 Test #461: Base.IO.LocalFileSystem.IO.LocalFileSystem reports and applies replacement durability .......................................   Passed    0.01 sec
+        Start 462: Base.IO.LocalFileSystem.IO.LocalFileSystem recursive copy applies symlink and cleanup policies
+217/388 Test #462: Base.IO.LocalFileSystem.IO.LocalFileSystem recursive copy applies symlink and cleanup policies ..............................   Passed    0.01 sec
+        Start 463: Base.IO.LocalFileSystem.IO.LocalFileSystem enumeration supports no-info and deterministic sorting
+218/388 Test #463: Base.IO.LocalFileSystem.IO.LocalFileSystem enumeration supports no-info and deterministic sorting ...........................   Passed    0.01 sec
+        Start 464: Base.IO.LocalFileSystem.IO.LocalFileSystem atomic text writes replace existing content
+219/388 Test #464: Base.IO.LocalFileSystem.IO.LocalFileSystem atomic text writes replace existing content ......................................   Passed    0.01 sec
+        Start 465: Base.IO.LocalFileSystem.IO.LocalFileSystem async file operations use value handles
+220/388 Test #465: Base.IO.LocalFileSystem.IO.LocalFileSystem async file operations use value handles ..........................................   Passed    0.01 sec
+        Start 466: Base.IO.LocalFileSystem.IO.LocalFileSystem async utility helpers work through IO::Runtime
+221/388 Test #466: Base.IO.LocalFileSystem.IO.LocalFileSystem async utility helpers work through IO::Runtime ...................................   Passed    0.01 sec
+        Start 467: Base.IO.LocalFileSystem.IO.LocalFileSystem async directory handles scope relative operations
+222/388 Test #467: Base.IO.LocalFileSystem.IO.LocalFileSystem async directory handles scope relative operations ................................   Passed    0.01 sec
+        Start 468: Base.IO.LocalFileSystem.IO.LocalFileSystem async operations observe cancellation before dispatch
+223/388 Test #468: Base.IO.LocalFileSystem.IO.LocalFileSystem async operations observe cancellation before dispatch ............................   Passed    0.00 sec
+        Start 469: Base.IO.LocalFileSystem.IO.LocalFileSystem directory handles scope relative operations
+224/388 Test #469: Base.IO.LocalFileSystem.IO.LocalFileSystem directory handles scope relative operations ......................................   Passed    0.00 sec
+        Start 470: Base.IO.LocalFileSystem.IO.LocalFileSystem extended operations
+225/388 Test #470: Base.IO.LocalFileSystem.IO.LocalFileSystem extended operations ..............................................................   Passed    0.01 sec
+        Start 471: Base.IO.LocalFileSystem.IO.LocalFileSystem POSIX metadata and file types
+226/388 Test #471: Base.IO.LocalFileSystem.IO.LocalFileSystem POSIX metadata and file types ....................................................   Passed    0.00 sec
+        Start 472: Base.IO.LocalFileSystem.IO.LocalFileSystem directory handles can read symlinks
+227/388 Test #472: Base.IO.LocalFileSystem.IO.LocalFileSystem directory handles can read symlinks ..............................................   Passed    0.00 sec
+        Start 473: Base.IO.NativeRuntime.Native file completions progress through one-callback runtime batches
+228/388 Test #473: Base.IO.NativeRuntime.Native file completions progress through one-callback runtime batches .................................   Passed    0.00 sec
+        Start 474: Base.IO.NativeRuntime.Async file native ownership survives a cold read and retires with its last owner
+229/388 Test #474: Base.IO.NativeRuntime.Async file native ownership survives a cold read and retires with its last owner ......................   Passed    0.00 sec
+        Start 475: Base.IO.NativeRuntime.Canceling delivery of an opened async file releases its unclaimed descriptor
+230/388 Test #475: Base.IO.NativeRuntime.Canceling delivery of an opened async file releases its unclaimed descriptor ..........................   Passed    0.00 sec
+        Start 476: Base.IO.NativeRuntime.Async file position ordering and close drain work on native and fallback backends
+231/388 Test #476: Base.IO.NativeRuntime.Async file position ordering and close drain work on native and fallback backends .....................   Passed    0.00 sec
+        Start 477: Base.IO.NativeRuntime.Async file explicit offsets and access modes are validated consistently
+232/388 Test #477: Base.IO.NativeRuntime.Async file explicit offsets and access modes are validated consistently ...............................   Passed    0.00 sec
+        Start 478: Base.IO.NativeRuntime.Canceling queued file close reopens admission without closing an active handle
+233/388 Test #478: Base.IO.NativeRuntime.Canceling queued file close reopens admission without closing an active handle ........................   Passed    0.00 sec
+        Start 479: Base.IO.NativeRuntime.Runtime stop cancels queued file leases without admitting new backend work
+234/388 Test #479: Base.IO.NativeRuntime.Runtime stop cancels queued file leases without admitting new backend work ............................   Passed    0.00 sec
+        Start 480: Base.IO.Path.IO.Path empty and root classification
+235/388 Test #480: Base.IO.Path.IO.Path empty and root classification ..........................................................................   Passed    0.00 sec
+        Start 481: Base.IO.Path.IO.Path normalization handles separators and dot segments
+236/388 Test #481: Base.IO.Path.IO.Path normalization handles separators and dot segments ......................................................   Passed    0.00 sec
+        Start 482: Base.IO.Path.IO.Path decomposition covers filenames stems and extensions
+237/388 Test #482: Base.IO.Path.IO.Path decomposition covers filenames stems and extensions ....................................................   Passed    0.00 sec
+        Start 483: Base.IO.Path.IO.Path lexical relative handles matches mismatches and identical paths
+238/388 Test #483: Base.IO.Path.IO.Path lexical relative handles matches mismatches and identical paths ........................................   Passed    0.00 sec
+        Start 484: Base.IO.Path.IO.Path prefix and suffix helpers use current lexical semantics
+239/388 Test #484: Base.IO.Path.IO.Path prefix and suffix helpers use current lexical semantics ................................................   Passed    0.00 sec
+        Start 485: Base.IO.Path.IO.Path mutation helpers join append replace extension and remove filename
+240/388 Test #485: Base.IO.Path.IO.Path mutation helpers join append replace extension and remove filename .....................................   Passed    0.00 sec
+        Start 486: Base.IO.Path.IO.Path native conversion preserves lexical form
+241/388 Test #486: Base.IO.Path.IO.Path native conversion preserves lexical form ...............................................................   Passed    0.00 sec
+        Start 487: Base.IO.Process.IO.Process captures output, errors, arguments, and exit status
+242/388 Test #487: Base.IO.Process.IO.Process captures output, errors, arguments, and exit status ..............................................   Passed    0.00 sec
+        Start 488: Base.IO.Process.IO.Process applies environment and working-directory options
+243/388 Test #488: Base.IO.Process.IO.Process applies environment and working-directory options ................................................   Passed    0.00 sec
+        Start 489: Base.IO.Process.IO.Process supports observers, discarded streams, and file output
+244/388 Test #489: Base.IO.Process.IO.Process supports observers, discarded streams, and file output ...........................................   Passed    0.02 sec
+        Start 490: Base.IO.Process.IO.Process enforces timeout, cancellation, and output limits
+245/388 Test #490: Base.IO.Process.IO.Process enforces timeout, cancellation, and output limits ................................................   Passed    0.10 sec
+        Start 491: Base.IO.Process.IO.Process reports invalid starts and enforces single wait
+246/388 Test #491: Base.IO.Process.IO.Process reports invalid starts and enforces single wait ..................................................   Passed    0.11 sec
+        Start 492: Base.IO.Process.IO.Process async execution uses the caller-owned executor and context cancellation
+247/388 Test #492: Base.IO.Process.IO.Process async execution uses the caller-owned executor and context cancellation ..........................   Passed    0.03 sec
+        Start 493: Base.IO.Process.IO.Process timeout terminates the isolated descendant tree
+248/388 Test #493: Base.IO.Process.IO.Process timeout terminates the isolated descendant tree ..................................................   Passed    1.05 sec
+        Start 494: Base.IO.RunTask.RunTask returns a root value and completes runtime shutdown
+249/388 Test #494: Base.IO.RunTask.RunTask returns a root value and completes runtime shutdown .................................................   Passed    0.00 sec
+        Start 495: Base.IO.RunTask.RunTask cancels and joins children before returning a root failure
+250/388 Test #495: Base.IO.RunTask.RunTask cancels and joins children before returning a root failure ..........................................   Passed    0.00 sec
+        Start 496: Base.IO.RunTask.RunTask preserves a child failure when the root succeeds
+251/388 Test #496: Base.IO.RunTask.RunTask preserves a child failure when the root succeeds ....................................................   Passed    0.00 sec
+        Start 497: Base.IO.RunTask.RunTask joins external children after stop without new admission
+252/388 Test #497: Base.IO.RunTask.RunTask joins external children after stop without new admission ............................................   Passed    0.00 sec
+        Start 498: Base.IO.RunTask.RunTask converts factory exceptions and admission exhaustion into root faults
+253/388 Test #498: Base.IO.RunTask.RunTask converts factory exceptions and admission exhaustion into root faults ...............................   Passed    0.00 sec
+        Start 499: Base.IO.RunTask.RunTask returns cancellation and does not take over another runtime owner
+254/388 Test #499: Base.IO.RunTask.RunTask returns cancellation and does not take over another runtime owner ...................................   Passed    0.00 sec
+        Start 500: Base.IO.RuntimeLoop.Runtime loop queues submissions and preserves bounded backlog
+255/388 Test #500: Base.IO.RuntimeLoop.Runtime loop queues submissions and preserves bounded backlog ...........................................   Passed    0.00 sec
+        Start 501: Base.IO.RuntimeLoop.Runtime loop rotates submissions completions and timers across tiny batches
+256/388 Test #501: Base.IO.RuntimeLoop.Runtime loop rotates submissions completions and timers across tiny batches .............................   Passed    0.00 sec
+        Start 502: Base.IO.RuntimeLoop.Runtime loop binds first drive ownership and rejects reentrancy
+257/388 Test #502: Base.IO.RuntimeLoop.Runtime loop binds first drive ownership and rejects reentrancy .........................................   Passed    0.00 sec
+        Start 503: Base.IO.RuntimeLoop.Runtime loop accepts reserved completion after stop and drains on its owner
+258/388 Test #503: Base.IO.RuntimeLoop.Runtime loop accepts reserved completion after stop and drains on its owner .............................   Passed    0.00 sec
+        Start 504: Base.IO.RuntimeLoop.Runtime loop shutdown waits for the committed driver without taking ownership
+259/388 Test #504: Base.IO.RuntimeLoop.Runtime loop shutdown waits for the committed driver without taking ownership ...........................   Passed    0.02 sec
+        Start 505: Base.IO.RuntimeLoop.Runtime loop removes canceled timer storage and recovers capacity immediately
+260/388 Test #505: Base.IO.RuntimeLoop.Runtime loop removes canceled timer storage and recovers capacity immediately ...........................   Passed    0.00 sec
+        Start 506: Base.IO.RuntimeLoop.Runtime timer ownership moves and removes undispatched work on destruction
+261/388 Test #506: Base.IO.RuntimeLoop.Runtime timer ownership moves and removes undispatched work on destruction ..............................   Passed    0.00 sec
+        Start 507: Base.IO.RuntimeLoop.Runtime loop wakes for an earlier timer deadline
+262/388 Test #507: Base.IO.RuntimeLoop.Runtime loop wakes for an earlier timer deadline ........................................................   Passed    0.01 sec
+        Start 508: Base.IO.RuntimeLoop.Runtime delay cancellation removes its long-duration timer immediately
+263/388 Test #508: Base.IO.RuntimeLoop.Runtime delay cancellation removes its long-duration timer immediately ..................................   Passed    0.00 sec
+        Start 509: Base.IO.RuntimeLoop.Runtime shutdown terminates a pending delay without an explicit cancellation token
+264/388 Test #509: Base.IO.RuntimeLoop.Runtime shutdown terminates a pending delay without an explicit cancellation token ......................   Passed    0.00 sec
+        Start 510: Base.IO.RuntimeLoop.Runtime timer installation racing cancellation reaches one terminal outcome
+265/388 Test #510: Base.IO.RuntimeLoop.Runtime timer installation racing cancellation reaches one terminal outcome .............................   Passed    0.01 sec
+        Start 511: Base.IO.RuntimeLoop.Runtime loop does not lose submissions racing entry into platform wait
+266/388 Test #511: Base.IO.RuntimeLoop.Runtime loop does not lose submissions racing entry into platform wait ..................................   Passed    0.01 sec
+        Start 512: Base.IO.RuntimeLoop.Runtime loop rejects invalid capacities and empty submissions
+267/388 Test #512: Base.IO.RuntimeLoop.Runtime loop rejects invalid capacities and empty submissions ...........................................   Passed    0.00 sec
+        Start 513: Base.IO.RuntimeLoop.Runtime loop ignores cached readiness from a retired generation
+268/388 Test #513: Base.IO.RuntimeLoop.Runtime loop ignores cached readiness from a retired generation .........................................   Passed    0.00 sec
+        Start 514: Base.IO.RuntimeLoop.Runtime loop retains readiness beyond a full native event batch
+269/388 Test #514: Base.IO.RuntimeLoop.Runtime loop retains readiness beyond a full native event batch .........................................   Passed    0.00 sec
+        Start 515: Base.IO.RuntimeLoop.Runtime loop rejects duplicate and excess registrations and retires them on stop
+270/388 Test #515: Base.IO.RuntimeLoop.Runtime loop rejects duplicate and excess registrations and retires them on stop ........................   Passed    0.00 sec
+        Start 516: Base.IO.RuntimeLoop.Runtime loop reserves admission without native monitoring and arms on demand
+271/388 Test #516: Base.IO.RuntimeLoop.Runtime loop reserves admission without native monitoring and arms on demand ............................   Passed    0.00 sec
+        Start 517: Base.IO.RuntimeLoop.Runtime host wakes when the final unarmed registration retires off owner
+272/388 Test #517: Base.IO.RuntimeLoop.Runtime host wakes when the final unarmed registration retires off owner ................................   Passed    0.00 sec
+        Start 518: Base.IO.RuntimeLoop.Runtime loop host descriptor signals submissions and changed timer deadlines
+273/388 Test #518: Base.IO.RuntimeLoop.Runtime loop host descriptor signals submissions and changed timer deadlines ............................   Passed    0.02 sec
+        Start 519: Base.IO.RuntimeLoop.Runtime host snapshots include native readiness and refresh after registration changes
+274/388 Test #519: Base.IO.RuntimeLoop.Runtime host snapshots include native readiness and refresh after registration changes ..................   Passed    0.00 sec
+        Start 520: Base.IO.RuntimeLoop.Runtime host snapshot rejects unsupported or insufficient storage without partial output
+275/388 Test #520: Base.IO.RuntimeLoop.Runtime host snapshot rejects unsupported or insufficient storage without partial output ................   Passed    0.00 sec
+        Start 521: Base.IO.RuntimeLoop.Runtime loop rejects IOCP requests without retaining registration capacity
+276/388 Test #521: Base.IO.RuntimeLoop.Runtime loop rejects IOCP requests without retaining registration capacity ..............................   Passed    0.00 sec
+        Start 522: Base.IO.RuntimeLoop.Runtime PollOnce charges sequential task transfers to the batch budget
+277/388 Test #522: Base.IO.RuntimeLoop.Runtime PollOnce charges sequential task transfers to the batch budget ..................................   Passed    0.00 sec
+        Start 523: Base.IO.RuntimeLoop.Nested runtime polls share dispatch depth and preserve ready backlog
+278/388 Test #523: Base.IO.RuntimeLoop.Nested runtime polls share dispatch depth and preserve ready backlog ....................................   Passed    0.00 sec
+        Start 524: Base.IO.RuntimeRunner.Runtime executor drives yields and timers on the application thread
+279/388 Test #524: Base.IO.RuntimeRunner.Runtime executor drives yields and timers on the application thread ...................................   Passed    0.00 sec
+        Start 525: Base.IO.RuntimeRunner.Runtime runner establishes ownership before construction returns
+280/388 Test #525: Base.IO.RuntimeRunner.Runtime runner establishes ownership before construction returns ......................................   Passed    0.00 sec
+        Start 526: Base.IO.RuntimeRunner.Runtime runner cannot take over a manually driven runtime
+281/388 Test #526: Base.IO.RuntimeRunner.Runtime runner cannot take over a manually driven runtime .............................................   Passed    0.00 sec
+        Start 527: Base.IO.RuntimeRunner.Runtime runner callbacks can request stop and reject blocking shutdown
+282/388 Test #527: Base.IO.RuntimeRunner.Runtime runner callbacks can request stop and reject blocking shutdown ................................   Passed    0.00 sec
+        Start 528: Base.IO.RuntimeRunner.Runtime stopping preserves admitted task continuations and subsequent child joins
+283/388 Test #528: Base.IO.RuntimeRunner.Runtime stopping preserves admitted task continuations and subsequent child joins .....................   Passed    0.00 sec
+        Start 529: Base.IO.RuntimeRunner.Runtime task reservation exhaustion rejects execution before its body starts
+284/388 Test #529: Base.IO.RuntimeRunner.Runtime task reservation exhaustion rejects execution before its body starts ..........................   Passed    0.00 sec
+        Start 530: Base.IO.RuntimeRunner.WhenAll joins every admitted child after runtime stop without new task admission
+285/388 Test #530: Base.IO.RuntimeRunner.WhenAll joins every admitted child after runtime stop without new task admission ......................   Passed    0.00 sec
+        Start 531: Base.IO.RuntimeRunner.WhenAny drains losing external work after runtime admission closes
+286/388 Test #531: Base.IO.RuntimeRunner.WhenAny drains losing external work after runtime admission closes ....................................   Passed    0.00 sec
+        Start 532: Base.IO.Runtime.IO.Runtime exposes host sources without initializing resource backends
+287/388 Test #532: Base.IO.Runtime.IO.Runtime exposes host sources without initializing resource backends ......................................   Passed    0.00 sec
+        Start 533: Base.IO.Runtime.IO.Runtime creates no backend for construction or synchronous use
+288/388 Test #533: Base.IO.Runtime.IO.Runtime creates no backend for construction or synchronous use ...........................................   Passed    0.00 sec
+        Start 534: Base.IO.Runtime.IO.Runtime shares lazy filesystem services across resources and contexts
+289/388 Test #534: Base.IO.Runtime.IO.Runtime shares lazy filesystem services across resources and contexts ....................................   Passed    0.00 sec
+        Start 535: Base.IO.Runtime.IO.Runtime requires an explicit binding for asynchronous filesystem operations
+290/388 Test #535: Base.IO.Runtime.IO.Runtime requires an explicit binding for asynchronous filesystem operations ..............................   Passed    0.00 sec
+        Start 536: Base.IO.Runtime.IO.Runtime validates positive admission limits
+291/388 Test #536: Base.IO.Runtime.IO.Runtime validates positive admission limits ..............................................................   Passed    0.00 sec
+        Start 537: Base.IO.VirtualFileSystem.IO.VirtualFileSystem forwards path-returning operations
+292/388 Test #537: Base.IO.VirtualFileSystem.IO.VirtualFileSystem forwards path-returning operations ...........................................   Passed    0.01 sec
+        Start 538: Base.IO.VirtualFileSystem.IO.VirtualFileSystem copies and moves across mounts
+293/388 Test #538: Base.IO.VirtualFileSystem.IO.VirtualFileSystem copies and moves across mounts ...............................................   Passed    0.01 sec
+        Start 539: Base.IO.VirtualFileSystem.IO.VirtualFileSystem directory handles scope relative operations
+294/388 Test #539: Base.IO.VirtualFileSystem.IO.VirtualFileSystem directory handles scope relative operations ..................................   Passed    0.00 sec
+        Start 540: Base.IO.VirtualFileSystem.IO.VirtualFileSystem async file operations use value handles
+295/388 Test #540: Base.IO.VirtualFileSystem.IO.VirtualFileSystem async file operations use value handles ......................................   Passed    0.01 sec
+        Start 541: Base.IO.VirtualFileSystem.IO.VirtualFileSystem async directory handles stay mount scoped
+296/388 Test #541: Base.IO.VirtualFileSystem.IO.VirtualFileSystem async directory handles stay mount scoped ....................................   Passed    0.00 sec
+        Start 542: Base.IO.VirtualFileSystem.IO.VirtualFileSystem async copy crosses mounts and cleans canceled destinations
+297/388 Test #542: Base.IO.VirtualFileSystem.IO.VirtualFileSystem async copy crosses mounts and cleans canceled destinations ...................   Passed    0.01 sec
+        Start 643: Base.Net.Address.Net.IpAddress parses and formats strict IPv4
+298/388 Test #643: Base.Net.Address.Net.IpAddress parses and formats strict IPv4 ...............................................................   Passed    0.00 sec
+        Start 644: Base.Net.Address.Net.IpAddress parses and canonically formats IPv6
+299/388 Test #644: Base.Net.Address.Net.IpAddress parses and canonically formats IPv6 ..........................................................   Passed    0.00 sec
+        Start 645: Base.Net.Address.Net.IpAddress supports allocation-free formatting and hashing
+300/388 Test #645: Base.Net.Address.Net.IpAddress supports allocation-free formatting and hashing ..............................................   Passed    0.00 sec
+        Start 646: Base.Net.Address.Net.Endpoint parses ports, bracketed IPv6, and numeric scopes
+301/388 Test #646: Base.Net.Address.Net.Endpoint parses ports, bracketed IPv6, and numeric scopes ..............................................   Passed    0.00 sec
+        Start 647: Base.Net.Address.Net.ResourceExhausted maps to a portable no-buffer-space error
+302/388 Test #647: Base.Net.Address.Net.ResourceExhausted maps to a portable no-buffer-space error .............................................   Passed    0.00 sec
+        Start 648: Base.Net.ExecutorPlacement.Network leaves transfer early and pending outcomes to their context executor
+303/388 Test #648: Base.Net.ExecutorPlacement.Network leaves transfer early and pending outcomes to their context executor .....................   Passed    0.00 sec
+        Start 649: Base.Net.NetSocket.Net.Udp.TryReceiveWouldBlock
+304/388 Test #649: Base.Net.NetSocket.Net.Udp.TryReceiveWouldBlock .............................................................................   Passed    0.00 sec
+        Start 650: Base.Net.NetSocket.Net.TcpListener.TryAcceptWouldBlock
+305/388 Test #650: Base.Net.NetSocket.Net.TcpListener.TryAcceptWouldBlock ......................................................................   Passed    0.00 sec
+        Start 651: Base.Net.NetSocket.Net.BufferPool.RentRelease
+306/388 Test #651: Base.Net.NetSocket.Net.BufferPool.RentRelease ...............................................................................   Passed    0.00 sec
+        Start 652: Base.Net.NetSocket.Net.Udp.LoopbackSendReceive
+307/388 Test #652: Base.Net.NetSocket.Net.Udp.LoopbackSendReceive ..............................................................................   Passed    0.00 sec
+        Start 653: Base.Net.NetSocket.Net.Tcp.LoopbackConnectSendReceive
+308/388 Test #653: Base.Net.NetSocket.Net.Tcp.LoopbackConnectSendReceive .......................................................................   Passed    0.00 sec
+        Start 654: Base.Net.NetSocket.Net.Udp.AsyncLoopbackSendReceive
+309/388 Test #654: Base.Net.NetSocket.Net.Udp.AsyncLoopbackSendReceive .........................................................................   Passed    0.00 sec
+        Start 655: Base.Net.NetSocket.Net.Tcp.AsyncLoopbackConnectSendReceive
+310/388 Test #655: Base.Net.NetSocket.Net.Tcp.AsyncLoopbackConnectSendReceive ..................................................................   Passed    0.00 sec
+        Start 656: Base.Net.NetSocket.Net.Tcp.VectoredSendReceive
+311/388 Test #656: Base.Net.NetSocket.Net.Tcp.VectoredSendReceive ..............................................................................   Passed    0.00 sec
+        Start 657: Base.Net.NetSocket.Net.Transport.TcpByteStream.Loopback
+312/388 Test #657: Base.Net.NetSocket.Net.Transport.TcpByteStream.Loopback .....................................................................   Passed    0.00 sec
+        Start 658: Base.Net.NetSocket.Net.Transport.LengthPrefixedMessageStream.Loopback
+313/388 Test #658: Base.Net.NetSocket.Net.Transport.LengthPrefixedMessageStream.Loopback .......................................................   Passed    0.00 sec
+        Start 659: Base.Net.NetSocket.Net.Udp.VectoredSendReceive
+314/388 Test #659: Base.Net.NetSocket.Net.Udp.VectoredSendReceive ..............................................................................   Passed    0.00 sec
+        Start 660: Base.Net.NetSocket.Net.Transport.UdpDatagramChannel.Loopback
+315/388 Test #660: Base.Net.NetSocket.Net.Transport.UdpDatagramChannel.Loopback ................................................................   Passed    0.00 sec
+        Start 661: Base.Net.NetSocket.Net.Udp.AsyncReceiveCancelled
+316/388 Test #661: Base.Net.NetSocket.Net.Udp.AsyncReceiveCancelled ............................................................................   Passed    0.00 sec
+        Start 662: Base.Net.NetSocket.Net.Tcp.AsyncAcceptCancelled
+317/388 Test #662: Base.Net.NetSocket.Net.Tcp.AsyncAcceptCancelled .............................................................................   Passed    0.00 sec
+        Start 663: Base.Net.NetSocket.Net.Tcp.AsyncReceiveCancelled
+318/388 Test #663: Base.Net.NetSocket.Net.Tcp.AsyncReceiveCancelled ............................................................................   Passed    0.00 sec
+        Start 664: Base.Net.NetSocket.Net.Tcp.AsyncReceiveEOF
+319/388 Test #664: Base.Net.NetSocket.Net.Tcp.AsyncReceiveEOF ..................................................................................   Passed    0.00 sec
+        Start 665: Base.Net.NetSocket.Net.Tcp.PartialReceive
+320/388 Test #665: Base.Net.NetSocket.Net.Tcp.PartialReceive ...................................................................................   Passed    0.00 sec
+        Start 666: Base.Net.NetSocket.Net.Tcp.ConnectRefused
+321/388 Test #666: Base.Net.NetSocket.Net.Tcp.ConnectRefused ...................................................................................   Passed    0.00 sec
+        Start 667: Base.Net.NetSocket.Net.Tcp.AsyncAcceptCloseWhilePending
+322/388 Test #667: Base.Net.NetSocket.Net.Tcp.AsyncAcceptCloseWhilePending .....................................................................   Passed    0.00 sec
+        Start 668: Base.Net.NetSocket.Net.Tcp.AsyncReceiveCloseWhilePending
+323/388 Test #668: Base.Net.NetSocket.Net.Tcp.AsyncReceiveCloseWhilePending ....................................................................   Passed    0.00 sec
+        Start 669: Base.Net.NetSocket.Net.Tcp.DualStackV6ListenerV4Client
+324/388 Test #669: Base.Net.NetSocket.Net.Tcp.DualStackV6ListenerV4Client ......................................................................   Passed    0.00 sec
+        Start 670: Base.Net.NetSocket.Net.Tcp.AsyncConnectRefused
+325/388 Test #670: Base.Net.NetSocket.Net.Tcp.AsyncConnectRefused ..............................................................................   Passed    0.00 sec
+        Start 671: Base.Net.Resolve.Net.Resolve resolves numeric loopback without external network access
+326/388 Test #671: Base.Net.Resolve.Net.Resolve resolves numeric loopback without external network access ......................................   Passed    0.00 sec
+        Start 672: Base.Net.Resolve.Net.Resolve applies address-family filters and preserves resolver diagnostics
+327/388 Test #672: Base.Net.Resolve.Net.Resolve applies address-family filters and preserves resolver diagnostics ..............................   Passed    0.00 sec
+        Start 673: Base.Net.Resolve.Net.Resolve async work uses its explicit driver and caller executor
+328/388 Test #673: Base.Net.Resolve.Net.Resolve async work uses its explicit driver and caller executor ........................................   Passed    0.00 sec
+        Start 674: Base.Net.Resolve.Net.Resolve async cancellation and timeout complete without waiting for lookup
+329/388 Test #674: Base.Net.Resolve.Net.Resolve async cancellation and timeout complete without waiting for lookup .............................   Passed    0.00 sec
+        Start 675: Base.Net.Resolve.Net.Resolve retires timeout capacity before delivering successful results
+330/388 Test #675: Base.Net.Resolve.Net.Resolve retires timeout capacity before delivering successful results ..................................   Passed    0.00 sec
+        Start 676: Base.Net.Resolve.Net.Resolve uses reserved delivery after ordinary executor admission closes
+331/388 Test #676: Base.Net.Resolve.Net.Resolve uses reserved delivery after ordinary executor admission closes ................................   Passed    0.00 sec
+        Start 677: Base.Net.Resolve.Net.Resolve cancellation racing setup publishes once on the selected executor
+332/388 Test #677: Base.Net.Resolve.Net.Resolve cancellation racing setup publishes once on the selected executor ..............................   Passed    0.01 sec
+        Start 678: Base.Net.Resolve.Net.Resolve supports cooperative timed delivery and retires its timer
+333/388 Test #678: Base.Net.Resolve.Net.Resolve supports cooperative timed delivery and retires its timer ......................................   Passed    0.00 sec
+        Start 679: Base.Net.Resolve.Net.Resolve driver shutdown completes queued lookup through reserved delivery
+334/388 Test #679: Base.Net.Resolve.Net.Resolve driver shutdown completes queued lookup through reserved delivery ..............................   Passed    0.00 sec
+        Start 680: Base.Net.Runtime.Net.Runtime shutdown cancels an admitted receive on its own executor
+335/388 Test #680: Base.Net.Runtime.Net.Runtime shutdown cancels an admitted receive on its own executor .......................................   Passed    0.00 sec
+        Start 681: Base.Net.Runtime.Net.Runtime runner uses context cancellation and no file workers
+336/388 Test #681: Base.Net.Runtime.Net.Runtime runner uses context cancellation and no file workers ...........................................   Passed    0.05 sec
+        Start 682: Base.Net.Runtime.Net.Runtime manual Run waits for lazy initialization and stops cleanly
+337/388 Test #682: Base.Net.Runtime.Net.Runtime manual Run waits for lazy initialization and stops cleanly .....................................   Passed    0.05 sec
+        Start 683: Base.Net.Runtime.Net.Runtime unbound sockets reject async use without starting a backend
+338/388 Test #683: Base.Net.Runtime.Net.Runtime unbound sockets reject async use without starting a backend ....................................   Passed    0.00 sec
+        Start 684: Base.Net.Runtime.Net.Runtime socket moves preserve bindings and runtimes stop independently
+339/388 Test #684: Base.Net.Runtime.Net.Runtime socket moves preserve bindings and runtimes stop independently .................................   Passed    0.05 sec
+        Start 685: Base.Net.Runtime.Net.Runtime honors a canceled operation context before a socket fast path
+340/388 Test #685: Base.Net.Runtime.Net.Runtime honors a canceled operation context before a socket fast path ..................................   Passed    0.00 sec
+        Start 686: Base.Net.Runtime.Net.Runtime close cancels a pending UDP receive without an application token
+341/388 Test #686: Base.Net.Runtime.Net.Runtime close cancels a pending UDP receive without an application token ...............................   Passed    0.00 sec
+        Start 687: Base.Net.Runtime.Net.Runtime close cancels a pending listener without an application token
+342/388 Test #687: Base.Net.Runtime.Net.Runtime close cancels a pending listener without an application token ..................................   Passed    0.00 sec
+        Start 688: Base.Net.Runtime.Net.Runtime pending receives reject another wait in the same direction
+343/388 Test #688: Base.Net.Runtime.Net.Runtime pending receives reject another wait in the same direction .....................................   Passed    0.00 sec
+        Start 689: Base.Net.SocketOperation.Net socket tasks retain their resource across cold and pending moves
+344/388 Test #689: Base.Net.SocketOperation.Net socket tasks retain their resource across cold and pending moves ...............................   Passed    0.00 sec
+        Start 690: Base.Net.SocketOperation.Net destroying a pending socket cancels without retaining its wrapper
+345/388 Test #690: Base.Net.SocketOperation.Net destroying a pending socket cancels without retaining its wrapper ..............................   Passed    0.00 sec
+        Start 691: Base.Net.SocketOperation.Net a ready datagram cannot bypass same-direction admission
+346/388 Test #691: Base.Net.SocketOperation.Net a ready datagram cannot bypass same-direction admission ........................................   Passed    0.00 sec
+        Start 692: Base.Net.SocketOperation.Net operation and registration saturation reject before sending and recover
+347/388 Test #692: Base.Net.SocketOperation.Net operation and registration saturation reject before sending and recover ........................   Passed    0.00 sec
+        Start 693: Base.Net.SocketOperation.Net fast sends require reserved completion storage
+348/388 Test #693: Base.Net.SocketOperation.Net fast sends require reserved completion storage .................................................   Passed    0.00 sec
+        Start 694: Base.Net.SocketOperation.Net async admission rejects blocking sockets
+349/388 Test #694: Base.Net.SocketOperation.Net async admission rejects blocking sockets .......................................................   Passed    0.00 sec
+        Start 695: Base.Net.SocketOperation.Net moved listeners and clients complete on the selected external executor
+350/388 Test #695: Base.Net.SocketOperation.Net moved listeners and clients complete on the selected external executor .........................   Passed    0.00 sec
+        Start 696: Base.Net.SocketOperation.Net pending connects reserve both directions and cancellation closes the connection
+351/388 Test #696: Base.Net.SocketOperation.Net pending connects reserve both directions and cancellation closes the connection ................   Passed    0.00 sec
+        Start 697: Base.Net.SocketOperation.Net close and ready cancellation races retire before descriptor reuse
+352/388 Test #697: Base.Net.SocketOperation.Net close and ready cancellation races retire before descriptor reuse ..............................   Passed    0.01 sec
+        Start 698: Base.Net.SocketOperation.Net a cold task cannot switch to a reopened socket
+353/388 Test #698: Base.Net.SocketOperation.Net a cold task cannot switch to a reopened socket .................................................   Passed    0.00 sec
+        Start 699: Base.Net.SocketOperation.Net a pending TCP read permits a write on the same socket
+354/388 Test #699: Base.Net.SocketOperation.Net a pending TCP read permits a write on the same socket ..........................................   Passed    0.00 sec
+        Start 700: Base.Net.SocketOperation.Net pending socket completion transfers the task chain to its leaf executor
+355/388 Test #700: Base.Net.SocketOperation.Net pending socket completion transfers the task chain to its leaf executor ........................   Passed    0.00 sec
+        Start 701: Base.Net.SocketOperation.Net pending socket delivery inlines when eligible and retains reserved fallback
+356/388 Test #701: Base.Net.SocketOperation.Net pending socket delivery inlines when eligible and retains reserved fallback ....................   Passed    0.00 sec
+        Start 702: Base.Net.SocketState.Socket leases admit one read and one write and defer native close until both retire
+357/388 Test #702: Base.Net.SocketState.Socket leases admit one read and one write and defer native close until both retire ....................   Passed    0.00 sec
+        Start 703: Base.Net.SocketState.Socket leases recover direction capacity and preserve state through owner moves
+358/388 Test #703: Base.Net.SocketState.Socket leases recover direction capacity and preserve state through owner moves ........................   Passed    0.00 sec
+        Start 704: Base.Net.SocketState.Socket close racing admission cannot release a successfully pinned native handle
+359/388 Test #704: Base.Net.SocketState.Socket close racing admission cannot release a successfully pinned native handle .......................   Passed    0.01 sec
+        Start 705: Base.Net.SocketState.Socket lease rejects absent state and invalid directions without native access
+360/388 Test #705: Base.Net.SocketState.Socket lease rejects absent state and invalid directions without native access .........................   Passed    0.00 sec
+        Start 706: Base.Net.TLS.TLS provider availability is explicit
+361/388 Test #706: Base.Net.TLS.TLS provider availability is explicit ..........................................................................   Passed    0.00 sec
+        Start 707: Base.Net.TLS.TLS trusted handshake negotiates SNI ALPN and fragmented application data
+362/388 Test #707: Base.Net.TLS.TLS trusted handshake negotiates SNI ALPN and fragmented application data ......................................***Skipped   0.00 sec
+        Start 708: Base.Net.TLS.TLS verification rejects untrusted expired and mismatched certificates
+363/388 Test #708: Base.Net.TLS.TLS verification rejects untrusted expired and mismatched certificates .........................................***Skipped   0.00 sec
+        Start 709: Base.Net.TLS.TLS mutual authentication and required ALPN policies are enforced
+364/388 Test #709: Base.Net.TLS.TLS mutual authentication and required ALPN policies are enforced ..............................................***Skipped   0.00 sec
+        Start 710: Base.Net.TLS.TLS handshake distinguishes caller cancellation and timeout
+365/388 Test #710: Base.Net.TLS.TLS handshake distinguishes caller cancellation and timeout ....................................................***Skipped   0.00 sec
+        Start 711: Base.Net.TLS.TLS reports EOF without close_notify as truncation
+366/388 Test #711: Base.Net.TLS.TLS reports EOF without close_notify as truncation .............................................................***Skipped   0.00 sec
+        Start 893: Base.IO.RuntimeLoopPortable.Runtime loop queues submissions and preserves bounded backlog
+367/388 Test #893: Base.IO.RuntimeLoopPortable.Runtime loop queues submissions and preserves bounded backlog ...................................   Passed    0.00 sec
+        Start 894: Base.IO.RuntimeLoopPortable.Runtime loop rotates submissions completions and timers across tiny batches
+368/388 Test #894: Base.IO.RuntimeLoopPortable.Runtime loop rotates submissions completions and timers across tiny batches .....................   Passed    0.00 sec
+        Start 895: Base.IO.RuntimeLoopPortable.Runtime loop binds first drive ownership and rejects reentrancy
+369/388 Test #895: Base.IO.RuntimeLoopPortable.Runtime loop binds first drive ownership and rejects reentrancy .................................   Passed    0.00 sec
+        Start 896: Base.IO.RuntimeLoopPortable.Runtime loop accepts reserved completion after stop and drains on its owner
+370/388 Test #896: Base.IO.RuntimeLoopPortable.Runtime loop accepts reserved completion after stop and drains on its owner .....................   Passed    0.00 sec
+        Start 897: Base.IO.RuntimeLoopPortable.Runtime loop shutdown waits for the committed driver without taking ownership
+371/388 Test #897: Base.IO.RuntimeLoopPortable.Runtime loop shutdown waits for the committed driver without taking ownership ...................   Passed    0.02 sec
+        Start 898: Base.IO.RuntimeLoopPortable.Runtime loop removes canceled timer storage and recovers capacity immediately
+372/388 Test #898: Base.IO.RuntimeLoopPortable.Runtime loop removes canceled timer storage and recovers capacity immediately ...................   Passed    0.00 sec
+        Start 899: Base.IO.RuntimeLoopPortable.Runtime timer ownership moves and removes undispatched work on destruction
+373/388 Test #899: Base.IO.RuntimeLoopPortable.Runtime timer ownership moves and removes undispatched work on destruction ......................   Passed    0.00 sec
+        Start 900: Base.IO.RuntimeLoopPortable.Runtime loop wakes for an earlier timer deadline
+374/388 Test #900: Base.IO.RuntimeLoopPortable.Runtime loop wakes for an earlier timer deadline ................................................   Passed    0.01 sec
+        Start 901: Base.IO.RuntimeLoopPortable.Runtime delay cancellation removes its long-duration timer immediately
+375/388 Test #901: Base.IO.RuntimeLoopPortable.Runtime delay cancellation removes its long-duration timer immediately ..........................   Passed    0.00 sec
+        Start 902: Base.IO.RuntimeLoopPortable.Runtime shutdown terminates a pending delay without an explicit cancellation token
+376/388 Test #902: Base.IO.RuntimeLoopPortable.Runtime shutdown terminates a pending delay without an explicit cancellation token ..............   Passed    0.00 sec
+        Start 903: Base.IO.RuntimeLoopPortable.Runtime timer installation racing cancellation reaches one terminal outcome
+377/388 Test #903: Base.IO.RuntimeLoopPortable.Runtime timer installation racing cancellation reaches one terminal outcome .....................   Passed    0.01 sec
+        Start 904: Base.IO.RuntimeLoopPortable.Runtime loop does not lose submissions racing entry into platform wait
+378/388 Test #904: Base.IO.RuntimeLoopPortable.Runtime loop does not lose submissions racing entry into platform wait ..........................   Passed    0.02 sec
+        Start 905: Base.IO.RuntimeLoopPortable.Runtime loop rejects invalid capacities and empty submissions
+379/388 Test #905: Base.IO.RuntimeLoopPortable.Runtime loop rejects invalid capacities and empty submissions ...................................   Passed    0.00 sec
+        Start 906: Base.IO.RuntimeLoopPortable.Runtime loop ignores cached readiness from a retired generation
+380/388 Test #906: Base.IO.RuntimeLoopPortable.Runtime loop ignores cached readiness from a retired generation .................................   Passed    0.00 sec
+        Start 907: Base.IO.RuntimeLoopPortable.Runtime loop retains readiness beyond a full native event batch
+381/388 Test #907: Base.IO.RuntimeLoopPortable.Runtime loop retains readiness beyond a full native event batch .................................   Passed    0.00 sec
+        Start 908: Base.IO.RuntimeLoopPortable.Runtime loop rejects duplicate and excess registrations and retires them on stop
+382/388 Test #908: Base.IO.RuntimeLoopPortable.Runtime loop rejects duplicate and excess registrations and retires them on stop ................   Passed    0.00 sec
+        Start 909: Base.IO.RuntimeLoopPortable.Runtime loop reserves admission without native monitoring and arms on demand
+383/388 Test #909: Base.IO.RuntimeLoopPortable.Runtime loop reserves admission without native monitoring and arms on demand ....................   Passed    0.00 sec
+        Start 910: Base.IO.RuntimeLoopPortable.Runtime host wakes when the final unarmed registration retires off owner
+384/388 Test #910: Base.IO.RuntimeLoopPortable.Runtime host wakes when the final unarmed registration retires off owner ........................   Passed    0.00 sec
+        Start 911: Base.IO.RuntimeLoopPortable.Runtime loop host descriptor signals submissions and changed timer deadlines
+385/388 Test #911: Base.IO.RuntimeLoopPortable.Runtime loop host descriptor signals submissions and changed timer deadlines ....................   Passed    0.02 sec
+        Start 912: Base.IO.RuntimeLoopPortable.Runtime host snapshots include native readiness and refresh after registration changes
+386/388 Test #912: Base.IO.RuntimeLoopPortable.Runtime host snapshots include native readiness and refresh after registration changes ..........   Passed    0.00 sec
+        Start 913: Base.IO.RuntimeLoopPortable.Runtime host snapshot rejects unsupported or insufficient storage without partial output
+387/388 Test #913: Base.IO.RuntimeLoopPortable.Runtime host snapshot rejects unsupported or insufficient storage without partial output ........   Passed    0.00 sec
+        Start 914: Base.IO.RuntimeLoopPortable.Runtime loop rejects IOCP requests without retaining registration capacity
+388/388 Test #914: Base.IO.RuntimeLoopPortable.Runtime loop rejects IOCP requests without retaining registration capacity ......................   Passed    0.00 sec
+
+100% tests passed, 0 tests failed out of 388
+
+Label Time Summary:
+Async        =   1.74 sec*proc (137 tests)
+Execution    =   0.06 sec*proc (42 tests)
+IO           =   1.82 sec*proc (140 tests)
+Net          =   0.30 sec*proc (69 tests)
+
+Total Test time (real) =   4.11 sec
+
+The following tests did not run:
+	458 - Base.IO.IocpFileBackend.Windows native file IOCP requires Windows (Skipped)
+	707 - Base.Net.TLS.TLS trusted handshake negotiates SNI ALPN and fragmented application data (Skipped)
+	708 - Base.Net.TLS.TLS verification rejects untrusted expired and mismatched certificates (Skipped)
+	709 - Base.Net.TLS.TLS mutual authentication and required ALPN policies are enforced (Skipped)
+	710 - Base.Net.TLS.TLS handshake distinguishes caller cancellation and timeout (Skipped)
+	711 - Base.Net.TLS.TLS reports EOF without close_notify as truncation (Skipped)

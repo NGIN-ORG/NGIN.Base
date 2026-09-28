@@ -1,0 +1,175 @@
+Internal ctest changing into directory: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/tests-asan
+Test project /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/tests-asan
+      Start  24: Base.Async.AsyncGenerator.AsyncGenerator yields values via Next(TaskContext)
+ 1/83 Test  #24: Base.Async.AsyncGenerator.AsyncGenerator yields values via Next(TaskContext) ........................................   Passed    0.01 sec
+      Start  25: Base.Async.AsyncGenerator.AsyncGenerator propagates exceptions from producer
+ 2/83 Test  #25: Base.Async.AsyncGenerator.AsyncGenerator propagates exceptions from producer ........................................   Passed    0.01 sec
+      Start  26: Base.Async.AsyncGenerator.AsyncGenerator Next observes TaskContext cancellation
+ 3/83 Test  #26: Base.Async.AsyncGenerator.AsyncGenerator Next observes TaskContext cancellation .....................................   Passed    0.01 sec
+      Start  27: Base.Async.AsyncGenerator.AsyncGenerator faults concurrent Next consumers
+ 4/83 Test  #27: Base.Async.AsyncGenerator.AsyncGenerator faults concurrent Next consumers ...........................................   Passed    0.01 sec
+      Start  28: Base.Async.AsyncGenerator.AsyncGenerator cancellation joins queued producer access
+ 5/83 Test  #28: Base.Async.AsyncGenerator.AsyncGenerator cancellation joins queued producer access ..................................   Passed    0.01 sec
+      Start  29: Base.Async.AsyncGenerator.AsyncGenerator Next retains producer ownership across moves and destruction
+ 6/83 Test  #29: Base.Async.AsyncGenerator.AsyncGenerator Next retains producer ownership across moves and destruction ...............   Passed    0.01 sec
+      Start  30: Base.Async.AsyncGenerator.AsyncGenerator advances and resumes its consumer on their selected executors
+ 7/83 Test  #30: Base.Async.AsyncGenerator.AsyncGenerator advances and resumes its consumer on their selected executors ..............   Passed    0.01 sec
+      Start  31: Base.Async.AsyncGenerator.AsyncGenerator preserves reserved consumer delivery after admission closes
+ 8/83 Test  #31: Base.Async.AsyncGenerator.AsyncGenerator preserves reserved consumer delivery after admission closes ................   Passed    0.01 sec
+      Start  32: Base.Async.AsyncGenerator.AsyncGenerator rejects failed producer admission before entering its body
+ 9/83 Test  #32: Base.Async.AsyncGenerator.AsyncGenerator rejects failed producer admission before entering its body .................   Passed    0.01 sec
+      Start  33: Base.Async.AsyncGenerator.AsyncGenerator cancellation waits for uncancelable producer suspension
+10/83 Test  #33: Base.Async.AsyncGenerator.AsyncGenerator cancellation waits for uncancelable producer suspension ....................   Passed    0.01 sec
+      Start  34: Base.Async.AsyncGenerator.AsyncGenerator supports concurrent executor delivery across repeated advances
+11/83 Test  #34: Base.Async.AsyncGenerator.AsyncGenerator supports concurrent executor delivery across repeated advances .............   Passed    0.44 sec
+      Start  35: Base.Async.AsyncGenerator.AsyncGenerator joins Operation delivery on its reserved producer continuation
+12/83 Test  #35: Base.Async.AsyncGenerator.AsyncGenerator joins Operation delivery on its reserved producer continuation .............   Passed    0.01 sec
+      Start  36: Base.Async.AsyncGenerator.AsyncGenerator empty and abandoned cold advances need no execution lifetime
+13/83 Test  #36: Base.Async.AsyncGenerator.AsyncGenerator empty and abandoned cold advances need no execution lifetime ...............   Passed    0.01 sec
+      Start  37: Base.Async.AsyncGenerator.AsyncGenerator retires owned canceled producers under concurrent delivery
+14/83 Test  #37: Base.Async.AsyncGenerator.AsyncGenerator retires owned canceled producers under concurrent delivery .................   Passed    0.27 sec
+      Start  53: Base.Async.ChildLifetime.Canceling a task wait joins child work before publishing parent cancellation
+15/83 Test  #53: Base.Async.ChildLifetime.Canceling a task wait joins child work before publishing parent cancellation ...............   Passed    0.01 sec
+      Start  54: Base.Async.ChildLifetime.An already canceled task wait does not start a cold child
+16/83 Test  #54: Base.Async.ChildLifetime.An already canceled task wait does not start a cold child ..................................   Passed    0.01 sec
+      Start  55: Base.Async.ChildLifetime.Nested canceled tasks retire child locals before their borrowed parent locals
+17/83 Test  #55: Base.Async.ChildLifetime.Nested canceled tasks retire child locals before their borrowed parent locals ..............   Passed    1.67 sec
+      Start  56: Base.Async.ChildLifetime.Operation awaits release canceled child locals before normal parent return
+18/83 Test  #56: Base.Async.ChildLifetime.Operation awaits release canceled child locals before normal parent return .................   Passed    0.02 sec
+      Start  57: Base.Async.CompletionAwait.AsCompletion returns every terminal outcome without failing its parent
+19/83 Test  #57: Base.Async.CompletionAwait.AsCompletion returns every terminal outcome without failing its parent ...................   Passed    0.01 sec
+      Start  58: Base.Async.CompletionAwait.AsCompletion waits for frame retirement before returning any outcome
+20/83 Test  #58: Base.Async.CompletionAwait.AsCompletion waits for frame retirement before returning any outcome .....................   Passed    0.01 sec
+      Start  62: Base.Async.Environment.Nested tasks preserve an environment across suspension
+21/83 Test  #62: Base.Async.Environment.Nested tasks preserve an environment across suspension .......................................   Passed    0.01 sec
+      Start  63: Base.Async.Environment.Environment construction rejects a null resource
+22/83 Test  #63: Base.Async.Environment.Environment construction rejects a null resource .............................................   Passed    0.01 sec
+      Start  64: Base.Async.Environment.Rejected environment allocation never starts a task
+23/83 Test  #64: Base.Async.Environment.Rejected environment allocation never starts a task ..........................................   Passed    0.01 sec
+      Start  65: Base.Async.Environment.Startup snapshots context properties before queued execution
+24/83 Test  #65: Base.Async.Environment.Startup snapshots context properties before queued execution .................................   Passed    0.01 sec
+      Start  66: Base.Async.Environment.Context cancellation replacement preserves other environment properties
+25/83 Test  #66: Base.Async.Environment.Context cancellation replacement preserves other environment properties ......................   Passed    0.01 sec
+      Start  67: Base.Async.ExecutorAffinity.StartsOn transfers the child placement to its parent
+26/83 Test  #67: Base.Async.ExecutorAffinity.StartsOn transfers the child placement to its parent ....................................   Passed    0.01 sec
+      Start  68: Base.Async.ExecutorAffinity.Operation resumes its observer on the observer executor
+27/83 Test  #68: Base.Async.ExecutorAffinity.Operation resumes its observer on the observer executor .................................   Passed    0.01 sec
+      Start  69: Base.Async.ExecutorAffinity.Moving an owned Operation awaiter preserves its child and selected executor
+28/83 Test  #69: Base.Async.ExecutorAffinity.Moving an owned Operation awaiter preserves its child and selected executor .............   Passed    0.01 sec
+      Start  70: Base.Async.ExecutorTransitions.Executor transitions deliver every outcome without restoring the original executor
+29/83 Test  #70: Base.Async.ExecutorTransitions.Executor transitions deliver every outcome without restoring the original executor ...   Passed    0.01 sec
+      Start  71: Base.Async.ExecutorTransitions.Rejected transition admission never enters the child
+30/83 Test  #71: Base.Async.ExecutorTransitions.Rejected transition admission never enters the child .................................   Passed    0.01 sec
+      Start  72: Base.Async.ExecutorTransitions.Ready void transitions preserve all terminal outcomes
+31/83 Test  #72: Base.Async.ExecutorTransitions.Ready void transitions preserve all terminal outcomes ................................   Passed    0.01 sec
+      Start  73: Base.Async.ExecutorTransitions.ContinuesOn uses its admitted terminal slot after admission closes
+32/83 Test  #73: Base.Async.ExecutorTransitions.ContinuesOn uses its admitted terminal slot after admission closes ...................   Passed    0.01 sec
+      Start  88: Base.Async.Ready.Ready tasks can be run without an executor
+33/83 Test  #88: Base.Async.Ready.Ready tasks can be run without an executor .........................................................   Passed    0.01 sec
+      Start  89: Base.Async.Ready.Ready child values compose and are consumed
+34/83 Test  #89: Base.Async.Ready.Ready child values compose and are consumed ........................................................   Passed    0.01 sec
+      Start  90: Base.Async.Ready.Ready terminal outcomes propagate through both task specializations
+35/83 Test  #90: Base.Async.Ready.Ready terminal outcomes propagate through both task specializations ................................   Passed    0.01 sec
+      Start  91: Base.Async.Ready.Throwing ready payload moves become observable faults
+36/83 Test  #91: Base.Async.Ready.Throwing ready payload moves become observable faults ..............................................   Passed    0.01 sec
+      Start  92: Base.Async.Ready.A canceled wait cannot replace an inline published result
+37/83 Test  #92: Base.Async.Ready.A canceled wait cannot replace an inline published result ..........................................   Passed    0.01 sec
+      Start  93: Base.Async.Ready.Ready Task move assignment replaces and consumes payload ownership
+38/83 Test  #93: Base.Async.Ready.Ready Task move assignment replaces and consumes payload ownership .................................   Passed    0.01 sec
+      Start  94: Base.Async.Ready.Scopes observe and retire ready children
+39/83 Test  #94: Base.Async.Ready.Scopes observe and retire ready children ...........................................................   Passed    0.01 sec
+      Start  95: Base.Async.Sequential.Sequential children reuse one admitted completion slot
+40/83 Test  #95: Base.Async.Sequential.Sequential children reuse one admitted completion slot ........................................   Passed    0.01 sec
+      Start  96: Base.Async.Sequential.Sequential void children reuse one admitted completion slot
+41/83 Test  #96: Base.Async.Sequential.Sequential void children reuse one admitted completion slot ...................................   Passed    0.01 sec
+      Start  97: Base.Async.Sequential.Long direct chains defer so unrelated work progresses
+42/83 Test  #97: Base.Async.Sequential.Long direct chains defer so unrelated work progresses .........................................   Passed    0.03 sec
+      Start  98: Base.Async.Sequential.Sequential child failure remains observable with one completion slot
+43/83 Test  #98: Base.Async.Sequential.Sequential child failure remains observable with one completion slot ..........................   Passed    0.04 sec
+      Start  99: Base.Async.Sequential.A throwing sequential result move becomes an observable parent fault
+44/83 Test  #99: Base.Async.Sequential.A throwing sequential result move becomes an observable parent fault ..........................   Passed    0.01 sec
+      Start 100: Base.Async.Sequential.Sequential failure waits for child frame borrowers before completing its parent
+45/83 Test #100: Base.Async.Sequential.Sequential failure waits for child frame borrowers before completing its parent ...............   Passed    0.01 sec
+      Start 101: Base.Async.Sequential.Awaiting an lvalue task consumes it once
+46/83 Test #101: Base.Async.Sequential.Awaiting an lvalue task consumes it once ......................................................   Passed    0.01 sec
+      Start 102: Base.Async.Sequential.Consuming a pending task again cannot replace its first parent
+47/83 Test #102: Base.Async.Sequential.Consuming a pending task again cannot replace its first parent ................................   Passed    0.01 sec
+      Start 103: Base.Async.Sequential.Sequential success waits for frame borrowers before resuming its parent
+48/83 Test #103: Base.Async.Sequential.Sequential success waits for frame borrowers before resuming its parent .......................   Passed    0.01 sec
+      Start 104: Base.Async.Task.Destroying or replacing cold tasks never starts their bodies
+49/83 Test #104: Base.Async.Task.Destroying or replacing cold tasks never starts their bodies ........................................   Passed    0.01 sec
+      Start 105: Base.Async.Task.Spawn consumes a cold task and returns a running operation
+50/83 Test #105: Base.Async.Task.Spawn consumes a cold task and returns a running operation ..........................................   Passed    0.01 sec
+      Start 106: Base.Async.Task.Spawn converts scheduler rejection into an async fault
+51/83 Test #106: Base.Async.Task.Spawn converts scheduler rejection into an async fault ..............................................   Passed    0.01 sec
+      Start 107: Base.Async.Task.Task continuation publication racing completion has no lost wakeup
+52/83 Test #107: Base.Async.Task.Task continuation publication racing completion has no lost wakeup ..................................   Passed    0.09 sec
+      Start 108: Base.Async.Task.Operation reports invalid result access before completion
+53/83 Test #108: Base.Async.Task.Operation reports invalid result access before completion ...........................................   Passed    0.01 sec
+      Start 109: Base.Async.Task.Operation result can be taken only once
+54/83 Test #109: Base.Async.Task.Operation result can be taken only once .............................................................   Passed    0.01 sec
+      Start 110: Base.Async.Task.Detach explicitly runs fire-and-forget work
+55/83 Test #110: Base.Async.Task.Detach explicitly runs fire-and-forget work .........................................................   Passed    0.01 sec
+      Start 111: Base.Async.Task.Detached task destroys its frame exactly once after completion
+56/83 Test #111: Base.Async.Task.Detached task destroys its frame exactly once after completion ......................................   Passed    0.01 sec
+      Start 112: Base.Async.Task.Detached canceled task destroys its suspended frame exactly once
+57/83 Test #112: Base.Async.Task.Detached canceled task destroys its suspended frame exactly once ....................................   Passed    0.01 sec
+      Start 113: Base.Async.Task.Operation ownership release racing completion destroys each frame exactly once
+58/83 Test #113: Base.Async.Task.Operation ownership release racing completion destroys each frame exactly once ......................   Passed    0.03 sec
+      Start 114: Base.Async.Task.Detach racing immediate completion destroys each frame exactly once
+59/83 Test #114: Base.Async.Task.Detach racing immediate completion destroys each frame exactly once .................................   Passed    0.03 sec
+      Start 115: Base.Async.Task.Task can be awaited without spawning the child explicitly
+60/83 Test #115: Base.Async.Task.Task can be awaited without spawning the child explicitly ...........................................   Passed    0.01 sec
+      Start 116: Base.Async.Task.Task domain errors propagate through co_await
+61/83 Test #116: Base.Async.Task.Task domain errors propagate through co_await .......................................................   Passed    0.01 sec
+      Start 117: Base.Async.Task.Task cancellation: Delay is woken by cancellation
+62/83 Test #117: Base.Async.Task.Task cancellation: Delay is woken by cancellation ...................................................   Passed    0.01 sec
+      Start 118: Base.Async.Task.Task cancellation: CancelAt wakes Delay without firing timers
+63/83 Test #118: Base.Async.Task.Task cancellation: CancelAt wakes Delay without firing timers .......................................   Passed    0.01 sec
+      Start 119: Base.Async.Task.Task propagates exceptions through co_await
+64/83 Test #119: Base.Async.Task.Task propagates exceptions through co_await .........................................................   Passed    0.01 sec
+      Start 120: Base.Async.TaskContext.Discarded token-free submissions deliver a terminal fault
+65/83 Test #120: Base.Async.TaskContext.Discarded token-free submissions deliver a terminal fault ....................................   Passed    0.01 sec
+      Start 121: Base.Async.TaskContext.TaskContext WithLinkedCancellationToken cancels when parent token cancels
+66/83 Test #121: Base.Async.TaskContext.TaskContext WithLinkedCancellationToken cancels when parent token cancels ....................   Passed    0.01 sec
+      Start 122: Base.Async.TaskContext.TaskContext WithLinkedCancellationToken supports chaining without losing root linkage
+67/83 Test #122: Base.Async.TaskContext.TaskContext WithLinkedCancellationToken supports chaining without losing root linkage ........   Passed    0.01 sec
+      Start 123: Base.Async.TaskContext.TaskContext rejects nonfinite delays without creating timers
+68/83 Test #123: Base.Async.TaskContext.TaskContext rejects nonfinite delays without creating timers .................................   Passed    0.01 sec
+      Start 124: Base.Async.TaskContext.Discarded cancellation-aware timers deliver a terminal fault
+69/83 Test #124: Base.Async.TaskContext.Discarded cancellation-aware timers deliver a terminal fault .................................   Passed    0.01 sec
+      Start 125: Base.Async.TaskContext.Submission handoff joins dispatch before admission returns
+70/83 Test #125: Base.Async.TaskContext.Submission handoff joins dispatch before admission returns ...................................   Passed    0.01 sec
+      Start 126: Base.Async.TaskContext.Token-free yields reuse a single admitted continuation without recursive dispatch
+71/83 Test #126: Base.Async.TaskContext.Token-free yields reuse a single admitted continuation without recursive dispatch ............   Passed    0.02 sec
+      Start 127: Base.Async.TaskContext.Discarded concurrent child and producer submissions complete their admitted parents
+72/83 Test #127: Base.Async.TaskContext.Discarded concurrent child and producer submissions complete their admitted parents ..........   Passed    0.01 sec
+      Start 128: Base.Async.TaskContext.TaskContext preserves a different executor's discard delivery
+73/83 Test #128: Base.Async.TaskContext.TaskContext preserves a different executor's discard delivery ................................   Passed    0.01 sec
+      Start 129: Base.Async.TaskContext.TaskContext rejects token-free suspension without a completion path
+74/83 Test #129: Base.Async.TaskContext.TaskContext rejects token-free suspension without a completion path ..........................   Passed    0.01 sec
+      Start 130: Base.Async.TaskContext.Thread-pool shutdown retires an initial task while its worker is occupied
+75/83 Test #130: Base.Async.TaskContext.Thread-pool shutdown retires an initial task while its worker is occupied ....................   Passed    0.01 sec
+      Start 131: Base.Async.TaskContext.Thread-pool shutdown retires token-free suspended timers
+76/83 Test #131: Base.Async.TaskContext.Thread-pool shutdown retires token-free suspended timers .....................................   Passed    0.01 sec
+      Start 132: Base.Async.TaskContext.Executor references compare dispatch bindings for continuation reuse
+77/83 Test #132: Base.Async.TaskContext.Executor references compare dispatch bindings for continuation reuse .........................   Passed    0.01 sec
+      Start 133: Base.Async.TaskScope.TaskScope joins child values and releases owned coroutine factories
+78/83 Test #133: Base.Async.TaskScope.TaskScope joins child values and releases owned coroutine factories ............................   Passed    0.01 sec
+      Start 134: Base.Async.TaskScope.TaskScope records the first failure and joins canceled siblings
+79/83 Test #134: Base.Async.TaskScope.TaskScope records the first failure and joins canceled siblings ................................   Passed    0.01 sec
+      Start 135: Base.Async.TaskScope.TaskScope rejects capacity before invoking another child factory
+80/83 Test #135: Base.Async.TaskScope.TaskScope rejects capacity before invoking another child factory ...............................   Passed    0.01 sec
+      Start 136: Base.Async.TaskScope.TaskScope reports a throwing factory and joins existing children
+81/83 Test #136: Base.Async.TaskScope.TaskScope reports a throwing factory and joins existing children ...............................   Passed    0.01 sec
+      Start 137: Base.Async.TaskScope.TaskScope can join independently executed children more than once
+82/83 Test #137: Base.Async.TaskScope.TaskScope can join independently executed children more than once ..............................   Passed    0.01 sec
+      Start 138: Base.Async.TaskScope.TaskScope joining waits for the last canceled child frame lease
+83/83 Test #138: Base.Async.TaskScope.TaskScope joining waits for the last canceled child frame lease ................................   Passed    0.01 sec
+
+100% tests passed, 0 tests failed out of 83
+
+Label Time Summary:
+Async    =   3.41 sec*proc (83 tests)
+
+Total Test time (real) =   3.46 sec

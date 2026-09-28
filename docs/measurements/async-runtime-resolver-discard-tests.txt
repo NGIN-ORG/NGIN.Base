@@ -1,0 +1,154 @@
+Internal ctest changing into directory: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/tests
+Test project /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/tests
+      Start 639: Base.Net.Address.Net.IpAddress parses and formats strict IPv4
+ 1/69 Test #639: Base.Net.Address.Net.IpAddress parses and formats strict IPv4 ..................................................   Passed    0.00 sec
+      Start 640: Base.Net.Address.Net.IpAddress parses and canonically formats IPv6
+ 2/69 Test #640: Base.Net.Address.Net.IpAddress parses and canonically formats IPv6 .............................................   Passed    0.00 sec
+      Start 641: Base.Net.Address.Net.IpAddress supports allocation-free formatting and hashing
+ 3/69 Test #641: Base.Net.Address.Net.IpAddress supports allocation-free formatting and hashing .................................   Passed    0.00 sec
+      Start 642: Base.Net.Address.Net.Endpoint parses ports, bracketed IPv6, and numeric scopes
+ 4/69 Test #642: Base.Net.Address.Net.Endpoint parses ports, bracketed IPv6, and numeric scopes .................................   Passed    0.00 sec
+      Start 643: Base.Net.Address.Net.ResourceExhausted maps to a portable no-buffer-space error
+ 5/69 Test #643: Base.Net.Address.Net.ResourceExhausted maps to a portable no-buffer-space error ................................   Passed    0.00 sec
+      Start 644: Base.Net.ExecutorPlacement.Network leaves transfer early and pending outcomes to their context executor
+ 6/69 Test #644: Base.Net.ExecutorPlacement.Network leaves transfer early and pending outcomes to their context executor ........   Passed    0.00 sec
+      Start 645: Base.Net.NetSocket.Net.Udp.TryReceiveWouldBlock
+ 7/69 Test #645: Base.Net.NetSocket.Net.Udp.TryReceiveWouldBlock ................................................................   Passed    0.00 sec
+      Start 646: Base.Net.NetSocket.Net.TcpListener.TryAcceptWouldBlock
+ 8/69 Test #646: Base.Net.NetSocket.Net.TcpListener.TryAcceptWouldBlock .........................................................   Passed    0.00 sec
+      Start 647: Base.Net.NetSocket.Net.BufferPool.RentRelease
+ 9/69 Test #647: Base.Net.NetSocket.Net.BufferPool.RentRelease ..................................................................   Passed    0.00 sec
+      Start 648: Base.Net.NetSocket.Net.Udp.LoopbackSendReceive
+10/69 Test #648: Base.Net.NetSocket.Net.Udp.LoopbackSendReceive .................................................................   Passed    0.00 sec
+      Start 649: Base.Net.NetSocket.Net.Tcp.LoopbackConnectSendReceive
+11/69 Test #649: Base.Net.NetSocket.Net.Tcp.LoopbackConnectSendReceive ..........................................................   Passed    0.00 sec
+      Start 650: Base.Net.NetSocket.Net.Udp.AsyncLoopbackSendReceive
+12/69 Test #650: Base.Net.NetSocket.Net.Udp.AsyncLoopbackSendReceive ............................................................   Passed    0.00 sec
+      Start 651: Base.Net.NetSocket.Net.Tcp.AsyncLoopbackConnectSendReceive
+13/69 Test #651: Base.Net.NetSocket.Net.Tcp.AsyncLoopbackConnectSendReceive .....................................................   Passed    0.00 sec
+      Start 652: Base.Net.NetSocket.Net.Tcp.VectoredSendReceive
+14/69 Test #652: Base.Net.NetSocket.Net.Tcp.VectoredSendReceive .................................................................   Passed    0.00 sec
+      Start 653: Base.Net.NetSocket.Net.Transport.TcpByteStream.Loopback
+15/69 Test #653: Base.Net.NetSocket.Net.Transport.TcpByteStream.Loopback ........................................................   Passed    0.00 sec
+      Start 654: Base.Net.NetSocket.Net.Transport.LengthPrefixedMessageStream.Loopback
+16/69 Test #654: Base.Net.NetSocket.Net.Transport.LengthPrefixedMessageStream.Loopback ..........................................   Passed    0.00 sec
+      Start 655: Base.Net.NetSocket.Net.Udp.VectoredSendReceive
+17/69 Test #655: Base.Net.NetSocket.Net.Udp.VectoredSendReceive .................................................................   Passed    0.00 sec
+      Start 656: Base.Net.NetSocket.Net.Transport.UdpDatagramChannel.Loopback
+18/69 Test #656: Base.Net.NetSocket.Net.Transport.UdpDatagramChannel.Loopback ...................................................   Passed    0.00 sec
+      Start 657: Base.Net.NetSocket.Net.Udp.AsyncReceiveCancelled
+19/69 Test #657: Base.Net.NetSocket.Net.Udp.AsyncReceiveCancelled ...............................................................   Passed    0.00 sec
+      Start 658: Base.Net.NetSocket.Net.Tcp.AsyncAcceptCancelled
+20/69 Test #658: Base.Net.NetSocket.Net.Tcp.AsyncAcceptCancelled ................................................................   Passed    0.00 sec
+      Start 659: Base.Net.NetSocket.Net.Tcp.AsyncReceiveCancelled
+21/69 Test #659: Base.Net.NetSocket.Net.Tcp.AsyncReceiveCancelled ...............................................................   Passed    0.00 sec
+      Start 660: Base.Net.NetSocket.Net.Tcp.AsyncReceiveEOF
+22/69 Test #660: Base.Net.NetSocket.Net.Tcp.AsyncReceiveEOF .....................................................................   Passed    0.00 sec
+      Start 661: Base.Net.NetSocket.Net.Tcp.PartialReceive
+23/69 Test #661: Base.Net.NetSocket.Net.Tcp.PartialReceive ......................................................................   Passed    0.00 sec
+      Start 662: Base.Net.NetSocket.Net.Tcp.ConnectRefused
+24/69 Test #662: Base.Net.NetSocket.Net.Tcp.ConnectRefused ......................................................................   Passed    0.00 sec
+      Start 663: Base.Net.NetSocket.Net.Tcp.AsyncAcceptCloseWhilePending
+25/69 Test #663: Base.Net.NetSocket.Net.Tcp.AsyncAcceptCloseWhilePending ........................................................   Passed    0.00 sec
+      Start 664: Base.Net.NetSocket.Net.Tcp.AsyncReceiveCloseWhilePending
+26/69 Test #664: Base.Net.NetSocket.Net.Tcp.AsyncReceiveCloseWhilePending .......................................................   Passed    0.00 sec
+      Start 665: Base.Net.NetSocket.Net.Tcp.DualStackV6ListenerV4Client
+27/69 Test #665: Base.Net.NetSocket.Net.Tcp.DualStackV6ListenerV4Client .........................................................   Passed    0.00 sec
+      Start 666: Base.Net.NetSocket.Net.Tcp.AsyncConnectRefused
+28/69 Test #666: Base.Net.NetSocket.Net.Tcp.AsyncConnectRefused .................................................................   Passed    0.00 sec
+      Start 667: Base.Net.Resolve.Net.Resolve resolves numeric loopback without external network access
+29/69 Test #667: Base.Net.Resolve.Net.Resolve resolves numeric loopback without external network access .........................   Passed    0.00 sec
+      Start 668: Base.Net.Resolve.Net.Resolve applies address-family filters and preserves resolver diagnostics
+30/69 Test #668: Base.Net.Resolve.Net.Resolve applies address-family filters and preserves resolver diagnostics .................   Passed    0.00 sec
+      Start 669: Base.Net.Resolve.Net.Resolve async work uses its explicit driver and caller executor
+31/69 Test #669: Base.Net.Resolve.Net.Resolve async work uses its explicit driver and caller executor ...........................   Passed    0.00 sec
+      Start 670: Base.Net.Resolve.Net.Resolve async cancellation and timeout complete without waiting for lookup
+32/69 Test #670: Base.Net.Resolve.Net.Resolve async cancellation and timeout complete without waiting for lookup ................   Passed    0.00 sec
+      Start 671: Base.Net.Resolve.Net.Resolve retires timeout capacity before delivering successful results
+33/69 Test #671: Base.Net.Resolve.Net.Resolve retires timeout capacity before delivering successful results .....................   Passed    0.00 sec
+      Start 672: Base.Net.Resolve.Net.Resolve uses reserved delivery after ordinary executor admission closes
+34/69 Test #672: Base.Net.Resolve.Net.Resolve uses reserved delivery after ordinary executor admission closes ...................   Passed    0.00 sec
+      Start 673: Base.Net.Resolve.Net.Resolve cancellation racing setup publishes once on the selected executor
+35/69 Test #673: Base.Net.Resolve.Net.Resolve cancellation racing setup publishes once on the selected executor .................   Passed    0.01 sec
+      Start 674: Base.Net.Resolve.Net.Resolve supports cooperative timed delivery and retires its timer
+36/69 Test #674: Base.Net.Resolve.Net.Resolve supports cooperative timed delivery and retires its timer .........................   Passed    0.00 sec
+      Start 675: Base.Net.Resolve.Net.Resolve driver shutdown completes queued lookup through reserved delivery
+37/69 Test #675: Base.Net.Resolve.Net.Resolve driver shutdown completes queued lookup through reserved delivery .................   Passed    0.00 sec
+      Start 676: Base.Net.Runtime.Net.Runtime shutdown cancels an admitted receive on its own executor
+38/69 Test #676: Base.Net.Runtime.Net.Runtime shutdown cancels an admitted receive on its own executor ..........................   Passed    0.00 sec
+      Start 677: Base.Net.Runtime.Net.Runtime runner uses context cancellation and no file workers
+39/69 Test #677: Base.Net.Runtime.Net.Runtime runner uses context cancellation and no file workers ..............................   Passed    0.05 sec
+      Start 678: Base.Net.Runtime.Net.Runtime manual Run waits for lazy initialization and stops cleanly
+40/69 Test #678: Base.Net.Runtime.Net.Runtime manual Run waits for lazy initialization and stops cleanly ........................   Passed    0.05 sec
+      Start 679: Base.Net.Runtime.Net.Runtime unbound sockets reject async use without starting a backend
+41/69 Test #679: Base.Net.Runtime.Net.Runtime unbound sockets reject async use without starting a backend .......................   Passed    0.00 sec
+      Start 680: Base.Net.Runtime.Net.Runtime socket moves preserve bindings and runtimes stop independently
+42/69 Test #680: Base.Net.Runtime.Net.Runtime socket moves preserve bindings and runtimes stop independently ....................   Passed    0.05 sec
+      Start 681: Base.Net.Runtime.Net.Runtime honors a canceled operation context before a socket fast path
+43/69 Test #681: Base.Net.Runtime.Net.Runtime honors a canceled operation context before a socket fast path .....................   Passed    0.00 sec
+      Start 682: Base.Net.Runtime.Net.Runtime close cancels a pending UDP receive without an application token
+44/69 Test #682: Base.Net.Runtime.Net.Runtime close cancels a pending UDP receive without an application token ..................   Passed    0.00 sec
+      Start 683: Base.Net.Runtime.Net.Runtime close cancels a pending listener without an application token
+45/69 Test #683: Base.Net.Runtime.Net.Runtime close cancels a pending listener without an application token .....................   Passed    0.00 sec
+      Start 684: Base.Net.Runtime.Net.Runtime pending receives reject another wait in the same direction
+46/69 Test #684: Base.Net.Runtime.Net.Runtime pending receives reject another wait in the same direction ........................   Passed    0.00 sec
+      Start 685: Base.Net.SocketOperation.Net socket tasks retain their resource across cold and pending moves
+47/69 Test #685: Base.Net.SocketOperation.Net socket tasks retain their resource across cold and pending moves ..................   Passed    0.00 sec
+      Start 686: Base.Net.SocketOperation.Net destroying a pending socket cancels without retaining its wrapper
+48/69 Test #686: Base.Net.SocketOperation.Net destroying a pending socket cancels without retaining its wrapper .................   Passed    0.01 sec
+      Start 687: Base.Net.SocketOperation.Net a ready datagram cannot bypass same-direction admission
+49/69 Test #687: Base.Net.SocketOperation.Net a ready datagram cannot bypass same-direction admission ...........................   Passed    0.00 sec
+      Start 688: Base.Net.SocketOperation.Net operation and registration saturation reject before sending and recover
+50/69 Test #688: Base.Net.SocketOperation.Net operation and registration saturation reject before sending and recover ...........   Passed    0.00 sec
+      Start 689: Base.Net.SocketOperation.Net fast sends require reserved completion storage
+51/69 Test #689: Base.Net.SocketOperation.Net fast sends require reserved completion storage ....................................   Passed    0.00 sec
+      Start 690: Base.Net.SocketOperation.Net async admission rejects blocking sockets
+52/69 Test #690: Base.Net.SocketOperation.Net async admission rejects blocking sockets ..........................................   Passed    0.00 sec
+      Start 691: Base.Net.SocketOperation.Net moved listeners and clients complete on the selected external executor
+53/69 Test #691: Base.Net.SocketOperation.Net moved listeners and clients complete on the selected external executor ............   Passed    0.00 sec
+      Start 692: Base.Net.SocketOperation.Net pending connects reserve both directions and cancellation closes the connection
+54/69 Test #692: Base.Net.SocketOperation.Net pending connects reserve both directions and cancellation closes the connection ...   Passed    0.00 sec
+      Start 693: Base.Net.SocketOperation.Net close and ready cancellation races retire before descriptor reuse
+55/69 Test #693: Base.Net.SocketOperation.Net close and ready cancellation races retire before descriptor reuse .................   Passed    0.01 sec
+      Start 694: Base.Net.SocketOperation.Net a cold task cannot switch to a reopened socket
+56/69 Test #694: Base.Net.SocketOperation.Net a cold task cannot switch to a reopened socket ....................................   Passed    0.00 sec
+      Start 695: Base.Net.SocketOperation.Net a pending TCP read permits a write on the same socket
+57/69 Test #695: Base.Net.SocketOperation.Net a pending TCP read permits a write on the same socket .............................   Passed    0.00 sec
+      Start 696: Base.Net.SocketOperation.Net pending socket completion transfers the task chain to its leaf executor
+58/69 Test #696: Base.Net.SocketOperation.Net pending socket completion transfers the task chain to its leaf executor ...........   Passed    0.00 sec
+      Start 697: Base.Net.SocketOperation.Net pending socket delivery inlines when eligible and retains reserved fallback
+59/69 Test #697: Base.Net.SocketOperation.Net pending socket delivery inlines when eligible and retains reserved fallback .......   Passed    0.00 sec
+      Start 698: Base.Net.SocketState.Socket leases admit one read and one write and defer native close until both retire
+60/69 Test #698: Base.Net.SocketState.Socket leases admit one read and one write and defer native close until both retire .......   Passed    0.00 sec
+      Start 699: Base.Net.SocketState.Socket leases recover direction capacity and preserve state through owner moves
+61/69 Test #699: Base.Net.SocketState.Socket leases recover direction capacity and preserve state through owner moves ...........   Passed    0.00 sec
+      Start 700: Base.Net.SocketState.Socket close racing admission cannot release a successfully pinned native handle
+62/69 Test #700: Base.Net.SocketState.Socket close racing admission cannot release a successfully pinned native handle ..........   Passed    0.02 sec
+      Start 701: Base.Net.SocketState.Socket lease rejects absent state and invalid directions without native access
+63/69 Test #701: Base.Net.SocketState.Socket lease rejects absent state and invalid directions without native access ............   Passed    0.00 sec
+      Start 702: Base.Net.TLS.TLS provider availability is explicit
+64/69 Test #702: Base.Net.TLS.TLS provider availability is explicit .............................................................   Passed    0.00 sec
+      Start 703: Base.Net.TLS.TLS trusted handshake negotiates SNI ALPN and fragmented application data
+65/69 Test #703: Base.Net.TLS.TLS trusted handshake negotiates SNI ALPN and fragmented application data .........................***Skipped   0.00 sec
+      Start 704: Base.Net.TLS.TLS verification rejects untrusted expired and mismatched certificates
+66/69 Test #704: Base.Net.TLS.TLS verification rejects untrusted expired and mismatched certificates ............................***Skipped   0.00 sec
+      Start 705: Base.Net.TLS.TLS mutual authentication and required ALPN policies are enforced
+67/69 Test #705: Base.Net.TLS.TLS mutual authentication and required ALPN policies are enforced .................................***Skipped   0.00 sec
+      Start 706: Base.Net.TLS.TLS handshake distinguishes caller cancellation and timeout
+68/69 Test #706: Base.Net.TLS.TLS handshake distinguishes caller cancellation and timeout .......................................***Skipped   0.00 sec
+      Start 707: Base.Net.TLS.TLS reports EOF without close_notify as truncation
+69/69 Test #707: Base.Net.TLS.TLS reports EOF without close_notify as truncation ................................................***Skipped   0.00 sec
+
+100% tests passed, 0 tests failed out of 69
+
+Label Time Summary:
+Net    =   0.32 sec*proc (69 tests)
+
+Total Test time (real) =   0.37 sec
+
+The following tests did not run:
+	703 - Base.Net.TLS.TLS trusted handshake negotiates SNI ALPN and fragmented application data (Skipped)
+	704 - Base.Net.TLS.TLS verification rejects untrusted expired and mismatched certificates (Skipped)
+	705 - Base.Net.TLS.TLS mutual authentication and required ALPN policies are enforced (Skipped)
+	706 - Base.Net.TLS.TLS handshake distinguishes caller cancellation and timeout (Skipped)
+	707 - Base.Net.TLS.TLS reports EOF without close_notify as truncation (Skipped)

@@ -1,0 +1,38 @@
+Internal ctest changing into directory: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/tests
+Test project /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/tests
+    Start 93: Base.Async.Sequential.Sequential success waits for frame borrowers before resuming its parent
+1/1 Test #93: Base.Async.Sequential.Sequential success waits for frame borrowers before resuming its parent ...***Failed    0.00 sec
+Filters: "Sequential success waits for frame borrowers before resuming its parent"
+Randomness seeded to: 3821964792
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Async_SequentialTests is a Catch2 v3.5.3 host application.
+Run with -? for options
+
+-------------------------------------------------------------------------------
+Sequential success waits for frame borrowers before resuming its parent
+-------------------------------------------------------------------------------
+/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/tests/Async/Sequential.cpp:345
+...............................................................................
+
+/home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/tests/Async/Sequential.cpp:361: FAILED:
+  REQUIRE_FALSE( completedBeforeRelease )
+with expansion:
+  !true
+
+===============================================================================
+test cases: 1 | 1 failed
+assertions: 1 | 1 failed
+
+
+
+0% tests passed, 1 tests failed out of 1
+
+Label Time Summary:
+Async    =   0.00 sec*proc (1 test)
+
+Total Test time (real) =   0.03 sec
+
+The following tests FAILED:
+	 93 - Base.Async.Sequential.Sequential success waits for frame borrowers before resuming its parent (Failed)
+Errors while running CTest

@@ -1,0 +1,93 @@
+Functions sorted by metric: Exclusive Total CPU Time
+
+Excl. Total   Incl. Total   Incl.      Incl.       Name
+CPU           CPU           Sync Wait  Sync Wait
+ sec.      %   sec.      %   sec.      Count
+0.089 100.00  0.089 100.00  0.002      67          <Total>
+0.050  56.18  0.050  56.18  0.          0          syscall
+0.006   6.74  0.006   6.74  0.          0          write
+0.004   4.49  0.004   4.49  0.          0          pwrite
+0.003   3.37  0.003   3.37  0.          0          __vdso_clock_gettime
+0.002   2.25  0.002   2.25  0.          0          NGIN::Execution::ThreadPoolScheduler::WorkerQueue::TrySteal()
+0.002   2.25  0.002   2.25  0.          0          epoll_wait
+0.002   2.25  0.002   2.25  0.          0          pread
+0.001   1.12  0.001   1.12  0.          0          <static>@0x1acb46 (<libstdc++.so.6.0.34>)
+0.001   1.12  0.001   1.12  0.          0          <static>@0x99099 (<libc.so.6>)
+0.001   1.12  0.001   1.12  0.          0          <static>@0xaab1b (<libc.so.6>)
+0.001   1.12  0.001   1.12  0.          0          NGIN::Async::CancellationRegistration::Reset()
+0.001   1.12  0.001   1.12  0.          0          NGIN::Execution::WorkItem::JobStorage::GetVTable<NGIN::IO::detail::FileOperationGate::Admission::await_suspend<NGIN::Async::Task<unsigned long, NGIN::IO::IOError>::promise_type>(std::__n4861::coroutine_handle<NGIN::Async::Task<unsigned long, NGIN::IO::IOError>::promise_type>)::{lambda()#1}, false>()::{lambda(void*, void*)#1}::_FUN(void*, void*)
+0.001   1.12  0.002   2.25  0.          0          NGIN::IO::(anonymous namespace)::DispatchData(NGIN::IO::(anonymous namespace)::_ZN4NGIN2IO12_GLOBAL__N_1L12DispatchDataIPFNS_5Async4TaskImNS0_7IOErrorEEERKSt10shared_ptrIvERNS3_11TaskContextEmSt4spanIKSt4byteLm18446744073709551615EEEJmSG_EEES6_SC_S8_T_DpT0_.Frame*) [clone .actor]
+0.001   1.12  0.009  10.11  0.          0          NGIN::IO::(anonymous namespace)::LocalAsyncFileWriteAt(NGIN::IO::(anonymous namespace)::_ZN4NGIN2IO12_GLOBAL__N_1L21LocalAsyncFileWriteAtERKSt10shared_ptrIvERNS_5Async11TaskContextEmSt4spanIKSt4byteLm18446744073709551615EE.Frame*) [clone .actor]
+0.001   1.12  0.002   2.25  0.          0          NGIN::IO::detail::FileSystemDriver::AcquireHandleOperation()
+0.001   1.12  0.012  13.48  0.          0          NGIN::IO::detail::IoUringNativeFileBackend::Submit(NGIN::IO::detail::NativeFileRequest, NGIN::Async::CancellationToken const&)
+0.001   1.12  0.003   3.37  0.          0          NGIN::IO::detail::RuntimePoller::Wait(std::span<NGIN::IO::detail::RuntimePoller::Event, 18446744073709551615ul>, std::optional<NGIN::Time::TimePoint>)
+0.001   1.12  0.007   7.87  0.          0          NGIN::IO::detail::RuntimePoller::Wake()
+0.001   1.12  0.002   2.25  0.          0          NGIN::Sync::detail::AtomicConditionWait(unsigned int&, unsigned int)
+0.001   1.12  0.064  71.91  0.001      37          NGIN::Utilities::Callable<void ()>::VTableFor<NGIN::Execution::ThreadPoolScheduler::ThreadPoolScheduler(unsigned long, unsigned long)::{lambda()#1}, false>::Invoke(void*)
+0.001   1.12  0.001   1.12  0.          0          __collector_tsd_get_by_key
+0.001   1.12  0.004   4.49  0.          0          clock_gettime
+0.001   1.12  0.002   2.25  0.          0          free
+0.001   1.12  0.001   1.12  0.          0          operator delete(void*, unsigned long, std::align_val_t)
+0.001   1.12  0.002   2.25  0.          0          pthread_mutex_unlock
+0.001   1.12  0.001   1.12  0.          0          read
+0.001   1.12  0.001   1.12  0.          0          std::__n4861::coroutine_handle<void> NGIN::Async::Task<unsigned long, NGIN::IO::IOError>::AwaitSuspend<NGIN::Async::Task<unsigned long, NGIN::IO::IOError>::promise_type>(std::__n4861::coroutine_handle<NGIN::Async::Task<unsigned long, NGIN::IO::IOError>::promise_type>)
+0.      0.    0.004   4.49  0.          0          <static>@0x2070 (<libgp-sync.so>)
+0.      0.    0.      0.    0.000       9          <static>@0x2a145 (<libc.so.6>)
+0.      0.    0.003   3.37  0.          0          <static>@0x49a45 (<libgp-collector.so>)
+0.      0.    0.067  75.28  0.001      38          <static>@0x5115c (<libgp-collector.so>)
+0.      0.    0.067  75.28  0.001      38          <static>@0x9c526 (<libc.so.6>)
+0.      0.    0.003   3.37  0.000       1          <static>@0xf2c03 (<libstdc++.so.6.0.34>)
+0.      0.    0.      0.    0.000       2          NGIN::Async::Completion<unsigned long, NGIN::IO::IOError> NGIN::Async::SyncWait<unsigned long, NGIN::IO::IOError>(NGIN::Async::TaskContext&, NGIN::Async::Task<unsigned long, NGIN::IO::IOError>&&)
+0.      0.    0.      0.    0.000       2          NGIN::Async::Operation<unsigned long, NGIN::IO::IOError> NGIN::Async::Spawn<unsigned long, NGIN::IO::IOError>(NGIN::Async::TaskContext&, NGIN::Async::Task<unsigned long, NGIN::IO::IOError>&&)
+0.      0.    0.      0.    0.000       2          NGIN::Async::detail::PromiseRuntimeCommon::ReserveExecution()
+0.      0.    0.064  71.91  0.001      37          NGIN::Execution::(anonymous namespace)::ThreadProc(void*)
+0.      0.    0.009  10.11  0.          0          NGIN::Execution::ExecutorRef::Execute(NGIN::Execution::WorkItem) const
+0.      0.    0.      0.    0.000       2          NGIN::Execution::ExecutorRef::From<NGIN::Execution::ThreadPoolScheduler>(NGIN::Execution::ThreadPoolScheduler&)::{lambda()#1}::operator()() const::{lambda(void*, NGIN::Execution::WorkItem)#1}::_FUN(void*, NGIN::Execution::WorkItem)
+0.      0.    0.009  10.11  0.          0          NGIN::Execution::ExecutorRef::From<NGIN::IO::detail::FileSystemDriver>(NGIN::IO::detail::FileSystemDriver&)::{lambda(void*, NGIN::Execution::WorkItem)#1}::_FUN(void*, NGIN::Execution::WorkItem)
+0.      0.    0.      0.    0.000       5          NGIN::Execution::Thread::Join()
+0.      0.    0.061  68.54  0.001      37          NGIN::Execution::ThreadPoolScheduler::TryRunOne(unsigned long, unsigned long&)
+0.      0.    0.      0.    0.000       2          NGIN::Execution::ThreadPoolScheduler::~ThreadPoolScheduler()
+0.      0.    0.024  26.97  0.000       2          NGIN::Execution::WorkItem::JobStorage::GetVTable<NGIN::Async::detail::PromiseRuntimeCommon::MarkFinishedAndResume<std::__n4861::coroutine_handle<NGIN::Async::Task<unsigned long, NGIN::IO::IOError>::promise_type> >(std::__n4861::coroutine_handle<NGIN::Async::Task<unsigned long, NGIN::IO::IOError>::promise_type>)::{lambda()#1}, false>()::{lambda(void*)#1}::_FUN(void*)
+0.      0.    0.024  26.97  0.000       2          NGIN::Execution::WorkItem::JobStorage::GetVTable<NGIN::Async::detail::PromiseRuntimeCommon::ReserveExecution()::{lambda()#1}, false>()::{lambda(void*)#1}::_FUN(void*)
+0.      0.    0.026  29.21  0.000       2          NGIN::Execution::WorkItem::JobStorage::GetVTable<NGIN::Async::detail::PromiseRuntimeCommon::SubmissionWork<std::__n4861::coroutine_handle<NGIN::Async::Task<unsigned long, NGIN::IO::IOError>::promise_type> >, false>()::{lambda(void*)#1}::_FUN(void*)
+0.      0.    0.001   1.12  0.          0          NGIN::Execution::WorkItem::JobStorage::GetVTable<NGIN::IO::detail::DriverDispatchAwaiter<std::expected<unsigned long, NGIN::IO::IOError>, NGIN::IO::(anonymous namespace)::LocalAsyncFileReadAt(std::shared_ptr<void> const&, NGIN::Async::TaskContext&, unsigned long, std::span<std::byte, 18446744073709551615ul>)::{lambda()#1}>::await_suspend(std::__n4861::coroutine_handle<void>)::{lambda()#1}, false>()::{lambda(void*)#1}::_FUN(void*)
+0.      0.    0.005   5.62  0.000       1          NGIN::Execution::WorkItem::JobStorage::GetVTable<NGIN::IO::detail::DriverDispatchAwaiter<std::expected<unsigned long, NGIN::IO::IOError>, NGIN::IO::(anonymous namespace)::LocalAsyncFileReadAt(std::shared_ptr<void> const&, NGIN::Async::TaskContext&, unsigned long, std::span<std::byte, 18446744073709551615ul>)::{lambda()#1}>::await_suspend(std::__n4861::coroutine_handle<void>)::{lambda()#2}, true>()::{lambda(void*)#1}::_FUN(void*)
+0.      0.    0.008   8.99  0.000       1          NGIN::Execution::WorkItem::JobStorage::GetVTable<NGIN::IO::detail::DriverDispatchAwaiter<std::expected<unsigned long, NGIN::IO::IOError>, NGIN::IO::(anonymous namespace)::LocalAsyncFileWriteAt(std::shared_ptr<void> const&, NGIN::Async::TaskContext&, unsigned long, std::span<std::byte const, 18446744073709551615ul>)::{lambda()#1}>::await_suspend(std::__n4861::coroutine_handle<void>)::{lambda()#2}, true>()::{lambda(void*)#1}::_FUN(void*)
+0.      0.    0.008   8.99  0.000       1          NGIN::Execution::WorkItem::JobStorage::GetVTable<NGIN::IO::detail::FileSystemDriver::Execute(NGIN::Execution::WorkItem)::{lambda()#2}, true>()::{lambda(void*)#1}::_FUN(void*)
+0.      0.    0.022  24.72  0.000       1          NGIN::Execution::detail::CompletionQueue::Publish(void*)
+0.      0.    0.      0.    0.000       1          NGIN::Execution::detail::CompletionQueue::Release(void*)
+0.      0.    0.001   1.12  0.000       1          NGIN::Execution::detail::CompletionQueue::Schedule(void*)
+0.      0.    0.001   1.12  0.          0          NGIN::IO::(anonymous namespace)::DispatchData(NGIN::IO::(anonymous namespace)::_ZN4NGIN2IO12_GLOBAL__N_1L12DispatchDataIPFNS_5Async4TaskImNS0_7IOErrorEEERKSt10shared_ptrIvERNS3_11TaskContextEmSt4spanISt4byteLm18446744073709551615EEEJmSF_EEES6_SC_S8_T_DpT0_.Frame*) [clone .actor]
+0.      0.    0.014  15.73  0.000       2          NGIN::IO::(anonymous namespace)::LocalAsyncFileReadAt(NGIN::IO::(anonymous namespace)::_ZN4NGIN2IO12_GLOBAL__N_1L20LocalAsyncFileReadAtERKSt10shared_ptrIvERNS_5Async11TaskContextEmSt4spanISt4byteLm18446744073709551615EE.Frame*) [clone .actor]
+0.      0.    0.002   2.25  0.000       2          NGIN::IO::Runtime::GetState() const
+0.      0.    0.      0.    0.000       3          NGIN::IO::Runtime::~Runtime()
+0.      0.    0.      0.    0.000       2          NGIN::IO::RuntimeRunner::~RuntimeRunner()
+0.      0.    0.002   2.25  0.          0          NGIN::IO::detail::FileOperationGate::Enqueue(NGIN::IO::detail::FileOperationGate::Node&)
+0.      0.    0.009  10.11  0.          0          NGIN::IO::detail::FileSystemDriver::Execute(NGIN::Execution::WorkItem)
+0.      0.    0.      0.    0.000       1          NGIN::IO::detail::FileSystemDriver::IsStopping() const
+0.      0.    0.001   1.12  0.000       1          NGIN::IO::detail::GetNativeFileBackend(NGIN::IO::detail::FileSystemDriver&)
+0.      0.    0.001   1.12  0.000       8          NGIN::IO::detail::IoUringNativeFileBackend::Drain()
+0.      0.    0.012  13.48  0.000       1          NGIN::IO::detail::NativeFileAwaiter::await_suspend(std::__n4861::coroutine_handle<void>)
+0.      0.    0.001   1.12  0.          0          NGIN::IO::detail::RunFileOperation(NGIN::IO::detail::_ZN4NGIN2IO6detail16RunFileOperationImNS1_19LocalAsyncFileStateEPFNS_5Async4TaskImNS0_7IOErrorEEERKSt10shared_ptrIvERNS4_11TaskContextEmSt4spanIKSt4byteLm18446744073709551615EEEJmSH_EEENS5_IT_S6_EESD_S9_NS1_17FileOperationGate4KindET1_DpT2_.Frame*) [clone .actor]
+0.      0.    0.002   2.25  0.          0          NGIN::IO::detail::RunFileOperation(NGIN::IO::detail::_ZN4NGIN2IO6detail16RunFileOperationImNS1_19LocalAsyncFileStateEPFNS_5Async4TaskImNS0_7IOErrorEEERKSt10shared_ptrIvERNS4_11TaskContextEmSt4spanISt4byteLm18446744073709551615EEEJmSG_EEENS5_IT_S6_EESD_S9_NS1_17FileOperationGate4KindET1_DpT2_.Frame*) [clone .actor]
+0.      0.    0.      0.    0.000       1          NGIN::IO::detail::RuntimeAccess::ReserveOperation(NGIN::IO::Runtime&, NGIN::Execution::WorkItem)
+0.      0.    0.003   3.37  0.000       1          NGIN::IO::detail::RuntimeAccess::Run(NGIN::IO::Runtime&, NGIN::Execution::WorkItem)
+0.      0.    0.002   2.25  0.000       2          NGIN::IO::detail::RuntimeLoop::GetState() const
+0.      0.    0.011  12.36  0.001      19          NGIN::IO::detail::RuntimeLoop::Impl::Batch()
+0.      0.    0.      0.    0.000       1          NGIN::IO::detail::RuntimeLoop::ReserveOperation(NGIN::Execution::WorkItem)
+0.      0.    0.003   3.37  0.000       1          NGIN::IO::detail::RuntimeLoop::Run(NGIN::Execution::WorkItem)
+0.      0.    0.039  43.82  0.          0          NGIN::Sync::detail::AtomicConditionNotifyAll(unsigned int&)
+0.      0.    0.001   1.12  0.          0          NGIN::Time::MonotonicClock::Now()
+0.      0.    0.      0.    0.000       9          __libc_start_main
+0.      0.    0.022  24.72  0.000       1          bool NGIN::Async::detail::PromiseRuntimeCommon::MarkFinishedAndResume<std::__n4861::coroutine_handle<NGIN::Async::Task<unsigned long, NGIN::IO::IOError>::promise_type> >(std::__n4861::coroutine_handle<NGIN::Async::Task<unsigned long, NGIN::IO::IOError>::promise_type>) [clone .isra.0]
+0.      0.    0.002   2.25  0.000       1          bool NGIN::Async::detail::PromiseRuntimeCommon::MarkFinishedAndResume<std::__n4861::coroutine_handle<NGIN::Async::Task<unsigned long, NGIN::IO::IOError>::promise_type> >(std::__n4861::coroutine_handle<NGIN::Async::Task<unsigned long, NGIN::IO::IOError>::promise_type>) [clone .isra.0]
+0.      0.    0.003   3.37  0.          0          bool NGIN::IO::detail::FileOperationGate::Admission::await_suspend<NGIN::Async::Task<unsigned long, NGIN::IO::IOError>::promise_type>(std::__n4861::coroutine_handle<NGIN::Async::Task<unsigned long, NGIN::IO::IOError>::promise_type>)
+0.      0.    0.      0.    0.000       9          main
+0.      0.    0.      0.    0.000       3          std::_Sp_counted_ptr_inplace<NGIN::Execution::ThreadPoolScheduler, std::allocator<void>, (__gnu_cxx::_Lock_policy)2>::_M_dispose()
+0.      0.    0.      0.    0.000       3          std::_Sp_counted_ptr_inplace<NGIN::IO::detail::FileSystemDriver, std::allocator<void>, (__gnu_cxx::_Lock_policy)2>::_M_dispose()
+0.      0.    0.003   3.37  0.000       1          std::thread::_State_impl<std::thread::_Invoker<std::tuple<NGIN::IO::RuntimeRunner::Impl::Impl(NGIN::IO::Runtime&)::{lambda()#1}> > >::_M_run()
+0.      0.    0.      0.    0.000       2          std::thread::join()
+0.      0.    0.001   1.12  0.000       1          void NGIN::Async::Operation<unsigned long, NGIN::IO::IOError>::ResumeRetainedContinuation<NGIN::Async::Task<unsigned long, NGIN::IO::IOError>::promise_type>(std::__n4861::coroutine_handle<void>, std::__n4861::coroutine_handle<void>)
+0.      0.    0.023  25.84  0.000       1          void NGIN::Async::Task<unsigned long, NGIN::IO::IOError>::PropagateChildCompletion<NGIN::Async::Task<unsigned long, NGIN::IO::IOError>::promise_type>(std::__n4861::coroutine_handle<void>, std::__n4861::coroutine_handle<void>)
+0.      0.    0.001   1.12  0.          0          void NGIN::Async::detail::PromiseRuntimeCommon::ReleaseFrameReference<std::__n4861::coroutine_handle<NGIN::Async::Task<unsigned long, NGIN::IO::IOError>::promise_type> >(std::__n4861::coroutine_handle<NGIN::Async::Task<unsigned long, NGIN::IO::IOError>::promise_type>)
+

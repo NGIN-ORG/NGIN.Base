@@ -4,6 +4,11 @@ Date: 2026-09-12
 
 Status: proposed implementation plan. This document does not describe completed changes.
 
+The plan is now organized into [Requirements](AsyncRuntime/Requirements.md),
+[Design](AsyncRuntime/Design.md), and [Tasks](AsyncRuntime/Tasks.md). Maintain the acceptance contract,
+implementation design, and progress in those documents respectively. This document preserves the original
+proposal; its checklists are historical, not the active task tracker.
+
 ## 1. Objective and scope
 
 Make ordinary async composition cheap, concurrent ownership explicit, and I/O completion reliable under load.

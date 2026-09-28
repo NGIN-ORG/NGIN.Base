@@ -1,0 +1,17 @@
+Internal ctest changing into directory: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/tests-asan
+Test project /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/tests-asan
+    Start 391: Base.Execution.CooperativeScheduler.CooperativeScheduler executes ready work
+1/4 Test #391: Base.Execution.CooperativeScheduler.CooperativeScheduler executes ready work ................................................   Passed    0.02 sec
+    Start 392: Base.Execution.CooperativeScheduler.CooperativeScheduler executes timers up to a given timepoint
+2/4 Test #392: Base.Execution.CooperativeScheduler.CooperativeScheduler executes timers up to a given timepoint ............................   Passed    0.01 sec
+    Start 393: Base.Execution.CooperativeScheduler.CooperativeScheduler rotates continuously runnable completion timer and ready sources
+3/4 Test #393: Base.Execution.CooperativeScheduler.CooperativeScheduler rotates continuously runnable completion timer and ready sources ...   Passed    0.01 sec
+    Start 394: Base.Execution.CooperativeScheduler.CooperativeScheduler preserves FIFO order across consumed prefix reuse
+4/4 Test #394: Base.Execution.CooperativeScheduler.CooperativeScheduler preserves FIFO order across consumed prefix reuse ..................   Passed    0.01 sec
+
+100% tests passed, 0 tests failed out of 4
+
+Label Time Summary:
+Execution    =   0.04 sec*proc (4 tests)
+
+Total Test time (real) =   0.08 sec

@@ -1,0 +1,416 @@
+--- a/benchmarks/CMakeLists.txt
++++ b/benchmarks/CMakeLists.txt
+@@ -291,3 +291,6 @@
+     )
+   endif()
+ endif()
++
++ngin_add_benchmark(AsyncRuntimeBenchmarks AsyncRuntimeBenchmarks.cpp)
++target_link_libraries(AsyncRuntimeBenchmarks PRIVATE NGIN::Base::IO)
+--- a/benchmarks/IORuntimeBenchmarks.cpp
++++ b/benchmarks/IORuntimeBenchmarks.cpp
+@@ -101,11 +101,12 @@
+         NGIN::Async::TaskContext             ctx(scheduler);
+         std::vector<double>                  samples;
+         samples.reserve(iterations);
+-        for (std::size_t i = 0; i < iterations; ++i)
++        for (std::size_t i = 0; i < iterations + 100; ++i)
+         {
+             const auto start = Clock::now();
+             RequireSuccess(NGIN::Async::SyncWait(ctx, Yield(ctx)));
+-            samples.push_back(Microseconds(Clock::now() - start));
++            if (i >= 100)
++                samples.push_back(Microseconds(Clock::now() - start));
+         }
+         Report("spawn_yield_join", samples);
+ 
+@@ -131,11 +132,12 @@
+         RequireSuccess(NGIN::Async::SyncWait(ctx, Exchange(ctx, receiver, sender, endpoint)));
+         std::cout << "network_cold_us=" << Microseconds(Clock::now() - coldStart) << '\n';
+         samples.clear();
+-        for (std::size_t i = 0; i < iterations; ++i)
++        for (std::size_t i = 0; i < iterations + 100; ++i)
+         {
+             const auto start = Clock::now();
+             RequireSuccess(NGIN::Async::SyncWait(ctx, Exchange(ctx, receiver, sender, endpoint)));
+-            samples.push_back(Microseconds(Clock::now() - start));
++            if (i >= 100)
++                samples.push_back(Microseconds(Clock::now() - start));
+         }
+         Report("udp_ready_exchange", samples);
+ #if defined(__linux__)
+@@ -172,11 +174,12 @@
+                       << " requested=" << static_cast<int>(preference)
+                       << " cold_us=" << Microseconds(Clock::now() - start) << '\n';
+             samples.clear();
+-            for (std::size_t i = 0; i < iterations; ++i)
++            for (std::size_t i = 0; i < iterations + 100; ++i)
+             {
+                 const auto operationStart = Clock::now();
+                 RequireSuccess(NGIN::Async::SyncWait(ctx, files.GetInfoAsync(ctx, NGIN::IO::Path("."))));
+-                samples.push_back(Microseconds(Clock::now() - operationStart));
++                if (i >= 100)
++                    samples.push_back(Microseconds(Clock::now() - operationStart));
+             }
+             Report("file_stat", samples);
+ #if defined(__linux__)
+--- a/benchmarks/IORuntimeFileBenchmarks.cpp
++++ b/benchmarks/IORuntimeFileBenchmarks.cpp
+@@ -86,7 +86,7 @@
+             for (int write = 0; write != 2; ++write)
+             {
+                 samples.clear();
+-                for (std::size_t index = 0; index < iterations; ++index)
++                for (std::size_t index = 0; index < iterations + 100; ++index)
+                 {
+                     const auto start  = Clock::now();
+                     auto       result = write
+@@ -95,7 +95,8 @@
+                     RequireSuccess(result);
+                     if (result.Value() != payloadSize)
+                         throw std::runtime_error("file benchmark transferred fewer bytes than requested");
+-                    samples.push_back(Microseconds(Clock::now() - start));
++                    if (index >= 100)
++                        samples.push_back(Microseconds(Clock::now() - start));
+                 }
+                 Report(name, write ? "write_at_64k" : "read_at_64k", samples);
+             }
+--- a/benchmarks/IORuntimeNetworkBenchmarks.cpp
++++ b/benchmarks/IORuntimeNetworkBenchmarks.cpp
+@@ -200,9 +200,11 @@
+             std::array<Byte, 64> payload {};
+             std::vector<double>  samples;
+             samples.reserve(iterations);
+-            const auto workload = Clock::now();
+-            for (std::size_t index = 0; index != iterations; ++index)
+-            {
++            auto workload = Clock::now();
++            for (std::size_t index = 0; index != iterations + 100; ++index)
++            {
++                if (index == 100)
++                    workload = Clock::now();
+                 const auto selected = index % active;
+                 // Exclude rearm/barrier time from the latency sample while
+                 // ensuring the receive was suspended before sending each packet.
+@@ -211,7 +213,8 @@
+                 const auto sent  = sender.TrySendTo(receivers.Endpoint(selected), payload);
+                 Require(sent && *sent == payload.size(), "send failed or truncated");
+                 receivers.Complete(selected);
+-                samples.push_back(Microseconds(Clock::now() - start));
++                if (index >= 100)
++                    samples.push_back(Microseconds(Clock::now() - start));
+                 receivers.Start(selected);
+             }
+             const double wall = Microseconds(Clock::now() - workload);
+--- a/benchmarks/AsyncRuntimeBenchmarks.cpp
++++ b/benchmarks/AsyncRuntimeBenchmarks.cpp
+@@ -0,0 +1,309 @@
++#include "../src/NGIN/IO/FileOperationGate.hpp"
++#include "../src/NGIN/IO/FileSystemDriver.hpp"
++#include <NGIN/Async/Task.hpp>
++#include <NGIN/Async/TaskScope.hpp>
++#include <NGIN/Execution/CooperativeScheduler.hpp>
++#include <NGIN/Execution/ThreadPoolScheduler.hpp>
++#include <NGIN/IO/AsyncFileHandle.hpp>
++#include <NGIN/IO/Runtime.hpp>
++
++#ifdef NGIN_ASYNC_MEASURE_ALLOCATIONS
++#include "AllocationInstrumentation.hpp"
++#endif
++
++#include <algorithm>
++#include <chrono>
++#include <iostream>
++#include <stdexcept>
++#include <string>
++#include <vector>
++
++namespace
++{
++    using namespace NGIN;
++    using Clock = std::chrono::steady_clock;
++
++    Async::Task<int> Chain(int depth, Async::TaskContext& context, bool pending)
++    {
++        if (depth > 1)
++            co_return 1 + co_await Chain(depth - 1, context, pending);
++        if (pending)
++            co_await context.YieldNow();
++        co_return 1;
++    }
++
++    Async::Task<int> PendingChain(int depth, Async::TaskContext& context)
++    {
++        if (depth > 1)
++            co_return co_await PendingChain(depth - 1, context);
++        co_await context.Delay(Units::Seconds(60));
++        co_return 1;
++    }
++
++    Async::Task<int> ScopeJoin(Async::TaskContext&, Async::TaskScope<>& scope)
++    {
++        const auto& outcome = co_await scope.Join();
++        co_return outcome.Succeeded() ? 1 : 0;
++    }
++
++    struct FileState
++    {
++        explicit FileState(IO::detail::FileSystemDriver& driver) : operations(driver) {}
++        IO::detail::FileOperationGate operations;
++        IO::Path                      path {};
++        bool                          NativeIsOpen() const noexcept { return true; }
++    };
++
++    IO::AsyncTask<UIntSize> FileLeaf(const std::shared_ptr<void>&, Async::TaskContext&, std::span<Byte> bytes)
++    {
++        co_return bytes.size();
++    }
++
++    IO::AsyncTask<UIntSize> GatedFileLeaf(const std::shared_ptr<void>& state, Async::TaskContext& context, std::span<Byte> bytes)
++    {
++        return IO::detail::RunFileOperation<UIntSize, FileState>(context, state,
++                                                                 IO::detail::FileOperationGate::Kind::Independent, FileLeaf, bytes);
++    }
++
++    // Counts submissions and reservation acquisition without changing production headers.
++    // Reserved deliveries are reusable; reservation count is not delivery-hop count.
++    struct CountedExecutor
++    {
++        Execution::ExecutorRef inner;
++        std::size_t            submissions {};
++        std::size_t            reservations {};
++        std::size_t            deliveries {};
++        Execution::WorkItem    CountDelivery(Execution::WorkItem work)
++        {
++            return Execution::WorkItem([this, work = std::move(work)]() mutable {
++                ++deliveries;
++                work.Invoke();
++            });
++        }
++        Execution::ScheduleResult Execute(Execution::WorkItem work) noexcept
++        {
++            ++submissions;
++            return inner.Execute(CountDelivery(std::move(work)));
++        }
++        Execution::ScheduleResult ExecuteAt(Execution::WorkItem work, Time::TimePoint time) noexcept
++        {
++            ++submissions;
++            return inner.ExecuteAt(CountDelivery(std::move(work)), time);
++        }
++        std::expected<Execution::CompletionReservation, Execution::ScheduleError>
++        ReserveCompletion(Execution::WorkItem work) noexcept
++        {
++            ++reservations;
++            return inner.ReserveCompletion(CountDelivery(std::move(work)));
++        }
++        bool IsCurrent() const noexcept { return inner.IsCurrent(); }
++    };
++
++    template<typename Pump>
++    void Drive(Pump& pump, Async::Operation<int>& operation)
++    {
++        while (!operation.IsCompleted())
++            pump();
++    }
++
++    template<typename F>
++    void Measure(const std::string& name, F&& work)
++    {
++        constexpr int samples = 1000;
++        for (int i = 0; i < 100; ++i)
++            work();
++        std::vector<double> times;
++        times.reserve(samples);
++#ifdef NGIN_ASYNC_MEASURE_ALLOCATIONS
++        const auto before = Benchmarks::Allocations::Snapshot();
++#endif
++        for (int i = 0; i < samples; ++i)
++        {
++            const auto start = Clock::now();
++            work();
++            times.push_back(std::chrono::duration<double, std::micro>(Clock::now() - start).count());
++        }
++#ifdef NGIN_ASYNC_MEASURE_ALLOCATIONS
++        const auto after = Benchmarks::Allocations::Snapshot();
++#endif
++        double total = 0;
++        for (double time: times)
++            total += time;
++        std::sort(times.begin(), times.end());
++        std::cout << name << " samples=" << samples << " mean_us=" << total / samples
++                  << " p50_us=" << times[samples / 2] << " p95_us=" << times[samples * 95 / 100]
++                  << " p99_us=" << times[samples * 99 / 100];
++#ifdef NGIN_ASYNC_MEASURE_ALLOCATIONS
++        std::cout << " allocations_per_sample=" << double(after.totalCount - before.totalCount) / samples
++                  << " bytes_per_sample=" << double(after.totalBytes - before.totalBytes) / samples;
++#endif
++        std::cout << '\n';
++    }
++}// namespace
++
++int main()
++{
++    using namespace NGIN;
++    std::cout << "promise_bytes=" << sizeof(Async::Task<int>::promise_type)
++              << " task_bytes=" << sizeof(Async::Task<int>)
++              << " context_bytes=" << sizeof(Async::TaskContext)
++              << " frame_bytes=unavailable (promise size excludes compiler frame storage)\n";
++    for (int workers: {1, 4})
++    {
++        Execution::ThreadPoolScheduler scheduler(workers);
++        Async::CancellationSource      source;
++        Async::TaskContext             context(scheduler);
++        for (int mode = 0; mode != 3; ++mode)
++        {
++            if (mode != 0)
++                context.BindCancellationToken(source.GetToken());
++            if (mode == 2)
++                source.Cancel();
++            for (int depth: {1, 8, 64})
++            {
++                const std::string label = "workers=" + std::to_string(workers) + " cancellation=" +
++                                          std::to_string(mode) + " depth=" + std::to_string(depth);
++                Measure("construction " + label, [&] { auto task = Chain(depth, context, false); });
++                for (bool pending: {false, true})
++                {
++                    Measure(std::string(pending ? "yield " : "child ") + label, [&] {
++                        auto result = Async::SyncWait(context, Chain(depth, context, pending));
++                        if ((!pending || mode != 2) && (!result.Succeeded() || result.Value() != depth))
++                            throw std::runtime_error("chain produced an incorrect result");
++                        if (mode == 2 && pending && !result.IsCanceled())
++                            throw std::runtime_error("canceled yield was not observed");
++                    });
++                }
++            }
++            Measure("context-copy workers=" + std::to_string(workers) + " cancellation=" + std::to_string(mode), [&] {
++                Async::TaskContext copy = context;
++                if (copy.GetExecutor() != context.GetExecutor())
++                    throw std::runtime_error("context copy changed executor");
++            });
++        }
++    }
++    for (int mode = 0; mode != 3; ++mode)
++    {
++        Async::CancellationSource source;
++        if (mode == 2)
++            source.Cancel();
++        const Async::CancellationToken token = mode == 0 ? Async::CancellationToken {} : source.GetToken();
++        Measure("registration cancellation=" + std::to_string(mode), [&] {
++            Async::CancellationRegistration registration;
++            auto                            result = token.Register(registration, {}, {}, +[](void*) noexcept { return false; });
++            if (!result)
++                throw std::runtime_error("callback registration failed");
++        });
++        Measure("link cancellation=" + std::to_string(mode), [&] {
++            Async::LinkedCancellationSource linked({token});
++            if (linked.IsCancellationRequested() != (mode == 2))
++                throw std::runtime_error("linked source lost cancellation");
++        });
++    }
++    {
++        IO::Runtime        runtime;
++        Async::TaskContext context(runtime.GetExecutor());
++        auto               pump = [&] { runtime.PollOnce(); };
++        for (int mode = 0; mode != 3; ++mode)
++        {
++            Async::CancellationSource source;
++            context.BindCancellationToken(mode == 0 ? Async::CancellationToken {} : source.GetToken());
++            if (mode == 2)
++                source.Cancel();
++            for (int depth: {1, 8, 64})
++                for (bool pending: {false, true})
++                    Measure(std::string("runtime ") + (pending ? "yield" : "child") + " depth=" + std::to_string(depth) +
++                                    " cancellation=" + std::to_string(mode),
++                            [&] {
++                                auto operation = Async::Spawn(context, Chain(depth, context, pending));
++                                Drive(pump, operation);
++                                auto result = operation.TakeResult();
++                                if ((!pending || mode != 2) && (!result.Succeeded() || result.Value() != depth))
++                                    throw std::runtime_error("runtime chain produced an incorrect result");
++                                if (pending && mode == 2 && !result.IsCanceled())
++                                    throw std::runtime_error("runtime yield missed cancellation");
++                            });
++        }
++        runtime.Shutdown();
++    }
++    {
++        Execution::CooperativeScheduler scheduler;
++        CountedExecutor                 counted {Execution::ExecutorRef::From(scheduler)};
++        Async::TaskContext              context(counted);
++        auto                            pump = [&] { scheduler.RunUntilIdle(); };
++        for (int depth: {1, 8, 64})
++        {
++            counted.submissions = counted.reservations = counted.deliveries = 0;
++            auto operation                                                  = Async::Spawn(context, Chain(depth, context, false));
++            Drive(pump, operation);
++            if (!operation.TakeResult().Succeeded())
++                throw std::runtime_error("counted chain failed");
++            std::cout << "structural depth=" << depth << " submissions=" << counted.submissions
++                      << " reservations=" << counted.reservations << " deliveries=" << counted.deliveries << '\n';
++        }
++    }
++    {
++        IO::Runtime                     runtime;
++        auto                            driver = IO::detail::AcquireFileSystemDriver(runtime);
++        std::shared_ptr<void>           state  = std::make_shared<FileState>(*driver);
++        IO::AsyncFileHandle::Operations functions {};
++        functions.read = GatedFileLeaf;
++        IO::AsyncFileHandle handle(state, &functions);
++        Async::TaskContext  context(runtime.GetExecutor());
++        std::span<Byte>     bytes;
++        for (int workers: {0, 1, 4})
++        {
++            std::unique_ptr<Execution::ThreadPoolScheduler> external;
++            if (workers)
++            {
++                external = std::make_unique<Execution::ThreadPoolScheduler>(workers);
++                context.BindExecutor(*external);
++            }
++            else
++                context.BindExecutor(runtime.GetExecutor());
++            for (int layer = 0; layer != 3; ++layer)
++                Measure("file-synthetic workers=" + std::to_string(workers) + " layer=" + std::to_string(layer), [&] {
++                    auto task   = layer == 0 ? FileLeaf(state, context, bytes) : layer == 1 ? GatedFileLeaf(state, context, bytes)
++                                                                                            : handle.ReadAsync(context, bytes);
++                    auto result = [&] {
++                        if (external)
++                            return Async::SyncWait(context, std::move(task));
++                        auto operation = Async::Spawn(context, std::move(task));
++                        while (!operation.IsCompleted())
++                            runtime.PollOnce();
++                        return operation.TakeResult();
++                    }();
++                    if (!result.Succeeded())
++                        throw std::runtime_error("synthetic file operation failed");
++                });
++        }
++        runtime.Shutdown();
++    }
++    for (int depth: {1, 8, 64})
++    {
++        Execution::CooperativeScheduler scheduler;
++        Measure("active-cancel depth=" + std::to_string(depth), [&] {
++            Async::CancellationSource source;
++            Async::TaskContext        context(scheduler, source.GetToken());
++            auto                      operation = Async::Spawn(context, PendingChain(depth, context));
++            scheduler.RunUntilIdle();
++            if (operation.IsCompleted())
++                throw std::runtime_error("pending fixture did not suspend");
++            source.Cancel();
++            scheduler.RunUntilIdle();
++            if (!operation.IsCompleted() || !operation.TakeResult().IsCanceled())
++                throw std::runtime_error("pending cancellation did not retire");
++        });
++        Measure("scope-spawn-join depth=" + std::to_string(depth), [&] {
++            Async::TaskContext context(scheduler);
++            Async::TaskScope   scope(context.GetExecutor(), {}, 1);
++            auto               admitted = scope.Spawn([depth](Async::TaskContext& child) { return Chain(depth, child, false); });
++            if (!admitted)
++                throw std::runtime_error("scope admission failed");
++            auto joining = Async::Spawn(context, ScopeJoin(context, scope));
++            scheduler.RunUntilIdle();
++            if (!joining.IsCompleted() || joining.TakeResult().Value() != 1 || scope.Pending() != 0)
++                throw std::runtime_error("scope did not join");
++        });
++    }
++}

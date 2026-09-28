@@ -1,0 +1,27 @@
+Internal ctest changing into directory: /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/tests-asan
+Test project /home/berggrenmille/NGIN/Dependencies/NGIN/NGIN.Base/build/tests-asan
+    Start 666: Base.Net.Resolve.Net.Resolve resolves numeric loopback without external network access
+1/9 Test #666: Base.Net.Resolve.Net.Resolve resolves numeric loopback without external network access ............   Passed    0.01 sec
+    Start 667: Base.Net.Resolve.Net.Resolve applies address-family filters and preserves resolver diagnostics
+2/9 Test #667: Base.Net.Resolve.Net.Resolve applies address-family filters and preserves resolver diagnostics ....   Passed    0.01 sec
+    Start 668: Base.Net.Resolve.Net.Resolve async work uses its explicit driver and caller executor
+3/9 Test #668: Base.Net.Resolve.Net.Resolve async work uses its explicit driver and caller executor ..............   Passed    0.01 sec
+    Start 669: Base.Net.Resolve.Net.Resolve async cancellation and timeout complete without waiting for lookup
+4/9 Test #669: Base.Net.Resolve.Net.Resolve async cancellation and timeout complete without waiting for lookup ...   Passed    0.01 sec
+    Start 670: Base.Net.Resolve.Net.Resolve retires timeout capacity before delivering successful results
+5/9 Test #670: Base.Net.Resolve.Net.Resolve retires timeout capacity before delivering successful results ........   Passed    0.01 sec
+    Start 671: Base.Net.Resolve.Net.Resolve uses reserved delivery after ordinary executor admission closes
+6/9 Test #671: Base.Net.Resolve.Net.Resolve uses reserved delivery after ordinary executor admission closes ......   Passed    0.01 sec
+    Start 672: Base.Net.Resolve.Net.Resolve cancellation racing setup publishes once on the selected executor
+7/9 Test #672: Base.Net.Resolve.Net.Resolve cancellation racing setup publishes once on the selected executor ....   Passed    0.03 sec
+    Start 673: Base.Net.Resolve.Net.Resolve supports cooperative timed delivery and retires its timer
+8/9 Test #673: Base.Net.Resolve.Net.Resolve supports cooperative timed delivery and retires its timer ............   Passed    0.01 sec
+    Start 674: Base.Net.Resolve.Net.Resolve driver shutdown completes queued lookup through reserved delivery
+9/9 Test #674: Base.Net.Resolve.Net.Resolve driver shutdown completes queued lookup through reserved delivery ....   Passed    0.01 sec
+
+100% tests passed, 0 tests failed out of 9
+
+Label Time Summary:
+Net    =   0.13 sec*proc (9 tests)
+
+Total Test time (real) =   0.16 sec
