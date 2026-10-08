@@ -13,6 +13,7 @@ namespace NGIN::Async
 
 namespace NGIN::IO::detail
 {
+    class NativeCompletionBinding;
     enum class NativeFileOperationKind : UInt8
     {
         Read,
@@ -41,6 +42,10 @@ namespace NGIN::IO::detail
     {
         NativeFileOperationKind      kind {NativeFileOperationKind::Read};
         std::uintptr_t               handleValue {0};
+#if defined(_WIN32)
+        // Borrowed from the native resource owner through backend retirement.
+        NativeCompletionBinding* completionBinding {nullptr};
+#endif
         UInt64                       offset {0};
         bool                         useCurrentOffset {false};
         void*                        buffer {nullptr};

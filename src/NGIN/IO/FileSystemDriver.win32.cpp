@@ -74,6 +74,8 @@ namespace NGIN::IO::detail
                 return SubmitControl(std::move(request));
             if (request.kind != NativeFileOperationKind::Read && request.kind != NativeFileOperationKind::Write)
                 return false;
+            if (!request.completionBinding)
+                return false;
             std::shared_ptr<Operation> operation;
             std::unique_lock           lock(m_mutex);
             if (m_pending == m_capacity || m_driver.IsStopping())
@@ -111,7 +113,7 @@ namespace NGIN::IO::detail
             }
             if (m_pending == m_capacity)
                 return false;
-            auto registered = m_loop.WatchCompletion(operation->request.handleValue, &operation->overlapped, operation);
+            auto registered = m_loop.WatchCompletion(operation->request.handleValue, &operation->overlapped, operation, *operation->request.completionBinding);
             if (!registered)
             {
                 NativeFileCompletion completion;

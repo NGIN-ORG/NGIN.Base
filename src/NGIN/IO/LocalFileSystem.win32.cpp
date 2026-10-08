@@ -4,6 +4,7 @@
 #include "AsyncDispatch.hpp"
 #include "FileOperationGate.hpp"
 #include "NativeFileDispatch.hpp"
+#include "RuntimePoller.hpp"
 #include "NativeFileSystemBackend.hpp"
 
 #include <NGIN/Text/Unicode/Convert.hpp>
@@ -1671,6 +1672,7 @@ namespace NGIN::IO
             }
             std::shared_ptr<NGIN::IO::detail::FileSystemDriver> driver {};
             detail::FileOperationGate                           operations;
+            detail::NativeCompletionBinding                     completionBinding;
             HANDLE                                              handle {INVALID_HANDLE_VALUE};
             Path                                                path {};
             bool                                                canRead {false};
@@ -1909,11 +1911,12 @@ namespace NGIN::IO
                         *state->driver, *backend,
                         ctx,
                         detail::NativeFileRequest {
-                                      .kind        = detail::NativeFileOperationKind::Read,
-                                      .handleValue = reinterpret_cast<std::uintptr_t>(state->handle),
-                                      .offset      = offset,
-                                      .buffer      = destination.data(),
-                                      .size        = static_cast<UInt32>(destination.size()),
+                                .kind              = detail::NativeFileOperationKind::Read,
+                                .handleValue       = reinterpret_cast<std::uintptr_t>(state->handle),
+                                .completionBinding = &state->completionBinding,
+                                .offset            = offset,
+                                .buffer            = destination.data(),
+                                .size              = static_cast<UInt32>(destination.size()),
                         });
                 // Cancellation can win delivery after a successful OS transfer.
                 if (completion.submitted && completion.systemCode == 0 &&
@@ -1979,11 +1982,12 @@ namespace NGIN::IO
                         *state->driver, *backend,
                         ctx,
                         detail::NativeFileRequest {
-                                      .kind        = detail::NativeFileOperationKind::Write,
-                                      .handleValue = reinterpret_cast<std::uintptr_t>(state->handle),
-                                      .offset      = offset,
-                                      .buffer      = const_cast<NGIN::Byte*>(source.data()),
-                                      .size        = static_cast<UInt32>(source.size()),
+                                .kind              = detail::NativeFileOperationKind::Write,
+                                .handleValue       = reinterpret_cast<std::uintptr_t>(state->handle),
+                                .completionBinding = &state->completionBinding,
+                                .offset            = offset,
+                                .buffer            = const_cast<NGIN::Byte*>(source.data()),
+                                .size              = static_cast<UInt32>(source.size()),
                         });
                 // Cancellation can win delivery after a successful OS transfer.
                 if (completion.submitted && completion.systemCode == 0 &&
@@ -2046,11 +2050,12 @@ namespace NGIN::IO
                         *state->driver, *backend,
                         ctx,
                         detail::NativeFileRequest {
-                                .kind        = detail::NativeFileOperationKind::Read,
-                                .handleValue = reinterpret_cast<std::uintptr_t>(state->handle),
-                                .offset      = offset,
-                                .buffer      = destination.data(),
-                                .size        = static_cast<UInt32>(destination.size()),
+                                .kind              = detail::NativeFileOperationKind::Read,
+                                .handleValue       = reinterpret_cast<std::uintptr_t>(state->handle),
+                                .completionBinding = &state->completionBinding,
+                                .offset            = offset,
+                                .buffer            = destination.data(),
+                                .size              = static_cast<UInt32>(destination.size()),
                         });
                 if (completion.status == NativeWindowsFileCompletion::Status::Canceled)
                 {
@@ -2113,11 +2118,12 @@ namespace NGIN::IO
                         *state->driver, *backend,
                         ctx,
                         detail::NativeFileRequest {
-                                .kind        = detail::NativeFileOperationKind::Write,
-                                .handleValue = reinterpret_cast<std::uintptr_t>(state->handle),
-                                .offset      = offset,
-                                .buffer      = const_cast<NGIN::Byte*>(source.data()),
-                                .size        = static_cast<UInt32>(source.size()),
+                                .kind              = detail::NativeFileOperationKind::Write,
+                                .handleValue       = reinterpret_cast<std::uintptr_t>(state->handle),
+                                .completionBinding = &state->completionBinding,
+                                .offset            = offset,
+                                .buffer            = const_cast<NGIN::Byte*>(source.data()),
+                                .size              = static_cast<UInt32>(source.size()),
                         });
                 if (completion.status == NativeWindowsFileCompletion::Status::Canceled)
                 {
@@ -2171,8 +2177,9 @@ namespace NGIN::IO
                         *state->driver, *backend,
                         ctx,
                         detail::NativeFileRequest {
-                                .kind        = detail::NativeFileOperationKind::Flush,
-                                .handleValue = reinterpret_cast<std::uintptr_t>(state->handle),
+                                .kind              = detail::NativeFileOperationKind::Flush,
+                                .handleValue       = reinterpret_cast<std::uintptr_t>(state->handle),
+                                .completionBinding = &state->completionBinding,
                         });
                 if (completion.status == NativeWindowsFileCompletion::Status::Canceled)
                 {

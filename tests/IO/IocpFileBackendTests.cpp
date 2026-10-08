@@ -61,6 +61,7 @@ namespace
                     throw std::runtime_error("ConnectNamedPipe test fixture failed");
             }
         }
+        NativeCompletionBinding binding;
         Handle server, client;
     };
 
@@ -101,12 +102,13 @@ TEST_CASE("Windows native file cancellation drains IOCP before releasing pending
     Result                          result {&RuntimeAccess::Loop(runtime)};
     Shutdown                        shutdown {runtime};
     REQUIRE(backend->Submit(NativeFileRequest {
-                                    .kind        = NativeFileOperationKind::Read,
-                                    .handleValue = reinterpret_cast<std::uintptr_t>(pipe.server.value),
-                                    .buffer      = buffer.data(),
-                                    .size        = static_cast<NGIN::UInt32>(buffer.size()),
-                                    .userData    = &result,
-                                    .completion  = &Result::Complete,
+                                    .kind              = NativeFileOperationKind::Read,
+                                    .handleValue       = reinterpret_cast<std::uintptr_t>(pipe.server.value),
+                                    .completionBinding = &pipe.binding,
+                                    .buffer            = buffer.data(),
+                                    .size              = static_cast<NGIN::UInt32>(buffer.size()),
+                                    .userData          = &result,
+                                    .completion        = &Result::Complete,
                             },
                             cancellation.GetToken()));
     REQUIRE_FALSE(result.done);
@@ -141,12 +143,13 @@ TEST_CASE("Windows native file reads use the shared loop without starting worker
     Result                     result {&RuntimeAccess::Loop(runtime)};
     Shutdown                   shutdown {runtime};
     REQUIRE(backend->Submit(NativeFileRequest {
-                                    .kind        = NativeFileOperationKind::Read,
-                                    .handleValue = reinterpret_cast<std::uintptr_t>(pipe.server.value),
-                                    .buffer      = buffer.data(),
-                                    .size        = static_cast<NGIN::UInt32>(buffer.size()),
-                                    .userData    = &result,
-                                    .completion  = &Result::Complete,
+                                    .kind              = NativeFileOperationKind::Read,
+                                    .handleValue       = reinterpret_cast<std::uintptr_t>(pipe.server.value),
+                                    .completionBinding = &pipe.binding,
+                                    .buffer            = buffer.data(),
+                                    .size              = static_cast<NGIN::UInt32>(buffer.size()),
+                                    .userData          = &result,
+                                    .completion        = &Result::Complete,
                             },
                             {}));
     Handle event;

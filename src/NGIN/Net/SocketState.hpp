@@ -4,6 +4,10 @@
 #include <NGIN/Net/Sockets/SocketHandle.hpp>
 #include <NGIN/Net/Types/NetError.hpp>
 
+#if defined(NGIN_PLATFORM_WINDOWS)
+#include "../IO/RuntimePoller.hpp"
+#endif
+
 #include <atomic>
 #include <expected>
 #include <memory>
@@ -38,6 +42,9 @@ namespace NGIN::Net::detail
         void SetNonBlocking(bool enabled) noexcept { m_nonBlocking.store(enabled, std::memory_order_release); }
         // Used only while an accepted socket's preallocated state is unpublished.
         void Adopt(NativeHandle native) noexcept;
+#if defined(NGIN_PLATFORM_WINDOWS)
+        NGIN::IO::detail::NativeCompletionBinding& CompletionBinding() noexcept { return m_completionBinding; }
+#endif
 
     private:
         friend class SocketLease;
@@ -50,6 +57,9 @@ namespace NGIN::Net::detail
         std::mutex                      m_mutex;
         unsigned                        m_busy {};
         NGIN::Async::CancellationSource m_close;
+#if defined(NGIN_PLATFORM_WINDOWS)
+        NGIN::IO::detail::NativeCompletionBinding m_completionBinding;
+#endif
     };
 
     class SocketLease final

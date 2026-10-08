@@ -77,6 +77,15 @@ preventing stale readiness
 events from addressing a newly reused descriptor. Synchronous close and resource
 destruction must obey the same lifetime boundary.
 
+On Windows, an IOCP association belongs to the open native resource, while each
+OVERLAPPED request has its own bounded completion registration. File and socket
+state retain the association across sequential and concurrent requests; retiring
+a request does not repeat or remove that association. A new resource receives a
+fresh binding even if Windows reuses a handle value. Bindings reject a different
+resource or runtime and distinguish runtime lifetimes without keeping a retired
+completion port alive. An OS association failure is propagated, never treated as
+evidence that the resource belongs to the requested port.
+
 ## Shutdown and thread ownership
 
 `RequestStop()` linearizes the `Running -> Stopping` transition under the same

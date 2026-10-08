@@ -368,7 +368,7 @@ namespace NGIN::Net
                 if (Setup(operation, continuation))
                 {
                     std::lock_guard lock(owner.m_mutex);
-                    auto            watched = owner.m_loop.WatchCompletion(static_cast<std::uintptr_t>(operation->descriptor), &operation->overlapped, operation);
+                    auto            watched = owner.m_loop.WatchCompletion(static_cast<std::uintptr_t>(operation->descriptor), &operation->overlapped, operation, socket->CompletionBinding());
                     if (!watched)
                     {
                         if (watched.error() == std::errc::operation_canceled)

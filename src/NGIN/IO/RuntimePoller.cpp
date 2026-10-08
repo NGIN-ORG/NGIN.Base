@@ -181,7 +181,13 @@ namespace NGIN::IO::detail
 #endif
     };
 
-    RuntimePoller::RuntimePoller(std::size_t capacity) : m_impl(std::make_unique<Impl>(capacity)) {}
+    RuntimePoller::RuntimePoller(std::size_t capacity)
+#if defined(_WIN32)
+        : m_impl(std::make_shared<Impl>(capacity))
+#else
+        : m_impl(std::make_unique<Impl>(capacity))
+#endif
+    {}
     RuntimePoller::~RuntimePoller() = default;
 
     std::error_code RuntimePoller::Watch(std::uintptr_t handle, std::uint64_t identifier, unsigned interests) noexcept
@@ -274,7 +280,7 @@ namespace NGIN::IO::detail
 #endif
     }
 
-    std::error_code RuntimePoller::WatchCompletion(std::uintptr_t handle, void* operation, std::uint64_t identifier) noexcept
+    std::error_code RuntimePoller::WatchCompletion(std::uintptr_t handle, void* operation, std::uint64_t identifier, NativeCompletionBinding& binding) noexcept
     {
         if (!operation || identifier == 0 || handle == 0 || handle == static_cast<std::uintptr_t>(-1))
             return std::make_error_code(std::errc::invalid_argument);
@@ -284,6 +290,10 @@ namespace NGIN::IO::detail
             return std::make_error_code(std::errc::device_or_resource_busy);
         if (m_impl->operations.size() == m_impl->capacity)
             return std::make_error_code(std::errc::no_buffer_space);
+        std::lock_guard bindingLock(binding.m_mutex);
+        if (binding.m_handle != 0 &&
+            (binding.m_handle != handle || binding.m_owner.owner_before(m_impl) || m_impl.owner_before(binding.m_owner)))
+            return std::make_error_code(std::errc::invalid_argument);
         try
         {
             m_impl->operations.emplace(operation, identifier);
@@ -291,17 +301,23 @@ namespace NGIN::IO::detail
         {
             return std::make_error_code(std::errc::not_enough_memory);
         }
-        // Completion keys cannot change when a live handle is associated again.
-        // Use a fixed key and identify each request through its stable OVERLAPPED.
-        if (::CreateIoCompletionPort(reinterpret_cast<HANDLE>(handle), m_impl->port, 0, 0) != m_impl->port)
+        // Association belongs to the open resource, not to an OVERLAPPED. Windows
+        // rejects a second association even when it specifies the same port.
+        if (binding.m_handle == 0)
         {
-            const int error = static_cast<int>(::GetLastError());
-            m_impl->operations.erase(operation);
-            return {error, std::system_category()};
+            if (::CreateIoCompletionPort(reinterpret_cast<HANDLE>(handle), m_impl->port, 0, 0) != m_impl->port)
+            {
+                const int error = static_cast<int>(::GetLastError());
+                m_impl->operations.erase(operation);
+                return {error, std::system_category()};
+            }
+            binding.m_owner  = m_impl;
+            binding.m_handle = handle;
         }
         return {};
 #else
         (void) handle;
+        (void) binding;
         return std::make_error_code(std::errc::operation_not_supported);
 #endif
     }

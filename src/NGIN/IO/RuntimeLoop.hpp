@@ -75,7 +75,7 @@ namespace NGIN::IO::detail
         std::expected<std::uint64_t, std::error_code>
         Watch(std::uintptr_t handle, unsigned interests, std::shared_ptr<Handler> handler) noexcept;
         std::expected<std::uint64_t, std::error_code>
-                        WatchCompletion(std::uintptr_t handle, void* operation, std::shared_ptr<Handler> handler) noexcept;
+                        WatchCompletion(std::uintptr_t handle, void* operation, std::shared_ptr<Handler> handler, NativeCompletionBinding& binding) noexcept;
         std::error_code Modify(std::uint64_t identifier, unsigned interests) noexcept;
         void            Unwatch(std::uint64_t identifier) noexcept;
 
@@ -97,7 +97,7 @@ namespace NGIN::IO::detail
 
     private:
         std::expected<std::uint64_t, std::error_code> Register(
-                std::uintptr_t handle, unsigned interests, void* operation, std::shared_ptr<Handler> handler, bool arm) noexcept;
+                std::uintptr_t handle, unsigned interests, void* operation, std::shared_ptr<Handler> handler, bool arm, NativeCompletionBinding* binding = nullptr) noexcept;
         bool ShutdownImpl(std::optional<NGIN::Time::TimePoint> deadline);
         struct Impl;
         std::unique_ptr<Impl> m_impl;

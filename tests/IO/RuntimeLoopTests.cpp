@@ -745,8 +745,9 @@ TEST_CASE("Runtime loop rejects IOCP requests without retaining registration cap
     RuntimeLoop loop({.registrationCapacity = 1});
     auto        handler = std::make_shared<PipeHandler>(loop);
     int         operation {};
-    REQUIRE(loop.WatchCompletion(handler->descriptors[0], nullptr, handler).error() == std::errc::invalid_argument);
-    REQUIRE(loop.WatchCompletion(handler->descriptors[0], &operation, handler).error() == std::errc::operation_not_supported);
+    NGIN::IO::detail::NativeCompletionBinding binding;
+    REQUIRE(loop.WatchCompletion(handler->descriptors[0], nullptr, handler, binding).error() == std::errc::invalid_argument);
+    REQUIRE(loop.WatchCompletion(handler->descriptors[0], &operation, handler, binding).error() == std::errc::operation_not_supported);
     auto watched = loop.Watch(handler->descriptors[0], RuntimePoller::Read, handler);
     REQUIRE(watched);
     handler->identifier = *watched;
@@ -781,6 +782,7 @@ namespace
         }
         ~CompletionFile() { CloseHandle(handle); }
         HANDLE handle {INVALID_HANDLE_VALUE};
+        NGIN::IO::detail::NativeCompletionBinding binding;
     };
 
     struct CompletionHandler final : RuntimeLoop::Handler
@@ -814,7 +816,7 @@ TEST_CASE("Runtime IOCP routes bounded batches of requests sharing one OS handle
     for (unsigned i = 0; i != 96; ++i)
     {
         auto handler    = std::make_shared<CompletionHandler>(loop);
-        auto registered = loop.WatchCompletion(reinterpret_cast<std::uintptr_t>(file.handle), &handler->operation, handler);
+        auto registered = loop.WatchCompletion(reinterpret_cast<std::uintptr_t>(file.handle), &handler->operation, handler, file.binding);
         REQUIRE(registered);
         handler->identifier = *registered;
         REQUIRE(PostQueuedCompletionStatus(reinterpret_cast<HANDLE>(loop.NativeHandle()), i, 0, &handler->operation));
@@ -834,7 +836,7 @@ TEST_CASE("Runtime IOCP routes bounded batches of requests sharing one OS handle
     // new runtime generation despite Windows retaining the handle association.
     auto&      again      = handlers.front();
     const auto old        = again->identifier;
-    auto       registered = loop.WatchCompletion(reinterpret_cast<std::uintptr_t>(file.handle), &again->operation, again);
+    auto       registered = loop.WatchCompletion(reinterpret_cast<std::uintptr_t>(file.handle), &again->operation, again, file.binding);
     REQUIRE(registered);
     REQUIRE(*registered != old);
     again->identifier = *registered;
@@ -853,19 +855,83 @@ TEST_CASE("Runtime IOCP registration bounds and shutdown preserve existing handl
     auto           first  = std::make_shared<CompletionHandler>(loop);
     auto           second = std::make_shared<CompletionHandler>(loop);
     const auto     native = reinterpret_cast<std::uintptr_t>(file.handle);
-    REQUIRE(loop.WatchCompletion(native, nullptr, first).error() == std::errc::invalid_argument);
-    REQUIRE_FALSE(loop.WatchCompletion(reinterpret_cast<std::uintptr_t>(INVALID_HANDLE_VALUE), &first->operation, first));
-    auto registered = loop.WatchCompletion(native, &first->operation, first);
+    REQUIRE(loop.WatchCompletion(native, nullptr, first, file.binding).error() == std::errc::invalid_argument);
+    REQUIRE_FALSE(loop.WatchCompletion(reinterpret_cast<std::uintptr_t>(INVALID_HANDLE_VALUE), &first->operation, first, file.binding));
+    auto registered = loop.WatchCompletion(native, &first->operation, first, file.binding);
     REQUIRE(registered);
     first->identifier = *registered;
-    REQUIRE(loop.WatchCompletion(native, &first->operation, first).error() == std::errc::device_or_resource_busy);
-    REQUIRE(loop.WatchCompletion(native, &second->operation, second).error() == std::errc::no_buffer_space);
+    REQUIRE(loop.WatchCompletion(native, &first->operation, first, file.binding).error() == std::errc::device_or_resource_busy);
+    REQUIRE(loop.WatchCompletion(native, &second->operation, second, file.binding).error() == std::errc::no_buffer_space);
     REQUIRE(loop.Modify(first->identifier, RuntimePoller::Read) == std::errc::operation_not_supported);
     loop.RequestStop();
-    REQUIRE(loop.WatchCompletion(native, &second->operation, second).error() == std::errc::operation_canceled);
+    REQUIRE(loop.WatchCompletion(native, &second->operation, second, file.binding).error() == std::errc::operation_canceled);
     loop.Shutdown();
     REQUIRE(first->stops == 1);
     REQUIRE(first->ready == 0);
+}
+
+TEST_CASE("Runtime IOCP bindings reject another resource or completion port without leaking capacity", "[IO][Runtime][IOCP]")
+{
+    CompletionFile file, otherFile;
+    RuntimePoller  first(1), second(1);
+    OVERLAPPED     operation {};
+    const auto     native      = reinterpret_cast<std::uintptr_t>(file.handle);
+    const auto     otherNative = reinterpret_cast<std::uintptr_t>(otherFile.handle);
+    REQUIRE_FALSE(first.WatchCompletion(native, &operation, 1, file.binding));
+    first.UnwatchCompletion(&operation);
+
+    REQUIRE(first.WatchCompletion(otherNative, &operation, 2, file.binding) == std::errc::invalid_argument);
+    REQUIRE(second.WatchCompletion(native, &operation, 2, file.binding) == std::errc::invalid_argument);
+    // A different binding must not hide the OS error for an already-owned handle.
+    NGIN::IO::detail::NativeCompletionBinding unassociated;
+    REQUIRE(second.WatchCompletion(native, &operation, 3, unassociated));
+    REQUIRE_FALSE(second.WatchCompletion(otherNative, &operation, 4, unassociated));
+    second.UnwatchCompletion(&operation);
+    REQUIRE_FALSE(first.WatchCompletion(native, &operation, 5, file.binding));
+    first.UnwatchCompletion(&operation);
+}
+
+TEST_CASE("Runtime IOCP bindings distinguish a replaced poller at the same address", "[IO][Runtime][IOCP][Lifetime]")
+{
+    CompletionFile               file;
+    const auto                   native = reinterpret_cast<std::uintptr_t>(file.handle);
+    OVERLAPPED                   operation {};
+    std::optional<RuntimePoller> poller(std::in_place, 1);
+    REQUIRE_FALSE(poller->WatchCompletion(native, &operation, 1, file.binding));
+    poller->UnwatchCompletion(&operation);
+    poller.reset();
+    poller.emplace(1);
+    REQUIRE(poller->WatchCompletion(native, &operation, 2, file.binding) == std::errc::invalid_argument);
+    CompletionFile freshFile;
+    REQUIRE_FALSE(poller->WatchCompletion(reinterpret_cast<std::uintptr_t>(freshFile.handle), &operation, 3, freshFile.binding));
+    poller->UnwatchCompletion(&operation);
+}
+
+TEST_CASE("Runtime IOCP requests can concurrently share one resource binding", "[IO][Runtime][IOCP]")
+{
+    CompletionFile                     file;
+    constexpr std::size_t              count = 16;
+    RuntimePoller                      poller(count);
+    std::array<OVERLAPPED, count>      operations {};
+    std::array<std::error_code, count> results {};
+    std::atomic<bool>                  start {false};
+    std::vector<std::thread>           threads;
+    for (std::size_t index = 0; index != count; ++index)
+        threads.emplace_back([&, index] {
+            while (!start.load(std::memory_order_acquire))
+                std::this_thread::yield();
+            results[index] = poller.WatchCompletion(reinterpret_cast<std::uintptr_t>(file.handle), &operations[index], index + 1, file.binding);
+        });
+    start.store(true, std::memory_order_release);
+    for (auto& thread: threads)
+        thread.join();
+    for (std::size_t index = 0; index != count; ++index)
+    {
+        REQUIRE_FALSE(results[index]);
+        poller.UnwatchCompletion(&operations[index]);
+    }
+    REQUIRE_FALSE(poller.WatchCompletion(reinterpret_cast<std::uintptr_t>(file.handle), &operations.front(), count + 1, file.binding));
+    poller.UnwatchCompletion(&operations.front());
 }
 #endif
 
@@ -933,7 +999,12 @@ TEST_CASE("Nested runtime polls share dispatch depth and preserve ready backlog"
             ++visits;
             affine &= loops[index]->GetExecutor().IsCurrent();
             if (index + 1 != loops.size())
-                backlog |= loops[index + 1]->PollOnce();
+            {
+                // Nested callbacks also update backlog. Keep the poll separate
+                // so MSVC does not overwrite their updates with a pre-call value.
+                const bool nestedReady = loops[index + 1]->PollOnce();
+                backlog |= nestedReady;
+            }
             affine &= loops[index]->GetExecutor().IsCurrent();
             --depth;
         }));

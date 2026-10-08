@@ -391,15 +391,15 @@ namespace NGIN::IO::detail
     }
 
     std::expected<std::uint64_t, std::error_code>
-    RuntimeLoop::WatchCompletion(std::uintptr_t handle, void* operation, std::shared_ptr<Handler> handler) noexcept
+    RuntimeLoop::WatchCompletion(std::uintptr_t handle, void* operation, std::shared_ptr<Handler> handler, NativeCompletionBinding& binding) noexcept
     {
         if (!operation)
             return std::unexpected(std::make_error_code(std::errc::invalid_argument));
-        return Register(handle, RuntimePoller::Read | RuntimePoller::Write, operation, std::move(handler), true);
+        return Register(handle, RuntimePoller::Read | RuntimePoller::Write, operation, std::move(handler), true, &binding);
     }
 
     std::expected<std::uint64_t, std::error_code>
-    RuntimeLoop::Register(std::uintptr_t handle, unsigned interests, void* operation, std::shared_ptr<Handler> handler, bool arm) noexcept
+    RuntimeLoop::Register(std::uintptr_t handle, unsigned interests, void* operation, std::shared_ptr<Handler> handler, bool arm, NativeCompletionBinding* binding) noexcept
     {
         const std::uintptr_t key = operation ? reinterpret_cast<std::uintptr_t>(operation) : handle;
         if (!handler)
@@ -424,7 +424,7 @@ namespace NGIN::IO::detail
         }
         if (!arm)
             return identifier;
-        const std::error_code error = operation ? m_impl->poller.WatchCompletion(handle, operation, identifier)
+        const std::error_code error = operation ? m_impl->poller.WatchCompletion(handle, operation, identifier, *binding)
                                                 : m_impl->poller.Watch(handle, identifier, interests);
         if (error)
         {

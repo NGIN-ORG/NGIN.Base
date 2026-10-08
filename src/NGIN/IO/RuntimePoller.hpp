@@ -8,12 +8,24 @@
 #include <cstdint>
 #include <expected>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <system_error>
 
 namespace NGIN::IO::detail
 {
+    // One binding per open native resource, retained through all of its requests.
+    // A reopened resource needs a new binding even when Windows reuses its handle.
+    // Weak ownership distinguishes poller lifetimes without keeping a port alive.
+    class NativeCompletionBinding final
+    {
+        friend class RuntimePoller;
+        std::mutex          m_mutex;
+        std::weak_ptr<void> m_owner;
+        std::uintptr_t      m_handle {};
+    };
+
     // Policy-free platform waiting. The consumer maps generation identifiers
     // to live registrations; the OS never stores pointers into coroutine frames.
     class NGIN_IORUNTIME_API RuntimePoller final
@@ -46,7 +58,7 @@ namespace NGIN::IO::detail
         // IOCP registrations belong to individual OVERLAPPED requests. The request
         // must remain alive until its terminal packet is consumed and unregistered.
         // Other pollers return operation_not_supported.
-        std::error_code WatchCompletion(std::uintptr_t handle, void* operation, std::uint64_t identifier) noexcept;
+        std::error_code WatchCompletion(std::uintptr_t handle, void* operation, std::uint64_t identifier, NativeCompletionBinding& binding) noexcept;
         void            UnwatchCompletion(void* operation) noexcept;
         void            Wake() noexcept;
 
@@ -60,6 +72,10 @@ namespace NGIN::IO::detail
 
     private:
         struct Impl;
+#if defined(_WIN32)
+        std::shared_ptr<Impl> m_impl;
+#else
         std::unique_ptr<Impl> m_impl;
+#endif
     };
 }// namespace NGIN::IO::detail
