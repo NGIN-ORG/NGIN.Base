@@ -3,8 +3,10 @@
 #include <NGIN/Crypto/Memory/ZeroMemory.hpp>
 #include <NGIN/Crypto/Random/SecureRandom.hpp>
 
-#include <bcrypt.h>
 #include <windows.h>
+
+// CNG declarations require the Windows types above.
+#include <bcrypt.h>
 
 #include <limits>
 
@@ -710,6 +712,8 @@ namespace NGIN::Crypto::Backend::detail
             return std::unexpected(AuthenticationFailed());
         }
 
-        return produced == plaintext.size() ? CryptoExpected<void> {} : InternalError(status);
+        if (produced != plaintext.size())
+            return std::unexpected(InternalError(status));
+        return {};
     }
 }// namespace NGIN::Crypto::Backend::detail

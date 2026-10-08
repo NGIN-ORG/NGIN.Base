@@ -5,8 +5,10 @@
 #include <algorithm>
 #include <limits>
 
-#include <bcrypt.h>
 #include <windows.h>
+
+// CNG declarations require the Windows types above.
+#include <bcrypt.h>
 
 namespace NGIN::Crypto::Random
 {

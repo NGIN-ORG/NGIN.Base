@@ -33,6 +33,7 @@ TEST_CASE("Net.Runtime shutdown cancels an admitted receive on its own executor"
     REQUIRE(runtime.IsStopped());
     REQUIRE(operation.IsStopped());
     REQUIRE(operationRoot.TryJoin());
+    REQUIRE(operation.TakeResult().StopReason() == NGIN::Async::StopReason::RuntimeShutdown);
 }
 
 TEST_CASE("Net.Runtime runner uses context cancellation and no file workers", "[Net][Runtime]")

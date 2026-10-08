@@ -37,7 +37,7 @@ namespace NGIN::Net
             bool                           stopReasonSet {false};
 
             void                                                        Ready(const Poller::Event& event) noexcept override { owner->Complete(*this, event); }
-            void                                                        Stop() noexcept override { owner->Cancel(*this); }
+            void                                                        Stop() noexcept override { owner->Cancel(*this, NGIN::Async::StopReason::RuntimeShutdown); }
             Impl*                                                       owner {};
             Kind                                                        kind {};
             detail::NativeSocket                                        descriptor {INVALID_SOCKET};

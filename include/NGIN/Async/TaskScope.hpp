@@ -309,7 +309,7 @@ namespace NGIN::Async
         template<typename Factory>
             requires std::invocable<std::decay_t<Factory>&, TaskContext&>
         [[nodiscard]] auto SpawnOn(NGIN::Execution::ExecutorRef executor, Factory&& factory)
-                -> std::expected<Operation<typename Child<std::decay_t<Factory>>::Value, E>, NGIN::Execution::ScheduleError>
+                -> std::expected<Operation<typename std::remove_cvref_t<std::invoke_result_t<std::decay_t<Factory>&, TaskContext&>>::ValueType, E>, NGIN::Execution::ScheduleError>
         {
             auto admitted = Prepare(executor, std::forward<Factory>(factory));
             if (!admitted)

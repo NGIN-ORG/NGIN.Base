@@ -11,9 +11,11 @@
 #include <NGIN/Net/Types/SocketOptions.hpp>
 
 #if defined(NGIN_PLATFORM_WINDOWS)
-#include <mswsock.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
+
+// Winsock types must be defined before its extension declarations.
+#include <mswsock.h>
 #else
 #include <arpa/inet.h>
 #include <errno.h>
