@@ -1,5 +1,6 @@
 # Add the Sandbox example
 add_subdirectory(Sandbox)
+add_subdirectory(AsyncSemaphore)
 
 # Add the UnitsExample
 add_subdirectory(UnitsExample)

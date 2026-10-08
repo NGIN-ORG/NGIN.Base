@@ -1,0 +1,6 @@
+add_executable(AsyncSemaphoreExample main.cpp)
+target_link_libraries(AsyncSemaphoreExample PRIVATE NGIN::Base::Execution)
+if(TARGET NGIN.Base.BuildOptions)
+  target_link_libraries(AsyncSemaphoreExample PRIVATE NGIN.Base.BuildOptions)
+endif()
+target_compile_features(AsyncSemaphoreExample PRIVATE cxx_std_23)

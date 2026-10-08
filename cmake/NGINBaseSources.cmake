@@ -81,6 +81,7 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64|arm)")
 endif()
 
 set(NGIN_BASE_EXECUTION_SOURCES
+  ${NGIN_BASE_ROOT_DIR}/src/NGIN/Async/AsyncSemaphore.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/Async/DeadlineState.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/Async/CompletionObservation.cpp
   ${NGIN_BASE_ROOT_DIR}/src/NGIN/Async/FirstCompleted.cpp

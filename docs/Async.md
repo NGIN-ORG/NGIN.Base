@@ -17,6 +17,7 @@ Most users only need these types:
 - `Completion<T, E>`: the value-owned terminal result
 - `TaskScope<E>`: bounded child ownership, shared cancellation, and explicit joining
 - `WhenAll` / `Race`: joined task groups and owning competition
+- `AsyncSemaphore`: cancellation-aware permit acquisition and scoped permit ownership
 
 ## Core Contract
 
@@ -298,6 +299,55 @@ NGIN::Async::Task<void, DemoError> Work(NGIN::Async::TaskContext& ctx)
     }
 }
 ```
+
+## Async synchronization
+
+Include `<NGIN/Async/AsyncSemaphore.hpp>` (also included by `<NGIN/Async.hpp>`)
+and link the Execution component. Unlike `NGIN::Sync::Semaphore`, pending
+acquisition suspends the coroutine instead of blocking an executor thread.
+
+```cpp
+NGIN::Async::Task<void> Update(NGIN::Async::AsyncSemaphore& semaphore)
+{
+    auto permit = co_await semaphore.AcquireAsync();
+    // Exclusive access if semaphore was constructed as AsyncSemaphore(1, 1).
+    // The permit remains owned across co_await and releases at scope exit.
+    co_await NGIN::Async::YieldNow();
+}
+```
+
+`AsyncSemaphore(initialCount, maximumCount)` requires a positive maximum and an
+initial count no greater than that maximum. The maximum defaults to the largest
+`UIntSize`. `AcquireAsync()` is a cold `Task<Permit>`; its move-only guard returns
+one permit on destruction or explicit `Permit::Release()`. Moving transfers
+ownership; releasing an empty guard is harmless. Keep the guard in a variable
+for the full critical section. For manual ownership, `co_await WaitAsync()`
+acquires one permit and `Release()` returns one. `TryAcquire()` attempts manual
+acquisition immediately; `CurrentCount()` snapshots available permits. Releasing
+above the maximum is a programmer error. The semaphore itself is neither copyable
+nor movable; guard access must be serialized, but separate guards and semaphore
+operations may run on different threads.
+
+Inside `Task<T, E>` with a domain-error type, use `WaitAsync<E>()` or
+`AcquireAsync<E>()` to match that type. Semaphore failures remain infrastructure
+faults; cancellation preserves its stop reason.
+
+Wait tasks inherit their caller's executor, cancellation token, and allocation
+resource. An available permit requires no pending-state allocation or extra
+delivery reservation. Pending waits reserve delivery before queueing, use the
+inherited PMR resource, and resume on that executor. Pending waiters receive
+permits FIFO; cancellation removes a waiter without consuming a permit. Release
+and cancellation race to select exactly one outcome. Cancellation after a grant
+does not revoke it, even before its queued continuation runs. Scheduling,
+allocation, or cancellation-registration failure returns an AsyncFault and leaves
+the permit count unchanged. Deadlines are not enforced implicitly; use the
+existing cancellation/timeout composition APIs when needed.
+
+The semaphore must outlive every returned task, in-flight call, and guard.
+Cancel and join pending work before destruction; destruction does not cancel
+waiters. The executor and PMR resource must outlive pending delivery. The complete
+[AsyncSemaphore example](../examples/AsyncSemaphore/main.cpp) demonstrates two
+tasks protecting shared state across suspension.
 
 ## Combinators
 

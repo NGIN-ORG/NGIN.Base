@@ -7,6 +7,7 @@
 #include <NGIN/Async/AsyncConfig.hpp>
 #include <NGIN/Async/AsyncDomainErrorException.hpp>
 #include <NGIN/Async/AsyncEnvironment.hpp>
+#include <NGIN/Async/AsyncSemaphore.hpp>
 #include <NGIN/Async/AsyncExceptionTraits.hpp>
 #include <NGIN/Async/AsyncFault.hpp>
 #include <NGIN/Async/AsyncError.hpp>
