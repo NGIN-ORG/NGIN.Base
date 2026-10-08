@@ -137,11 +137,15 @@ namespace NGIN::IO::detail
                 default:
                     return false;
             }
-            // Force potentially blocking file work into the kernel's async
-            // context; the runtime thread only admits and observes operations.
-            submission.flags = IOSQE_ASYNC;
-            submission.fd    = static_cast<int>(request.handleValue);
-            if (request.kind == NativeFileOperationKind::Read || request.kind == NativeFileOperationKind::Write)
+            // The runtime thread only admits and observes operations, so its
+            // submissions always run in the kernel's async context. A transfer
+            // from an application executor may first be attempted inline:
+            // io_uring issues it nonblocking and punts work that would block,
+            // which saves a kernel worker handoff for cached data.
+            const bool transfer = request.kind == NativeFileOperationKind::Read || request.kind == NativeFileOperationKind::Write;
+            submission.flags    = transfer && !m_loop.IsCurrent() ? 0 : IOSQE_ASYNC;
+            submission.fd       = static_cast<int>(request.handleValue);
+            if (transfer)
             {
                 submission.addr = reinterpret_cast<__u64>(request.buffer);
                 submission.len  = request.size;

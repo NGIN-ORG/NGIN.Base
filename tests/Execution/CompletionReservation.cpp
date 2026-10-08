@@ -7,6 +7,7 @@
 #include <NGIN/Execution/detail/CompletionQueue.hpp>
 
 #include <atomic>
+#include <chrono>
 #include <future>
 #include <latch>
 #include <memory>
@@ -83,6 +84,49 @@ TEST_CASE("Completion retirement wakes only a closed queue's final drain", "[Exe
     last->Reset();
     REQUIRE(wakes == 3);
     REQUIRE(queue.Outstanding() == 0);
+}
+
+TEST_CASE("Single-driver completion publication signals outside the queue lock", "[Execution][Reservation]")
+{
+    struct Signal final
+    {
+        std::atomic<unsigned> wakes {0};
+        std::atomic<bool>     block {true};
+        std::latch            entered {1};
+        std::latch            release {1};
+    } signal;
+    auto queue = std::make_unique<detail::CompletionQueue>(1, +[](void* state) noexcept {
+        auto& self = *static_cast<Signal*>(state);
+        ++self.wakes;
+        if (self.block.exchange(false))
+        {
+            self.entered.count_down();
+            self.release.wait();
+        }
+    }, &signal, std::pmr::get_default_resource(), true);
+    bool ran    = false;
+    auto ticket = queue->Reserve(WorkItem([&] { ran = true; }));
+    REQUIRE(ticket);
+    std::thread producer([&] { ticket->Dispatch(); });
+    signal.entered.wait();
+    // The driver can consume and retire the item while its producer is still
+    // signaling; queue destruction waits for that signal to finish.
+    REQUIRE(queue->RunOne());
+    REQUIRE(ran);
+    REQUIRE(queue->Outstanding() == 0);
+    std::atomic<bool> destroyed {false};
+    std::thread       destroyer([&] {
+        queue.reset();
+        destroyed.store(true);
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    const bool destroyedEarly = destroyed.load();
+    signal.release.count_down();
+    producer.join();
+    destroyer.join();
+    REQUIRE_FALSE(destroyedEarly);
+    REQUIRE(destroyed.load());
+    REQUIRE(signal.wakes.load() == 1);
 }
 
 TEST_CASE("Completion reservation allocation failure rejects admission without leaking capacity", "[Execution][Reservation]")

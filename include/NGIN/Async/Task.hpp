@@ -439,12 +439,8 @@ namespace NGIN::Async
                     return false;
                 }
 
-                if (m_execution)
-                {
-                    if (m_execution->m_terminalObserver)
-                        m_execution->m_terminalObserver(m_execution->m_terminalContext);
-                    m_execution->m_finishedCondition.NotifyAll();
-                }
+                if (m_execution && m_execution->m_terminalObserver)
+                    m_execution->m_terminalObserver(m_execution->m_terminalContext);
 
                 const std::coroutine_handle<> continuation = CompleteContinuation();
 

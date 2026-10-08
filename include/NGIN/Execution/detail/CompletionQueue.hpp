@@ -4,12 +4,14 @@
 #include <NGIN/Execution/ScheduleResult.hpp>
 #include <NGIN/Execution/WorkItem.hpp>
 
+#include <atomic>
 #include <cassert>
 #include <cstddef>
 #include <expected>
 #include <memory_resource>
 #include <mutex>
 #include <stdexcept>
+#include <thread>
 
 namespace NGIN::Execution::detail
 {
@@ -20,9 +22,13 @@ namespace NGIN::Execution::detail
     public:
         using Wake = void (*)(void*) noexcept;
 
+        /// @param singleDriver The queue has one driving thread. Publications then
+        /// signal it after releasing the lock (see Queue).
         explicit CompletionQueue(std::size_t capacity = 4096, Wake wake = nullptr, void* context = nullptr,
-                                 std::pmr::memory_resource* resource = std::pmr::get_default_resource())
-            : m_capacity(capacity), m_wake(wake), m_context(context), m_resource(resource)
+                                 std::pmr::memory_resource* resource = std::pmr::get_default_resource(),
+                                 bool singleDriver = false)
+            : m_capacity(capacity), m_wake(wake), m_context(context), m_resource(resource),
+              m_signalAfterUnlock(singleDriver && wake)
         {
             if (capacity == 0 || !resource)
                 throw std::invalid_argument("Completion queue requires positive capacity and an allocator");
@@ -30,6 +36,11 @@ namespace NGIN::Execution::detail
 
         ~CompletionQueue()
         {
+            // A producer may still be signaling the executor after its item was
+            // consumed. Its final access is the decrement below; wait for it.
+            // The owner keeps the signaled object alive until this returns.
+            while (m_notifying.load(std::memory_order_acquire) != 0)
+                std::this_thread::yield();
             if (m_outstanding != 0)
                 std::terminate();
         }
@@ -129,7 +140,7 @@ namespace NGIN::Execution::detail
             bool  pending {false};
         };
 
-        void Enqueue(Node* node) noexcept
+        void Enqueue(Node* node, bool notify = true) noexcept
         {
             node->state = Node::State::Queued;
             node->next  = nullptr;
@@ -138,7 +149,8 @@ namespace NGIN::Execution::detail
             else
                 m_head = node;
             m_tail = node;
-            Notify();
+            if (notify)
+                Notify();
         }
 
         static void Publish(void* state) noexcept { Queue(state, true); }
@@ -148,17 +160,32 @@ namespace NGIN::Execution::detail
         {
             Node*            node  = static_cast<Node*>(state);
             CompletionQueue* owner = node->owner;
-            std::lock_guard  lock(owner->m_mutex);
-            // Concurrent/repeated deliveries into one reserved callback are a
-            // producer contract violation, not an invitation to drop a resume.
-            if (!node->owned || node->state == Node::State::Queued || node->pending)
-                std::terminate();
-            if (transfer)
-                node->owned = false;
-            if (node->state == Node::State::Running)
-                node->pending = true;
-            else
-                owner->Enqueue(node);
+            {
+                std::lock_guard lock(owner->m_mutex);
+                // Concurrent/repeated deliveries into one reserved callback are a
+                // producer contract violation, not an invitation to drop a resume.
+                if (!node->owned || node->state == Node::State::Queued || node->pending)
+                    std::terminate();
+                if (transfer)
+                    node->owned = false;
+                if (node->state == Node::State::Running)
+                {
+                    node->pending = true;
+                    return;
+                }
+                // Waking a blocked driver can take microseconds. Doing that under
+                // the lock stalls every concurrent producer behind the wake, so a
+                // single-driver queue signals after unlocking; its destructor waits
+                // for this in-flight signal. With several drivers, signaling under
+                // the lock keeps woken drivers waiting for the publisher, which
+                // retains its own continuation chains instead of migrating each step.
+                owner->Enqueue(node, !owner->m_signalAfterUnlock);
+                if (!owner->m_signalAfterUnlock)
+                    return;
+                owner->m_notifying.fetch_add(1, std::memory_order_relaxed);
+            }
+            owner->m_wake(owner->m_context);
+            owner->m_notifying.fetch_sub(1, std::memory_order_release);
         }
 
         static void Release(void* state) noexcept
@@ -211,6 +238,8 @@ namespace NGIN::Execution::detail
         Node*                      m_head {};
         Node*                      m_tail {};
         std::size_t                m_outstanding {};
+        const bool                 m_signalAfterUnlock;
+        std::atomic<std::size_t>   m_notifying {};
         bool                       m_closed {};
     };
 }// namespace NGIN::Execution::detail

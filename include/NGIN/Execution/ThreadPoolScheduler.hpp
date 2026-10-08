@@ -36,7 +36,8 @@ namespace NGIN::Execution
         /// </summary>
         explicit ThreadPoolScheduler(size_t threadCount        = static_cast<size_t>(ThisThread::HardwareConcurrency()),
                                      size_t completionCapacity = 4096)
-            : m_stop(false), m_completions(completionCapacity, +[](void* state) noexcept { static_cast<ThreadPoolScheduler*>(state)->m_workWake.NotifyAll(); }, this)
+            : m_stop(false), m_completions(completionCapacity, +[](void* state) noexcept { static_cast<ThreadPoolScheduler*>(state)->m_workWake.NotifyAll(); }, this,
+                                           std::pmr::get_default_resource(), threadCount <= 1)
         {
             if (threadCount == 0)
             {

@@ -96,6 +96,57 @@ namespace NGIN::Sync
         CHECK(wakeCount.load(std::memory_order_relaxed) == 2);
     }
 
+    TEST_CASE("AtomicCondition notification without a waiter still releases a later stale wait", "[Sync][AtomicCondition]")
+    {
+        AtomicCondition condition;
+        const auto      observedGeneration = condition.Load();
+
+        // Neither notification has a blocked waiter, so neither needs a platform wake.
+        condition.NotifyOne();
+        condition.NotifyAll();
+
+        condition.Wait(observedGeneration);
+        CHECK(condition.Load() == observedGeneration + 2U);
+        CHECK(condition.WaitFor(observedGeneration, NGIN::Units::Milliseconds {1.0}));
+    }
+
+    TEST_CASE("AtomicCondition ping-pong never loses a skipped wake", "[Sync][AtomicCondition]")
+    {
+        // Each side checks its predicate after observing the generation and before
+        // blocking, so a lost wake would hang this exchange.
+        constexpr int    rounds = 20000;
+        AtomicCondition  request;
+        AtomicCondition  response;
+        std::atomic<int> turn {0};
+        const auto       await = [&turn](AtomicCondition& condition, int expected) {
+            for (;;)
+            {
+                const auto generation = condition.Load();
+                if (turn.load(std::memory_order_acquire) == expected)
+                    return;
+                condition.Wait(generation);
+            }
+        };
+
+        std::thread peer([&] {
+            for (int round = 0; round != rounds; ++round)
+            {
+                await(request, 2 * round + 1);
+                turn.store(2 * round + 2, std::memory_order_release);
+                response.NotifyOne();
+            }
+        });
+        for (int round = 0; round != rounds; ++round)
+        {
+            turn.store(2 * round + 1, std::memory_order_release);
+            request.NotifyOne();
+            await(response, 2 * round + 2);
+        }
+        peer.join();
+
+        CHECK(turn.load(std::memory_order_acquire) == 2 * rounds);
+    }
+
     TEST_CASE("AtomicCondition timed wait reports timeout", "[Sync][AtomicCondition]")
     {
         AtomicCondition condition;

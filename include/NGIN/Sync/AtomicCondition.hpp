@@ -39,12 +39,7 @@ namespace NGIN::Sync
     {
     public:
         AtomicCondition() noexcept
-            : m_generation(0)
-#ifdef _DEBUG
-              ,
-              m_waitingThreads(0)
-#endif
-
+            : m_generation(0), m_waitingThreads(0)
         {
         }
 
@@ -57,13 +52,7 @@ namespace NGIN::Sync
         /// that value is changed by a call to NotifyOne or NotifyAll.
         void Wait() noexcept
         {
-#ifdef _DEBUG
-            m_waitingThreads.fetch_add(1, std::memory_order_relaxed);
-#endif
             Wait(Load());
-#ifdef _DEBUG
-            m_waitingThreads.fetch_sub(1, std::memory_order_relaxed);
-#endif
         }
 
         /// @brief Wait until the generation differs from @p observedGeneration.
@@ -71,12 +60,14 @@ namespace NGIN::Sync
         /// This is the safe building block for predicate loops (prevents missed notifications).
         void Wait(UInt32 observedGeneration) noexcept
         {
+            EnterWait();
 #if defined(NGIN_PLATFORM_WINDOWS) || defined(NGIN_PLATFORM_LINUX)
             detail::AtomicConditionWait(m_generation, observedGeneration);
 #else
             auto generation = Generation();
             generation.wait(observedGeneration, std::memory_order_acquire);
 #endif
+            LeaveWait();
         }
 
         [[nodiscard]] UInt32 Load() const noexcept
@@ -89,33 +80,7 @@ namespace NGIN::Sync
             requires NGIN::Units::QuantityOf<NGIN::Units::TIME, TUnit>
         [[nodiscard]] bool WaitFor(const TUnit& duration) noexcept
         {
-#ifdef _DEBUG
-            m_waitingThreads.fetch_add(1, std::memory_order_relaxed);
-#endif
-            const UInt32 gen = Load();
-
-            const auto nanoseconds = ToWaitNanoseconds(duration);
-            if (nanoseconds == 0)
-            {
-#ifdef _DEBUG
-                m_waitingThreads.fetch_sub(1, std::memory_order_relaxed);
-#endif
-                return false;
-            }
-
-#if defined(NGIN_PLATFORM_WINDOWS) || defined(NGIN_PLATFORM_LINUX)
-            const bool ok = detail::AtomicConditionWaitFor(m_generation, gen, nanoseconds);
-#ifdef _DEBUG
-            m_waitingThreads.fetch_sub(1, std::memory_order_relaxed);
-#endif
-            return ok;
-#else
-            const bool notified = WaitFor(gen, duration);
-#ifdef _DEBUG
-            m_waitingThreads.fetch_sub(1, std::memory_order_relaxed);
-#endif
-            return notified;
-#endif
+            return WaitFor(Load(), duration);
         }
 
         template<typename TUnit>
@@ -129,7 +94,10 @@ namespace NGIN::Sync
             }
 
 #if defined(NGIN_PLATFORM_WINDOWS) || defined(NGIN_PLATFORM_LINUX)
-            return detail::AtomicConditionWaitFor(m_generation, observedGeneration, nanoseconds);
+            EnterWait();
+            const bool notified = detail::AtomicConditionWaitFor(m_generation, observedGeneration, nanoseconds);
+            LeaveWait();
+            return notified;
 #else
             using Nanoseconds = std::chrono::nanoseconds;
             using Rep         = Nanoseconds::rep;
@@ -167,7 +135,8 @@ namespace NGIN::Sync
         void NotifyOne() noexcept
         {
             auto generation = Generation();
-            generation.fetch_add(1u, std::memory_order_release);
+            if (!PublishGeneration(generation))
+                return;
 #if defined(NGIN_PLATFORM_WINDOWS) || defined(NGIN_PLATFORM_LINUX)
             detail::AtomicConditionNotifyOne(m_generation);
 #else
@@ -181,7 +150,8 @@ namespace NGIN::Sync
         void NotifyAll() noexcept
         {
             auto generation = Generation();
-            generation.fetch_add(1u, std::memory_order_release);
+            if (!PublishGeneration(generation))
+                return;
 #if defined(NGIN_PLATFORM_WINDOWS) || defined(NGIN_PLATFORM_LINUX)
             detail::AtomicConditionNotifyAll(m_generation);
 #else
@@ -214,6 +184,20 @@ namespace NGIN::Sync
 #endif
 
     private:
+        // A waiter registers before its blocking primitive compares the generation;
+        // a notifier publishes the generation before checking for waiters. With both
+        // sequentially consistent, a notifier that sees no waiter is ordered before
+        // that waiter's comparison, which then observes the new generation and does
+        // not block. Skipping the wake then avoids a system call per notification.
+        void EnterWait() noexcept { m_waitingThreads.fetch_add(1, std::memory_order_seq_cst); }
+        void LeaveWait() noexcept { m_waitingThreads.fetch_sub(1, std::memory_order_relaxed); }
+
+        [[nodiscard]] bool PublishGeneration(std::atomic_ref<UInt32> generation) noexcept
+        {
+            generation.fetch_add(1u, std::memory_order_seq_cst);
+            return m_waitingThreads.load(std::memory_order_seq_cst) != 0;
+        }
+
         template<typename TUnit>
             requires NGIN::Units::QuantityOf<NGIN::Units::TIME, TUnit>
         [[nodiscard]] static UInt64 ToWaitNanoseconds(const TUnit& duration) noexcept
@@ -246,10 +230,8 @@ namespace NGIN::Sync
 
         // The generation counter serves as the shared state. Threads wait for its change.
         alignas(alignof(UInt32)) UInt32 m_generation;
-#ifdef _DEBUG
-        // Counter for the number of threads currently waiting
+        // Threads currently inside a blocking wait; notifications skip the wake when zero.
         std::atomic<UInt32> m_waitingThreads;
-#endif
     };
 
 }// namespace NGIN::Sync

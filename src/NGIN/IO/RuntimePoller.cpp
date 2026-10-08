@@ -248,7 +248,6 @@ namespace NGIN::IO::detail
             }
         }
 #endif
-        Wake();
         return {};
     }
 
@@ -273,7 +272,6 @@ namespace NGIN::IO::detail
 #else
         (void) handle;// IOCP association ends when the OS handle is closed.
 #endif
-        Wake();
     }
 
     std::error_code RuntimePoller::WatchCompletion(std::uintptr_t handle, void* operation, std::uint64_t identifier) noexcept
@@ -316,7 +314,6 @@ namespace NGIN::IO::detail
 #else
         (void) operation;
 #endif
-        Wake();
     }
 
     void RuntimePoller::Wake() noexcept

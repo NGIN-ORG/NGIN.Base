@@ -682,6 +682,33 @@ TEST_CASE("Runtime host snapshots include native readiness and refresh after reg
     REQUIRE(HostWait(std::span(sources).first(*copied), 0) == 0);
     loop.Shutdown();
 }
+
+TEST_CASE("Runtime loop dispatches work and readiness registered by its own callbacks", "[IO][Runtime][Wakeup]")
+{
+    // The loop does not signal itself for changes made during its dispatch.
+    // Continued pumping must still observe both the queued work and the readiness.
+    RuntimeLoop   loop({});
+    ShutdownGuard cleanup {loop};
+    auto          handler    = std::make_shared<PipeHandler>(loop);
+    bool          registered = false;
+    bool          queued     = false;
+    bool          followed   = false;
+    handler->Signal();
+    REQUIRE(loop.GetExecutor().Execute([&] {
+        auto watched = loop.Watch(handler->descriptors[0], RuntimePoller::Read, handler);
+        registered   = watched.has_value();
+        if (watched)
+            handler->identifier = *watched;
+        queued = loop.GetExecutor().Execute([&] { followed = loop.IsCurrent(); }).has_value();
+    }));
+    while (loop.PollOnce()) {}
+    REQUIRE(registered);
+    REQUIRE(queued);
+    REQUIRE(followed);
+    REQUIRE(handler->ready == 1);
+    REQUIRE(handler->correctIdentifier);
+    REQUIRE(handler->readSucceeded);
+}
 #endif
 
 TEST_CASE("Runtime host snapshot rejects unsupported or insufficient storage without partial output", "[IO][Runtime][Host][Admission]")

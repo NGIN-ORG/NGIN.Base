@@ -32,15 +32,23 @@ namespace NGIN::IO::detail
     {
         explicit Impl(RuntimeLoop* runtime, Options configured, NGIN::Execution::WorkItem onStop)
             : loop(runtime), options(configured), poller(configured.registrationCapacity),
-              submissions(configured.submissionCapacity, &Wake, this),
-              completions(configured.completionCapacity, &Wake, this),
-              operations(configured.operationCapacity, &Wake, this), stopHandler(std::move(onStop))
+              submissions(configured.submissionCapacity, &Wake, this, std::pmr::get_default_resource(), true),
+              completions(configured.completionCapacity, &Wake, this, std::pmr::get_default_resource(), true),
+              operations(configured.operationCapacity, &Wake, this, std::pmr::get_default_resource(), true), stopHandler(std::move(onStop))
         {
             if (options.timerCapacity == 0 || options.batchSize == 0)
                 throw std::invalid_argument("Runtime requires positive timer capacity and batch size");
         }
 
-        static void Wake(void* state) noexcept { static_cast<Impl*>(state)->poller.Wake(); }
+        static void Wake(void* state) noexcept
+        {
+            auto& impl = *static_cast<Impl*>(state);
+            // Work published by this loop's own dispatch is found by the same
+            // Batch rescan or reported by its final HasReady check.
+            if (currentLoop == impl.loop)
+                return;
+            impl.poller.Wake();
+        }
 
         struct DriveGuard final
         {
@@ -424,12 +432,17 @@ namespace NGIN::IO::detail
                 m_impl->poller.UnwatchCompletion(operation);
             else
                 m_impl->poller.Unwatch(handle);
+            Impl::Wake(m_impl.get());
             m_impl->handles.erase(key);
             auto failed = m_impl->registrations.extract(identifier);
             // Handler destruction may reenter; keep it alive until the lock exits.
             handler = std::move(failed.mapped().handler);
             return std::unexpected(error);
         }
+        // Hosts monitoring an older wait-source snapshot refresh after this signal.
+        // Per-request IOCP registrations do not change any snapshot.
+        if (!operation)
+            Impl::Wake(m_impl.get());
         return identifier;
     }
 
@@ -443,7 +456,10 @@ namespace NGIN::IO::detail
             return std::make_error_code(std::errc::operation_not_supported);
         // Even a failed platform update can require cleanup of partial filters.
         found->second.armed = true;
-        return m_impl->poller.Watch(found->second.handle, identifier, interests);
+        const std::error_code error = m_impl->poller.Watch(found->second.handle, identifier, interests);
+        if (!error)
+            Impl::Wake(m_impl.get());
+        return error;
     }
 
     void RuntimeLoop::Unwatch(std::uint64_t identifier) noexcept
@@ -454,12 +470,14 @@ namespace NGIN::IO::detail
             const auto      found = m_impl->registrations.find(identifier);
             if (found == m_impl->registrations.end())
                 return;
+            const bool monitored = found->second.completion || found->second.armed;
             if (found->second.completion)
                 m_impl->poller.UnwatchCompletion(reinterpret_cast<void*>(found->second.handle));
             else if (found->second.armed)
                 m_impl->poller.Unwatch(found->second.handle);
-            else if (m_impl->state != State::Running)
-                m_impl->poller.Wake();
+            // Removal changes host snapshots, and can complete stop drainage.
+            if (monitored || m_impl->state != State::Running)
+                Impl::Wake(m_impl.get());
             m_impl->handles.erase(found->second.handle);
             retired = std::move(found->second.handler);
             m_impl->registrations.erase(found);

@@ -84,7 +84,8 @@ while (!WorkAvailable())
 ```
 
 `NotifyOne` and `NotifyAll` increment the generation before waking waiters.
-Timed waits return `false` for timeout, non-positive durations, and NaN
+When no thread is blocked in `Wait` or `WaitFor`, they skip the platform wake
+call; a later wait on the old generation still returns immediately. Timed waits return `false` for timeout, non-positive durations, and NaN
 durations. They return `true` after the observed generation changes.
 
 `AtomicCondition` does not own a predicate or protect shared data. The caller

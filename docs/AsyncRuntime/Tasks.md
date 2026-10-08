@@ -459,6 +459,15 @@ helper dispatch stays depth-independent, overload teardown returns tracked memor
 to baseline, and idle CPU/cancellation/shutdown checks pass. Fixed root allocation
 cost increased; its contribution to end-to-end regressions remains to be isolated.
 
+Follow-up: [OptimizationPlan.md](OptimizationPlan.md) attributes the regressions to
+wake and handoff costs and records a checkpoint (2026-10-04). Removing a completion-queue
+lock convoy and other unnecessary wakes, and no longer forcing io_uring transfers into
+io-wq, make suspended receive, spawn/yield/join, ready UDP, and native file transfers
+pass their latency gates on Linux. Fallback file transfers, file stat, and cold setup
+still fail. The fallback/stat cost is runtime-routed delivery, which the current
+cancellation contract requires, so it awaits a contract decision. T23's original
+acceptance gates are unchanged, and T23 remains open.
+
 ### T24 — Finish documentation and remove superseded machinery
 
 Requirements: R01, R23. Design: [D1](Design.md#d1--architecture-and-change-boundaries),

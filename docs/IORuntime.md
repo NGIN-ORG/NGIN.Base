@@ -254,6 +254,9 @@ then repeat the following whenever a source or host timer notifies it:
 4. Wait for either descriptor notification or the host timer, then refresh the
    entire snapshot. New work, cancellation, registration changes, shutdown, and
    earlier deadlines signal the included wake source. Do not use periodic polling.
+   Work queued and registrations changed by callbacks during `PollOnce()` do not
+   signal it: pumping until `PollOnce()` returns false and the copy in step 2
+   already observe them.
 
 The copy does not allocate, consume readiness, drive callbacks, or initialize a
 resource backend. Insufficient caller storage returns `no_buffer_space` without

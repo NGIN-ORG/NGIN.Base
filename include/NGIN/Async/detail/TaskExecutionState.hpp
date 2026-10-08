@@ -4,7 +4,6 @@
 
 #include <NGIN/Execution/Config.hpp>
 #include <NGIN/Execution/ExecutorRef.hpp>
-#include <NGIN/Sync/AtomicCondition.hpp>
 
 #include <atomic>
 #include <cstdint>
@@ -43,7 +42,6 @@ namespace NGIN::Async::detail
 
         NGIN::Execution::ExecutorRef            m_executor {};
         std::pmr::memory_resource*              m_resource {};
-        NGIN::Sync::AtomicCondition             m_finishedCondition {};
         NGIN::Execution::CompletionReservation  m_taskContinuation {};
         NGIN::Execution::CompletionReservation  m_foreignContinuation {};
         NGIN::Execution::WorkItem               m_pendingContinuation {};

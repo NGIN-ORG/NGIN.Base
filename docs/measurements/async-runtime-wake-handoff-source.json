@@ -1,0 +1,58 @@
+{
+  "date_utc": "2026-10-04T17:14:27.431132+00:00",
+  "base_revision": "df9383ddb4f4a64262dee3d726021fc8862a633d",
+  "changed_sources": {
+    "include/NGIN/Async/SyncWait.hpp": "13be61cb9821ab16972521cddd930f4f0d61c1e1c5fbbdceaf3bfc91168a0ef6",
+    "include/NGIN/Async/Task.hpp": "e22d6b48ef6470ffe01ad5421f614a68765055fdf404bb7269f7a8c2a48fda8d",
+    "include/NGIN/Async/detail/TaskExecutionState.hpp": "c3321d6a9b556a76954a874e71fba09b33466d41a1331a6e67f6aece98741b71",
+    "include/NGIN/Execution/ThreadPoolScheduler.hpp": "4d800b9d018fae30fbcb5f3f4ea32f5b00e424c4c5d4f19768557e110a2cdc9a",
+    "include/NGIN/Execution/detail/CompletionQueue.hpp": "1234f5b2f779581a929b5f8bbf306528e503fa5e97a34c5d49edef2ce5fafb3c",
+    "include/NGIN/Sync/AtomicCondition.hpp": "62c6aaaf3247333f8b10cdc8e069a666991ab0ac95c646dca206670c677fee34",
+    "src/NGIN/IO/FileSystemDriver.linux.cpp": "bc8e4d6c41f4d0191530cf327a8370eeddbd6ad44a1d489603b496329e43e005",
+    "src/NGIN/IO/RuntimeLoop.cpp": "17f35d4079f2c39aec7dad86f0c4a32e114187341e76ccc9b285186982e72914",
+    "src/NGIN/IO/RuntimePoller.cpp": "c1f5e1b1feab805526b9d43eaa7c619ba8145d17ca2df7f449640feedcfc94ae",
+    "src/NGIN/IO/RuntimePoller.hpp": "ccab3b0e246e87b792cde02075134a12930e5cf3ffb996c543276c091966b471",
+    "tests/Async/SyncWait.cpp": "5007633d5155e9cb5d00c355c60e9d27215c241a4aa2b68c05078aa33a7466c7",
+    "tests/Execution/CompletionReservation.cpp": "1d68b92663fe38eef50c7e856de0b512f5bce14d7880b1de7750f882569babad",
+    "tests/IO/RuntimeLoopTests.cpp": "35c288eb16995d898c1e41c9161df8b51e5e02037e59402a93bad082bf358aa0",
+    "tests/Sync/AtomicCondition.cpp": "0435e07f145559473260f6c3a413a497b1a2fbb9fa2897983256fdea239d9635"
+  },
+  "binaries": {
+    "original/IORuntimeBenchmarks": "96c7c6a04ef5c0a153892b02069f912752556b7b06809a8a1eb5fab20f8c488d",
+    "original/IORuntimeFileBenchmarks": "c2f76c26b02cde3d1fcc6e576bd22f43f49fb334a8d8c36f4eebb767b9d5eaf3",
+    "original/IORuntimeNetworkBenchmarks": "6e830538a4318047b7648d667728d3f19485617281e1ede010aba27cf28cbcb8",
+    "checkpoint/IORuntimeBenchmarks": "aa769f43e060ca3703d29c2c332138c849bb60a6c15c6f5625c9bcc01b82efd0",
+    "checkpoint/IORuntimeFileBenchmarks": "e866532f57597552181675dd7e6fc4f79c758e815359c27b4c2649d5601604eb",
+    "checkpoint/IORuntimeNetworkBenchmarks": "ce12fc72ba5d970a016a86624e6c2fb3ffb1cfbbd0b0c90f1aee5816098ecc1f",
+    "checkpoint/AsyncRuntimeBenchmarks": "7dbae00c857dc9881fe6ed6dc6fb43d3e20982ff2e6f991b14acfbd919a14ae1",
+    "redesign/IORuntimeBenchmarks": "e5f6fc07ba85f620f0bf35a6973e7e72edb0a26785cc66a58f748d91888188d2",
+    "redesign/IORuntimeFileBenchmarks": "18ff00098289c7dea5bc903163bb2135bd973b5add22b836fbeb2c9c46668929",
+    "redesign/IORuntimeNetworkBenchmarks": "bad3576214b17609b162e5eee64ea886ea131a2594d92999d50eb6445914b5de",
+    "redesign/AsyncRuntimeBenchmarks": "d945e124aafc9360e48a92cffcad845d03af4de4f729a4fa9f8c207ddf2c5fea",
+    "redesign/IORuntimeMixedBenchmarks": "10546f6e393a4dc3e0da00762016551b3d858ec05e275f0b663bb70dc7056923",
+    "redesign/AsyncRuntimeAllocationBenchmarks": "c849e799326cae1992e9bb4009073324fedabce643dbb0a6c56e4f48b2454143",
+    "redesign/IORuntimeAllocationBenchmarks": "4e61fe304482780642786ec2b8b11449aab3dac7c5916af300f3458c0d1c71fb",
+    "redesign/IORuntimeFileAllocationBenchmarks": "40cd097430fdf238677d0f0d2152720a01e2385c8f630aa9c1d9ebac6015b768",
+    "current/IORuntimeBenchmarks": "196d16d4f6f1afc23b74003c3546698e028c9af01ab961b1d61cb9b22f57a58e",
+    "current/IORuntimeFileBenchmarks": "e3c94372893df2d0837ccae1a351715d0edec3e3f0cda5e0547665cb36f055e4",
+    "current/IORuntimeNetworkBenchmarks": "8db055c5dbe02c6aee9e0c1668bfc70fdd5913e747775362db8a51f6245831e7",
+    "current/AsyncRuntimeBenchmarks": "f857f2c6a9f48f4251f3e0740cc8da572f0aef984188867fe11f7d2c330caea4",
+    "current/IORuntimeMixedBenchmarks": "8c38236a7083df6f3fbe8c784015e1680142376af7eea94ce894ba76d5719b59",
+    "current/AsyncRuntimeAllocationBenchmarks": "e1eb4479818188c0404ca96b61fa2396158b07b5f76abe956bd2a98209253764",
+    "current/IORuntimeAllocationBenchmarks": "c3fe4872b899f580aa257a1bccd07ff7de62df5c5d6121024e65dc226af2cf6a",
+    "current/IORuntimeFileAllocationBenchmarks": "479f79978b3d70e2b2d82fec7022d8210e1f5d5f1c792a8b79d0dce338cc104d"
+  },
+  "harness_scripts": {
+    "run.py": "9114732c99a047c85e7d8a013698f4c05908d94a725274dacaaab03fd9bfe08f",
+    "analyze.py": "03ad4774c09ab406deef3aab28cef6ec951287fee0451d342ed3e7c694b092bc"
+  },
+  "commands": {
+    "build_versions": "cmake --preset benchmarks -DCMAKE_CXX_COMPILER=/opt/gcc-15.2/bin/c++; cmake --build build/benchmarks --config Release -j4 --target <timing and allocation targets>",
+    "timing": "python3 run.py final  (serial; see header of async-runtime-wake-handoff-linux.txt)",
+    "analysis": "python3 analyze.py final",
+    "tests": "ctest --test-dir build/tests -C Debug -R \"^Base\\.(Async|Execution|Sync|IO|Net)\\.\" -j4",
+    "sanitizers": "UBSAN_OPTIONS=halt_on_error=1 (ASan tree only); ctest --test-dir build/tests-{asan,tsan} -C RelWithDebInfo -R \"^Base\\.(Async|Execution|Sync|IO|Net)\\.\" -j3"
+  },
+  "compiler": "GCC 15.2.0",
+  "host": "x86_64 WSL2 6.18.40.1-microsoft-standard-WSL2, i7-13700KF"
+}

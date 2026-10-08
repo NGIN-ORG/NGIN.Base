@@ -48,6 +48,11 @@ namespace
         co_await Hold {lease};
         co_return *owned;
     }
+    Task<int> Yielded(TaskContext& context, int value)
+    {
+        co_await context.YieldNow();
+        co_return value;
+    }
 }// namespace
 
 TEST_CASE("SyncWait joins a root's final frame lease before returning", "[Async][Root][Lifetime]")
@@ -115,4 +120,20 @@ TEST_CASE("SyncWait retains move-only root errors and rejects canceled cold root
     bool        started = false;
     REQUIRE(SyncWait(canceled, Value(started)).StopReason() == StopReason::Deadline);
     REQUIRE_FALSE(started);
+}
+
+TEST_CASE("SyncWait wakes its caller whether the root retires before or after it blocks", "[Async][Root][Lifetime]")
+{
+    // Each caller-owned retirement signal is destroyed as soon as SyncWait
+    // returns. Alternate immediate and yielding roots on several workers so
+    // retirement races both sides of the caller entering its wait.
+    NGIN::Execution::ThreadPoolScheduler scheduler(2);
+    TaskContext                          context(scheduler);
+    for (int iteration = 0; iteration != 2000; ++iteration)
+    {
+        bool started = false;
+        REQUIRE(SyncWait(context, Value(started)).Value() == 42);
+        REQUIRE(started);
+        REQUIRE(SyncWait(context, Yielded(context, iteration)).Value() == iteration);
+    }
 }

@@ -39,7 +39,8 @@ namespace NGIN::IO::detail
         RuntimePoller(const RuntimePoller&)            = delete;
         RuntimePoller& operator=(const RuntimePoller&) = delete;
 
-        // Thread-safe. Identifier zero is reserved for control wakeups.
+        // Thread-safe. Identifier zero is reserved for control wakeups. Registration
+        // changes do not wake a blocked Wait; the caller decides whether one must.
         std::error_code Watch(std::uintptr_t handle, std::uint64_t identifier, unsigned interests) noexcept;
         void            Unwatch(std::uintptr_t handle) noexcept;
         // IOCP registrations belong to individual OVERLAPPED requests. The request

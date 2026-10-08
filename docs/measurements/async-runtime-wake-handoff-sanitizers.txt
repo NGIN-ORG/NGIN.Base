@@ -1,0 +1,45 @@
+Focused ASan/UBSan and TSan runs, RelWithDebInfo, 2026-10-04. Same 492 Async/Execution/Sync/IO/Net tests as the Debug run.
+ASan aborts on its first report; UBSan ran with UBSAN_OPTIONS=halt_on_error=1; TSan exits nonzero after any report.
+Every test process exited successfully, so no sanitizer report occurred.
+
+== build/tests-asan (NGIN_BASE_ENABLE_ASAN=ON), UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
+100% tests passed, 0 tests failed out of 492
+
+Label Time Summary:
+Async        =   6.73 sec*proc (213 tests)
+Base         =   0.02 sec*proc (1 test)
+Execution    =   0.40 sec*proc (43 tests)
+IO           =   3.42 sec*proc (150 tests)
+Net          =   1.04 sec*proc (70 tests)
+Sync         =   0.63 sec*proc (16 tests)
+
+Total Test time (real) =   4.31 sec
+
+The following tests did not run:
+	535 - Base.IO.IocpFileBackend.Windows native file IOCP requires Windows (Skipped)
+	791 - Base.Net.TLS.TLS trusted handshake negotiates SNI ALPN and fragmented application data (Skipped)
+	792 - Base.Net.TLS.TLS verification rejects untrusted expired and mismatched certificates (Skipped)
+	793 - Base.Net.TLS.TLS mutual authentication and required ALPN policies are enforced (Skipped)
+	794 - Base.Net.TLS.TLS handshake distinguishes caller cancellation and timeout (Skipped)
+	795 - Base.Net.TLS.TLS reports EOF without close_notify as truncation (Skipped)
+
+== build/tests-tsan (NGIN_BASE_ENABLE_TSAN=ON)
+100% tests passed, 0 tests failed out of 492
+
+Label Time Summary:
+Async        =   8.95 sec*proc (213 tests)
+Base         =   0.04 sec*proc (1 test)
+Execution    =   0.43 sec*proc (43 tests)
+IO           =   3.31 sec*proc (150 tests)
+Net          =   0.93 sec*proc (70 tests)
+Sync         =   0.70 sec*proc (16 tests)
+
+Total Test time (real) =   5.07 sec
+
+The following tests did not run:
+	535 - Base.IO.IocpFileBackend.Windows native file IOCP requires Windows (Skipped)
+	791 - Base.Net.TLS.TLS trusted handshake negotiates SNI ALPN and fragmented application data (Skipped)
+	792 - Base.Net.TLS.TLS verification rejects untrusted expired and mismatched certificates (Skipped)
+	793 - Base.Net.TLS.TLS mutual authentication and required ALPN policies are enforced (Skipped)
+	794 - Base.Net.TLS.TLS handshake distinguishes caller cancellation and timeout (Skipped)
+	795 - Base.Net.TLS.TLS reports EOF without close_notify as truncation (Skipped)
